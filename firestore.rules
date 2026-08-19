@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Projects root match
+    match /projects/{projectId} {
+      allow read: if true;
+      allow write: if true;
+
+      // Persons subcollection
+      match /persons/{personId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Metric records subcollection
+      match /metricRecords/{recordId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Documents subcollection
+      match /documents/{documentId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Hypotheses subcollection
+      match /hypotheses/{hypothesisId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Tasks subcollection
+      match /tasks/{taskId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Findings subcollection
+      match /findings/{findingId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Archive requests subcollection
+      match /requests/{requestId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Matrix entries subcollection
+      match /matrixEntries/{entryId} {
+        allow read: if true;
+        allow write: if true;
+      }
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

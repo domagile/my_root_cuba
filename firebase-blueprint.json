@@ -1,0 +1,188 @@
+{
+  "entities": {
+    "ProjectMeta": {
+      "title": "ProjectMeta",
+      "description": "Metadata for a genealogy research project",
+      "type": "object",
+      "properties": {
+        "lastUpdated": { "type": "string" },
+        "personsCount": { "type": "number" },
+        "metricRecordsCount": { "type": "number" },
+        "documentsCount": { "type": "number" },
+        "hypothesesCount": { "type": "number" }
+      }
+    },
+    "Person": {
+      "title": "Person",
+      "description": "Genealogical and case figure profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "patronymic": { "type": "string" },
+        "maidenName": { "type": "string" },
+        "gender": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "birthYear": { "type": "number" },
+        "birthPlace": { "type": "string" },
+        "deathDate": { "type": "string" },
+        "deathYear": { "type": "number" },
+        "deathPlace": { "type": "string" },
+        "occupation": { "type": "string" },
+        "estateOrSocialStatus": { "type": "string" },
+        "confession": { "type": "string" },
+        "militaryRank": { "type": "string" },
+        "education": { "type": "string" },
+        "residence": { "type": "string" },
+        "fatherId": { "type": "string" },
+        "motherId": { "type": "string" },
+        "notes": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "firstName", "lastName"]
+    },
+    "MetricRecord": {
+      "title": "MetricRecord",
+      "description": "Archival metric register act",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "recordType": { "type": "string" },
+        "year": { "type": "number" },
+        "date": { "type": "string" },
+        "archive": { "type": "string" },
+        "fund": { "type": "string" },
+        "inventory": { "type": "string" },
+        "caseNumber": { "type": "string" },
+        "title": { "type": "string" },
+        "transcription": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "recordType"]
+    },
+    "GenealogyDocument": {
+      "title": "GenealogyDocument",
+      "description": "Archival scan, evidence or document file",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string" },
+        "archive": { "type": "string" },
+        "archiveRef": { "type": "string" },
+        "year": { "type": "number" },
+        "date": { "type": "string" },
+        "summary": { "type": "string" },
+        "notes": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "GenealogyHypothesis": {
+      "title": "GenealogyHypothesis",
+      "description": "Investigative hypothesis and connection theory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "probability": { "type": "number" },
+        "description": { "type": "string" },
+        "supportingEvidence": { "type": "string" },
+        "contradictingEvidence": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title"]
+    },
+    "GenealogyTask": {
+      "title": "GenealogyTask",
+      "description": "Archival and genealogical research task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "priority": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title"]
+    },
+    "GenealogyFinding": {
+      "title": "GenealogyFinding",
+      "description": "Confirmed research finding or discovery",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "confidence": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title"]
+    },
+    "ArchiveRequest": {
+      "title": "ArchiveRequest",
+      "description": "Official inquiry sent to state archives",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "archiveName": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "YearMatrixEntry": {
+      "title": "YearMatrixEntry",
+      "description": "Chronicle matrix cell per village and year",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "year": { "type": "number" },
+        "village": { "type": "string" },
+        "docType": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["year"]
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": {
+      "schema": "ProjectMeta",
+      "description": "Root metadata document for the project"
+    },
+    "/projects/{projectId}/persons/{personId}": {
+      "schema": "Person",
+      "description": "Individual person record document"
+    },
+    "/projects/{projectId}/metricRecords/{recordId}": {
+      "schema": "MetricRecord",
+      "description": "Individual metric record document"
+    },
+    "/projects/{projectId}/documents/{documentId}": {
+      "schema": "GenealogyDocument",
+      "description": "Individual document and scan metadata"
+    },
+    "/projects/{projectId}/hypotheses/{hypothesisId}": {
+      "schema": "GenealogyHypothesis",
+      "description": "Individual genealogical hypothesis"
+    },
+    "/projects/{projectId}/tasks/{taskId}": {
+      "schema": "GenealogyTask",
+      "description": "Individual research task"
+    },
+    "/projects/{projectId}/findings/{findingId}": {
+      "schema": "GenealogyFinding",
+      "description": "Individual research finding"
+    },
+    "/projects/{projectId}/requests/{requestId}": {
+      "schema": "ArchiveRequest",
+      "description": "Individual archival request record"
+    },
+    "/projects/{projectId}/matrixEntries/{entryId}": {
+      "schema": "YearMatrixEntry",
+      "description": "Individual chronicle year matrix entry"
+    }
+  }
+}
