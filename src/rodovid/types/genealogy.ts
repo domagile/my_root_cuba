@@ -147,6 +147,19 @@ export type EventType =
   | 'Emigration'
   | 'Immigration';
 
+export interface FanChartSector {
+  person: Person | null;
+  generation: number;
+  startAngle: number;
+  endAngle: number;
+  innerRadius: number;
+  outerRadius: number;
+  color?: string;
+  isAhnen?: number;
+  ahnenNumber?: number;
+  side?: 'paternal' | 'maternal' | 'root';
+}
+
 export interface LifeEvent {
   id: string;
   type: EventType;
@@ -154,10 +167,13 @@ export interface LifeEvent {
   date?: string;
   year?: number;
   place?: string;
+  placeName?: string;
   description?: string;
   personId?: string;
   familyId?: string;
   sourceId?: string;
+  citations?: any[];
+  notes?: any;
 }
 
 export type Event = LifeEvent;

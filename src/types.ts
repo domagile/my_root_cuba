@@ -186,8 +186,8 @@ export interface GenealogyDocument {
   uploadDate?: string;
   status?: string;
   notes?: string;
-  customFields?: CustomFieldItem[] | Record<string, string>;
-  scans?: string[];
+  customFields?: CustomFieldItem[];
+  scans?: any[];
 }
 
 export interface ArchiveRequest {

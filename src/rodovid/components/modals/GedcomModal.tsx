@@ -227,8 +227,7 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
             ],
             events: []
           }
-        },
-        events: {}
+        }
       };
       onImportDatabase(romanovDb);
       setImportStatus('Завантажено історичну династію Романових');

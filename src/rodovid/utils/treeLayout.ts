@@ -39,6 +39,7 @@ export interface FanChartSector {
   startAngle: number;
   endAngle: number;
   fillColor?: string;
+  color?: string;
 }
 
 const NODE_WIDTH = 220;

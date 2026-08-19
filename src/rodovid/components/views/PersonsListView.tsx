@@ -76,8 +76,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         const nameB = `${b.name?.surname || b.lastName || ''} ${b.name?.given || b.firstName || ''}`;
         comparison = nameA.localeCompare(nameB, 'uk');
       } else if (sortBy === 'birth') {
-        const yA = a.birthYear || 0;
-        const yB = b.birthYear || 0;
+        const yA = Number(a.birthYear) || 0;
+        const yB = Number(b.birthYear) || 0;
         comparison = yA - yB;
       } else if (sortBy === 'events') {
         comparison = (a.events?.length || 0) - (b.events?.length || 0);

@@ -40,24 +40,89 @@ export const EventsTimelineView: React.FC<EventsTimelineViewProps> = ({
 
     // From Persons
     (Object.values(database.persons || {}) as Person[]).forEach((p) => {
-      (p.events || []).forEach((ev) => {
+      const explicitEvents = p.events || [];
+      let hasBirth = false;
+      let hasDeath = false;
+
+      explicitEvents.forEach((ev) => {
+        if (ev.type === 'Birth' || ev.type === 'baptism') hasBirth = true;
+        if (ev.type === 'Death' || ev.type === 'burial') hasDeath = true;
         list.push({
           event: ev,
           person: p,
           sourceContext: 'person'
         });
       });
+
+      // Auto-extract birth if not in explicit events
+      const bYearNum = typeof p.birthYear === 'number' ? p.birthYear : (p.birthDate ? parseInt(String(p.birthDate).match(/\b(1[5-9]\d\d|20\d\d)\b/)?.[1] || '0', 10) : 0);
+      if (!hasBirth && bYearNum > 0) {
+        list.push({
+          event: {
+            id: `birth_${p.id}`,
+            personId: p.id,
+            type: 'Birth',
+            date: p.birthDate || `${bYearNum} р.`,
+            year: bYearNum,
+            placeName: p.birthPlace,
+            description: `Народження особи ${getFullName(p)}`
+          },
+          person: p,
+          sourceContext: 'person'
+        });
+      }
+
+      // Auto-extract death if not in explicit events
+      const dYearNum = typeof p.deathYear === 'number' ? p.deathYear : (p.deathDate ? parseInt(String(p.deathDate).match(/\b(1[5-9]\d\d|20\d\d)\b/)?.[1] || '0', 10) : 0);
+      if (!hasDeath && dYearNum > 0) {
+        list.push({
+          event: {
+            id: `death_${p.id}`,
+            personId: p.id,
+            type: 'Death',
+            date: p.deathDate || `${dYearNum} р.`,
+            year: dYearNum,
+            placeName: p.deathPlace,
+            description: `Смерть особи ${getFullName(p)}`
+          },
+          person: p,
+          sourceContext: 'person'
+        });
+      }
     });
 
     // From Families
     (Object.values(database.families || {}) as Family[]).forEach((f) => {
-      (f.events || []).forEach((ev) => {
+      const explicitEvents = f.events || [];
+      let hasMarriage = false;
+      explicitEvents.forEach((ev) => {
+        if (ev.type === 'Marriage') hasMarriage = true;
         list.push({
           event: ev,
           familyId: f.id,
           sourceContext: 'family'
         });
       });
+
+      const mYearNum = typeof f.marriageYear === 'number' ? f.marriageYear : (f.marriageDate ? parseInt(String(f.marriageDate).match(/\b(1[5-9]\d\d|20\d\d)\b/)?.[1] || '0', 10) : 0);
+      if (!hasMarriage && mYearNum > 0) {
+        const husb = f.husbandId ? database.persons[f.husbandId] : undefined;
+        const wife = f.wifeId ? database.persons[f.wifeId] : undefined;
+        list.push({
+          event: {
+            id: `marriage_${f.id}`,
+            familyId: f.id,
+            type: 'Marriage',
+            date: f.marriageDate || `${mYearNum} р.`,
+            year: mYearNum,
+            placeName: f.marriagePlace,
+            description: `Шлюб: ${husb ? getFullName(husb) : ''} та ${wife ? getFullName(wife) : ''}`
+          },
+          person: husb || wife,
+          familyId: f.id,
+          sourceContext: 'family'
+        });
+      }
     });
 
     // From global database events

@@ -1991,9 +1991,9 @@ export const HypothesesView: React.FC = () => {
   const openEdit = (h: GenealogyHypothesis) => {
     setEditingHypo(h);
     setTitle(h.title);
-    setDescription(h.description);
-    setConfidence(h.confidence);
-    setEvidenceCount(h.evidenceCount);
+    setDescription(h.description || '');
+    setConfidence(Number(h.confidence) || 70);
+    setEvidenceCount(Number(h.evidenceCount) || 1);
     setStatus(h.status);
     setIsModalOpen(true);
   };

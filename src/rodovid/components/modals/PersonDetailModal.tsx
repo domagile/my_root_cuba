@@ -205,6 +205,15 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                   </div>
                 </div>
               )}
+              {estate && (
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Стан / Соціальний статус:</span>
+                    <span className="font-medium text-slate-200">{estate}</span>
+                  </div>
+                </div>
+              )}
               {person.militaryRank && (
                 <div className="flex items-center gap-2">
                   <Award className="w-4 h-4 text-amber-400 shrink-0" />
@@ -214,7 +223,53 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                   </div>
                 </div>
               )}
+              {person.confession && (
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Віросповідання / Конфесія:</span>
+                    <span className="font-medium text-slate-200">{person.confession}</span>
+                  </div>
+                </div>
+              )}
             </div>
+          )}
+
+          {/* Custom Fields */}
+          {person.customFields && (
+            Array.isArray(person.customFields) ? (
+              person.customFields.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                    Додаткові відомості:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {person.customFields.map((cf, idx) => (
+                      <div key={idx} className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-xs">
+                        <span className="text-slate-400 text-[10px] block">{cf.label || cf.key || 'Поле'}:</span>
+                        <span className="font-medium text-slate-200">{cf.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            ) : (
+              Object.keys(person.customFields).length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                    Додаткові відомості:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {Object.entries(person.customFields).map(([k, v], idx) => (
+                      <div key={idx} className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-xs">
+                        <span className="text-slate-400 text-[10px] block">{k}:</span>
+                        <span className="font-medium text-slate-200">{String(v)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            )
           )}
 
           {/* Tags */}

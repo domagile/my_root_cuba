@@ -145,28 +145,85 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Occupation, Military Rank, Estate */}
+        {/* Occupation, Military Rank, Estate, Confession */}
         {(person.occupation || person.militaryRank || estate || person.confession) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800/30 border border-neutral-200 dark:border-neutral-800 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/30 border border-neutral-200 dark:border-neutral-800 text-xs">
             {person.occupation && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <Briefcase className="w-4 h-4 text-[#B88E3E] shrink-0" />
                 <div>
-                  <span className="text-neutral-400 block text-[10px]">Професія / Посада:</span>
-                  <span className="font-medium text-neutral-200">{person.occupation}</span>
+                  <span className="text-neutral-400 block text-[10px]">Професія / Посада / Заняття:</span>
+                  <span className="font-medium text-neutral-800 dark:text-neutral-200">{person.occupation}</span>
+                </div>
+              </div>
+            )}
+            {estate && (
+              <div className="flex items-center gap-2.5">
+                <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div>
+                  <span className="text-neutral-400 block text-[10px]">Стан / Соціальний статус:</span>
+                  <span className="font-medium text-neutral-800 dark:text-neutral-200">{estate}</span>
                 </div>
               </div>
             )}
             {person.militaryRank && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <Award className="w-4 h-4 text-amber-400 shrink-0" />
                 <div>
-                  <span className="text-neutral-400 block text-[10px]">Військовий чин / звання:</span>
-                  <span className="font-medium text-neutral-200">{person.militaryRank}</span>
+                  <span className="text-neutral-400 block text-[10px]">Військовий чин / Звання:</span>
+                  <span className="font-medium text-neutral-800 dark:text-neutral-200">{person.militaryRank}</span>
+                </div>
+              </div>
+            )}
+            {person.confession && (
+              <div className="flex items-center gap-2.5">
+                <BookOpen className="w-4 h-4 text-indigo-400 shrink-0" />
+                <div>
+                  <span className="text-neutral-400 block text-[10px]">Віросповідання / Конфесія:</span>
+                  <span className="font-medium text-neutral-800 dark:text-neutral-200">{person.confession}</span>
                 </div>
               </div>
             )}
           </div>
+        )}
+
+        {/* Custom Fields (if any) */}
+        {person.customFields && (
+          Array.isArray(person.customFields) ? (
+            person.customFields.length > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                  <Tag className="w-4 h-4 text-[#B88E3E]" />
+                  Додаткові атрибути фігуранта
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {person.customFields.map((cf, idx) => (
+                    <div key={idx} className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-700/60 text-xs">
+                      <span className="text-neutral-400 text-[10px] block">{cf.label || cf.key || 'Поле'}:</span>
+                      <span className="font-semibold text-neutral-800 dark:text-neutral-200">{cf.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          ) : (
+            Object.keys(person.customFields).length > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                  <Tag className="w-4 h-4 text-[#B88E3E]" />
+                  Додаткові атрибути фігуранта
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {Object.entries(person.customFields).map(([k, v], idx) => (
+                    <div key={idx} className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-700/60 text-xs">
+                      <span className="text-neutral-400 text-[10px] block">{k}:</span>
+                      <span className="font-semibold text-neutral-800 dark:text-neutral-200">{String(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          )
         )}
 
         {/* Tags */}

@@ -35,62 +35,123 @@ export function getPersonMotherId(person: Person, database: GenealogyDatabase): 
   return undefined;
 }
 
-export function calculateKinship(
-  person1Id: string,
-  person2Id: string,
-  database: GenealogyDatabase
-): {
+export interface KinshipPathStep {
+  personId: string;
+  relationFromPrevious?: string;
+}
+
+export interface KinshipCalculationResult {
   relationship: string;
+  relationshipName: string;
   degree: number;
+  degreeOfConsanguinity: number;
   coefficient: number;
   description: string;
-  path?: string[];
-} {
-  if (person1Id === person2Id) {
-    return {
-      relationship: 'Та сама особа',
-      degree: 0,
-      coefficient: 100,
-      description: 'Вибрано одного й того самого користувача.',
-      path: [person1Id]
-    };
+  personA: Person | null;
+  personB: Person | null;
+  commonAncestors: Person[];
+  path: KinshipPathStep[];
+}
+
+export function calculateKinship(
+  arg1: any,
+  arg2: any,
+  arg3?: any
+): KinshipCalculationResult {
+  let db: GenealogyDatabase;
+  let p1Id: string;
+  let p2Id: string;
+
+  if (typeof arg1 === 'object' && arg1.persons) {
+    db = arg1;
+    p1Id = arg2;
+    p2Id = arg3;
+  } else if (typeof arg3 === 'object' && arg3.persons) {
+    p1Id = arg1;
+    p2Id = arg2;
+    db = arg3;
+  } else {
+    db = { persons: {}, families: {}, sources: {}, events: {} };
+    p1Id = arg1;
+    p2Id = arg2;
   }
 
-  const p1 = database.persons[person1Id];
-  const p2 = database.persons[person2Id];
+  const p1 = db.persons?.[p1Id] || null;
+  const p2 = db.persons?.[p2Id] || null;
+
   if (!p1 || !p2) {
     return {
       relationship: 'Не знайдено',
+      relationshipName: 'Не знайдено',
       degree: 0,
+      degreeOfConsanguinity: 0,
       coefficient: 0,
-      description: 'Одну або обидві особи не знайдено в базі даних.'
+      description: 'Одну або обидві особи не знайдено в базі даних.',
+      personA: p1,
+      personB: p2,
+      commonAncestors: [],
+      path: []
+    };
+  }
+
+  if (p1Id === p2Id) {
+    return {
+      relationship: 'Та сама особа',
+      relationshipName: 'Та сама особа',
+      degree: 0,
+      degreeOfConsanguinity: 0,
+      coefficient: 100,
+      description: 'Вибрано одну й ту саму особу.',
+      personA: p1,
+      personB: p2,
+      commonAncestors: [p1],
+      path: [{ personId: p1Id, relationFromPrevious: 'Сама особа' }]
     };
   }
 
   const p1IsMale = p1.gender === 'male' || p1.gender === 'M';
-  const p2FatherId = getPersonFatherId(p2, database);
-  const p2MotherId = getPersonMotherId(p2, database);
-  const p1FatherId = getPersonFatherId(p1, database);
-  const p1MotherId = getPersonMotherId(p1, database);
+  const p2IsMale = p2.gender === 'male' || p2.gender === 'M';
+  const p2FatherId = getPersonFatherId(p2, db);
+  const p2MotherId = getPersonMotherId(p2, db);
+  const p1FatherId = getPersonFatherId(p1, db);
+  const p1MotherId = getPersonMotherId(p1, db);
 
   // Check parent-child
   if (p2FatherId === p1.id || p2MotherId === p1.id) {
+    const rel = p1IsMale ? 'Батько' : 'Мати';
     return {
-      relationship: p1IsMale ? 'Батько' : 'Мати',
+      relationship: rel,
+      relationshipName: rel,
       degree: 1,
+      degreeOfConsanguinity: 1,
       coefficient: 50,
       description: `${getFullName(p1)} є ${p1IsMale ? 'батьком' : 'матір\'ю'} для ${getFullName(p2)}.`,
-      path: [p1.id, p2.id]
+      personA: p1,
+      personB: p2,
+      commonAncestors: [p1],
+      path: [
+        { personId: p1.id, relationFromPrevious: 'Початок' },
+        { personId: p2.id, relationFromPrevious: p2IsMale ? 'Син' : 'Донька' }
+      ]
     };
   }
 
   if (p1FatherId === p2.id || p1MotherId === p2.id) {
+    const rel = p1IsMale ? 'Син' : 'Донька';
     return {
-      relationship: p1IsMale ? 'Син' : 'Донька',
+      relationship: rel,
+      relationshipName: rel,
       degree: 1,
+      degreeOfConsanguinity: 1,
       coefficient: 50,
       description: `${getFullName(p1)} є ${p1IsMale ? 'сином' : 'донькою'} для ${getFullName(p2)}.`,
-      path: [p1.id, p2.id]
+      personA: p1,
+      personB: p2,
+      commonAncestors: [p2],
+      path: [
+        { personId: p1.id, relationFromPrevious: 'Початок' },
+        { personId: p2.id, relationFromPrevious: p2IsMale ? 'Батько' : 'Мати' }
+      ]
     };
   }
 
@@ -98,7 +159,7 @@ export function calculateKinship(
   const p1Spouses = new Set<string>(p1.spouseIds || []);
   if (p1.spouseFamilyIds) {
     p1.spouseFamilyIds.forEach((fId) => {
-      const fam = database.families[fId];
+      const fam = db.families[fId];
       if (fam) {
         if (fam.husbandId && fam.husbandId !== p1.id) p1Spouses.add(fam.husbandId);
         if (fam.wifeId && fam.wifeId !== p1.id) p1Spouses.add(fam.wifeId);
@@ -107,12 +168,21 @@ export function calculateKinship(
   }
 
   if (p1Spouses.has(p2.id)) {
+    const rel = p2IsMale ? 'Чоловік' : 'Дружина';
     return {
-      relationship: p1IsMale ? 'Чоловік' : 'Дружина',
+      relationship: rel,
+      relationshipName: rel,
       degree: 0,
+      degreeOfConsanguinity: 1,
       coefficient: 0,
       description: `${getFullName(p1)} та ${getFullName(p2)} є подружжям.`,
-      path: [p1.id, p2.id]
+      personA: p1,
+      personB: p2,
+      commonAncestors: [],
+      path: [
+        { personId: p1.id, relationFromPrevious: 'Початок' },
+        { personId: p2.id, relationFromPrevious: rel }
+      ]
     };
   }
 
@@ -120,55 +190,98 @@ export function calculateKinship(
   const sharedFather = p1FatherId && p1FatherId === p2FatherId;
   const sharedMother = p1MotherId && p1MotherId === p2MotherId;
   if (sharedFather || sharedMother) {
+    const rel = p2IsMale ? 'Рідний брат' : 'Рідна сестра';
+    const commonAncestors = [
+      sharedFather && db.persons[p1FatherId!] ? db.persons[p1FatherId!] : null,
+      sharedMother && db.persons[p1MotherId!] ? db.persons[p1MotherId!] : null
+    ].filter(Boolean) as Person[];
+
     return {
-      relationship: p1IsMale ? 'Рідний брат' : 'Рідна сестра',
+      relationship: rel,
+      relationshipName: rel,
       degree: 2,
+      degreeOfConsanguinity: 2,
       coefficient: 50,
       description: `${getFullName(p1)} та ${getFullName(p2)} мають спільних батьків.`,
-      path: [p1.id, (p1FatherId || p1MotherId)!, p2.id]
+      personA: p1,
+      personB: p2,
+      commonAncestors,
+      path: [
+        { personId: p1.id, relationFromPrevious: 'Початок' },
+        { personId: (p1FatherId || p1MotherId)!, relationFromPrevious: 'Спільний батько/мати' },
+        { personId: p2.id, relationFromPrevious: rel }
+      ]
     };
   }
 
   // Check Grandparent - Grandchild
-  const p1Father = p1FatherId ? database.persons[p1FatherId] : null;
-  const p1Mother = p1MotherId ? database.persons[p1MotherId] : null;
-  const p1GF1 = p1Father ? getPersonFatherId(p1Father, database) : null;
-  const p1GM1 = p1Father ? getPersonMotherId(p1Father, database) : null;
-  const p1GF2 = p1Mother ? getPersonFatherId(p1Mother, database) : null;
-  const p1GM2 = p1Mother ? getPersonMotherId(p1Mother, database) : null;
+  const p1Father = p1FatherId ? db.persons[p1FatherId] : null;
+  const p1Mother = p1MotherId ? db.persons[p1MotherId] : null;
+  const p1GF1 = p1Father ? getPersonFatherId(p1Father, db) : null;
+  const p1GM1 = p1Father ? getPersonMotherId(p1Father, db) : null;
+  const p1GF2 = p1Mother ? getPersonFatherId(p1Mother, db) : null;
+  const p1GM2 = p1Mother ? getPersonMotherId(p1Mother, db) : null;
 
   if (p1GF1 === p2.id || p1GM1 === p2.id || p1GF2 === p2.id || p1GM2 === p2.id) {
+    const rel = p2IsMale ? 'Дідусь' : 'Бабуся';
     return {
-      relationship: p1IsMale ? 'Онук' : 'Онука',
+      relationship: rel,
+      relationshipName: rel,
       degree: 2,
+      degreeOfConsanguinity: 2,
       coefficient: 25,
-      description: `${getFullName(p1)} є онуком/онукою для ${getFullName(p2)}.`,
-      path: [p1.id, (p1Father ? p1Father.id : p1Mother?.id)!, p2.id]
+      description: `${getFullName(p2)} є ${rel.toLowerCase()} для ${getFullName(p1)}.`,
+      personA: p1,
+      personB: p2,
+      commonAncestors: [p2],
+      path: [
+        { personId: p1.id, relationFromPrevious: 'Початок' },
+        { personId: (p1Father ? p1Father.id : p1Mother?.id)!, relationFromPrevious: 'Батько/Мати' },
+        { personId: p2.id, relationFromPrevious: rel }
+      ]
     };
   }
 
-  const p2Father = p2FatherId ? database.persons[p2FatherId] : null;
-  const p2Mother = p2MotherId ? database.persons[p2MotherId] : null;
-  const p2GF1 = p2Father ? getPersonFatherId(p2Father, database) : null;
-  const p2GM1 = p2Father ? getPersonMotherId(p2Father, database) : null;
-  const p2GF2 = p2Mother ? getPersonFatherId(p2Mother, database) : null;
-  const p2GM2 = p2Mother ? getPersonMotherId(p2Mother, database) : null;
+  const p2Father = p2FatherId ? db.persons[p2FatherId] : null;
+  const p2Mother = p2MotherId ? db.persons[p2MotherId] : null;
+  const p2GF1 = p2Father ? getPersonFatherId(p2Father, db) : null;
+  const p2GM1 = p2Father ? getPersonMotherId(p2Father, db) : null;
+  const p2GF2 = p2Mother ? getPersonFatherId(p2Mother, db) : null;
+  const p2GM2 = p2Mother ? getPersonMotherId(p2Mother, db) : null;
 
   if (p2GF1 === p1.id || p2GM1 === p1.id || p2GF2 === p1.id || p2GM2 === p1.id) {
+    const rel = p2IsMale ? 'Онук' : 'Онука';
     return {
-      relationship: p1IsMale ? 'Дідусь' : 'Бабуся',
+      relationship: rel,
+      relationshipName: rel,
       degree: 2,
+      degreeOfConsanguinity: 2,
       coefficient: 25,
-      description: `${getFullName(p1)} є ${p1IsMale ? 'дідусем' : 'бабусею'} для ${getFullName(p2)}.`,
-      path: [p1.id, (p2Father ? p2Father.id : p2Mother?.id)!, p2.id]
+      description: `${getFullName(p2)} є ${rel.toLowerCase()} для ${getFullName(p1)}.`,
+      personA: p1,
+      personB: p2,
+      commonAncestors: [p1],
+      path: [
+        { personId: p1.id, relationFromPrevious: 'Початок' },
+        { personId: (p2Father ? p2Father.id : p2Mother?.id)!, relationFromPrevious: 'Дитина' },
+        { personId: p2.id, relationFromPrevious: rel }
+      ]
     };
   }
 
   return {
-    relationship: 'Далекий родич або зв\'язок через кілька поколінь',
+    relationship: 'Далекий родич або спільне дерево',
+    relationshipName: 'Далекий родич',
     degree: 3,
+    degreeOfConsanguinity: 3,
     coefficient: 12.5,
     description: `Особи ${getFullName(p1)} та ${getFullName(p2)} належать до одного родоводу.`,
-    path: [p1.id, p2.id]
+    personA: p1,
+    personB: p2,
+    commonAncestors: [],
+    path: [
+      { personId: p1.id, relationFromPrevious: 'Початок' },
+      { personId: p2.id, relationFromPrevious: 'Родинний зв\'язок' }
+    ]
   };
 }

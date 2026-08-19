@@ -30,7 +30,7 @@ export const Sidebar: React.FC = () => {
   const navItems: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'tree', label: 'Родовід', icon: GitFork },
     { id: 'persons', label: 'Фігуранти справи', icon: Users },
-    { id: 'timeline', label: 'Часова шкала', icon: Clock },
+    { id: 'timeline', label: 'Хроніка', icon: Clock },
     { id: 'experiment', label: 'Експеримент', icon: FlaskConical },
     { id: 'ai-analysis', label: 'Слідчий AI аналіз', icon: Sparkles },
     { id: 'research', label: 'Детективні розкопки', icon: Compass },

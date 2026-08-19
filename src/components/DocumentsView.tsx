@@ -208,7 +208,7 @@ export const DocumentsView: React.FC = () => {
       'Остання переглянута сторінка': doc.lastViewedPage || '—',
       'Кількість сторінок': doc.pageCount || '—',
       'Посилання': doc.documentLink || doc.driveUrl || '—',
-      'Власні поля': doc.customFields?.map(f => `${f.label}: ${f.value}`).join('; ') || '—',
+      'Власні поля': Array.isArray(doc.customFields) ? doc.customFields.map(f => `${f.label}: ${f.value}`).join('; ') : '—',
       'Нотатки': doc.notes || ''
     }));
 
@@ -660,7 +660,7 @@ export const DocumentsView: React.FC = () => {
                       {doc.settlement || '—'}
                     </td>
                     <td className="py-3.5 px-4 text-[#A3A3A3]">
-                      {doc.customFields && doc.customFields.length > 0 ? (
+                      {Array.isArray(doc.customFields) && doc.customFields.length > 0 ? (
                         <div className="flex flex-wrap gap-1 max-w-xs">
                           {doc.customFields.map((cf, i) => (
                             <span key={i} className="px-1.5 py-0.5 bg-[#1C1C1C] border border-[#333333] text-[#A3A3A3] rounded text-[10px]">
