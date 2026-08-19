@@ -18,12 +18,16 @@ import {
   Clock,
   FlaskConical
 } from 'lucide-react';
-import { useGenealogy } from '../context/GenealogyContext';
+import { useUIStore } from '../stores/useUIStore';
+import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { NavigationTab } from '../types';
 import { getThemeConfig } from '../utils/theme';
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, persons, themePalette } = useGenealogy();
+  const activeTab = useUIStore((s) => s.activeTab);
+  const setActiveTab = useUIStore((s) => s.setActiveTab);
+  const themePalette = useUIStore((s) => s.themePalette);
+  const personsCount = useGenealogyStore((s) => s.persons.length);
   const theme = getThemeConfig(themePalette);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -99,7 +103,7 @@ export const Sidebar: React.FC = () => {
           <>
             <div className="flex items-center gap-2 opacity-80">
               <ShieldCheck className="w-4 h-4 text-emerald-500" />
-              <span className="text-[11px]">Осіб у родоводі ({persons.length})</span>
+              <span className="text-[11px]">Осіб у родоводі ({personsCount})</span>
             </div>
             <button
               onClick={() => setActiveTab('settings')}
