@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { GenealogyProvider, useUIStore } from './context/GenealogyContext';
+import { useAuthStore } from './stores/useAuthStore';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { FamilyTreeView } from './components/Tree/FamilyTreeView';
@@ -33,10 +34,10 @@ import { getThemeConfig } from './utils/theme';
 function AppContent() {
   const activeTab = useUIStore((s) => s.activeTab);
   const themePalette = useUIStore((s) => s.themePalette);
-  const isUnlocked = useUIStore((s) => s.isUnlocked);
+  const currentUser = useAuthStore((s) => s.currentUser);
   const theme = getThemeConfig(themePalette);
 
-  if (!isUnlocked) {
+  if (!currentUser || !currentUser.isAuthenticated) {
     return <AccessLockScreen />;
   }
 

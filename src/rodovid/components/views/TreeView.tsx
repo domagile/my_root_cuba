@@ -75,6 +75,26 @@ export const TreeView: React.FC<TreeViewProps> = ({
   };
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerDimensions, setContainerDimensions] = useState<{ width: number; height: number }>({
+    width: 1200,
+    height: 800
+  });
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const updateSize = () => {
+      if (containerRef.current) {
+        setContainerDimensions({
+          width: containerRef.current.clientWidth || 1200,
+          height: containerRef.current.clientHeight || 800
+        });
+      }
+    };
+    updateSize();
+    const resizeObs = new ResizeObserver(updateSize);
+    resizeObs.observe(containerRef.current);
+    return () => resizeObs.disconnect();
+  }, []);
 
   const layout = useMemo(() => {
     if (layoutType === 'ancestors') {
@@ -83,6 +103,52 @@ export const TreeView: React.FC<TreeViewProps> = ({
       return calculateDescendantsLayout(database, activePersonId, generations);
     }
   }, [database, activePersonId, layoutType, generations]);
+
+  // Viewport Culling Bounding Box (world coordinates)
+  const visibleBounds = useMemo(() => {
+    const margin = 200; // Extra buffer around viewport
+    return {
+      minX: (-pan.x - margin) / scale,
+      maxX: (-pan.x + containerDimensions.width + margin) / scale,
+      minY: (-pan.y - margin) / scale,
+      maxY: (-pan.y + containerDimensions.height + margin) / scale
+    };
+  }, [pan.x, pan.y, scale, containerDimensions]);
+
+  // Culled Nodes: Only render nodes that fall within current visible viewport
+  const visibleNodes = useMemo(() => {
+    if (layout.nodes.length < 30) return layout.nodes;
+    return layout.nodes.filter((node) => {
+      const nodeRight = node.x + (node.width || 220);
+      const nodeBottom = node.y + (node.height || 100);
+      return (
+        nodeRight >= visibleBounds.minX &&
+        node.x <= visibleBounds.maxX &&
+        nodeBottom >= visibleBounds.minY &&
+        node.y <= visibleBounds.maxY
+      );
+    });
+  }, [layout.nodes, visibleBounds]);
+
+  // Culled Links: Only render bezier paths intersecting the viewport
+  const visibleLinks = useMemo(() => {
+    if (layout.links.length < 30) return layout.links;
+    return layout.links.filter((link) => {
+      const minX = Math.min(link.sourceX, link.targetX);
+      const maxX = Math.max(link.sourceX, link.targetX);
+      const minY = Math.min(link.sourceY, link.targetY);
+      const maxY = Math.max(link.sourceY, link.targetY);
+      return (
+        maxX >= visibleBounds.minX &&
+        minX <= visibleBounds.maxX &&
+        maxY >= visibleBounds.minY &&
+        minY <= visibleBounds.maxY
+      );
+    });
+  }, [layout.links, visibleBounds]);
+
+  // Level of Detail (LOD): When zoomed far out, render ultra-lightweight simplified cards
+  const isLowDetail = scale < 0.52;
 
   // Center tree on person change or initial mount
   useEffect(() => {
@@ -482,12 +548,12 @@ export const TreeView: React.FC<TreeViewProps> = ({
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`
           }}
         >
-          {/* SVG Links */}
+          {/* SVG Links (Viewport Culled) */}
           <svg
             className="overflow-visible pointer-events-none absolute inset-0"
             style={{ width: layout.width, height: layout.height }}
           >
-            {layout.links.map((link) => {
+            {visibleLinks.map((link) => {
               // Smooth bezier curve connecting nodes
               const isHorizontal = layoutType === 'ancestors';
               const midX = (link.sourceX + link.targetX) / 2;
@@ -512,8 +578,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
             })}
           </svg>
 
-          {/* HTML Nodes */}
-          {layout.nodes.map((node) => {
+          {/* HTML Nodes (Viewport Culled + LOD) */}
+          {visibleNodes.map((node) => {
             const p = node.person;
             const isRoot = p.id === activePersonId;
             const isMale = p.gender === 'M';
@@ -524,6 +590,36 @@ export const TreeView: React.FC<TreeViewProps> = ({
               : isFemale
               ? 'border-rose-500/40 bg-slate-900/95 hover:border-rose-400'
               : 'border-slate-600 bg-slate-900/95';
+
+            // LOD (Level of Detail) Lightweight node for distant zoom
+            if (isLowDetail) {
+              return (
+                <div
+                  key={node.id}
+                  style={{
+                    position: 'absolute',
+                    left: `${node.x}px`,
+                    top: `${node.y}px`,
+                    width: `${node.width}px`,
+                    height: `${node.height}px`
+                  }}
+                  className={`group rounded-lg border p-2 shadow-sm transition-all cursor-pointer flex flex-col justify-center ${genderBg} ${
+                    isRoot ? 'ring-2 ring-emerald-500' : ''
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectPerson(p.id);
+                  }}
+                >
+                  <div className="font-bold text-xs text-white truncate">
+                    {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''}
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400 truncate mt-0.5">
+                    {p.birthYear || '?'} — {p.isLiving ? 'теп. час' : p.deathYear || '?'}
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -551,6 +647,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         src={p.avatarUrl}
                         alt={p.name?.given || p.firstName || ''}
                         className="w-11 h-11 rounded-lg object-cover border border-slate-700 shadow-sm"
+                        loading="lazy"
                       />
                     ) : (
                       <div

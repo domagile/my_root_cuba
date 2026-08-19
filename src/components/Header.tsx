@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Github, HardDrive, Sparkles, Share2, Palette, Mail, Plus, Trash2, Copy, Check, ShieldCheck, Sun, Moon } from 'lucide-react';
+import { Search, UserPlus, Github, HardDrive, Sparkles, Share2, Palette, Mail, Plus, Trash2, Copy, Check, ShieldCheck, Sun, Moon, Lock, LogOut, Bell, Shield } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
+import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 
@@ -23,7 +24,10 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
     setActiveTab
   } = useGenealogy();
 
+  const { currentUser, accessRequests, logout, addToWhitelist } = useAuthStore();
   const theme = getThemeConfig(themePalette);
+
+  const pendingRequestsCount = accessRequests.filter((r) => r.status === 'pending').length;
 
   const [showStorageModal, setShowStorageModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -40,20 +44,23 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
       alert('Будь ласка, вкажіть коректну Google пошту (email).');
       return;
     }
+    const cleanEmail = newInviteEmail.trim().toLowerCase();
     addSharedInvite({
       id: `invite-${Date.now()}`,
-      name: newInviteEmail.split('@')[0],
-      email: newInviteEmail,
+      name: cleanEmail.split('@')[0],
+      email: cleanEmail,
       role: newInviteRole,
       inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
       createdAt: new Date().toISOString(),
       invitedAt: new Date().toISOString()
     });
+    // Add to Whitelist immediately!
+    addToWhitelist(cleanEmail, newInviteRole, cleanEmail.split('@')[0], 'Додано через швидке запрошення');
     setNewInviteEmail('');
   };
 
   const handleCopyLink = (inviteId: string, email: string) => {
-    const link = `${window.location.origin}/?invite=${inviteId}&user=${encodeURIComponent(email)}`;
+    const link = `${window.location.origin}/?email=${encodeURIComponent(email)}&tab=login`;
     navigator.clipboard.writeText(link);
     setCopiedInviteId(inviteId);
     setTimeout(() => setCopiedInviteId(null), 2000);
@@ -104,6 +111,35 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
 
         {/* Action Controls */}
         <div className="flex items-center gap-2.5">
+          {/* Pending Requests Badge for Admin */}
+          {currentUser?.role === 'admin' && pendingRequestsCount > 0 && (
+            <button
+              onClick={() => setActiveTab('settings')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse"
+              title="Є нові вхідні запити на доступ"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>Запити ({pendingRequestsCount})</span>
+            </button>
+          )}
+
+          {/* User Role & Email Badge */}
+          {currentUser && (
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs">
+              <div className="w-6 h-6 rounded-full bg-[#B88E3E]/20 text-[#B88E3E] flex items-center justify-center font-bold text-[11px]">
+                {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div className="text-left">
+                <div className="text-[11px] font-bold leading-tight truncate max-w-[120px]">
+                  {currentUser.email.split('@')[0]}
+                </div>
+                <div className="text-[9px] text-[#B88E3E] uppercase font-bold tracking-wider">
+                  {currentUser.role === 'admin' ? 'Адміністратор' : currentUser.role === 'editor' ? 'Редактор' : currentUser.role === 'researcher' ? 'Дослідник' : 'Переглядач'}
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={onOpenAddPerson}
             id="add-person-btn"
@@ -111,6 +147,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
           >
             <UserPlus className="w-4 h-4" />
             <span>Додати особу</span>
+          </button>
+
+          {/* Sign Out / Lock Session Button */}
+          <button
+            onClick={() => logout()}
+            className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors"
+            title="Вийти з облікового запису / Заблокувати сесію"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>

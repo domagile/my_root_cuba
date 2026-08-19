@@ -61,6 +61,25 @@ export interface GenealogyContextType {
   emptyTrash: () => void;
   getPersonById: (id: string) => Person | undefined;
 
+  // Families, Sources & Events (Unified Domain Layer)
+  families: Record<string, any>;
+  setFamilies: (families: any) => void;
+  saveFamily: (family: any) => void;
+  deleteFamily: (id: string) => void;
+
+  sources: Record<string, any>;
+  setSources: (sources: any) => void;
+  saveSource: (source: any) => void;
+  deleteSource: (id: string) => void;
+
+  events: Record<string, any>;
+  setEvents: (events: any) => void;
+  saveEvent: (event: any) => void;
+  deleteEvent: (id: string) => void;
+
+  getGenealogyDatabase: () => any;
+  loadGenealogyDatabase: (db: any) => void;
+
   // Metric Records
   metricRecords: MetricRecord[];
   addMetricRecord: (record: any, data?: any) => void;
@@ -163,6 +182,24 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const setGoogleDriveEmail = useGenealogyStore((s) => s.setGoogleDriveEmail);
   const exportGedcomData = useGenealogyStore((s) => s.exportGedcomData);
   const resetPersonsToSample = useGenealogyStore((s) => s.resetPersonsToSample);
+
+  const families = useGenealogyStore((s) => s.families);
+  const setFamilies = useGenealogyStore((s) => s.setFamilies);
+  const saveFamily = useGenealogyStore((s) => s.saveFamily);
+  const deleteFamily = useGenealogyStore((s) => s.deleteFamily);
+
+  const sources = useGenealogyStore((s) => s.sources);
+  const setSources = useGenealogyStore((s) => s.setSources);
+  const saveSource = useGenealogyStore((s) => s.saveSource);
+  const deleteSource = useGenealogyStore((s) => s.deleteSource);
+
+  const events = useGenealogyStore((s) => s.events);
+  const setEvents = useGenealogyStore((s) => s.setEvents);
+  const saveEvent = useGenealogyStore((s) => s.saveEvent);
+  const deleteEvent = useGenealogyStore((s) => s.deleteEvent);
+
+  const getGenealogyDatabase = useGenealogyStore((s) => s.getGenealogyDatabase);
+  const loadGenealogyDatabase = useGenealogyStore((s) => s.loadGenealogyDatabase);
 
   const metricRecords = useResearchStore((s) => s.metricRecords);
   const setMetricRecords = useResearchStore((s) => s.setMetricRecords);
@@ -329,6 +366,20 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       permanentlyDeletePersons,
       emptyTrash,
       getPersonById,
+      families,
+      setFamilies,
+      saveFamily,
+      deleteFamily,
+      sources,
+      setSources,
+      saveSource,
+      deleteSource,
+      events,
+      setEvents,
+      saveEvent,
+      deleteEvent,
+      getGenealogyDatabase,
+      loadGenealogyDatabase,
       metricRecords,
       addMetricRecord,
       updateMetricRecord,
@@ -400,6 +451,20 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       permanentlyDeletePersons,
       emptyTrash,
       getPersonById,
+      families,
+      setFamilies,
+      saveFamily,
+      deleteFamily,
+      sources,
+      setSources,
+      saveSource,
+      deleteSource,
+      events,
+      setEvents,
+      saveEvent,
+      deleteEvent,
+      getGenealogyDatabase,
+      loadGenealogyDatabase,
       metricRecords,
       addMetricRecord,
       updateMetricRecord,

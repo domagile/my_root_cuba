@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { 
   Users, 
   Search, 
@@ -194,6 +195,15 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     }
     return list;
   }, [filteredPersons, sortOption, centralPerson]);
+
+  // Virtualization for large lists / archives
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: sortedPersons.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 58,
+    overscan: 10,
+  });
 
   // Select all logic
   const isAllSelected = useMemo(() => {
@@ -673,11 +683,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       ) : viewMode === 'table' ? (
         /* TABLE VIEW */
         <div className="rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-[#E5E5E5]">
-              <thead className="bg-[#121212] text-[#B88E3E] uppercase tracking-wider font-bold text-[10px] border-b border-[#2A2A2A]">
+          <div ref={tableContainerRef} className="overflow-x-auto max-h-[calc(100vh-270px)] overflow-y-auto">
+            <table className="w-full text-left text-xs text-[#E5E5E5] relative border-collapse">
+              <thead className="bg-[#121212] text-[#B88E3E] uppercase tracking-wider font-bold text-[10px] border-b border-[#2A2A2A] sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 w-10 text-center">
+                  <th className="p-3 w-10 text-center bg-[#121212]">
                     {isSelectionMode ? (
                       <input
                         type="checkbox"
@@ -690,16 +700,25 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       '#'
                     )}
                   </th>
-                  <th className="p-3">ОСОБА</th>
-                  <th className="p-3">РОКИ ЖИТТЯ</th>
-                  <th className="p-3">СТАТУС</th>
-                  <th className="p-3">КЛЮЧОВИЙ ЗВ'ЯЗОК</th>
-                  <th className="p-3">МІСЦЯ</th>
-                  <th className="p-3 text-right">ДІЇ</th>
+                  <th className="p-3 bg-[#121212]">ОСОБА</th>
+                  <th className="p-3 bg-[#121212]">РОКИ ЖИТТЯ</th>
+                  <th className="p-3 bg-[#121212]">СТАТУС</th>
+                  <th className="p-3 bg-[#121212]">КЛЮЧОВИЙ ЗВ'ЯЗОК</th>
+                  <th className="p-3 bg-[#121212]">МІСЦЯ</th>
+                  <th className="p-3 text-right bg-[#121212]">ДІЇ</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#262626]">
-                {sortedPersons.map((p, idx) => {
+              <tbody>
+                {/* Virtual top spacer */}
+                {rowVirtualizer.getVirtualItems().length > 0 && rowVirtualizer.getVirtualItems()[0].start > 0 && (
+                  <tr>
+                    <td colSpan={7} style={{ height: `${rowVirtualizer.getVirtualItems()[0].start}px` }} />
+                  </tr>
+                )}
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const idx = virtualRow.index;
+                  const p = sortedPersons[idx];
+                  if (!p) return null;
                   const isChecked = selectedIds.has(p.id);
                   const feminine = p.gender !== 'male';
                   const initials = `${p.lastName?.[0] || ''}${p.firstName?.[0] || ''}`.toUpperCase();
@@ -710,8 +729,10 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   return (
                     <tr
                       key={p.id}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
                       onClick={() => onInspectPerson?.(p.id)}
-                      className={`hover:bg-[#262626] transition-colors cursor-pointer ${
+                      className={`hover:bg-[#262626] transition-colors cursor-pointer border-b border-[#262626] ${
                         isCentral ? 'bg-[#B88E3E]/10 border-l-2 border-l-[#B88E3E]' : isChecked ? 'bg-[#222222]' : ''
                       }`}
                     >
@@ -871,6 +892,21 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     </tr>
                   );
                 })}
+                {/* Virtual bottom spacer */}
+                {rowVirtualizer.getVirtualItems().length > 0 && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      style={{
+                        height: `${Math.max(
+                          0,
+                          rowVirtualizer.getTotalSize() -
+                            rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1].end
+                        )}px`
+                      }}
+                    />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

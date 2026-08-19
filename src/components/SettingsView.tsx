@@ -23,11 +23,23 @@ import {
   Copy,
   ExternalLink,
   LockKeyhole,
-  LogOut
+  LogOut,
+  UserPlus,
+  UserCheck,
+  UserX,
+  Shield,
+  ShieldAlert,
+  Send,
+  Users,
+  Mail,
+  User,
+  AlertCircle,
+  KeyRound
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
+import { useAuthStore } from '../stores/useAuthStore';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
-import { ThemePalette } from '../types';
+import { ThemePalette, UserRole } from '../types';
 import { pushProjectToGithub } from '../utils/githubSync';
 
 export const SettingsView: React.FC = () => {
@@ -56,9 +68,31 @@ export const SettingsView: React.FC = () => {
     lockAppSession
   } = useGenealogy();
 
+  const {
+    currentUser,
+    whitelist,
+    accessRequests,
+    accessConfig,
+    addToWhitelist,
+    removeFromWhitelist,
+    updateWhitelistRole,
+    toggleWhitelistStatus,
+    approveAccessRequest,
+    rejectAccessRequest,
+    setAccessConfig,
+    logout
+  } = useAuthStore();
+
   const theme = getThemeConfig(themePalette);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+
+  // New Whitelist User Form State
+  const [newWhiteEmail, setNewWhiteEmail] = useState('');
+  const [newWhiteName, setNewWhiteName] = useState('');
+  const [newWhiteRole, setNewWhiteRole] = useState<UserRole>('viewer');
+  const [newWhiteNotes, setNewWhiteNotes] = useState('');
+  const [whiteSuccessMsg, setWhiteSuccessMsg] = useState<string | null>(null);
 
   // Git form states
   const [repoUrlInput, setRepoUrlInput] = useState(gitConfig?.repoUrl || '');
@@ -484,162 +518,465 @@ export const SettingsView: React.FC = () => {
         </div>
       </section>
 
-      {/* SECTION 2.7: Private Access & PIN Protection */}
+      {/* SECTION 2.7: Google Email Whitelist & Access Control Management */}
       <section className="space-y-4 pt-4 border-t border-black/10">
         <div>
-          <h2 className={`text-lg font-bold ${theme.cardTitle} flex items-center gap-2`}>
-            <LockKeyhole className="w-5 h-5 text-[#B88E3E]" />
-            <span>Приватне посилання та захист PIN-кодом</span>
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className={`text-lg font-bold ${theme.cardTitle} flex items-center gap-2`}>
+              <ShieldCheck className="w-5 h-5 text-[#B88E3E]" />
+              <span>Керування доступом та Білий список Google (Whitelist)</span>
+            </h2>
+
+            {currentUser && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className={`px-2.5 py-1 rounded-full ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-medium flex items-center gap-1.5`}>
+                  <User className="w-3.5 h-3.5 text-[#B88E3E]" />
+                  <span>Ви увійшли як: <strong>{currentUser.email}</strong> ({currentUser.role === 'admin' ? 'Адміністратор' : currentUser.role})</span>
+                </span>
+                <button
+                  onClick={() => logout()}
+                  className="px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Змінити акаунт
+                </button>
+              </div>
+            )}
+          </div>
           <p className={`text-xs ${theme.cardSubtext} mt-1`}>
-            Обмежте доступ до вашого сайту родоводу, щоб він був доступний тільки вам або людям з вашим secret-посиланням/PIN-кодом
+            Захистіть конфіденційні генеалогічні матеріали: переглядати чи редагувати архів можуть лише авторизовані користувачі з підтвердженою Google-поштою.
           </p>
         </div>
 
         <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-6`}>
-          {/* Main Toggle */}
-          <div className="flex items-center justify-between p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10">
-            <div className="space-y-0.5">
-              <h4 className={`text-sm font-bold ${theme.cardTitle} flex items-center gap-2`}>
-                <Lock className="w-4 h-4 text-[#B88E3E]" />
-                <span>Захист архіву PIN-кодом</span>
-              </h4>
-              <p className={`text-xs ${theme.cardSubtext}`}>
-                Якщо увімкнено, відвідувачі без PIN-коду або без секретного ключа в лінку побачать екран авторизації
-              </p>
-            </div>
+          {/* Security Mode Selector */}
+          <div className="space-y-2">
+            <label className={`text-xs font-bold uppercase tracking-wider text-[#B88E3E] block`}>
+              Режим захисту доступу
+            </label>
 
-            <button
-              onClick={() => {
-                const updated = { ...accessLockConfig, enabled: !accessLockConfig.enabled };
-                setAccessLockConfig(updated);
-              }}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
-                accessLockConfig.enabled ? 'bg-[#B88E3E]' : 'bg-gray-400/40'
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  accessLockConfig.enabled ? 'translate-x-6' : 'translate-x-1'
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div
+                onClick={() => setAccessConfig({ ...accessConfig, mode: 'whitelist_only' })}
+                className={`p-3.5 rounded-xl border cursor-pointer transition-all space-y-1 ${
+                  accessConfig.mode === 'whitelist_only'
+                    ? 'border-[#B88E3E] bg-[#B88E3E]/10 ring-2 ring-[#B88E3E]/30'
+                    : 'border-black/10 dark:border-white/10 hover:border-[#B88E3E]/50'
                 }`}
-              />
-            </button>
-          </div>
-
-          {/* Settings when Lock is enabled */}
-          {accessLockConfig.enabled && (
-            <div className="space-y-5 pt-2">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* PIN code setup */}
-                <div className="space-y-1.5">
-                  <label className={`text-xs font-semibold ${theme.cardTitle} flex items-center gap-1.5`}>
-                    <Key className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>Ваш секретний PIN-код</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={pinEditInput}
-                      onChange={(e) => setPinEditInput(e.target.value)}
-                      placeholder="1234"
-                      className={`flex-1 px-3.5 py-2 rounded-xl text-xs font-mono border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
-                    />
-                    <button
-                      onClick={() => {
-                        if (!pinEditInput.trim()) {
-                          alert('Будь ласка, вкажіть PIN-код.');
-                          return;
-                        }
-                        setAccessLockConfig({ ...accessLockConfig, pinCode: pinEditInput.trim() });
-                        alert('PIN-код успішно збережено!');
-                      }}
-                      className={`px-3.5 py-2 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs shrink-0`}
-                    >
-                      Зберегти PIN
-                    </button>
-                  </div>
-                </div>
-
-                {/* Regenerate Secret Key */}
-                <div className="space-y-1.5">
-                  <label className={`text-xs font-semibold ${theme.cardTitle} flex items-center gap-1.5`}>
-                    <RefreshCw className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>Секретний маркер доступу</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={accessLockConfig.secretKey}
-                      className={`flex-1 px-3.5 py-2 rounded-xl text-xs font-mono border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} opacity-80`}
-                    />
-                    <button
-                      onClick={() => {
-                        const newKey = 'rodovid-key-' + Math.random().toString(36).substring(2, 9);
-                        setAccessLockConfig({ ...accessLockConfig, secretKey: newKey });
-                      }}
-                      className={`px-3 py-2 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} text-xs font-medium shrink-0`}
-                    >
-                      Оновити ключ
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Secret Link Box */}
-              <div className="p-4 rounded-xl bg-[#B88E3E]/10 border border-[#B88E3E]/30 space-y-2">
+              >
                 <div className="flex items-center justify-between">
                   <span className={`text-xs font-bold ${theme.cardTitle} flex items-center gap-1.5`}>
-                    <ExternalLink className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>Секретне посилання для друзів та родичів (Прямий вхід без PIN)</span>
+                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                    <span>Тільки Білий список (Strict)</span>
                   </span>
-                  {copyLinkSuccess && (
-                    <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>Скопійовано!</span>
-                    </span>
-                  )}
+                  {accessConfig.mode === 'whitelist_only' && <Check className="w-4 h-4 text-[#B88E3E]" />}
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={`${window.location.origin}/?key=${accessLockConfig.secretKey}`}
-                    className={`flex-1 px-3.5 py-2 rounded-xl text-xs font-mono border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText}`}
-                  />
-                  <button
-                    onClick={() => {
-                      const fullUrl = `${window.location.origin}/?key=${accessLockConfig.secretKey}`;
-                      navigator.clipboard.writeText(fullUrl);
-                      setCopyLinkSuccess(true);
-                      setTimeout(() => setCopyLinkSuccess(false), 3000);
-                    }}
-                    className={`px-4 py-2 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs flex items-center gap-1.5 shrink-0`}
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Скопіювати лінк</span>
-                  </button>
-                </div>
-                <p className={`text-[11px] ${theme.cardSubtext}`}>
-                  Усі, хто відкриє сайт за цим посиланням, автоматично увійдуть в родовід без введення PIN-коду.
+                <p className={`text-[11px] ${theme.cardSubtext} leading-tight`}>
+                  Найвищий рівень: вхід дозволено виключно схваленим Google-поштам.
                 </p>
               </div>
 
-              {/* Lock session button */}
-              <div className="pt-2 flex justify-end">
-                <button
-                  onClick={() => {
-                    lockAppSession();
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-bold text-xs flex items-center gap-2 cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Заблокувати сесію зараз (Захистити вхід)</span>
-                </button>
+              <div
+                onClick={() => setAccessConfig({ ...accessConfig, mode: 'whitelist_and_pin' })}
+                className={`p-3.5 rounded-xl border cursor-pointer transition-all space-y-1 ${
+                  accessConfig.mode === 'whitelist_and_pin'
+                    ? 'border-[#B88E3E] bg-[#B88E3E]/10 ring-2 ring-[#B88E3E]/30'
+                    : 'border-black/10 dark:border-white/10 hover:border-[#B88E3E]/50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs font-bold ${theme.cardTitle} flex items-center gap-1.5`}>
+                    <KeyRound className="w-4 h-4 text-[#B88E3E]" />
+                    <span>Список + Резервний PIN</span>
+                  </span>
+                  {accessConfig.mode === 'whitelist_and_pin' && <Check className="w-4 h-4 text-[#B88E3E]" />}
+                </div>
+                <p className={`text-[11px] ${theme.cardSubtext} leading-tight`}>
+                  Основний вхід по Google email + можливість увійти за гостьовим PIN.
+                </p>
+              </div>
+
+              <div
+                onClick={() => setAccessConfig({ ...accessConfig, mode: 'open_demo' })}
+                className={`p-3.5 rounded-xl border cursor-pointer transition-all space-y-1 ${
+                  accessConfig.mode === 'open_demo'
+                    ? 'border-[#B88E3E] bg-[#B88E3E]/10 ring-2 ring-[#B88E3E]/30'
+                    : 'border-black/10 dark:border-white/10 hover:border-[#B88E3E]/50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs font-bold ${theme.cardTitle} flex items-center gap-1.5`}>
+                    <Users className="w-4 h-4 text-blue-500" />
+                    <span>Відкритий доступ (Демо)</span>
+                  </span>
+                  {accessConfig.mode === 'open_demo' && <Check className="w-4 h-4 text-[#B88E3E]" />}
+                </div>
+                <p className={`text-[11px] ${theme.cardSubtext} leading-tight`}>
+                  Будь-який відвідувач може переглядати дерево без авторизації.
+                </p>
               </div>
             </div>
-          )}
+
+            {/* Email Notification Dispatch Settings for Admin */}
+            <div className="p-3.5 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-[#B88E3E]" />
+                  <span className={`text-xs font-bold ${theme.cardTitle}`}>
+                    Email-сповіщення адміністратора про нові заявки
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={accessConfig.enableEmailNotifications !== false}
+                    onChange={(e) =>
+                      setAccessConfig({
+                        ...accessConfig,
+                        enableEmailNotifications: e.target.checked
+                      })
+                    }
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#B88E3E]" />
+                </label>
+              </div>
+
+              <div className="space-y-1.5 pt-1">
+                <label className={`text-[11px] font-semibold ${theme.cardSubtext}`}>
+                  Адміністратори, які отримують копію кожного запиту:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {whitelist
+                    .filter((w) => w.role === 'admin' && w.status === 'active')
+                    .map((admin) => (
+                      <span
+                        key={admin.id}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-mono bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                      >
+                        <Shield className="w-3 h-3 text-emerald-500" />
+                        <span>{admin.email}</span>
+                        {admin.name && <span className="opacity-70">({admin.name})</span>}
+                      </span>
+                    ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1">
+                  <label className={`text-[11px] font-semibold ${theme.cardSubtext}`}>
+                    Додаткові email-адреси (через кому):
+                  </label>
+                  <input
+                    type="text"
+                    value={accessConfig.adminNotificationEmail || 'CubaTarara400@gmail.com'}
+                    onChange={(e) =>
+                      setAccessConfig({
+                        ...accessConfig,
+                        adminNotificationEmail: e.target.value
+                      })
+                    }
+                    placeholder="admin1@gmail.com, admin2@gmail.com"
+                    className={`w-full px-3 py-1.5 rounded-lg text-xs font-mono border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className={`text-[11px] font-semibold ${theme.cardSubtext}`}>
+                    Webhook / Поштовий шлюз (необов'язково):
+                  </label>
+                  <input
+                    type="url"
+                    value={accessConfig.webhookUrl || ''}
+                    onChange={(e) =>
+                      setAccessConfig({
+                        ...accessConfig,
+                        webhookUrl: e.target.value
+                      })
+                    }
+                    placeholder="https://formspree.io/f/..."
+                    className={`w-full px-3 py-1.5 rounded-lg text-xs font-mono border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
+                  />
+                </div>
+              </div>
+
+              <p className={`text-[10px] ${theme.cardSubtext} leading-tight`}>
+                Коли хтось надсилає запит, повідомлення транслюється <strong>усім призначеним адміністраторам</strong> родоводу для оперативного розгляду та схвалення.
+              </p>
+            </div>
+          </div>
+
+          {/* SECTION: Pending Access Requests */}
+          <div className="space-y-3 pt-2 border-t border-black/10 dark:border-white/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 text-[#B88E3E]" />
+                <h3 className={`text-sm font-bold ${theme.cardTitle}`}>
+                  Вхідні запити на доступ ({accessRequests.filter((r) => r.status === 'pending').length})
+                </h3>
+              </div>
+              <span className={`text-xs ${theme.cardSubtext}`}>
+                Люди, які відкрили архів і попросили доступ
+              </span>
+            </div>
+
+            {accessRequests.filter((r) => r.status === 'pending').length > 0 ? (
+              <div className="space-y-2.5">
+                {accessRequests
+                  .filter((r) => r.status === 'pending')
+                  .map((req) => (
+                    <div
+                      key={req.id}
+                      className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold ${theme.cardTitle}`}>{req.name}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                            {req.email}
+                          </span>
+                          <span className="text-[10px] opacity-60 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>{new Date(req.createdAt).toLocaleString('uk-UA')}</span>
+                          </span>
+                        </div>
+                        {req.note && (
+                          <p className="text-xs text-gray-600 dark:text-gray-300 italic">
+                            «{req.note}»
+                          </p>
+                        )}
+                        <div className="text-[11px] text-[#B88E3E]">
+                          Бажана роль: <strong>{req.requestedRole === 'editor' ? 'Редактор' : req.requestedRole === 'researcher' ? 'Дослідник' : 'Переглядач'}</strong>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                        <button
+                          onClick={() => approveAccessRequest(req.id, req.requestedRole)}
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Схвалити доступ</span>
+                        </button>
+                        <button
+                          onClick={() => rejectAccessRequest(req.id)}
+                          className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 border border-rose-500/30 text-xs font-medium cursor-pointer"
+                        >
+                          Відхилити
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 text-center text-xs text-gray-500">
+                Немає нових запитів. Усі бажаючі вже отримали доступ.
+              </div>
+            )}
+          </div>
+
+          {/* SECTION: Add New Email to Whitelist */}
+          <div className="space-y-3 pt-2 border-t border-black/10 dark:border-white/10">
+            <h3 className={`text-sm font-bold ${theme.cardTitle} flex items-center gap-2`}>
+              <UserPlus className="w-4 h-4 text-[#B88E3E]" />
+              <span>Додати нову пошту до Білого списку (Whitelist)</span>
+            </h3>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newWhiteEmail.trim() || !newWhiteEmail.includes('@')) {
+                  alert('Вкажіть коректну адресу Google-пошти.');
+                  return;
+                }
+                addToWhitelist(newWhiteEmail, newWhiteRole, newWhiteName, newWhiteNotes);
+                setWhiteSuccessMsg(`Пошту ${newWhiteEmail} успішно додано до білого списку з роллю "${newWhiteRole}"!`);
+                setNewWhiteEmail('');
+                setNewWhiteName('');
+                setNewWhiteNotes('');
+                setTimeout(() => setWhiteSuccessMsg(null), 5000);
+              }}
+              className="space-y-3 p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className={`text-xs font-semibold ${theme.cardTitle}`}>
+                    Google Email користувача
+                  </label>
+                  <input
+                    type="email"
+                    value={newWhiteEmail}
+                    onChange={(e) => setNewWhiteEmail(e.target.value)}
+                    placeholder="relative@gmail.com"
+                    className={`w-full px-3 py-2 rounded-lg text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className={`text-xs font-semibold ${theme.cardTitle}`}>
+                    Ім'я / Прізвище
+                  </label>
+                  <input
+                    type="text"
+                    value={newWhiteName}
+                    onChange={(e) => setNewWhiteName(e.target.value)}
+                    placeholder="наприклад: Василь Коваленко"
+                    className={`w-full px-3 py-2 rounded-lg text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className={`text-xs font-semibold ${theme.cardTitle}`}>
+                    Рівень доступу (Роль)
+                  </label>
+                  <select
+                    value={newWhiteRole}
+                    onChange={(e) => setNewWhiteRole(e.target.value as UserRole)}
+                    className={`w-full px-3 py-2 rounded-lg text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
+                  >
+                    <option value="viewer">Переглядач (Тільки перегляд)</option>
+                    <option value="researcher">Дослідник (Перегляд + нотатки)</option>
+                    <option value="editor">Редактор (Повне наповнення)</option>
+                    <option value="admin">Адміністратор (Повні права)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className={`text-xs font-semibold ${theme.cardTitle}`}>
+                  Примітка або родинний статус (необов'язково)
+                </label>
+                <input
+                  type="text"
+                  value={newWhiteNotes}
+                  onChange={(e) => setNewWhiteNotes(e.target.value)}
+                  placeholder="наприклад: Двоюрідний брат, архівні документи гілки Полтави"
+                  className={`w-full px-3 py-2 rounded-lg text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                {whiteSuccessMsg ? (
+                  <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{whiteSuccessMsg}</span>
+                  </span>
+                ) : (
+                  <span className={`text-[11px] ${theme.cardSubtext}`}>
+                    Користувач зможе увійти за цим email без введення паролів чи PIN-кодів.
+                  </span>
+                )}
+
+                <button
+                  type="submit"
+                  className={`px-4 py-2 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer`}
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Додати до білого списку</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* SECTION: Whitelist Table */}
+          <div className="space-y-3 pt-2 border-t border-black/10 dark:border-white/10">
+            <div className="flex items-center justify-between">
+              <h3 className={`text-sm font-bold ${theme.cardTitle} flex items-center gap-2`}>
+                <Users className="w-4 h-4 text-[#B88E3E]" />
+                <span>Авторизовані користувачі у Білому списку ({whitelist.length})</span>
+              </h3>
+              <span className={`text-xs ${theme.cardSubtext}`}>
+                Усі електронні адреси мають захищений доступ за ролями
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-black/10 dark:border-white/10 text-gray-500 font-semibold">
+                    <th className="py-2.5 px-3">Користувач & Google Email</th>
+                    <th className="py-2.5 px-3">Роль доступу</th>
+                    <th className="py-2.5 px-3">Статус</th>
+                    <th className="py-2.5 px-3">Примітки</th>
+                    <th className="py-2.5 px-3 text-right">Дії</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/5 dark:divide-white/5">
+                  {whitelist.map((w) => {
+                    const isSelf = currentUser?.email.toLowerCase() === w.email.toLowerCase();
+                    return (
+                      <tr key={w.id} className="hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-full bg-[#B88E3E]/20 text-[#B88E3E] font-bold flex items-center justify-center text-xs">
+                              {w.name ? w.name.charAt(0).toUpperCase() : 'U'}
+                            </div>
+                            <div>
+                              <div className="font-bold flex items-center gap-1.5">
+                                <span>{w.name || 'Користувач'}</span>
+                                {isSelf && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] bg-[#B88E3E] text-white font-bold">
+                                    Ви
+                                  </span>
+                                )}
+                              </div>
+                              <div className="font-mono text-[11px] text-gray-500">{w.email}</div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-2.5 px-3">
+                          <select
+                            value={w.role}
+                            onChange={(e) => updateWhitelistRole(w.id, e.target.value as UserRole)}
+                            className={`px-2 py-1 rounded-lg text-xs font-semibold border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText}`}
+                          >
+                            <option value="admin">Адміністратор</option>
+                            <option value="editor">Редактор</option>
+                            <option value="researcher">Дослідник</option>
+                            <option value="viewer">Переглядач</option>
+                          </select>
+                        </td>
+
+                        <td className="py-2.5 px-3">
+                          <button
+                            onClick={() => toggleWhitelistStatus(w.id)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                              w.status === 'active'
+                                ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/30'
+                                : 'bg-gray-400/20 text-gray-500 hover:bg-gray-400/30'
+                            }`}
+                          >
+                            {w.status === 'active' ? '● Активний' : '○ Призупинено'}
+                          </button>
+                        </td>
+
+                        <td className="py-2.5 px-3 text-gray-500 text-[11px] max-w-[200px] truncate">
+                          {w.notes || '—'}
+                        </td>
+
+                        <td className="py-2.5 px-3 text-right">
+                          {!isSelf && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`Видалити ${w.email} з білого списку?`)) {
+                                  removeFromWhitelist(w.id);
+                                }
+                              }}
+                              className="text-rose-500 hover:text-rose-700 p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
+                              title="Видалити з білого списку"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
 

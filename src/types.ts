@@ -56,8 +56,8 @@ export type CustomField = CustomFieldItem;
 export interface Person {
   id: string;
   name?: PersonName;
-  firstName: string;
-  lastName: string;
+  firstName?: string;
+  lastName?: string;
   maidenName?: string;
   patronymic?: string;
   prefix?: string;
@@ -326,3 +326,184 @@ export interface ThemeConfig {
   headerBg: string;
   border: string;
 }
+
+export type ViewMode = 
+  | 'tree'
+  | 'fan'
+  | 'persons'
+  | 'families'
+  | 'timeline'
+  | 'map'
+  | 'places'
+  | 'sources'
+  | 'calculator'
+  | 'kinship'
+  | 'statistics'
+  | 'stats'
+  | 'reports';
+
+export type TreeLayoutType = 'ancestors' | 'descendants' | 'hourglass' | 'both';
+
+export interface FamilyChild {
+  personId: string;
+  relationType?: string;
+}
+
+export interface Family {
+  id: string;
+  husbandId?: string;
+  wifeId?: string;
+  relationshipType?: string;
+  children: FamilyChild[];
+  childrenIds?: string[];
+  marriageDate?: string;
+  marriageYear?: number;
+  marriagePlace?: string;
+  divorceDate?: string;
+  divorceYear?: number;
+  events?: any[];
+  notes?: any;
+  citations?: any[];
+  sourceIds?: string[];
+}
+
+export interface Source {
+  id: string;
+  title: string;
+  author?: string;
+  publication?: string;
+  repository?: string;
+  archiveReference?: string;
+  archiveFund?: string;
+  inventory?: string;
+  caseNumber?: string;
+  page?: string;
+  url?: string;
+  notes?: string;
+}
+
+export type EventType =
+  | 'birth'
+  | 'death'
+  | 'marriage'
+  | 'burial'
+  | 'baptism'
+  | 'census'
+  | 'residence'
+  | 'other'
+  | 'Birth'
+  | 'Baptism'
+  | 'Marriage'
+  | 'Divorce'
+  | 'Death'
+  | 'Burial'
+  | 'Military'
+  | 'Award'
+  | 'Education'
+  | 'Occupation'
+  | 'Census'
+  | 'Residence'
+  | 'Custom'
+  | 'Emigration'
+  | 'Immigration';
+
+export interface FanChartSector {
+  person: Person | null;
+  generation: number;
+  startAngle: number;
+  endAngle: number;
+  innerRadius: number;
+  outerRadius: number;
+  color?: string;
+  isAhnen?: number;
+  ahnenNumber?: number;
+  ahnentafelNumber?: number;
+  side?: 'paternal' | 'maternal' | 'root';
+}
+
+export interface LifeEvent {
+  id: string;
+  type: EventType;
+  title?: string;
+  date?: string;
+  year?: number;
+  place?: string;
+  placeName?: string;
+  description?: string;
+  personId?: string;
+  familyId?: string;
+  sourceId?: string;
+  citations?: any[];
+  notes?: any;
+}
+
+export type Event = LifeEvent;
+
+export interface GenealogyDatabase {
+  title?: string;
+  description?: string;
+  rootPersonId?: string;
+  grampsCompatibilityVersion?: string;
+  persons: Record<string, Person>;
+  families: Record<string, Family>;
+  sources: Record<string, Source>;
+  events: Record<string, Event>;
+  places?: Record<string, any>;
+  notes?: Record<string, any>;
+  metadata?: {
+    title: string;
+    description?: string;
+    lastModified?: string;
+    author?: string;
+  };
+  lastModified?: string;
+}
+
+export type UserRole = 'admin' | 'editor' | 'researcher' | 'viewer';
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+  role: UserRole;
+  isAuthenticated: boolean;
+  isWhitelisted: boolean;
+  loginMethod: 'google' | 'pin' | 'demo';
+  lastActive?: string;
+}
+
+export interface WhitelistEntry {
+  id: string;
+  email: string;
+  name?: string;
+  role: UserRole;
+  addedAt: string;
+  addedBy?: string;
+  status: 'active' | 'suspended';
+  notes?: string;
+}
+
+export interface AccessRequest {
+  id: string;
+  email: string;
+  name: string;
+  note?: string;
+  requestedRole: UserRole;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  processedAt?: string;
+  processedBy?: string;
+}
+
+export interface AccessControlConfig {
+  mode: 'whitelist_only' | 'whitelist_and_pin' | 'open_demo';
+  pinCode?: string;
+  allowPublicRequests: boolean;
+  autoApproveViewers?: boolean;
+  adminNotificationEmail?: string;
+  enableEmailNotifications?: boolean;
+  webhookUrl?: string;
+}
+
+

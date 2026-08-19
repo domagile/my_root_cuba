@@ -471,7 +471,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 {typeof person.notes === 'string'
                   ? person.notes
                   : Array.isArray(person.notes)
-                  ? person.notes.join('\n')
+                  ? (person.notes as any[]).join('\n')
                   : JSON.stringify(person.notes)}
               </div>
             </div>

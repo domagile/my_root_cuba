@@ -478,8 +478,8 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     }`}
                   />
 
-                  {/* Text inside sector */}
-                  {sec.person && (() => {
+                  {/* Text inside sector (LOD optimized) */}
+                  {sec.person && (scale >= 0.52 || sec.generation <= 3 || isHovered) && (() => {
                     const surname = sec.person.name?.surname || sec.person.lastName || '';
                     const given = sec.person.name?.given || sec.person.firstName || '';
                     return (
