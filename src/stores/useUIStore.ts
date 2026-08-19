@@ -1,10 +1,11 @@
 import { create } from 'zustand';
-import { ThemePalette, AccessLockConfig } from '../types';
+import { ThemePalette, AccessLockConfig, ViewMode } from '../types';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v2';
 
 export interface UIState {
   activeTab: string;
+  rodovidView: ViewMode;
   themePalette: ThemePalette;
   searchQuery: string;
   treeMode: string;
@@ -14,6 +15,7 @@ export interface UIState {
   
   // Actions
   setActiveTab: (tab: string) => void;
+  setRodovidView: (view: ViewMode) => void;
   setThemePalette: (palette: ThemePalette) => void;
   setSearchQuery: (query: string) => void;
   setTreeMode: (mode: string) => void;
@@ -25,6 +27,7 @@ export interface UIState {
 
 export const useUIStore = create<UIState>((set, get) => ({
   activeTab: 'tree',
+  rodovidView: 'tree',
   isMobileMenuOpen: false,
   
   themePalette: (() => {
@@ -57,6 +60,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   })(),
 
   setActiveTab: (activeTab: string) => set({ activeTab }),
+
+  setRodovidView: (rodovidView: ViewMode) => set({ rodovidView, activeTab: 'tree' }),
 
   setThemePalette: (themePalette: ThemePalette) => {
     try {

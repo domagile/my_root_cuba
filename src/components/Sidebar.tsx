@@ -1,32 +1,38 @@
 import React, { useState } from 'react';
 import { 
   GitFork, 
+  PieChart,
+  Users,
+  HeartHandshake,
+  Calendar,
+  MapPin,
+  BookOpen,
   Compass, 
+  BarChart3,
   FileText, 
-  Inbox, 
   CalendarDays, 
   CheckSquare, 
   Bookmark, 
   Lightbulb, 
-  Users, 
   Settings, 
   FolderTree, 
   ShieldCheck, 
   Sparkles, 
   PanelLeftClose, 
   PanelLeftOpen, 
-  Clock, 
   FlaskConical,
   X
 } from 'lucide-react';
 import { useUIStore } from '../stores/useUIStore';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
-import { NavigationTab } from '../types';
+import { NavigationTab, ViewMode } from '../types';
 import { getThemeConfig } from '../utils/theme';
 
 export const Sidebar: React.FC = () => {
   const activeTab = useUIStore((s) => s.activeTab);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
+  const rodovidView = useUIStore((s) => s.rodovidView);
+  const setRodovidView = useUIStore((s) => s.setRodovidView);
   const isMobileMenuOpen = useUIStore((s) => s.isMobileMenuOpen);
   const setMobileMenuOpen = useUIStore((s) => s.setMobileMenuOpen);
   const themePalette = useUIStore((s) => s.themePalette);
@@ -34,10 +40,20 @@ export const Sidebar: React.FC = () => {
   const theme = getThemeConfig(themePalette);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const navItems: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [
-    { id: 'tree', label: 'Родовід', icon: GitFork },
-    { id: 'persons', label: 'Фігуранти справи', icon: Users },
-    { id: 'timeline', label: 'Хроніка', icon: Clock },
+  const rodovidItems: { id: ViewMode; label: string; icon: React.FC<{ className?: string }> }[] = [
+    { id: 'tree', label: 'Дерево', icon: GitFork },
+    { id: 'fan', label: 'Віяло', icon: PieChart },
+    { id: 'persons', label: `Особи (${personsCount})`, icon: Users },
+    { id: 'families', label: "Сім'ї", icon: HeartHandshake },
+    { id: 'timeline', label: 'Хроніка', icon: Calendar },
+    { id: 'places', label: 'Місця', icon: MapPin },
+    { id: 'sources', label: 'Архів джерел', icon: BookOpen },
+    { id: 'kinship', label: 'Спорідненість', icon: Compass },
+    { id: 'stats', label: 'Статистика', icon: BarChart3 },
+    { id: 'reports', label: 'Звіти', icon: FileText }
+  ];
+
+  const researchItems: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'ai-analysis', label: 'Слідчий AI аналіз', icon: Sparkles },
     { id: 'documents', label: 'Речові докази', icon: FileText },
     { id: 'research', label: 'Детективні розкопки', icon: Compass },
@@ -48,7 +64,13 @@ export const Sidebar: React.FC = () => {
     { id: 'experiment', label: 'Експеримент', icon: FlaskConical }
   ];
 
-  const handleTabClick = (tabId: NavigationTab) => {
+  const handleRodovidClick = (viewId: ViewMode) => {
+    setActiveTab('tree');
+    setRodovidView(viewId);
+    setMobileMenuOpen(false);
+  };
+
+  const handleNavTabClick = (tabId: NavigationTab) => {
     setActiveTab(tabId);
     setMobileMenuOpen(false);
   };
@@ -110,41 +132,80 @@ export const Sidebar: React.FC = () => {
         </div>
 
         {/* Navigation Links */}
-        <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                id={`nav-btn-${item.id}`}
-                onClick={() => handleTabClick(item.id)}
-                title={isCollapsed ? item.label : undefined}
-                className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-3.5 px-3.5'} gap-3.5 px-3.5 py-3 md:py-2.5 rounded-xl text-sm font-medium transition-all duration-150 cursor-pointer ${
-                  isActive
-                    ? theme.sidebarActiveNav
-                    : `${theme.sidebarText} ${theme.sidebarHover}`
-                }`}
-              >
-                <Icon className="w-5 h-5 flex-shrink-0 text-[#B88E3E]" />
-                <span className={`truncate ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
-              </button>
-            );
-          })}
+        <nav className="flex-1 py-3 px-2 space-y-4 overflow-y-auto">
+          {/* Section 1: Родовід (Інструменти родинного дерева) */}
+          <div className="space-y-1">
+            {(!isCollapsed || isMobileMenuOpen) && (
+              <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#B88E3E] opacity-90 flex items-center justify-between">
+                <span>Родовід</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#B88E3E]/15 font-mono">{rodovidItems.length}</span>
+              </div>
+            )}
+            {rodovidItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === 'tree' && rodovidView === item.id;
+              return (
+                <button
+                  key={`rodovid-${item.id}`}
+                  id={`nav-btn-rodovid-${item.id}`}
+                  onClick={() => handleRodovidClick(item.id)}
+                  title={isCollapsed ? item.label : undefined}
+                  className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-3 px-3'} gap-3 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
+                    isActive
+                      ? theme.sidebarActiveNav
+                      : `${theme.sidebarText} ${theme.sidebarHover}`
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#B88E3E]' : 'text-emerald-500'}`} />
+                  <span className={`truncate ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Section 2: Дослідження та Докази */}
+          <div className="space-y-1 pt-2 border-t border-white/5">
+            {(!isCollapsed || isMobileMenuOpen) && (
+              <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400 opacity-90">
+                <span>Дослідження & AI</span>
+              </div>
+            )}
+            {researchItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={`research-${item.id}`}
+                  id={`nav-btn-${item.id}`}
+                  onClick={() => handleNavTabClick(item.id)}
+                  title={isCollapsed ? item.label : undefined}
+                  className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-3 px-3'} gap-3 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
+                    isActive
+                      ? theme.sidebarActiveNav
+                      : `${theme.sidebarText} ${theme.sidebarHover}`
+                  }`}
+                >
+                  <Icon className="w-4 h-4 flex-shrink-0 text-[#B88E3E]" />
+                  <span className={`truncate ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </nav>
 
         {/* Footer info & settings */}
         <div className={`p-3 border-t ${theme.sidebarBorder} flex items-center ${isCollapsed ? 'md:justify-center' : 'justify-between'} justify-between text-xs`}>
           <div className={`flex items-center gap-2 opacity-80 ${isCollapsed ? 'md:hidden' : 'flex'}`}>
             <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span className="text-[11px] truncate">Осіб у родоводі ({personsCount})</span>
+            <span className="text-[11px] truncate">Осіб у базі ({personsCount})</span>
           </div>
           <button
-            onClick={() => handleTabClick('settings')}
-            className={`p-2 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer`}
+            onClick={() => handleNavTabClick('settings')}
+            className={`p-2 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-2`}
             title="Налаштування"
           >
             <Settings className="w-4 h-4" />
+            {(!isCollapsed || isMobileMenuOpen) && <span className="text-[11px]">Налаштування</span>}
           </button>
         </div>
       </aside>

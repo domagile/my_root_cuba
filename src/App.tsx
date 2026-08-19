@@ -38,10 +38,6 @@ function AppContent() {
   const currentUser = useAuthStore((s) => s.currentUser);
   const theme = getThemeConfig(themePalette);
 
-  if (!currentUser || !currentUser.isAuthenticated) {
-    return <AccessLockScreen />;
-  }
-
   const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
   const [personToEdit, setPersonToEdit] = useState<Person | null>(null);
   const [relationManagerPerson, setRelationManagerPerson] = useState<Person | null>(null);
@@ -50,6 +46,10 @@ function AppContent() {
     type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
     targetPersonId: string;
   } | null>(null);
+
+  if (!currentUser || !currentUser.isAuthenticated) {
+    return <AccessLockScreen />;
+  }
 
   const handleOpenAddModal = () => {
     setPersonToEdit(null);

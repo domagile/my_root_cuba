@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { X, Save, User, UserPlus, Calendar, MapPin, Briefcase, FileText, Image, Tag, Shield } from 'lucide-react';
+import { X, Save, User, UserPlus, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
 import { Person, Gender } from '../../types';
@@ -25,6 +25,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 }) => {
   const { persons, addPerson, updatePerson, themePalette } = useGenealogy();
   const theme = getThemeConfig(themePalette);
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [firstName, setFirstName] = useState(
     initialPersonToEdit?.name?.given || initialPersonToEdit?.firstName || ''
@@ -69,6 +71,33 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     typeof initialPersonToEdit?.notes === 'string' ? initialPersonToEdit.notes : ''
   );
 
+  const targetPerson = initialRelation
+    ? persons.find((p) => p.id === initialRelation.targetPersonId)
+    : null;
+
+  const getRelationLabel = () => {
+    if (!initialRelation) return 'Створення нової особи';
+    const name = targetPerson
+      ? `${targetPerson.name?.surname || targetPerson.lastName || ''} ${targetPerson.name?.given || targetPerson.firstName || ''}`.trim()
+      : 'особи';
+    switch (initialRelation.type) {
+      case 'father':
+        return `Додати батька для: ${name}`;
+      case 'mother':
+        return `Додати матір для: ${name}`;
+      case 'spouse':
+        return `Додати партнера/подружжя для: ${name}`;
+      case 'child':
+        return `Додати дитину для: ${name}`;
+      case 'sibling':
+        return `Додати брата/сестру для: ${name}`;
+      case 'parent':
+        return `Додати одного з батьків для: ${name}`;
+      default:
+        return `Додати родича для: ${name}`;
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!firstName.trim() && !lastName.trim()) return;
@@ -98,21 +127,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         name: nameObj,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        maidenName: maidenName.trim() || undefined,
         patronymic: patronymic.trim() || undefined,
+        maidenName: maidenName.trim() || undefined,
         prefix: prefix.trim() || undefined,
         gender,
         birthDate: birthDate.trim() || undefined,
-        birthYear: birthYear || initialPersonToEdit.birthYear,
         birthPlace: birthPlace.trim() || undefined,
+        birthYear,
         deathDate: isLiving ? undefined : deathDate.trim() || undefined,
-        deathYear: isLiving ? undefined : deathYear || initialPersonToEdit.deathYear,
         deathPlace: isLiving ? undefined : deathPlace.trim() || undefined,
+        deathYear: isLiving ? undefined : deathYear,
         isLiving,
         occupation: occupation.trim() || undefined,
         estate: estate.trim() || undefined,
-        socialStatus: estate.trim() || undefined,
         estateOrSocialStatus: estate.trim() || undefined,
+        socialStatus: estate.trim() || undefined,
         confession: confession.trim() || undefined,
         militaryRank: militaryRank.trim() || undefined,
         bio: bio.trim() || undefined,
@@ -123,27 +152,27 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         notes: notes.trim() || undefined
       });
     } else {
-      const newPersonId = `person-${Date.now()}`;
+      const newPersonId = `p-${Date.now()}`;
       const newPerson: Person = {
         id: newPersonId,
         name: nameObj,
-        firstName: firstName.trim() || 'Без імені',
-        lastName: lastName.trim() || '',
-        maidenName: maidenName.trim() || undefined,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
         patronymic: patronymic.trim() || undefined,
+        maidenName: maidenName.trim() || undefined,
         prefix: prefix.trim() || undefined,
         gender,
         birthDate: birthDate.trim() || undefined,
-        birthYear,
         birthPlace: birthPlace.trim() || undefined,
+        birthYear,
         deathDate: isLiving ? undefined : deathDate.trim() || undefined,
-        deathYear: isLiving ? undefined : deathYear,
         deathPlace: isLiving ? undefined : deathPlace.trim() || undefined,
+        deathYear: isLiving ? undefined : deathYear,
         isLiving,
         occupation: occupation.trim() || undefined,
         estate: estate.trim() || undefined,
-        socialStatus: estate.trim() || undefined,
         estateOrSocialStatus: estate.trim() || undefined,
+        socialStatus: estate.trim() || undefined,
         confession: confession.trim() || undefined,
         militaryRank: militaryRank.trim() || undefined,
         bio: bio.trim() || undefined,
@@ -219,282 +248,276 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-      <div className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-6 md:p-8 space-y-6 relative scrollbar-thin`}>
-        <button
-          onClick={onClose}
-          className="absolute top-5 right-5 p-2 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        <div className="flex items-center gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-4">
-          <div className="w-10 h-10 rounded-xl bg-[#B88E3E]/20 text-[#B88E3E] flex items-center justify-center border border-[#B88E3E]/30">
-            {initialPersonToEdit ? <User className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/65 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150">
+      <div className={`w-full max-w-lg max-h-[88vh] flex flex-col rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl overflow-hidden my-auto transition-all`}>
+        
+        {/* Compact Header */}
+        <div className="px-4 sm:px-5 py-3 flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-[#B88E3E]/20 text-[#B88E3E] flex items-center justify-center shrink-0 border border-[#B88E3E]/30">
+              {initialPersonToEdit ? <User className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+            </div>
+            <div className="min-w-0">
+              <h2 className={`text-sm font-bold ${theme.cardTitle} truncate`}>
+                {initialPersonToEdit ? 'Редагувати особу' : getRelationLabel()}
+              </h2>
+              <p className={`text-[11px] ${theme.cardSubtext} truncate`}>
+                {initialRelation ? 'Швидке створення та зв\'язування' : 'Канонічний запис у базі родоводу'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className={`text-lg font-bold ${theme.cardTitle}`}>
-              {initialPersonToEdit ? 'Редагувати фігуранта / особу' : 'Додати фігуранта / особу в родовід'}
-            </h2>
-            <p className={`text-xs ${theme.cardSubtext}`}>
-              Єдині поля обліку фігуранта справи та генеалогічного родоводу
-            </p>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors shrink-0 ml-2"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Main Name Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Scrollable Form Body */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 scrollbar-thin">
+          
+          {/* Names Row 1: Прізвище та Ім'я */}
+          <div className="grid grid-cols-2 gap-2.5">
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Титул / Префікс</label>
-              <input
-                type="text"
-                value={prefix}
-                onChange={(e) => setPrefix(e.target.value)}
-                placeholder="козак, шляхтич, міщанин..."
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Ім'я *</label>
-              <input
-                type="text"
-                required
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="напр. Остап"
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Прізвище *</label>
+              <label className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                Прізвище <span className="text-rose-500">*</span>
+              </label>
               <input
                 type="text"
                 required
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
-                placeholder="напр. Коваленко"
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                placeholder="напр. Шевченко"
+                className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                Ім'я <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="напр. Тарас"
+                className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Names Row 2: По батькові & Стать */}
+          <div className="grid grid-cols-2 gap-2.5">
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">По батькові</label>
+              <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">По батькові</label>
               <input
                 type="text"
                 value={patronymic}
                 onChange={(e) => setPatronymic(e.target.value)}
                 placeholder="Григорович"
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Дівоче прізвище</label>
-              <input
-                type="text"
-                value={maidenName}
-                onChange={(e) => setMaidenName(e.target.value)}
-                placeholder="для жінок до шлюбу"
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Стать</label>
+              <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Стать</label>
               <select
                 value={gender}
                 onChange={(e) => setGender(e.target.value as any)}
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
               >
                 <option value="male">Чоловіча (M)</option>
                 <option value="female">Жіноча (F)</option>
-                <option value="other">Інша / Невідомо (U)</option>
+                <option value="other">Невідомо (U)</option>
               </select>
             </div>
           </div>
 
-          {/* Birth Info */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          {/* Life Dates Row */}
+          <div className="grid grid-cols-2 gap-2.5">
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Дата / Рік народження</label>
+              <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
+                Рік / дата народження
+              </label>
               <input
                 type="text"
                 value={birthDate}
                 onChange={(e) => setBirthDate(e.target.value)}
-                placeholder="1845-04-12 або 1845"
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                placeholder="1814 або 1814-03-09"
+                className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Місце народження</label>
-              <input
-                type="text"
-                value={birthPlace}
-                onChange={(e) => setBirthPlace(e.target.value)}
-                placeholder="с. Чернечий Яр"
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
+                  {isLiving ? 'Статус' : 'Рік / дата смерті'}
+                </label>
+                <label className="text-[10px] text-neutral-500 flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isLiving}
+                    onChange={(e) => setIsLiving(e.target.checked)}
+                    className="rounded text-[#B88E3E] text-xs"
+                  />
+                  <span>Живий(а)</span>
+                </label>
+              </div>
+              {!isLiving ? (
+                <input
+                  type="text"
+                  value={deathDate}
+                  onChange={(e) => setDeathDate(e.target.value)}
+                  placeholder="1861 або 1861-03-10"
+                  className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                />
+              ) : (
+                <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-medium border border-emerald-200 dark:border-emerald-800/50">
+                  Нині живий(а)
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Living toggle & Death Info */}
+          {/* Collapsible toggle for advanced/optional fields */}
           <div className="pt-1">
-            <label className="flex items-center gap-2 text-xs font-semibold text-neutral-600 dark:text-neutral-300 cursor-pointer pb-2">
-              <input
-                type="checkbox"
-                checked={isLiving}
-                onChange={(e) => setIsLiving(e.target.checked)}
-                className="rounded text-[#B88E3E] focus:ring-[#B88E3E]"
-              />
-              <span>Особа є живою (приховати дату смерті)</span>
-            </label>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="w-full py-1.5 px-3 rounded-xl bg-neutral-100 dark:bg-slate-800/80 hover:bg-neutral-200 text-neutral-600 dark:text-neutral-300 text-xs font-semibold flex items-center justify-between transition-colors"
+            >
+              <span>{showAdvanced ? 'Приховати додаткові поля' : 'Більше деталей (місця, стан, біографія)'}</span>
+              {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          </div>
 
-            {!isLiving && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {showAdvanced && (
+            <div className="space-y-3 pt-1 border-t border-neutral-200 dark:border-neutral-800 animate-in fade-in duration-150">
+              
+              {/* Maiden name & Prefix */}
+              <div className="grid grid-cols-2 gap-2.5">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Дата смерті</label>
+                  <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Дівоче прізвище</label>
                   <input
                     type="text"
-                    value={deathDate}
-                    onChange={(e) => setDeathDate(e.target.value)}
-                    placeholder="1918-11-20"
-                    className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                    value={maidenName}
+                    onChange={(e) => setMaidenName(e.target.value)}
+                    placeholder="до шлюбу"
+                    className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Місце смерті / поховання</label>
+                  <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Титул / Префікс</label>
                   <input
                     type="text"
-                    value={deathPlace}
-                    onChange={(e) => setDeathPlace(e.target.value)}
-                    placeholder="с. Чернечий Яр"
-                    className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                    value={prefix}
+                    onChange={(e) => setPrefix(e.target.value)}
+                    placeholder="козак, шляхтич..."
+                    className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
                   />
                 </div>
               </div>
-            )}
-          </div>
 
-          {/* Social, Confession, Rank, Occupation */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Фах / Професія / Посада</label>
-              <input
-                type="text"
-                value={occupation}
-                onChange={(e) => setOccupation(e.target.value)}
-                placeholder="Коваль, сотник, вчитель..."
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
+              {/* Places */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Місце народження</label>
+                  <input
+                    type="text"
+                    value={birthPlace}
+                    onChange={(e) => setBirthPlace(e.target.value)}
+                    placeholder="с. Моринці, Київська губ."
+                    className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                  />
+                </div>
+
+                {!isLiving && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Місце смерті / поховання</label>
+                    <input
+                      type="text"
+                      value={deathPlace}
+                      onChange={(e) => setDeathPlace(e.target.value)}
+                      placeholder="м. Санкт-Петербург"
+                      className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Occupation & Social Estate */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Професія / Посада</label>
+                  <input
+                    type="text"
+                    value={occupation}
+                    onChange={(e) => setOccupation(e.target.value)}
+                    placeholder="Художник, поет, козак..."
+                    className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Стан / Соціальний статус</label>
+                  <input
+                    type="text"
+                    value={estate}
+                    onChange={(e) => setEstate(e.target.value)}
+                    placeholder="Селянин, дворянин, міщанин..."
+                    className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                  />
+                </div>
+              </div>
+
+              {/* Bio */}
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Короткий життєпис</label>
+                <textarea
+                  rows={2}
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  placeholder="Біографічні відомості..."
+                  className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                />
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">Архівні примітки & Джерела</label>
+                <textarea
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Метричні книги, ревізії..."
+                  className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
+                />
+              </div>
             </div>
+          )}
 
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Стан / Соціальний статус</label>
-              <input
-                type="text"
-                value={estate}
-                onChange={(e) => setEstate(e.target.value)}
-                placeholder="Козак, дворянин, міщанин..."
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Віросповідання / Конфесія</label>
-              <input
-                type="text"
-                value={confession}
-                onChange={(e) => setConfession(e.target.value)}
-                placeholder="Православний, греко-католик..."
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Військове звання / Чин</label>
-              <input
-                type="text"
-                value={militaryRank}
-                onChange={(e) => setMilitaryRank(e.target.value)}
-                placeholder="Унтер-офіцер, козацький старшина..."
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
-            </div>
-          </div>
-
-          {/* Photo & Tags */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">URL фото / портрета</label>
-              <input
-                type="url"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
-                placeholder="https://example.com/photo.jpg"
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Теги (через кому)</label>
-              <input
-                type="text"
-                value={tagsStr}
-                onChange={(e) => setTagsStr(e.target.value)}
-                placeholder="Полтавщина, ковальство, 1914"
-                className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-              />
-            </div>
-          </div>
-
-          {/* Bio and Notes */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Життєпис / Біографічна довідка</label>
-            <textarea
-              rows={2}
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              placeholder="Короткий життєпис, родинна історія..."
-              className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Архівні примітки та джерела</label>
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Додаткові відомості з метричних книг, ревізьких казок, сповідних розписів..."
-              className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-200 dark:border-neutral-800">
+          {/* Footer Submit Actions */}
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-800 shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-medium transition-colors"
+              className="px-3.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-medium transition-colors"
             >
               Скасувати
             </button>
             <button
               type="submit"
-              className="px-6 py-2 rounded-xl bg-[#B88E3E] hover:bg-[#A37B30] text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer"
+              className="px-4 py-1.5 rounded-xl bg-[#B88E3E] hover:bg-[#A37B30] text-white text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
             >
-              <Save className="w-4 h-4" />
+              <Save className="w-3.5 h-3.5" />
               <span>Зберегти</span>
             </button>
           </div>
+
         </form>
       </div>
     </div>

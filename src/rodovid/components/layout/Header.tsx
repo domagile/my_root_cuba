@@ -15,11 +15,11 @@ import {
   TreeDeciduous,
   ChevronDown,
   Menu,
-  X,
   Sun,
   Moon
 } from 'lucide-react';
 import { ViewMode } from '../../types/genealogy';
+import { useUIStore } from '../../../stores/useUIStore';
 
 interface HeaderProps {
   currentView: ViewMode;
@@ -38,7 +38,8 @@ export const Header: React.FC<HeaderProps> = ({
   totalPersonsCount
 }) => {
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
-  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const isMobileMenuOpen = useUIStore((s) => s.isMobileMenuOpen);
+  const setMobileMenuOpen = useUIStore((s) => s.setMobileMenuOpen);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('gramps_theme_mode');
@@ -100,7 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={() => {
             onViewChange('tree');
-            setIsMobileNavOpen(false);
+            setMobileMenuOpen(false);
           }}
           className="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 flex items-center justify-center text-white shadow-sm shrink-0 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-400"
           title="Gramps Web — Повернутися до дерева"
@@ -238,44 +239,15 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Mobile navigation toggle button */}
           <button
-            onClick={() => setIsMobileNavOpen((prev) => !prev)}
+            onClick={() => setMobileMenuOpen(!isMobileMenuOpen)}
             className="md:hidden p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-            title="Меню інструментів"
+            title="Меню інструментів та родоводу"
             aria-label="Відкрити меню"
           >
-            {isMobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            <Menu className="w-5 h-5" />
           </button>
         </div>
       </div>
-
-      {/* Mobile Drawer Menu with ALL 11 tools */}
-      {isMobileNavOpen && (
-        <div className="md:hidden border-t border-slate-800 bg-slate-900/98 px-3 py-3 shadow-2xl animate-in slide-in-from-top duration-200">
-          <div className="grid grid-cols-2 gap-1.5">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = currentView === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    onViewChange(item.id);
-                    setIsMobileNavOpen(false);
-                  }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left ${
-                    isActive
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0 text-emerald-400" />
-                  <span className="truncate">{item.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </header>
   );
 };

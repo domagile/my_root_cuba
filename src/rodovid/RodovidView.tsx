@@ -24,8 +24,12 @@ import { GedcomModal } from './components/modals/GedcomModal';
 import { RelationManagerModal } from '../components/Tree/RelationManagerModal';
 import { AddPersonModal } from '../components/Tree/AddPersonModal';
 import { useGenealogy } from '../context/GenealogyContext';
+import { useUIStore } from '../stores/useUIStore';
 
 export const RodovidView: React.FC = () => {
+  const currentView = useUIStore((s) => s.rodovidView);
+  const setCurrentView = useUIStore((s) => s.setRodovidView);
+
   const {
     persons,
     families,
@@ -41,8 +45,6 @@ export const RodovidView: React.FC = () => {
     saveSource,
     loadGenealogyDatabase
   } = useGenealogy();
-
-  const [currentView, setCurrentView] = useState<ViewMode>('tree');
 
   // Single Source of Truth Database view
   const database: GenealogyDatabase = useMemo(() => {

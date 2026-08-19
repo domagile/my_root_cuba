@@ -42,14 +42,14 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const estate = person.estateOrSocialStatus || person.estate || person.socialStatus;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-      <div className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-6 md:p-8 space-y-6 relative scrollbar-thin`}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/65 backdrop-blur-xs animate-in fade-in duration-150">
+      <div className={`w-full max-w-xl max-h-[88vh] overflow-y-auto rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 relative scrollbar-thin my-auto`}>
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 p-2 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+          className="absolute top-4 right-4 p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
         >
-          <X className="w-5 h-5" />
+          <X className="w-4 h-4" />
         </button>
 
         {/* Profile Header */}
