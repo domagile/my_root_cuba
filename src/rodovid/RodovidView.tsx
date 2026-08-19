@@ -21,6 +21,8 @@ import { EditPersonModal } from './components/modals/EditPersonModal';
 import { EditFamilyModal } from './components/modals/EditFamilyModal';
 import { EditSourceModal } from './components/modals/EditSourceModal';
 import { GedcomModal } from './components/modals/GedcomModal';
+import { RelationManagerModal } from '../components/Tree/RelationManagerModal';
+import { AddPersonModal } from '../components/Tree/AddPersonModal';
 import { useGenealogy } from '../context/GenealogyContext';
 
 export const RodovidView: React.FC = () => {
@@ -69,6 +71,11 @@ export const RodovidView: React.FC = () => {
 
   // Modals state
   const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
+  const [relationManagerPersonId, setRelationManagerPersonId] = useState<string | null>(null);
+  const [addRelation, setAddRelation] = useState<{
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
+    targetPersonId: string;
+  } | null>(null);
   const [editPersonTarget, setEditPersonTarget] = useState<string | null>(null); // 'NEW' or personId
   const [editFamilyTarget, setEditFamilyTarget] = useState<string | null>(null); // 'NEW' or familyId
   const [editSourceTarget, setEditSourceTarget] = useState<string | null>(null); // 'NEW' or sourceId
@@ -150,6 +157,7 @@ export const RodovidView: React.FC = () => {
               setEditPersonTarget('NEW');
             }}
             onChangeRoot={(id) => setSelectedPersonId(id)}
+            onOpenRelationManager={(id) => setRelationManagerPersonId(id)}
           />
         )}
 
@@ -290,6 +298,24 @@ export const RodovidView: React.FC = () => {
           database={database}
           onClose={() => setIsGedcomModalOpen(false)}
           onImportDatabase={handleImportDatabase}
+        />
+      )}
+
+      {relationManagerPersonId && (
+        <RelationManagerModal
+          targetPerson={persons.find((p) => p.id === relationManagerPersonId) || { id: relationManagerPersonId, firstName: 'Особа', lastName: '' } as any}
+          onClose={() => setRelationManagerPersonId(null)}
+          onOpenAddModalWithRelation={(type, targetId) => {
+            setRelationManagerPersonId(null);
+            setAddRelation({ type, targetPersonId: targetId });
+          }}
+        />
+      )}
+
+      {addRelation && (
+        <AddPersonModal
+          initialRelation={addRelation}
+          onClose={() => setAddRelation(null)}
         />
       )}
     </div>

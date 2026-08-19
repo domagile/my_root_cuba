@@ -15,7 +15,7 @@ export type ThemePalette =
   | 'dark-emerald'
   | 'light-parchment';
 
-export type RecordType = 'birth' | 'marriage' | 'death' | 'confession';
+export type RecordType = 'birth' | 'marriage' | 'death' | 'confession' | 'revision' | 'other';
 
 export type NavigationTab =
   | 'tree'
@@ -297,17 +297,6 @@ export interface AccessLockConfig {
   secretKey?: string;
   secretLinkKey?: string;
   autoLockMinutes?: number;
-}
-
-export interface SharedInvite {
-  id: string;
-  name: string;
-  email?: string;
-  role: 'viewer' | 'editor' | 'researcher' | string;
-  inviteCode: string;
-  createdAt: string;
-  invitedAt?: string;
-  expiresAt?: string;
 }
 
 export interface ThemeConfig {

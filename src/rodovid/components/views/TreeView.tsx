@@ -28,6 +28,7 @@ interface TreeViewProps {
   onOpenAddChild: (parentId: string) => void;
   onOpenAddParent: (childId: string) => void;
   onChangeRoot: (id: string) => void;
+  onOpenRelationManager?: (personId: string) => void;
 }
 
 export const TreeView: React.FC<TreeViewProps> = ({
@@ -36,7 +37,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
   onSelectPerson,
   onOpenAddChild,
   onOpenAddParent,
-  onChangeRoot
+  onChangeRoot,
+  onOpenRelationManager
 }) => {
   const [layoutType, setLayoutType] = useState<TreeLayoutType>('ancestors');
   const [generations, setGenerations] = useState<number>(5);
@@ -708,6 +710,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         {p.citations.length}
                       </span>
                     )}
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onOpenRelationManager) {
+                          onOpenRelationManager(p.id);
+                        }
+                      }}
+                      className="p-1 hover:bg-slate-700 text-slate-400 hover:text-emerald-400 rounded transition-colors"
+                      title="Керування родичами / Додати родича"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
 
                     <button
                       onClick={(e) => {

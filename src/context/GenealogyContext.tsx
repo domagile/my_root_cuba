@@ -16,8 +16,7 @@ import {
   GenealogyHypothesis,
   RangeAnalysis,
   GitConfig,
-  AccessLockConfig,
-  SharedInvite
+  AccessLockConfig
 } from '../types';
 import { subscribeToProjectData, saveProjectDataToCloud } from '../lib/firebase';
 import { useUIStore } from '../stores/useUIStore';
@@ -128,9 +127,6 @@ export interface GenealogyContextType {
   // Git & Collaboration
   gitConfig: GitConfig;
   setGitConfig: (config: GitConfig) => void;
-  sharedInvites: SharedInvite[];
-  addSharedInvite: (invite: any, role?: string) => void;
-  deleteSharedInvite: (id: string) => void;
   googleDriveEmail: string;
   setGoogleDriveEmail: (email: string) => void;
 
@@ -175,9 +171,6 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const getPersonById = useGenealogyStore((s) => s.getPersonById);
   const gitConfig = useGenealogyStore((s) => s.gitConfig);
   const setGitConfig = useGenealogyStore((s) => s.setGitConfig);
-  const sharedInvites = useGenealogyStore((s) => s.sharedInvites);
-  const addSharedInvite = useGenealogyStore((s) => s.addSharedInvite);
-  const deleteSharedInvite = useGenealogyStore((s) => s.deleteSharedInvite);
   const googleDriveEmail = useGenealogyStore((s) => s.googleDriveEmail);
   const setGoogleDriveEmail = useGenealogyStore((s) => s.setGoogleDriveEmail);
   const exportGedcomData = useGenealogyStore((s) => s.exportGedcomData);
@@ -414,9 +407,6 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       deleteRangeAnalysis,
       gitConfig,
       setGitConfig,
-      sharedInvites,
-      addSharedInvite,
-      deleteSharedInvite,
       googleDriveEmail,
       setGoogleDriveEmail,
       exportJsonData,
@@ -499,9 +489,6 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       deleteRangeAnalysis,
       gitConfig,
       setGitConfig,
-      sharedInvites,
-      addSharedInvite,
-      deleteSharedInvite,
       googleDriveEmail,
       setGoogleDriveEmail,
       exportJsonData,

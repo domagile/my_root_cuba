@@ -4,7 +4,6 @@ import {
   Download, 
   Upload, 
   RefreshCw, 
-  Github, 
   Database, 
   Sun, 
   Moon, 
@@ -13,8 +12,6 @@ import {
   ShieldCheck, 
   Info,
   Sparkles,
-  GitBranch,
-  GitCommit,
   CheckCircle2,
   Trash2,
   Clock,
@@ -40,7 +37,6 @@ import { useGenealogy } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { ThemePalette, UserRole } from '../types';
-import { pushProjectToGithub } from '../utils/githubSync';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -58,11 +54,6 @@ export const SettingsView: React.FC = () => {
     findings,
     requests,
     matrixEntries,
-    sharedInvites,
-    addSharedInvite,
-    deleteSharedInvite,
-    gitConfig,
-    setGitConfig,
     accessLockConfig,
     setAccessLockConfig,
     lockAppSession
@@ -94,99 +85,9 @@ export const SettingsView: React.FC = () => {
   const [newWhiteNotes, setNewWhiteNotes] = useState('');
   const [whiteSuccessMsg, setWhiteSuccessMsg] = useState<string | null>(null);
 
-  // Git form states
-  const [repoUrlInput, setRepoUrlInput] = useState(gitConfig?.repoUrl || '');
-  const [branchInput, setBranchInput] = useState(gitConfig?.branch || 'main');
-  const [tokenInput, setTokenInput] = useState(gitConfig?.token || '');
-  const [isGitSyncing, setIsGitSyncing] = useState(false);
-  const [gitStatusMsg, setGitStatusMsg] = useState<string | null>(null);
-
   // Access Lock & Secret Link states
   const [pinEditInput, setPinEditInput] = useState(accessLockConfig?.pinCode || '1234');
   const [copyLinkSuccess, setCopyLinkSuccess] = useState(false);
-
-  const handleConnectGit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!repoUrlInput.trim()) {
-      alert('Будь ласка, вкажіть URL вашого Git репозиторію.');
-      return;
-    }
-    setIsGitSyncing(true);
-    setGitStatusMsg('Перевірка з\'єднання та первинна відправка даних у GitHub...');
-
-    const newConfig = {
-      repoUrl: repoUrlInput.trim(),
-      branch: branchInput.trim() || 'main',
-      token: tokenInput.trim(),
-      connected: true,
-      lastSync: new Date().toLocaleString('uk-UA'),
-      autoSyncDaily: true,
-      autoSyncTime: '18:00'
-    };
-
-    const res = await pushProjectToGithub(newConfig, {
-      persons,
-      metricRecords,
-      tasks,
-      hypotheses,
-      documents,
-      findings,
-      requests,
-      matrixEntries
-    });
-
-    setIsGitSyncing(false);
-    if (res.success) {
-      setGitConfig(newConfig);
-      setGitStatusMsg(`Успішно! ${res.message}`);
-    } else {
-      setGitConfig(newConfig);
-      setGitStatusMsg(`Репозиторій збережено, але пуш повернув: ${res.message}`);
-    }
-    setTimeout(() => setGitStatusMsg(null), 6000);
-  };
-
-  const handleGitSyncNow = async () => {
-    if (!gitConfig) return;
-    setIsGitSyncing(true);
-    setGitStatusMsg('Відправка та фіксація коду й бази даних у GitHub...');
-
-    const res = await pushProjectToGithub(gitConfig, {
-      persons,
-      metricRecords,
-      tasks,
-      hypotheses,
-      documents,
-      findings,
-      requests,
-      matrixEntries
-    });
-
-    const now = new Date().toLocaleString('uk-UA');
-    setIsGitSyncing(false);
-
-    if (res.success) {
-      setGitConfig({
-        ...gitConfig,
-        lastSync: now
-      });
-      setGitStatusMsg(`Зміни й код успішно відправлені у GitHub! (${now})`);
-    } else {
-      setGitStatusMsg(`Помилка пушу: ${res.message}`);
-    }
-    setTimeout(() => setGitStatusMsg(null), 6000);
-  };
-
-  const handleDisconnectGit = () => {
-    if (confirm('Ви впевнені, що бажаєте відключити Git репозиторій?')) {
-      setGitConfig(null);
-      setRepoUrlInput('');
-      setBranchInput('main');
-      setTokenInput('');
-      setGitStatusMsg('Git репозиторій відключено.');
-      setTimeout(() => setGitStatusMsg(null), 3000);
-    }
-  };
 
   const themeList = Object.values(THEME_CONFIGS);
   const lightThemes = themeList.filter(t => t.category === 'light');
@@ -429,90 +330,6 @@ export const SettingsView: React.FC = () => {
                 <RefreshCw className="w-4 h-4" />
                 <span>Відновити демо-архів</span>
               </button>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* SECTION 2.5: Shared Access & Collaboration */}
-      <section className="space-y-4 pt-4 border-t border-black/10">
-        <div>
-          <h2 className={`text-lg font-bold ${theme.cardTitle} flex items-center gap-2`}>
-            <ShieldCheck className="w-5 h-5 text-[#B88E3E]" />
-            <span>Спільний доступ до родоводу за поштою Google</span>
-          </h2>
-          <p className={`text-xs ${theme.cardSubtext} mt-1`}>
-            Надавайте права перегляду чи редагування вашим родичам та дослідникам за поштою Google
-          </p>
-        </div>
-
-        <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-4`}>
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            const form = e.target as HTMLFormElement;
-            const input = form.elements.namedItem('inviteEmail') as HTMLInputElement;
-            const roleSelect = form.elements.namedItem('inviteRole') as HTMLSelectElement;
-            if (input && input.value && input.value.includes('@')) {
-              addSharedInvite({
-                id: `invite-${Date.now()}`,
-                name: input.value.split('@')[0],
-                email: input.value,
-                role: roleSelect?.value as any || 'editor',
-                inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
-                createdAt: new Date().toISOString()
-              });
-              input.value = '';
-              alert('Запрошення надіслано та збережено!');
-            } else {
-              alert('Будь ласка, вкажіть коректну Google пошту.');
-            }
-          }} className="flex flex-col sm:flex-row gap-2">
-            <input 
-              name="inviteEmail"
-              type="email" 
-              placeholder="user@gmail.com (Google пошта)" 
-              className={`flex-1 px-3.5 py-2 rounded-xl text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
-              required
-            />
-            <select 
-              name="inviteRole"
-              className={`px-3 py-2 rounded-xl text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText}`}
-            >
-              <option value="viewer">Перегляд (Лише читання)</option>
-              <option value="editor">Редагування (Повний доступ)</option>
-            </select>
-            <button 
-              type="submit" 
-              className={`px-4 py-2 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs flex items-center gap-1.5 shrink-0 justify-center shadow-sm`}
-            >
-              <span>Надати доступ</span>
-            </button>
-          </form>
-
-          {/* List of Shared Invites */}
-          <div className="space-y-2 pt-2">
-            <h4 className={`text-xs font-bold ${theme.cardTitle}`}>Активні доступи та запрошення:</h4>
-            {sharedInvites.length > 0 ? (
-              <div className="space-y-2">
-                {sharedInvites.map(inv => (
-                  <div key={inv.id} className={`p-3 rounded-xl border ${theme.cardBorder} flex items-center justify-between text-xs`}>
-                    <div>
-                      <span className={`font-semibold ${theme.cardTitle} block`}>{inv.email}</span>
-                      <span className={`text-[10px] ${theme.cardSubtext}`}>
-                        Роль: {inv.role === 'editor' ? 'Редактор' : 'Читач'} • Створено: {inv.createdAt}
-                      </span>
-                    </div>
-                    <button 
-                      onClick={() => deleteSharedInvite(inv.id)} 
-                      className="text-rose-500 hover:text-rose-700 text-xs font-medium px-2 py-1 bg-rose-500/10 rounded-lg"
-                    >
-                      Видалити
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className={`text-xs italic ${theme.cardSubtext}`}>Ще немає доданих адрес для спільного доступу.</p>
             )}
           </div>
         </div>
@@ -977,170 +794,6 @@ export const SettingsView: React.FC = () => {
               </table>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* SECTION 3: GitHub Integration & Push */}
-      <section className="space-y-4 pt-4 border-t border-black/10">
-        <div>
-          <h2 className={`text-lg font-bold ${theme.cardTitle} flex items-center gap-2`}>
-            <Github className="w-5 h-5 text-[#B88E3E]" />
-            <span>Інтеграція з GitHub & Синхронізація коду</span>
-          </h2>
-          <p className={`text-xs ${theme.cardSubtext} mt-1`}>
-            Прикріпіть ваш GitHub-репозиторій для регулярного відправлення коду додатка та генеалогічної бази даних
-          </p>
-        </div>
-
-        {/* Info Box about AI Studio Export */}
-        <div className="p-4 rounded-xl bg-[#B88E3E]/10 border border-[#B88E3E]/30 flex items-start gap-3">
-          <Info className="w-5 h-5 text-[#B88E3E] shrink-0 mt-0.5" />
-          <div className="text-xs space-y-1">
-            <strong className={`font-bold ${theme.cardTitle} block`}>Два способи зв'язку з GitHub:</strong>
-            <p className={theme.cardSubtext}>
-              <strong>1. Через меню AI Studio:</strong> У верхній/боковій панелі браузера відкрийте меню налаштувань AI Studio та виберіть <em>"Export to GitHub"</em> або <em>"Connect to GitHub"</em>. Це створить репозиторій напряму.
-            </p>
-            <p className={theme.cardSubtext}>
-              <strong>2. Прямий автоматичний пуш із додатка (нижче):</strong> Вкажіть посилання на ваш репозиторій та Personal Access Token від GitHub для відправки останньої версії коду та даних родоводу одним кліком.
-            </p>
-          </div>
-        </div>
-
-        <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-6`}>
-          {gitConfig?.connected ? (
-            /* Connected state */
-            <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className={`text-sm font-bold ${theme.cardTitle} flex items-center gap-2`}>
-                      <span>GitHub репозиторій підключено</span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-mono">
-                        {gitConfig.branch || 'main'}
-                      </span>
-                    </h4>
-                    <a 
-                      href={gitConfig.repoUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="text-xs text-[#B88E3E] hover:underline font-mono break-all"
-                    >
-                      {gitConfig.repoUrl}
-                    </a>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                  <button
-                    onClick={handleGitSyncNow}
-                    disabled={isGitSyncing}
-                    className={`px-4 py-2 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs flex items-center gap-2 shadow-sm disabled:opacity-50`}
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isGitSyncing ? 'animate-spin' : ''}`} />
-                    <span>{isGitSyncing ? 'Синхронізація...' : 'Пуш коду зараз'}</span>
-                  </button>
-
-                  <button
-                    onClick={handleDisconnectGit}
-                    className="px-3 py-2 rounded-xl bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 border border-rose-500/30 text-xs font-medium"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {gitConfig.lastSync && (
-                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 pl-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Останній пуш у GitHub: <strong>{gitConfig.lastSync}</strong></span>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* Setup Form */
-            <form onSubmit={handleConnectGit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className={`text-xs font-semibold ${theme.cardTitle} flex items-center gap-1.5`}>
-                    <GitBranch className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>URL GitHub Репозиторію</span>
-                  </label>
-                  <input
-                    type="url"
-                    value={repoUrlInput}
-                    onChange={(e) => setRepoUrlInput(e.target.value)}
-                    placeholder="https://github.com/username/my-genealogy-app"
-                    className={`w-full px-3.5 py-2 rounded-xl text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className={`text-xs font-semibold ${theme.cardTitle} flex items-center gap-1.5`}>
-                    <GitCommit className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>Назва гілки (Branch)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={branchInput}
-                    onChange={(e) => setBranchInput(e.target.value)}
-                    placeholder="main"
-                    className={`w-full px-3.5 py-2 rounded-xl text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className={`text-xs font-semibold ${theme.cardTitle} flex items-center gap-1.5`}>
-                    <ShieldCheck className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>Personal Access Token (PAT)</span>
-                  </label>
-                  <a
-                    href="https://github.com/settings/tokens/new?scopes=repo&description=GenealogyApp"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[11px] text-[#B88E3E] hover:underline flex items-center gap-1"
-                  >
-                    <span>Як отримати токен на GitHub ↗</span>
-                  </a>
-                </div>
-                <input
-                  type="password"
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                  className={`w-full px-3.5 py-2 rounded-xl text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E] font-mono`}
-                  required
-                />
-                <p className={`text-[10px] ${theme.cardSubtext}`}>
-                  Токен повинен мати дозвіл <code>repo</code> (Full control of private repositories).
-                </p>
-              </div>
-
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={isGitSyncing}
-                  className={`px-5 py-2.5 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs flex items-center gap-2 shadow-sm disabled:opacity-50`}
-                >
-                  <Github className="w-4 h-4" />
-                  <span>{isGitSyncing ? 'Підключення...' : 'Зберегти та синхронізувати з GitHub'}</span>
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* Status notification */}
-          {gitStatusMsg && (
-            <div className="p-3.5 rounded-xl bg-[#B88E3E]/15 border border-[#B88E3E]/40 text-xs flex items-center gap-2 text-[#B88E3E] font-medium">
-              <Info className="w-4 h-4 shrink-0" />
-              <span>{gitStatusMsg}</span>
-            </div>
-          )}
         </div>
       </section>
     </div>

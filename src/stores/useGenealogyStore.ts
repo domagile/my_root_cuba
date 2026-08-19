@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig, SharedInvite } from '../types';
+import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig } from '../types';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v2';
 
@@ -362,7 +362,6 @@ export interface GenealogyDataState {
   trashPersons: Person[];
   selectedPersonId: string | null;
   gitConfig: GitConfig;
-  sharedInvites: SharedInvite[];
   googleDriveEmail: string;
 
   // Person Actions
@@ -398,8 +397,6 @@ export interface GenealogyDataState {
   getGenealogyDatabase: () => GenealogyDatabase;
   loadGenealogyDatabase: (db: GenealogyDatabase) => void;
   setGitConfig: (config: GitConfig) => void;
-  addSharedInvite: (invite: any, role?: string) => void;
-  deleteSharedInvite: (id: string) => void;
   setGoogleDriveEmail: (email: string) => void;
   exportGedcomData: () => void;
   resetPersonsToSample: () => void;
@@ -462,7 +459,6 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     }
   })(),
 
-  sharedInvites: [],
   googleDriveEmail: '',
 
   setPersons: (updater) =>
@@ -770,26 +766,6 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     } catch {}
     set({ gitConfig });
   },
-
-  addSharedInvite: (invite, role = 'viewer') =>
-    set((state) => {
-      const email = typeof invite === 'string' ? invite : (invite.email || '');
-      const newInv: SharedInvite = {
-        id: (typeof invite === 'object' && invite.id) ? invite.id : `inv-${Date.now()}`,
-        name: (typeof invite === 'object' && invite.name) ? invite.name : (email ? email.split('@')[0] : 'Гість'),
-        email,
-        role: (typeof invite === 'object' && invite.role ? invite.role : role) as any,
-        inviteCode: (typeof invite === 'object' && invite.inviteCode) ? invite.inviteCode : Math.random().toString(36).substring(2, 8).toUpperCase(),
-        createdAt: new Date().toISOString(),
-        invitedAt: new Date().toISOString()
-      };
-      return { sharedInvites: [...state.sharedInvites, newInv] };
-    }),
-
-  deleteSharedInvite: (id) =>
-    set((state) => ({
-      sharedInvites: state.sharedInvites.filter((inv) => inv.id !== id)
-    })),
 
   setGoogleDriveEmail: (googleDriveEmail) => set({ googleDriveEmail }),
 

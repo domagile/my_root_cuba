@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Github, HardDrive, Sparkles, Share2, Palette, Mail, Plus, Trash2, Copy, Check, ShieldCheck, Sun, Moon, Lock, LogOut, Bell, Shield } from 'lucide-react';
-import { useGenealogy } from '../context/GenealogyContext';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon } from 'lucide-react';
+import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
@@ -15,56 +15,20 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
     setSearchQuery, 
     persons, 
     metricRecords, 
-    tasks, 
-    sharedInvites, 
-    addSharedInvite, 
-    deleteSharedInvite,
-    themePalette,
+    themePalette, 
     setThemePalette,
     setActiveTab
   } = useGenealogy();
 
-  const { currentUser, accessRequests, logout, addToWhitelist } = useAuthStore();
+  const isMobileMenuOpen = useUIStore((s) => s.isMobileMenuOpen);
+  const setMobileMenuOpen = useUIStore((s) => s.setMobileMenuOpen);
+
+  const { currentUser, accessRequests, logout } = useAuthStore();
   const theme = getThemeConfig(themePalette);
 
   const pendingRequestsCount = accessRequests.filter((r) => r.status === 'pending').length;
 
-  const [showStorageModal, setShowStorageModal] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
-
-  // Invite Form State
-  const [newInviteEmail, setNewInviteEmail] = useState('');
-  const [newInviteRole, setNewInviteRole] = useState<'editor' | 'viewer'>('viewer');
-  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
-
-  const handleSendInvite = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newInviteEmail.trim() || !newInviteEmail.includes('@')) {
-      alert('Будь ласка, вкажіть коректну Google пошту (email).');
-      return;
-    }
-    const cleanEmail = newInviteEmail.trim().toLowerCase();
-    addSharedInvite({
-      id: `invite-${Date.now()}`,
-      name: cleanEmail.split('@')[0],
-      email: cleanEmail,
-      role: newInviteRole,
-      inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
-      createdAt: new Date().toISOString(),
-      invitedAt: new Date().toISOString()
-    });
-    // Add to Whitelist immediately!
-    addToWhitelist(cleanEmail, newInviteRole, cleanEmail.split('@')[0], 'Додано через швидке запрошення');
-    setNewInviteEmail('');
-  };
-
-  const handleCopyLink = (inviteId: string, email: string) => {
-    const link = `${window.location.origin}/?email=${encodeURIComponent(email)}&tab=login`;
-    navigator.clipboard.writeText(link);
-    setCopiedInviteId(inviteId);
-    setTimeout(() => setCopiedInviteId(null), 2000);
-  };
 
   const themeList = Object.values(THEME_CONFIGS);
   const lightThemes = themeList.filter(t => t.category === 'light');
@@ -80,16 +44,26 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
 
   return (
     <>
-      <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-6 flex items-center justify-between gap-4 flex-shrink-0 transition-colors duration-300`}>
+      <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-3 md:px-6 flex items-center justify-between gap-2 md:gap-4 flex-shrink-0 transition-colors duration-300`}>
+        {/* Mobile Hamburger Menu Toggle */}
+        <button
+          id="mobile-drawer-toggle"
+          onClick={() => setMobileMenuOpen(!isMobileMenuOpen)}
+          className="md:hidden p-2 rounded-lg text-[#B88E3E] hover:bg-black/10 dark:hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+          title="Відкрити навігаційне меню"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
         {/* Search Input */}
-        <div className="relative w-72">
+        <div className="relative flex-1 max-w-[260px] md:max-w-xs">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-60" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Пошук особи, прізвища чи місця..."
-            className={`w-full pl-9 pr-4 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-sm ${theme.inputText} placeholder-opacity-60 focus:outline-none focus:border-[#B88E3E] transition-colors`}
+            placeholder="Пошук особи..."
+            className={`w-full pl-9 pr-3 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs md:text-sm ${theme.inputText} placeholder-opacity-60 focus:outline-none focus:border-[#B88E3E] transition-colors`}
           />
         </div>
 
@@ -110,22 +84,32 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5 md:gap-2.5">
+          {/* Theme Palette Toggle Button */}
+          <button
+            onClick={() => setShowThemeModal(true)}
+            className="p-2 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 text-[#B88E3E] text-xs transition-colors shrink-0 cursor-pointer"
+            title="Змінити тему оформлення"
+          >
+            <Palette className="w-4 h-4" />
+          </button>
+
           {/* Pending Requests Badge for Admin */}
           {currentUser?.role === 'admin' && pendingRequestsCount > 0 && (
             <button
               onClick={() => setActiveTab('settings')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse"
+              className="flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse"
               title="Є нові вхідні запити на доступ"
             >
               <Bell className="w-3.5 h-3.5" />
-              <span>Запити ({pendingRequestsCount})</span>
+              <span className="hidden sm:inline">Запити ({pendingRequestsCount})</span>
+              <span className="sm:hidden font-mono">{pendingRequestsCount}</span>
             </button>
           )}
 
           {/* User Role & Email Badge */}
           {currentUser && (
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs">
+            <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs">
               <div className="w-6 h-6 rounded-full bg-[#B88E3E]/20 text-[#B88E3E] flex items-center justify-center font-bold text-[11px]">
                 {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
               </div>
@@ -143,16 +127,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
           <button
             onClick={onOpenAddPerson}
             id="add-person-btn"
-            className={`flex items-center gap-2 px-4 py-1.5 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-lg text-xs transition-colors shadow-sm`}
+            className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-lg text-xs transition-colors shadow-sm shrink-0 cursor-pointer`}
           >
             <UserPlus className="w-4 h-4" />
-            <span>Додати особу</span>
+            <span className="hidden sm:inline">Додати особу</span>
           </button>
 
           {/* Sign Out / Lock Session Button */}
           <button
             onClick={() => logout()}
-            className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors"
+            className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors shrink-0 cursor-pointer"
             title="Вийти з облікового запису / Заблокувати сесію"
           >
             <LogOut className="w-4 h-4" />
@@ -265,198 +249,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
                 className={`px-5 py-2 ${theme.accentBtn} ${theme.accentBtnText} font-medium text-xs rounded-xl transition-colors`}
               >
                 Застосувати та закрити
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Shared Access via Google Email Modal */}
-      {showShareModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0D2E28] border border-[#22574A] rounded-2xl max-w-lg w-full p-6 text-[#E4DAC7] shadow-2xl relative space-y-4">
-            <div className="flex items-start justify-between border-b border-[#18463C] pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#E2C382]/20 flex items-center justify-center text-[#E2C382]">
-                  <Share2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-lg text-[#F5EEDC]">Спільний доступ за Google Поштою</h3>
-                  <p className="text-xs text-[#8BAAA1]">Надайте доступ для перегляду чи редагування родоводу</p>
-                </div>
-              </div>
-              <button onClick={() => setShowShareModal(false)} className="text-[#8BAAA1] hover:text-[#F5EEDC] text-lg px-2">
-                ✕
-              </button>
-            </div>
-
-            {/* Invite Form */}
-            <form onSubmit={handleSendInvite} className="p-3 bg-[#08201B] rounded-xl border border-[#16443B] space-y-3">
-              <span className="text-xs font-semibold text-[#E2C382] flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5" />
-                <span>Запросити корисувача за ел. поштою</span>
-              </span>
-
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  required
-                  placeholder="напр. relative@gmail.com"
-                  value={newInviteEmail}
-                  onChange={(e) => setNewInviteEmail(e.target.value)}
-                  className="flex-1 px-3 py-1.5 bg-[#09221D] border border-[#1B4A3E] rounded-lg text-xs text-[#F0E6D2] focus:outline-none focus:border-[#E2C382]"
-                />
-                <select
-                  value={newInviteRole}
-                  onChange={(e) => setNewInviteRole(e.target.value as 'editor' | 'viewer')}
-                  className="px-2.5 py-1.5 bg-[#09221D] border border-[#1B4A3E] rounded-lg text-xs text-[#F0E6D2] focus:outline-none"
-                >
-                  <option value="viewer">Переглядач</option>
-                  <option value="editor">Редактор</option>
-                </select>
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 bg-[#E2C382] hover:bg-[#D4B572] text-[#0A2621] font-semibold text-xs rounded-lg flex items-center gap-1 transition-colors shrink-0"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Надіслати</span>
-                </button>
-              </div>
-            </form>
-
-            {/* Invited Users List */}
-            <div className="space-y-2">
-              <span className="text-xs font-semibold text-[#8BAAA1] block">Користувачі з доступом:</span>
-              
-              <div className="p-2.5 bg-[#08201B] rounded-xl border border-[#16443B] flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-[#54C086]" />
-                  <div>
-                    <span className="text-xs text-[#F0E6D2] font-semibold block">Власник родоводу (Ви)</span>
-                    <span className="text-[10px] text-[#8BAAA1]">CubaTarara400@gmail.com</span>
-                  </div>
-                </div>
-                <span className="px-2 py-0.5 text-[10px] bg-[#143B33] text-[#54C086] rounded font-mono">Адміністратор</span>
-              </div>
-
-              {sharedInvites.length === 0 ? (
-                <p className="text-xs text-[#789A91] italic p-2">Ще немає додаткових запрошених користувачів.</p>
-              ) : (
-                sharedInvites.map((inv) => (
-                  <div key={inv.id} className="p-2.5 bg-[#08201B] rounded-xl border border-[#16443B] flex items-center justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-[#F0E6D2] font-medium truncate">{inv.email}</span>
-                        <span className="px-1.5 py-0.2 text-[9px] bg-[#16443B] text-[#E2C382] rounded font-mono">
-                          {inv.role === 'editor' ? 'Редактор' : 'Переглядач'}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-[#789A91] block">Запрошено: {inv.invitedAt}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => handleCopyLink(inv.id, inv.email)}
-                        className="px-2 py-1 bg-[#123830] hover:bg-[#1C4E43] text-[#E2C382] text-[11px] rounded flex items-center gap-1 border border-[#1F5448]"
-                        title="Скопіювати персональне посилання-запрошення"
-                      >
-                        {copiedInviteId === inv.id ? (
-                          <>
-                            <Check className="w-3 h-3 text-[#54C086]" />
-                            <span className="text-[#54C086]">Скопійовано!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>Лінк</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        onClick={() => deleteSharedInvite(inv.id)}
-                        className="p-1.5 text-[#8BAAA1] hover:text-rose-400 shrink-0"
-                        title="Скасувати доступ"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                onClick={() => setShowShareModal(false)}
-                className="px-4 py-2 bg-[#E2C382] text-[#0A2621] font-medium text-xs rounded-lg hover:bg-[#D4B572] transition-colors"
-              >
-                Закрити
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Storage & GitHub explanation modal */}
-      {showStorageModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0D2E28] border border-[#22574A] rounded-2xl max-w-lg w-full p-6 text-[#E4DAC7] shadow-2xl relative space-y-4">
-            <div className="flex items-start justify-between border-b border-[#18463C] pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#E2C382]/20 flex items-center justify-center text-[#E2C382]">
-                  <Github className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-lg text-[#F5EEDC]">Збереження даних та коду на GitHub</h3>
-                  <p className="text-xs text-[#8BAAA1]">Як влаштовано збереження ваших даних</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowStorageModal(false)}
-                className="text-[#8BAAA1] hover:text-[#F5EEDC] text-lg px-2"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 text-sm text-[#C2D4CE] leading-relaxed">
-              <div className="p-3 bg-[#08201B] rounded-xl border border-[#16443B]">
-                <h4 className="font-semibold text-[#E2C382] mb-1 flex items-center gap-2">
-                  <HardDrive className="w-4 h-4" /> 1. Де зберігається проіндексована інформація?
-                </h4>
-                <p className="text-xs text-[#A8C2BB]">
-                  Всі внесені вами особи, фотографії, розпізнані метричні книги та замітки миттєво зберігаються у **локальній базі даних вашого браузера (LocalStorage)**. Це гарантує приватність та миттєву швидкість роботи.
-                </p>
-              </div>
-
-              <div className="p-3 bg-[#08201B] rounded-xl border border-[#16443B]">
-                <h4 className="font-semibold text-[#E2C382] mb-1 flex items-center gap-2">
-                  <Github className="w-4 h-4" /> 2. Як зберегти весь код та дані на GitHub або Google Диск?
-                </h4>
-                <ul className="text-xs text-[#A8C2BB] space-y-1.5 list-disc pl-4">
-                  <li><strong>Код програми:</strong> Ви можете завантажити код додатка у ваш репозиторій на GitHub за допомогою кнопки Export/GitHub у верхньому меню середовища AI Studio.</li>
-                  <li><strong>Файл даних родоводу:</strong> Кнопка <span className="text-[#E2C382]">«Експорт JSON»</span> у бічній панелі створює повний резервний файл родоводу. Ви можете завантажити цей файл у ваш репозиторій на GitHub чи на Google Диск.</li>
-                  <li><strong>Формат GEDCOM:</strong> Ви також можете експортувати дерево у стандартний формат GEDCOM для завантаження в будь-які інші генеалогічні програми.</li>
-                </ul>
-              </div>
-
-              <div className="p-3 bg-[#08201B] rounded-xl border border-[#16443B]">
-                <h4 className="font-semibold text-[#54C086] mb-1 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" /> 3. Автоматичний імпорт
-                </h4>
-                <p className="text-xs text-[#A8C2BB]">
-                  Коли ви відкриєте додаток на іншому комп&apos;ютері, просто натисніть кнопку <span className="text-[#E2C382]">«Імпорт»</span> і виберіть ваш збережений файл з GitHub або Google Диска — і весь ваш родовід повністю відновиться!
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                onClick={() => setShowStorageModal(false)}
-                className="px-4 py-2 bg-[#E2C382] text-[#0A2621] font-medium text-xs rounded-lg hover:bg-[#D4B572] transition-colors"
-              >
-                Зрозуміло
               </button>
             </div>
           </div>

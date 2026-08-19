@@ -10,12 +10,14 @@ export interface UIState {
   treeMode: string;
   isUnlocked: boolean;
   accessLockConfig: AccessLockConfig;
+  isMobileMenuOpen: boolean;
   
   // Actions
   setActiveTab: (tab: string) => void;
   setThemePalette: (palette: ThemePalette) => void;
   setSearchQuery: (query: string) => void;
   setTreeMode: (mode: string) => void;
+  setMobileMenuOpen: (isOpen: boolean) => void;
   unlockWithPin: (pin: string) => boolean;
   lockAppSession: () => void;
   setAccessLockConfig: (config: AccessLockConfig) => void;
@@ -23,6 +25,7 @@ export interface UIState {
 
 export const useUIStore = create<UIState>((set, get) => ({
   activeTab: 'tree',
+  isMobileMenuOpen: false,
   
   themePalette: (() => {
     try {
@@ -65,6 +68,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSearchQuery: (searchQuery: string) => set({ searchQuery }),
 
   setTreeMode: (treeMode: string) => set({ treeMode }),
+
+  setMobileMenuOpen: (isMobileMenuOpen: boolean) => set({ isMobileMenuOpen }),
 
   unlockWithPin: (pin: string) => {
     const { accessLockConfig } = get();

@@ -12,7 +12,7 @@ import { Person, Gender } from '../../types';
 interface AddPersonModalProps {
   initialPersonToEdit?: Person | null;
   initialRelation?: {
-    type: 'father' | 'mother' | 'child' | 'spouse' | 'sibling';
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
     targetPersonId: string;
   } | null;
   onClose: () => void;
@@ -166,6 +166,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           } else if (initialRelation.type === 'mother') {
             updatePerson({ ...target, motherId: newPersonId });
             newPerson.childrenIds = [target.id];
+          } else if (initialRelation.type === 'parent') {
+            const isFemale = gender === 'female' || gender === 'F';
+            if (isFemale) {
+              updatePerson({ ...target, motherId: newPersonId });
+            } else {
+              updatePerson({ ...target, fatherId: newPersonId });
+            }
+            newPerson.childrenIds = [target.id];
           } else if (initialRelation.type === 'child') {
             if (target.gender === 'male' || target.gender === 'M') newPerson.fatherId = target.id;
             else newPerson.motherId = target.id;
@@ -179,6 +187,27 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               ...target,
               spouseIds: Array.from(new Set([...(target.spouseIds || []), newPersonId]))
             });
+          } else if (initialRelation.type === 'sibling') {
+            if (target.fatherId) {
+              newPerson.fatherId = target.fatherId;
+              const f = persons.find((p) => p.id === target.fatherId);
+              if (f) {
+                updatePerson({
+                  ...f,
+                  childrenIds: Array.from(new Set([...(f.childrenIds || []), newPersonId]))
+                });
+              }
+            }
+            if (target.motherId) {
+              newPerson.motherId = target.motherId;
+              const m = persons.find((p) => p.id === target.motherId);
+              if (m) {
+                updatePerson({
+                  ...m,
+                  childrenIds: Array.from(new Set([...(m.childrenIds || []), newPersonId]))
+                });
+              }
+            }
           }
         }
       }

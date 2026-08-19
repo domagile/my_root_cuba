@@ -13,7 +13,7 @@ interface PersonDetailModalProps {
   personId: string;
   onClose: () => void;
   onEdit: (person: Person) => void;
-  onOpenAddRelation: (type: 'father' | 'mother' | 'child' | 'spouse' | 'sibling', targetPersonId: string) => void;
+  onOpenAddRelation: (type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling', targetPersonId: string) => void;
 }
 
 export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
