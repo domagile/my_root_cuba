@@ -12,6 +12,7 @@ export interface UIState {
   isUnlocked: boolean;
   accessLockConfig: AccessLockConfig;
   isMobileMenuOpen: boolean;
+  isSidebarVisible: boolean;
   
   // Actions
   setActiveTab: (tab: string) => void;
@@ -20,6 +21,8 @@ export interface UIState {
   setSearchQuery: (query: string) => void;
   setTreeMode: (mode: string) => void;
   setMobileMenuOpen: (isOpen: boolean) => void;
+  setSidebarVisible: (isVisible: boolean) => void;
+  toggleSidebar: () => void;
   unlockWithPin: (pin: string) => boolean;
   lockAppSession: () => void;
   setAccessLockConfig: (config: AccessLockConfig) => void;
@@ -29,6 +32,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   activeTab: 'tree',
   rodovidView: 'tree',
   isMobileMenuOpen: false,
+  isSidebarVisible: true,
   
   themePalette: (() => {
     try {
@@ -75,6 +79,18 @@ export const useUIStore = create<UIState>((set, get) => ({
   setTreeMode: (treeMode: string) => set({ treeMode }),
 
   setMobileMenuOpen: (isMobileMenuOpen: boolean) => set({ isMobileMenuOpen }),
+  
+  setSidebarVisible: (isSidebarVisible: boolean) => set({ isSidebarVisible }),
+
+  toggleSidebar: () => {
+    const { isSidebarVisible, isMobileMenuOpen } = get();
+    // On small screens, toggle the mobile drawer. On larger screens, toggle panel visibility.
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      set({ isMobileMenuOpen: !isMobileMenuOpen });
+    } else {
+      set({ isSidebarVisible: !isSidebarVisible });
+    }
+  },
 
   unlockWithPin: (pin: string) => {
     const { accessLockConfig } = get();

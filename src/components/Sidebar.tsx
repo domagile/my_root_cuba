@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState } from 'react';
 import { 
   GitFork, 
@@ -21,7 +26,8 @@ import {
   PanelLeftClose, 
   PanelLeftOpen, 
   FlaskConical,
-  X
+  X,
+  ChevronLeft
 } from 'lucide-react';
 import { useUIStore } from '../stores/useUIStore';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
@@ -35,6 +41,8 @@ export const Sidebar: React.FC = () => {
   const setRodovidView = useUIStore((s) => s.setRodovidView);
   const isMobileMenuOpen = useUIStore((s) => s.isMobileMenuOpen);
   const setMobileMenuOpen = useUIStore((s) => s.setMobileMenuOpen);
+  const isSidebarVisible = useUIStore((s) => s.isSidebarVisible);
+  const setSidebarVisible = useUIStore((s) => s.setSidebarVisible);
   const themePalette = useUIStore((s) => s.themePalette);
   const personsCount = useGenealogyStore((s) => s.persons.length);
   const theme = getThemeConfig(themePalette);
@@ -85,54 +93,65 @@ export const Sidebar: React.FC = () => {
         />
       )}
 
-      {/* 2. Responsive Sidebar / Mobile Drawer */}
+      {/* 2. Responsive Sidebar / Desktop Side Panel */}
       <aside 
         id="app-sidebar" 
         className={`
-          fixed md:relative top-0 bottom-0 left-0 z-50 md:z-auto
-          ${isCollapsed ? 'md:w-16' : 'md:w-64'} 
+          fixed md:relative top-0 bottom-0 left-0 z-50 md:z-20
+          ${isSidebarVisible ? (isCollapsed ? 'md:w-16' : 'md:w-64') : 'md:w-0 md:border-r-0 md:overflow-hidden md:p-0'} 
           w-72 max-w-[85vw]
           ${theme.sidebarBg} ${theme.sidebarText} 
           flex flex-col h-full border-r ${theme.sidebarBorder} select-none flex-shrink-0 
-          transition-transform md:transition-all duration-300
-          ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:translate-x-0'}
+          transition-all duration-300 ease-in-out
+          ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : (isSidebarVisible ? '-translate-x-full md:translate-x-0' : '-translate-x-full')}
         `}
       >
-        {/* Brand Header & Toggle */}
-        <div className={`p-4 border-b ${theme.sidebarBorder} flex items-center justify-between`}>
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 rounded-xl bg-[#B88E3E]/20 border border-[#B88E3E]/40 flex items-center justify-center text-[#B88E3E] shrink-0">
-              <FolderTree className="w-5 h-5" />
+        {/* Brand Header & Action Controls */}
+        <div className={`p-3.5 border-b ${theme.sidebarBorder} flex items-center justify-between shrink-0`}>
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            <div className="w-8 h-8 rounded-lg bg-[#B88E3E]/20 border border-[#B88E3E]/40 flex items-center justify-center text-[#B88E3E] shrink-0">
+              <FolderTree className="w-4 h-4" />
             </div>
             {(!isCollapsed || isMobileMenuOpen) && (
               <div className="whitespace-nowrap overflow-hidden">
-                <h1 className="font-semibold text-base leading-tight tracking-wide">Родовід</h1>
-                <p className="text-[11px] opacity-75">Генеалогія & Архіви</p>
+                <h1 className="font-bold text-sm leading-tight tracking-wide">Родовід</h1>
+                <p className="text-[10px] opacity-75">Генеалогія & Архіви</p>
               </div>
             )}
           </div>
 
-          {/* Desktop Collapse Toggle */}
-          <button 
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            className={`hidden md:flex p-1.5 rounded-lg ${theme.sidebarHover} transition-colors text-[#B88E3E] shrink-0 ml-1 cursor-pointer`}
-            title={isCollapsed ? 'Розгорнути панель вкладок' : 'Згорнути панель вкладок'}
-          >
-            {isCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Desktop Collapse / Expand Button */}
+            <button 
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className={`hidden md:flex p-1.5 rounded-lg ${theme.sidebarHover} transition-colors text-[#B88E3E] shrink-0 cursor-pointer`}
+              title={isCollapsed ? 'Розгорнути назви' : 'Згорнути до значків'}
+            >
+              {isCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            </button>
 
-          {/* Mobile Close Button */}
-          <button 
-            onClick={() => setMobileMenuOpen(false)}
-            className={`md:hidden p-2 rounded-lg ${theme.sidebarHover} text-neutral-400 hover:text-white cursor-pointer`}
-            title="Закрити меню"
-          >
-            <X className="w-5 h-5" />
-          </button>
+            {/* Desktop Hide Panel Button */}
+            <button 
+              onClick={() => setSidebarVisible(false)}
+              className={`hidden md:flex p-1.5 rounded-lg ${theme.sidebarHover} transition-colors text-neutral-400 hover:text-white shrink-0 cursor-pointer`}
+              title="Сховати бічну панель"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            {/* Mobile Close Button */}
+            <button 
+              onClick={() => setMobileMenuOpen(false)}
+              className={`md:hidden p-1.5 rounded-lg ${theme.sidebarHover} text-neutral-400 hover:text-white cursor-pointer`}
+              title="Закрити меню"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Navigation Links */}
-        <nav className="flex-1 py-3 px-2 space-y-4 overflow-y-auto">
+        <nav className="flex-1 py-3 px-2 space-y-4 overflow-y-auto scrollbar-thin">
           {/* Section 1: Родовід (Інструменти родинного дерева) */}
           <div className="space-y-1">
             {(!isCollapsed || isMobileMenuOpen) && (
@@ -150,7 +169,7 @@ export const Sidebar: React.FC = () => {
                   id={`nav-btn-rodovid-${item.id}`}
                   onClick={() => handleRodovidClick(item.id)}
                   title={isCollapsed ? item.label : undefined}
-                  className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-3 px-3'} gap-3 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
+                  className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
                     isActive
                       ? theme.sidebarActiveNav
                       : `${theme.sidebarText} ${theme.sidebarHover}`
@@ -179,7 +198,7 @@ export const Sidebar: React.FC = () => {
                   id={`nav-btn-${item.id}`}
                   onClick={() => handleNavTabClick(item.id)}
                   title={isCollapsed ? item.label : undefined}
-                  className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-3 px-3'} gap-3 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
+                  className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
                     isActive
                       ? theme.sidebarActiveNav
                       : `${theme.sidebarText} ${theme.sidebarHover}`
@@ -194,17 +213,17 @@ export const Sidebar: React.FC = () => {
         </nav>
 
         {/* Footer info & settings */}
-        <div className={`p-3 border-t ${theme.sidebarBorder} flex items-center ${isCollapsed ? 'md:justify-center' : 'justify-between'} justify-between text-xs`}>
-          <div className={`flex items-center gap-2 opacity-80 ${isCollapsed ? 'md:hidden' : 'flex'}`}>
-            <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span className="text-[11px] truncate">Осіб у базі ({personsCount})</span>
+        <div className={`p-2.5 border-t ${theme.sidebarBorder} flex items-center ${isCollapsed ? 'md:justify-center' : 'justify-between'} justify-between text-xs shrink-0`}>
+          <div className={`flex items-center gap-1.5 opacity-80 ${isCollapsed ? 'md:hidden' : 'flex'}`}>
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <span className="text-[11px] truncate">Осіб: {personsCount}</span>
           </div>
           <button
             onClick={() => handleNavTabClick('settings')}
-            className={`p-2 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-2`}
+            className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-1.5`}
             title="Налаштування"
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="w-3.5 h-3.5" />
             {(!isCollapsed || isMobileMenuOpen) && <span className="text-[11px]">Налаштування</span>}
           </button>
         </div>

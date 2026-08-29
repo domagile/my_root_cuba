@@ -102,6 +102,26 @@ export const RodovidView: React.FC = () => {
     } else {
       addPerson(person);
     }
+
+    // Sync parent childrenIds
+    if (person.fatherId) {
+      const father = persons.find((p) => p.id === person.fatherId);
+      if (father && !father.childrenIds?.includes(person.id)) {
+        updatePerson({
+          ...father,
+          childrenIds: Array.from(new Set([...(father.childrenIds || []), person.id]))
+        });
+      }
+    }
+    if (person.motherId) {
+      const mother = persons.find((p) => p.id === person.motherId);
+      if (mother && !mother.childrenIds?.includes(person.id)) {
+        updatePerson({
+          ...mother,
+          childrenIds: Array.from(new Set([...(mother.childrenIds || []), person.id]))
+        });
+      }
+    }
   }, [persons, updatePerson, addPerson]);
 
   const handleDeletePerson = useCallback((personId: string) => {
@@ -156,7 +176,7 @@ export const RodovidView: React.FC = () => {
       />
 
       {/* Main View Area */}
-      <div className="flex-1 min-h-0 overflow-auto relative">
+      <div className="flex-1 min-h-0 overflow-hidden relative">
         {currentView === 'tree' && (
           <TreeView
             database={database}
@@ -277,6 +297,14 @@ export const RodovidView: React.FC = () => {
             setCurrentView('tree');
           }}
           onOpenKinshipWith={handleOpenKinshipWith}
+          onOpenRelationManager={(id) => {
+            setInspectPersonId(null);
+            setRelationManagerPersonId(id);
+          }}
+          onAddRelation={(type, targetPersonId) => {
+            setInspectPersonId(null);
+            setAddRelation({ type, targetPersonId });
+          }}
         />
       )}
 

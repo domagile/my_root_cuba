@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { X, Save, User } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, Save, User, Users } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
+import { getFullName } from '../../utils/relationship';
 
 interface EditPersonModalProps {
   database: GenealogyDatabase;
@@ -22,6 +23,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
 }) => {
   const existingPerson = personId ? database.persons[personId] : null;
 
+  const initialFatherId = existingPerson?.fatherId || (existingPerson?.parentFamilyId ? database.families[existingPerson.parentFamilyId]?.husbandId : undefined);
+  const initialMotherId = existingPerson?.motherId || (existingPerson?.parentFamilyId ? database.families[existingPerson.parentFamilyId]?.wifeId : undefined);
+
   const [given, setGiven] = useState(existingPerson?.name?.given || existingPerson?.firstName || '');
   const [surname, setSurname] = useState(existingPerson?.name?.surname || existingPerson?.lastName || '');
   const [patronymic, setPatronymic] = useState(existingPerson?.name?.patronymic || existingPerson?.patronymic || '');
@@ -29,6 +33,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const [prefix, setPrefix] = useState(existingPerson?.name?.prefix || existingPerson?.prefix || '');
   const [gender, setGender] = useState<Gender>(existingPerson?.gender || 'M');
   const [isLiving, setIsLiving] = useState<boolean>(existingPerson?.isLiving ?? false);
+  const [fatherId, setFatherId] = useState<string>(initialFatherId || '');
+  const [motherId, setMotherId] = useState<string>(initialMotherId || '');
   const [birthDate, setBirthDate] = useState(existingPerson?.birthDate || '');
   const [birthPlace, setBirthPlace] = useState(existingPerson?.birthPlace || '');
   const [deathDate, setDeathDate] = useState(existingPerson?.deathDate || '');
@@ -41,6 +47,21 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const [bio, setBio] = useState(existingPerson?.bio || '');
   const [notes, setNotes] = useState(typeof existingPerson?.notes === 'string' ? existingPerson.notes : '');
   const [tagsStr, setTagsStr] = useState((existingPerson?.tags || []).join(', '));
+
+  // Available fathers and mothers lists
+  const availablePersons = useMemo(() => {
+    return Object.values(database.persons)
+      .filter((p) => !personId || p.id !== personId)
+      .sort((a, b) => getFullName(a).localeCompare(getFullName(b)));
+  }, [database.persons, personId]);
+
+  const availableFathers = useMemo(() => {
+    return availablePersons.filter((p) => p.gender !== 'female' && p.gender !== 'F');
+  }, [availablePersons]);
+
+  const availableMothers = useMemo(() => {
+    return availablePersons.filter((p) => p.gender !== 'male' && p.gender !== 'M');
+  }, [availablePersons]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,8 +124,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
       sourceIds: existingPerson?.sourceIds || [],
       parentFamilyId: existingPerson?.parentFamilyId,
       spouseFamilyIds: existingPerson?.spouseFamilyIds || [],
-      fatherId: existingPerson?.fatherId,
-      motherId: existingPerson?.motherId,
+      fatherId: fatherId.trim() || undefined,
+      motherId: motherId.trim() || undefined,
       spouseIds: existingPerson?.spouseIds || [],
       childrenIds: existingPerson?.childrenIds || []
     };
@@ -283,6 +304,52 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Parents Section */}
+          <div className="p-3.5 bg-slate-950/70 border border-slate-800/80 rounded-xl space-y-3">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200">
+              <Users className="w-4 h-4 text-emerald-400" />
+              <span>Батьки (встановлення родинного зв'язку)</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-blue-400 mb-1">
+                  Батько
+                </label>
+                <select
+                  value={fatherId}
+                  onChange={(e) => setFatherId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">-- Не вказаний / Невідомий --</option>
+                  {availableFathers.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {getFullName(f)} ({f.birthYear || '?'}) [{f.id}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-rose-400 mb-1">
+                  Мати
+                </label>
+                <select
+                  value={motherId}
+                  onChange={(e) => setMotherId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-rose-500"
+                >
+                  <option value="">-- Не вказана / Невідома --</option>
+                  {availableMothers.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {getFullName(m)} ({m.birthYear || '?'}) [{m.id}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
 
           {/* Occupation & Social Status */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

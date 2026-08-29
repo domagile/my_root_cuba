@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PieChart, ZoomIn, ZoomOut, Maximize2, User, GitFork, X, Info, Download, Printer, ChevronDown } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
-import { calculateFanChart, FanChartSector } from '../../utils/treeLayout';
+import { calculateFanChart, FanChartSector, getMaxAncestorGenerations } from '../../utils/treeLayout';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
@@ -21,7 +21,8 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   onChangeRoot,
   onSwitchToTree
 }) => {
-  const [generations, setGenerations] = useState<number>(5);
+  // Default to 0 = ALL generations
+  const [generations, setGenerations] = useState<number>(0);
   const [hoveredSector, setHoveredSector] = useState<FanChartSector | null>(null);
   const [scale, setScale] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -202,12 +203,24 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
   const activePerson = database.persons[activePersonId];
 
+  const maxAvailableGens = useMemo(() => {
+    return getMaxAncestorGenerations(database, activePersonId);
+  }, [database, activePersonId]);
+
   const sectors = useMemo(() => {
-    return calculateFanChart(database, activePersonId, generations, 60, 75);
+    return calculateFanChart(database, activePersonId, generations);
   }, [database, activePersonId, generations]);
 
-  const centerX = 450;
-  const centerY = 400;
+  const maxRadius = useMemo(() => {
+    if (sectors.length === 0) return 400;
+    return Math.max(...sectors.map((s) => s.outerRadius));
+  }, [sectors]);
+
+  const padding = 50;
+  const svgWidth = Math.max(920, Math.round((maxRadius + padding) * 2));
+  const svgHeight = Math.max(760, Math.round(maxRadius + padding + 60));
+  const centerX = svgWidth / 2;
+  const centerY = maxRadius + padding;
 
   // Function to describe SVG arc path
   function describeArc(
@@ -302,8 +315,8 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     
     // Add background rect to cloned SVG
     const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgRect.setAttribute('width', '900');
-    bgRect.setAttribute('height', '760');
+    bgRect.setAttribute('width', String(svgWidth));
+    bgRect.setAttribute('height', String(svgHeight));
     bgRect.setAttribute('fill', '#090d16');
     cloned.insertBefore(bgRect, cloned.firstChild);
 
@@ -337,22 +350,41 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
           <div className={`flex items-center gap-1.5 text-xs ${theme.textSecondary} ${theme.surfaceBg} px-3 py-1.5 rounded-lg border ${theme.borderSubtle}`}>
             <PieChart className="w-3.5 h-3.5 text-amber-500" />
-            <span>Поколінь віяла:</span>
-            {[3, 4, 5, 6, 7].map((g) => (
-              <button
-                key={g}
-                onClick={() => setGenerations(g)}
-                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
-                  generations === g
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : isDark
-                    ? 'hover:bg-slate-700 text-slate-400'
-                    : 'hover:bg-neutral-200 text-neutral-600'
-                }`}
-              >
-                {g}
-              </button>
-            ))}
+            <span className="font-medium">Поколінь віяла:</span>
+            
+            {/* All Generations Button */}
+            <button
+              onClick={() => setGenerations(0)}
+              className={`px-2.5 py-0.5 rounded text-xs font-bold transition-colors cursor-pointer ${
+                generations === 0
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : isDark
+                  ? 'hover:bg-slate-700 text-slate-400'
+                  : 'hover:bg-neutral-200 text-neutral-600'
+              }`}
+              title="Відобразити всі доступні покоління родоводу"
+            >
+              Всі {maxAvailableGens > 0 ? `(${maxAvailableGens})` : ''}
+            </button>
+
+            {/* Specific generation numbers */}
+            {Array.from({ length: Math.max(maxAvailableGens - 3, 5) }, (_, i) => i + 4)
+              .filter((g) => g <= Math.max(maxAvailableGens, 8))
+              .map((g) => (
+                <button
+                  key={g}
+                  onClick={() => setGenerations(g)}
+                  className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
+                    generations === g
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : isDark
+                      ? 'hover:bg-slate-700 text-slate-400'
+                      : 'hover:bg-neutral-200 text-neutral-600'
+                  }`}
+                >
+                  {g}
+                </button>
+              ))}
           </div>
 
           <div className="hidden md:flex items-center gap-2">
@@ -525,9 +557,9 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
           <svg
             id="gramps-fanchart-svg"
             xmlns="http://www.w3.org/2000/svg"
-            width="900"
-            height="760"
-            viewBox="0 0 900 760"
+            width={svgWidth}
+            height={svgHeight}
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
             className="overflow-visible filter drop-shadow-2xl"
           >
             {sectors.map((sec) => {
@@ -570,10 +602,20 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     }`}
                   />
 
-                  {/* Text inside sector (LOD optimized) */}
-                  {sec.person && (scale >= 0.52 || sec.generation <= 3 || isHovered) && (() => {
+                  {/* Text inside sector (LOD optimized for all generation depths) */}
+                  {sec.person && (scale >= (sec.generation >= 8 ? 0.85 : sec.generation >= 6 ? 0.55 : 0.35) || sec.generation <= 3 || isHovered) && (() => {
                     const surname = sec.person.name?.surname || sec.person.lastName || '';
                     const given = sec.person.name?.given || sec.person.firstName || '';
+                    const birth = sec.person.birthYear || (sec.person.birthDate ? sec.person.birthDate.slice(0, 4) : '');
+
+                    let fontSize = '11px';
+                    if (sec.generation === 0) fontSize = '13px';
+                    else if (sec.generation <= 2) fontSize = '11px';
+                    else if (sec.generation <= 4) fontSize = '9.5px';
+                    else if (sec.generation <= 6) fontSize = '8px';
+                    else if (sec.generation <= 8) fontSize = '7px';
+                    else fontSize = '6px';
+
                     return (
                       <text
                         x={textPos.x}
@@ -583,19 +625,30 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                         transform={`rotate(${rotation}, ${textPos.x}, ${textPos.y})`}
                         fill="#ffffff"
                         className="pointer-events-none font-medium select-none"
-                        fontSize={sec.generation <= 2 ? '11px' : sec.generation <= 4 ? '9px' : '7.5px'}
+                        fontSize={fontSize}
                       >
                         {sec.generation <= 3 ? (
                           <>
-                            <tspan x={textPos.x} dy="-0.4em">
+                            <tspan x={textPos.x} dy="-0.45em" fontWeight="bold">
                               {surname}
                             </tspan>
-                            <tspan x={textPos.x} dy="1.1em" fontSize="8px" fill="#cbd5e1">
-                              {given}
+                            <tspan x={textPos.x} dy="1.15em" fontSize={sec.generation <= 2 ? '9px' : '8px'} fill="#e2e8f0">
+                              {given} {birth ? `(${birth})` : ''}
                             </tspan>
                           </>
+                        ) : sec.generation <= 6 ? (
+                          <>
+                            <tspan x={textPos.x} dy={birth && sec.generation <= 5 ? "-0.35em" : "0"} fontWeight="bold">
+                              {surname} {given ? given.charAt(0) + '.' : ''}
+                            </tspan>
+                            {birth && sec.generation <= 5 && (
+                              <tspan x={textPos.x} dy="1.05em" fontSize="6.5px" fill="#cbd5e1">
+                                {birth}
+                              </tspan>
+                            )}
+                          </>
                         ) : (
-                          `${surname} ${given.charAt(0)}.`
+                          `${surname} ${given ? given.charAt(0) + '.' : ''}`
                         )}
                       </text>
                     );

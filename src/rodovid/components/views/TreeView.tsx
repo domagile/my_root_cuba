@@ -26,7 +26,15 @@ import {
   ChevronLeft,
   ChevronUp,
   MapPin,
-  Compass
+  Compass,
+  Users,
+  Sparkles,
+  Eye,
+  EyeOff,
+  Palette,
+  Sun,
+  Moon,
+  Check
 } from 'lucide-react';
 import { GenealogyDatabase, TreeLayoutType, Person } from '../../types/genealogy';
 import {
@@ -41,7 +49,6 @@ import {
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
-import { PngBranchManagerModal } from '../../../components/Tree/PngBranchManagerModal';
 
 interface TreeViewProps {
   database: GenealogyDatabase;
@@ -65,21 +72,25 @@ export const TreeView: React.FC<TreeViewProps> = ({
   onSwitchToFan
 }) => {
   const [layoutType, setLayoutType] = useState<TreeLayoutType>('ancestors');
-  const [generations, setGenerations] = useState<number>(8);
+  // Default to 0 = ALL generations
+  const [generations, setGenerations] = useState<number>(0);
   const [scale, setScale] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 80, y: 80 });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [showMinimap, setShowMinimap] = useState<boolean>(true);
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
-  const [isPngModalOpen, setIsPngModalOpen] = useState<boolean>(false);
-  const [pngModalTab, setPngModalTab] = useState<'export' | 'import'>('export');
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
         setIsExportOpen(false);
+      }
+      if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
+        setIsThemeMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -108,10 +119,81 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return () => resizeObs.disconnect();
   }, []);
 
-  // Compute Layout (Classic Family Pedigree with grouped spouses and orthogonal lines)
+  // Visibility & Branch Collapse Filters
+  const [showParents, setShowParents] = useState<boolean>(true);
+  const [showSiblings, setShowSiblings] = useState<boolean>(true);
+  const [showDescendants, setShowDescendants] = useState<boolean>(true);
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
+  const [collapsedSiblings, setCollapsedSiblings] = useState<Set<string>>(new Set());
+  const [collapsedChildren, setCollapsedChildren] = useState<Set<string>>(new Set());
+  const [hoveredPersonId, setHoveredPersonId] = useState<string | null>(null);
+
+  const toggleCollapseParents = useCallback((personId: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleCollapseSiblings = useCallback((personId: string) => {
+    setCollapsedSiblings((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleCollapseChildren = useCallback((personId: string) => {
+    setCollapsedChildren((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleExpandAll = useCallback(() => {
+    setShowParents(true);
+    setShowSiblings(true);
+    setShowDescendants(true);
+    setCollapsedParents(new Set());
+    setCollapsedSiblings(new Set());
+    setCollapsedChildren(new Set());
+  }, []);
+
+  // Compute Layout (Classic Family Pedigree with grouped spouses, siblings & orthogonal lines)
   const layout = useMemo(() => {
-    return calculateClassicFamilyTreeLayout(database, activePersonId, generations);
-  }, [database, activePersonId, generations]);
+    return calculateClassicFamilyTreeLayout(database, activePersonId, generations, {
+      showParents,
+      showSiblings,
+      showDescendants,
+      collapsedParents,
+      collapsedSiblings,
+      collapsedChildren
+    });
+  }, [
+    database,
+    activePersonId,
+    generations,
+    showParents,
+    showSiblings,
+    showDescendants,
+    collapsedParents,
+    collapsedSiblings,
+    collapsedChildren
+  ]);
 
   // Viewport Culling Bounding Box
   const visibleBounds = useMemo(() => {
@@ -163,7 +245,30 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
 
-  const [canvasTheme, setCanvasTheme] = useState<'classic-dark' | 'parchment' | 'emerald'>('classic-dark');
+  const [canvasTheme, setCanvasTheme] = useState<'classic-dark' | 'parchment' | 'light' | 'emerald'>('classic-dark');
+
+  // Tree Bounding Box
+  const treeBounds = useMemo(() => {
+    if (!layout.nodes.length) {
+      return { minX: 0, maxX: 1400, minY: 0, maxY: 900, width: 1400, height: 900 };
+    }
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    layout.nodes.forEach((n) => {
+      minX = Math.min(minX, n.x);
+      maxX = Math.max(maxX, n.x + (n.width || CLASSIC_CARD_WIDTH));
+      minY = Math.min(minY, n.y);
+      maxY = Math.max(maxY, n.y + (n.height || CLASSIC_CARD_HEIGHT));
+    });
+    const pad = 100;
+    return {
+      minX: minX - pad,
+      maxX: maxX + pad,
+      minY: minY - pad,
+      maxY: maxY + pad,
+      width: Math.max(maxX - minX + pad * 2, 800),
+      height: Math.max(maxY - minY + pad * 2, 600)
+    };
+  }, [layout.nodes]);
 
   // Center tree on container dimensions and tree bounding box
   const centerTree = useCallback(() => {
@@ -172,30 +277,56 @@ export const TreeView: React.FC<TreeViewProps> = ({
     const cw = container ? container.clientWidth : containerDimensions.width || 1000;
     const ch = container ? container.clientHeight : containerDimensions.height || 700;
 
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    layout.nodes.forEach((n) => {
-      minX = Math.min(minX, n.x);
-      maxX = Math.max(maxX, n.x + (n.width || CLASSIC_CARD_WIDTH));
-      minY = Math.min(minY, n.y);
-      maxY = Math.max(maxY, n.y + (n.height || CLASSIC_CARD_HEIGHT));
-    });
-
-    const treeW = Math.max(maxX - minX, CLASSIC_CARD_WIDTH);
-    const treeH = Math.max(maxY - minY, CLASSIC_CARD_HEIGHT);
+    const treeW = treeBounds.width;
+    const treeH = treeBounds.height;
 
     const fitScaleX = (cw - 120) / treeW;
     const fitScaleY = (ch - 120) / treeH;
     const optimalScale = Math.min(Math.max(Math.min(fitScaleX, fitScaleY), 0.65), 1.1);
 
-    const treeCenterX = (minX + maxX) / 2;
-    const treeCenterY = (minY + maxY) / 2;
+    const treeCenterX = (treeBounds.minX + treeBounds.maxX) / 2;
+    const treeCenterY = (treeBounds.minY + treeBounds.maxY) / 2;
 
     const newPanX = cw / 2 - treeCenterX * optimalScale;
     const newPanY = ch / 2 - treeCenterY * optimalScale;
 
     setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
     setScale(optimalScale);
-  }, [layout.nodes, containerDimensions]);
+  }, [layout.nodes, containerDimensions, treeBounds]);
+
+  const fitTreeWidth = useCallback(() => {
+    if (!layout.nodes.length) return;
+    const cw = containerDimensions.width || 1200;
+    const treeW = treeBounds.width;
+    const fitScale = Math.min(Math.max((cw - 80) / treeW, 0.35), 1.5);
+    const treeCenterX = (treeBounds.minX + treeBounds.maxX) / 2;
+    setPan({
+      x: Math.round(cw / 2 - treeCenterX * fitScale),
+      y: 80
+    });
+    setScale(fitScale);
+  }, [layout.nodes, containerDimensions, treeBounds]);
+
+  const centerOnActive = useCallback(() => {
+    const activeNode = layout.nodes.find(n => n.person.id === activePersonId) || layout.nodes[0];
+    if (!activeNode) return;
+    const cw = containerDimensions.width || 1200;
+    const ch = containerDimensions.height || 800;
+    const nodeCenterX = activeNode.x + (activeNode.width || CLASSIC_CARD_WIDTH) / 2;
+    const nodeCenterY = activeNode.y + (activeNode.height || CLASSIC_CARD_HEIGHT) / 2;
+    setPan({
+      x: Math.round(cw / 2 - nodeCenterX * scale),
+      y: Math.round(ch / 2 - nodeCenterY * scale)
+    });
+  }, [layout.nodes, activePersonId, containerDimensions, scale]);
+
+  const scrollStep = useCallback((direction: 'left' | 'right') => {
+    const step = 380;
+    setPan(prev => ({
+      ...prev,
+      x: direction === 'left' ? prev.x + step : prev.x - step
+    }));
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -300,9 +431,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-    const newScale = Math.min(Math.max(scale * zoomFactor, 0.35), 2.4);
-    setScale(newScale);
+    if (e.ctrlKey || e.metaKey) {
+      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+      const newScale = Math.min(Math.max(scale * zoomFactor, 0.35), 2.4);
+      setScale(newScale);
+    } else {
+      // Natural 2D trackpad / Shift-wheel horizontal scroll
+      const deltaX = e.shiftKey ? e.deltaY : e.deltaX;
+      const deltaY = e.shiftKey ? 0 : e.deltaY;
+      setPan((prev) => ({
+        x: prev.x - deltaX,
+        y: prev.y - deltaY
+      }));
+    }
   };
 
   const activePerson = database.persons[activePersonId];
@@ -401,7 +542,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-[#23272b] overflow-hidden relative select-none">
+    <div className="flex flex-col h-full w-full bg-[#23272b] overflow-hidden relative select-none">
       {/* Top Toolbar */}
       <div className="h-14 bg-[#1e2226] border-b border-[#323840] px-4 flex items-center justify-between z-20 shrink-0 print:hidden shadow-md">
         <div className="flex items-center gap-3">
@@ -431,7 +572,18 @@ export const TreeView: React.FC<TreeViewProps> = ({
           {/* Generations counter */}
           <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-3 py-1.5 rounded-lg">
             <span className="text-slate-400">Поколінь:</span>
-            {[3, 4, 5, 6, 7, 8, 9].map((g) => (
+            <button
+              onClick={() => setGenerations(0)}
+              className={`px-2.5 py-0.5 rounded text-xs font-bold transition-colors cursor-pointer ${
+                generations === 0
+                  ? 'bg-emerald-600 text-white font-bold'
+                  : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+              title="Відобразити всі покоління дерева"
+            >
+              Всі
+            </button>
+            {[4, 5, 6, 7, 8, 9, 10].map((g) => (
               <button
                 key={g}
                 onClick={() => setGenerations(g)}
@@ -461,6 +613,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
               ))}
             </select>
           </div>
+
         </div>
 
         {/* Action Controls */}
@@ -468,17 +621,16 @@ export const TreeView: React.FC<TreeViewProps> = ({
           {/* Export Menu */}
           <div className="relative" ref={exportMenuRef}>
             <button
+              type="button"
               onClick={() => setIsExportOpen((prev) => !prev)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+              className={`p-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
                 isExportOpen
                   ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
                   : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
               }`}
-              title="Експорт та друк дерева"
+              title="Експорт та друк дерева (SVG / PDF)"
             >
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">Експорт</span>
-              <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${isExportOpen ? 'rotate-180' : ''}`} />
+              <Download className="w-4 h-4 text-emerald-400" />
             </button>
 
             {isExportOpen && (
@@ -486,23 +638,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-[#2d3238] mb-1">
                   Збереження та експорт
                 </div>
-                <button
-                  onClick={() => {
-                    setPngModalTab('export');
-                    setIsPngModalOpen(true);
-                    setIsExportOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
-                >
-                  <ImageIcon className="w-4 h-4 text-amber-400 shrink-0" />
-                  <div>
-                    <div className="font-bold flex items-center gap-1.5 text-slate-100">
-                      <span>Скачати картинку дерева (PNG)</span>
-                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">HD</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400">Висока роздільна здатність, стилі та кольори</div>
-                  </div>
-                </button>
                 <button
                   onClick={() => {
                     handleExportSvg();
@@ -533,48 +668,108 @@ export const TreeView: React.FC<TreeViewProps> = ({
             )}
           </div>
 
-          {/* Quick Import PNG Branch Button */}
-          <button
-            onClick={() => {
-              setPngModalTab('import');
-              setIsPngModalOpen(true);
-            }}
-            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border-emerald-700/60 transition-all cursor-pointer shadow-xs"
-            title="Додати нові гілки або родичів з PNG зображення / фотографії схеми"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>+ Гілка з PNG</span>
-          </button>
+          {/* Canvas Theme Selector Dropdown */}
+          <div className="relative" ref={themeMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsThemeMenuOpen((prev) => !prev)}
+              className={`p-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
+                isThemeMenuOpen
+                  ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
+                  : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
+              }`}
+              title="Колірна тема фону дерева"
+            >
+              <Palette className="w-4 h-4 text-amber-400" />
+            </button>
 
-          {/* Canvas Theme Selector */}
-          <div className="hidden lg:flex items-center gap-1 bg-[#15181b] border border-[#2d3238] p-1 rounded-lg">
-            <button
-              onClick={() => setCanvasTheme('classic-dark')}
-              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                canvasTheme === 'classic-dark' ? 'bg-[#2d333b] text-white shadow-xs font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Класичний графітовий фон (як у FamilySearch)"
-            >
-              Графіт
-            </button>
-            <button
-              onClick={() => setCanvasTheme('parchment')}
-              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                canvasTheme === 'parchment' ? 'bg-amber-200 text-amber-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Світлий архівний пергамент"
-            >
-              Пергамент
-            </button>
-            <button
-              onClick={() => setCanvasTheme('emerald')}
-              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                canvasTheme === 'emerald' ? 'bg-emerald-800 text-white shadow-xs font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Смарагдовий ліс"
-            >
-              Ліс
-            </button>
+            {isThemeMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-[#2d3238] mb-1">
+                  Тема фону полотна
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCanvasTheme('classic-dark');
+                    setIsThemeMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                    canvasTheme === 'classic-dark'
+                      ? 'bg-[#252a30] text-white font-semibold'
+                      : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-4 h-4 rounded-full bg-[#1b1f23] border border-slate-600 flex items-center justify-center">
+                      <Moon className="w-2.5 h-2.5 text-slate-300" />
+                    </div>
+                    <span>Графіт (Темна)</span>
+                  </div>
+                  {canvasTheme === 'classic-dark' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCanvasTheme('parchment');
+                    setIsThemeMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                    canvasTheme === 'parchment'
+                      ? 'bg-[#252a30] text-white font-semibold'
+                      : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-4 h-4 rounded-full bg-[#f4ede2] border border-amber-600" />
+                    <span>Пергамент</span>
+                  </div>
+                  {canvasTheme === 'parchment' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCanvasTheme('light');
+                    setIsThemeMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                    canvasTheme === 'light'
+                      ? 'bg-[#252a30] text-white font-semibold'
+                      : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-4 h-4 rounded-full bg-white border border-slate-300 flex items-center justify-center">
+                      <Sun className="w-2.5 h-2.5 text-amber-500" />
+                    </div>
+                    <span>Світла</span>
+                  </div>
+                  {canvasTheme === 'light' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCanvasTheme('emerald');
+                    setIsThemeMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                    canvasTheme === 'emerald'
+                      ? 'bg-[#252a30] text-white font-semibold'
+                      : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-4 h-4 rounded-full bg-emerald-700 border border-emerald-500" />
+                    <span>Смарагдовий ліс</span>
+                  </div>
+                  {canvasTheme === 'emerald' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Zoom Controls */}
@@ -621,18 +816,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
         onWheel={handleWheel}
         className={`flex-1 relative overflow-hidden touch-none ${
           canvasTheme === 'parchment'
-            ? 'bg-[#e5ded0]'
+            ? 'bg-[#f4efe4]'
+            : canvasTheme === 'light'
+            ? 'bg-[#f8fafc]'
             : canvasTheme === 'emerald'
-            ? 'bg-[#041a14]'
-            : 'bg-[#2d3238]'
+            ? 'bg-[#031d16]'
+            : 'bg-[#23272e]'
         } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         style={{
           backgroundImage:
             canvasTheme === 'parchment'
-              ? 'radial-gradient(circle at 1px 1px, rgba(120, 90, 50, 0.22) 1px, transparent 0)'
+              ? 'radial-gradient(circle at 1px 1px, rgba(140, 110, 70, 0.22) 1px, transparent 0)'
+              : canvasTheme === 'light'
+              ? 'radial-gradient(circle at 1px 1px, rgba(100, 116, 139, 0.18) 1px, transparent 0)'
               : canvasTheme === 'emerald'
               ? 'radial-gradient(circle at 1px 1px, rgba(52, 211, 153, 0.18) 1px, transparent 0)'
-              : 'radial-gradient(circle at 1px 1px, rgba(140, 155, 170, 0.18) 1px, transparent 0)',
+              : 'radial-gradient(circle at 1px 1px, rgba(140, 155, 170, 0.16) 1px, transparent 0)',
           backgroundSize: '24px 24px',
           touchAction: 'none'
         }}
@@ -649,51 +848,63 @@ export const TreeView: React.FC<TreeViewProps> = ({
             className="overflow-visible pointer-events-none absolute inset-0"
             style={{ width: layout.width, height: layout.height }}
           >
-            <defs>
-              <marker
-                id="arrow-down"
-                viewBox="0 0 10 10"
-                refX="5"
-                refY="7"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto-start-reverse"
-              >
-                <path d="M 1 2 L 5 7 L 9 2" fill="none" stroke="#717d8a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </marker>
-              <marker
-                id="arrow-up"
-                viewBox="0 0 10 10"
-                refX="5"
-                refY="3"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto"
-              >
-                <path d="M 1 8 L 5 3 L 9 8" fill="none" stroke="#717d8a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </marker>
-            </defs>
-
             {visibleLinks.map((link) => {
               const pathData = link.path || `M ${link.sourceX} ${link.sourceY} L ${link.targetX} ${link.targetY}`;
               const isMarriage = link.type === 'marriage';
+              const isHovered = Boolean(
+                hoveredPersonId && (
+                  link.sourcePersonId === hoveredPersonId ||
+                  link.targetPersonId === hoveredPersonId ||
+                  link.childPersonId === hoveredPersonId ||
+                  link.familyId === hoveredPersonId
+                )
+              );
+
+              const defaultColor = link.color || (isMarriage ? '#a1a1aa' : '#0284c7');
+              const strokeColor = isHovered ? '#38bdf8' : defaultColor;
+              const strokeWidth = isHovered ? (isMarriage ? 3.5 : 3.2) : (isMarriage ? 2 : 2.2);
+              const opacity = hoveredPersonId ? (isHovered ? 1 : 0.38) : 0.95;
 
               return (
-                <g key={link.id}>
+                <g key={link.id} opacity={opacity} className="transition-opacity duration-150">
+                  {/* Glowing halo background on hover */}
+                  {isHovered && (
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke="#38bdf8"
+                      strokeWidth={strokeWidth + 4}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity={0.35}
+                    />
+                  )}
                   <path
                     d={pathData}
                     fill="none"
-                    stroke={isMarriage ? '#8b96a2' : '#6c7782'}
-                    strokeWidth={isMarriage ? '2' : '1.8'}
+                    stroke={strokeColor}
+                    strokeWidth={strokeWidth}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
+                  {/* Marriage central connector badge */}
+                  {isMarriage && (
+                    <circle
+                      cx={(link.sourceX + link.targetX) / 2}
+                      cy={link.sourceY}
+                      r={3.5}
+                      fill="#a1a1aa"
+                      stroke="#1e2226"
+                      strokeWidth={1.5}
+                    />
+                  )}
+                  {/* Matching arrowhead in family lineage color */}
                   {link.arrow === 'down' && (
                     <path
-                      d={`M ${link.targetX - 4} ${link.targetY - 6} L ${link.targetX} ${link.targetY - 1} L ${link.targetX + 4} ${link.targetY - 6}`}
+                      d={`M ${link.targetX - 4.5} ${link.targetY - 7} L ${link.targetX} ${link.targetY - 0.5} L ${link.targetX + 4.5} ${link.targetY - 7}`}
                       fill="none"
-                      stroke="#8b96a2"
-                      strokeWidth="1.8"
+                      stroke={strokeColor}
+                      strokeWidth={strokeWidth}
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
@@ -709,7 +920,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             const isRoot = p.id === activePersonId;
             const isMale = p.gender === 'male' || p.gender === 'M';
             const isFemale = p.gender === 'female' || p.gender === 'F';
-            const isLightCanvas = canvasTheme === 'parchment';
+            const isLightCanvas = canvasTheme === 'parchment' || canvasTheme === 'light';
 
             const firstName = p.name?.given || p.firstName || '—';
             const lastName = p.name?.surname || p.lastName || '—';
@@ -728,9 +939,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     width: `${node.width}px`,
                     height: `${node.height}px`
                   }}
+                  onMouseEnter={() => setHoveredPersonId(p.id)}
+                  onMouseLeave={() => setHoveredPersonId(null)}
                   className={`group rounded-xl border p-2.5 shadow-lg transition-all cursor-pointer flex flex-col justify-center text-center ${
                     isLightCanvas
-                      ? 'bg-[#f4efe4] border-[#d3c9b8] text-neutral-900'
+                      ? 'bg-white border-[#d4c8b5] text-neutral-900 shadow-md'
                       : 'bg-[#22262a] border-[#363c44] text-white'
                   } ${isRoot ? 'ring-2 ring-rose-500 border-rose-500 shadow-xl' : ''}`}
                   onClick={(e) => {
@@ -743,9 +956,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   }`}>
                     <User className="w-4 h-4" />
                   </div>
-                  <div className="font-bold text-xs truncate leading-tight">{firstName}</div>
-                  <div className="font-bold text-xs truncate leading-tight">{lastName}</div>
-                  <div className="text-[10px] text-slate-400 mt-1 truncate">{lifespanStr}</div>
+                  <div className={`font-bold text-xs truncate leading-tight ${isLightCanvas ? 'text-neutral-900' : 'text-white'}`}>{firstName}</div>
+                  <div className={`font-bold text-xs truncate leading-tight ${isLightCanvas ? 'text-neutral-900' : 'text-white'}`}>{lastName}</div>
+                  <div className={`text-[10px] mt-1 truncate ${isLightCanvas ? 'text-neutral-600 font-medium' : 'text-slate-400'}`}>{lifespanStr}</div>
                 </div>
               );
             }
@@ -760,9 +973,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   width: `${node.width}px`,
                   height: `${node.height}px`
                 }}
+                onMouseEnter={() => setHoveredPersonId(p.id)}
+                onMouseLeave={() => setHoveredPersonId(null)}
                 className={`group rounded-xl border transition-all cursor-pointer flex flex-col justify-between p-3 select-none relative shadow-xl ${
                   isLightCanvas
-                    ? 'bg-[#f8f5ee] border-[#d8cfbe] text-neutral-900 hover:border-emerald-600'
+                    ? 'bg-white border-[#d8cfbe] text-neutral-900 hover:border-emerald-600 shadow-md hover:shadow-lg'
                     : 'bg-[#22262a] border-[#383e46] text-white hover:border-slate-400 shadow-black/40'
                 } ${
                   isRoot
@@ -785,12 +1000,47 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       onOpenRelationManager(p.id);
                     }
                   }}
-                  className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#181b1f] hover:bg-emerald-600 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-[#30353c] hover:border-emerald-400 shadow-xs"
+                  className={`absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center transition-all cursor-pointer border shadow-xs ${
+                    isLightCanvas
+                      ? 'bg-stone-100 hover:bg-emerald-600 text-stone-700 hover:text-white border-stone-300 hover:border-emerald-500'
+                      : 'bg-[#181b1f] hover:bg-emerald-600 text-slate-400 hover:text-white border-[#30353c] hover:border-emerald-400'
+                  }`}
                   title="Додати родича (+ батьків, дітей, подружжя)"
                   aria-label="Додати родича"
                 >
                   <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                 </button>
+
+                {/* Top Collapse/Expand Parents Branch Badge */}
+                {node.hasParents && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCollapseParents(p.id);
+                    }}
+                    className={`absolute -top-3 left-1/2 -translate-x-1/2 z-10 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer border ${
+                      node.isParentsCollapsed
+                        ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 scale-105'
+                        : isLightCanvas
+                        ? 'bg-[#ece5d8] hover:bg-[#ded5c5] text-stone-900 border-[#cfc3af]'
+                        : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
+                    }`}
+                    title={node.isParentsCollapsed ? `Розгорнути батьків (${node.parentsCount})` : 'Сховати батьків'}
+                  >
+                    {node.isParentsCollapsed ? (
+                      <>
+                        <ChevronUp className="w-3 h-3" />
+                        <span>+Батьки ({node.parentsCount})</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-3 h-3" />
+                        <span>Батьки</span>
+                      </>
+                    )}
+                  </button>
+                )}
 
                 {/* Centered Avatar (Image 2 style) */}
                 <div className="flex flex-col items-center mt-1">
@@ -809,6 +1059,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                             ? 'bg-[#0f4f6e] border-[#0284c7]/50 text-[#38bdf8]'
                             : isFemale
                             ? 'bg-[#6d1b4a] border-[#e11d48]/50 text-[#f472b6]'
+                            : isLightCanvas
+                            ? 'bg-slate-200 border-slate-300 text-slate-700'
                             : 'bg-slate-700 border-slate-600 text-slate-300'
                         }`}
                       >
@@ -824,34 +1076,78 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 {/* Name & Genealogical Information */}
                 <div className="text-center my-auto px-0.5">
                   {/* First Name */}
-                  <h4 className="font-bold text-[13px] leading-tight truncate text-white group-hover:text-emerald-400 transition-colors">
+                  <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
+                    isLightCanvas
+                      ? 'text-neutral-900 group-hover:text-emerald-700 font-bold'
+                      : 'text-white group-hover:text-emerald-400 font-bold'
+                  }`}>
                     {firstName}
                   </h4>
                   {/* Last Name */}
-                  <h4 className="font-bold text-[13px] leading-tight truncate text-white group-hover:text-emerald-400 transition-colors">
+                  <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
+                    isLightCanvas
+                      ? 'text-neutral-900 group-hover:text-emerald-700 font-bold'
+                      : 'text-white group-hover:text-emerald-400 font-bold'
+                  }`}>
                     {lastName}
                   </h4>
 
                   {/* Lifespan */}
-                  <div className="text-[11px] text-[#94a3b8] mt-1.5 font-normal tracking-tight">
+                  <div className={`text-[11px] mt-1.5 font-medium tracking-tight ${
+                    isLightCanvas ? 'text-neutral-700 font-semibold' : 'text-[#94a3b8]'
+                  }`}>
                     {lifespanStr}
                   </div>
 
                   {/* FamilySearch-style unique ID code */}
-                  <div className="text-[10px] font-mono text-[#64748b] tracking-wider mt-0.5">
+                  <div className={`text-[10px] font-mono tracking-wider mt-0.5 ${
+                    isLightCanvas ? 'text-neutral-600 font-medium' : 'text-[#64748b]'
+                  }`}>
                     {fsCode}
                   </div>
                 </div>
 
                 {/* Bottom Source & Document Badges (Image 2 style) */}
-                <div className="flex items-center justify-center gap-1.5 pt-1.5 border-t border-[#2e343c]">
+                <div className={`flex items-center justify-center gap-1.5 pt-1.5 border-t ${
+                  isLightCanvas ? 'border-stone-200' : 'border-[#2e343c]'
+                }`}>
                   {/* Citations / Documents Badge */}
                   <div
-                    className="w-5 h-5 rounded-md bg-[#0e7490]/30 hover:bg-[#0e7490]/60 text-[#38bdf8] flex items-center justify-center border border-[#0e7490]/50 transition-colors"
+                    className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors ${
+                      isLightCanvas
+                        ? 'bg-sky-50 text-sky-800 border-sky-300'
+                        : 'bg-[#0e7490]/30 text-[#38bdf8] border-[#0e7490]/50'
+                    }`}
                     title={`Джерела та архівні записи: ${p.citations?.length || (p.sourceIds?.length || 1)}`}
                   >
                     <FileText className="w-3 h-3" />
                   </div>
+
+                  {/* Sibling Toggle Badge */}
+                  {node.hasSiblings && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleCollapseSiblings(p.id);
+                      }}
+                      className={`h-5 px-1.5 rounded-md flex items-center gap-1 text-[10px] font-medium border transition-colors cursor-pointer ${
+                        node.isSiblingsCollapsed
+                          ? 'bg-sky-600 text-white border-sky-400 hover:bg-sky-500'
+                          : isLightCanvas
+                          ? 'bg-stone-100 hover:bg-sky-100 text-stone-800 border-stone-300'
+                          : 'bg-[#334155]/60 hover:bg-sky-900 text-slate-300 border-slate-600/50'
+                      }`}
+                      title={
+                        node.isSiblingsCollapsed
+                          ? `Розгорнути братів/сестер (${node.siblingsCount})`
+                          : `Сховати братів/сестер (${node.siblingsCount})`
+                      }
+                    >
+                      <Users className="w-3 h-3 text-sky-500" />
+                      <span>{node.isSiblingsCollapsed ? `+${node.siblingsCount}` : `${node.siblingsCount}`}</span>
+                    </button>
+                  )}
 
                   {/* Estate / Confession / Relatives Badge */}
                   <button
@@ -862,12 +1158,47 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         onOpenRelationManager(p.id);
                       }
                     }}
-                    className="w-5 h-5 rounded-md bg-[#334155]/60 hover:bg-emerald-700/80 text-slate-300 hover:text-white flex items-center justify-center border border-slate-600/50 transition-colors cursor-pointer"
+                    className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
+                      isLightCanvas
+                        ? 'bg-stone-100 hover:bg-emerald-600 text-stone-700 hover:text-white border-stone-300'
+                        : 'bg-[#334155]/60 hover:bg-emerald-700/80 text-slate-300 hover:text-white border-slate-600/50'
+                    }`}
                     title="Родинні зв'язки"
                   >
                     <GitFork className="w-3 h-3 rotate-90" />
                   </button>
                 </div>
+
+                {/* Bottom Collapse/Expand Children Branch Badge */}
+                {node.hasChildren && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCollapseChildren(p.id);
+                    }}
+                    className={`absolute -bottom-3 left-1/2 -translate-x-1/2 z-10 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer border ${
+                      node.isChildrenCollapsed
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 scale-105'
+                        : isLightCanvas
+                        ? 'bg-[#ece5d8] hover:bg-[#ded5c5] text-stone-900 border-[#cfc3af]'
+                        : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
+                    }`}
+                    title={node.isChildrenCollapsed ? `Розгорнути дітей (${node.childrenCount})` : 'Сховати дітей'}
+                  >
+                    {node.isChildrenCollapsed ? (
+                      <>
+                        <ChevronDown className="w-3 h-3" />
+                        <span>+Діти ({node.childrenCount})</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronUp className="w-3 h-3" />
+                        <span>Діти</span>
+                      </>
+                    )}
+                  </button>
+                )}
 
                 {/* Side Expand Chevron (if ancestors/descendants continue) */}
                 <button
@@ -910,7 +1241,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
         {/* Mini-Map / Overview Navigator (Image 2 style bottom-left) */}
         {showMinimap && layout.nodes.length > 0 && (
-          <div className="absolute bottom-4 left-4 z-20 p-2.5 rounded-xl bg-[#1a1e22]/90 backdrop-blur-md border border-[#323840] shadow-2xl">
+          <div className="absolute bottom-16 left-4 z-20 p-2.5 rounded-xl bg-[#1a1e22]/90 backdrop-blur-md border border-[#323840] shadow-2xl">
             <div className="flex items-center justify-between gap-2 mb-1.5 pb-1 border-b border-[#282d33]">
               <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider text-slate-400">
                 <Compass className="w-3 h-3 text-emerald-400" />
@@ -992,22 +1323,79 @@ export const TreeView: React.FC<TreeViewProps> = ({
         {!showMinimap && (
           <button
             onClick={() => setShowMinimap(true)}
-            className="absolute bottom-4 left-4 z-20 px-2.5 py-1.5 rounded-lg bg-[#1a1e22]/90 hover:bg-[#252a30] text-slate-300 text-xs font-medium border border-[#323840] shadow-lg flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="absolute bottom-6 left-4 z-20 px-2.5 py-1.5 rounded-lg bg-[#1a1e22]/90 hover:bg-[#252a30] text-slate-300 text-xs font-medium border border-[#323840] shadow-lg flex items-center gap-1.5 cursor-pointer transition-colors"
           >
             <Compass className="w-3.5 h-3.5 text-emerald-400" />
             <span>Міні-мапа</span>
           </button>
         )}
-      </div>
 
-      {/* PNG Branch Export/Import Modal */}
-      {isPngModalOpen && (
-        <PngBranchManagerModal
-          isOpen={isPngModalOpen}
-          onClose={() => setIsPngModalOpen(false)}
-          initialTab={pngModalTab}
-        />
-      )}
+        {/* Sleek Fixed Bottom Horizontal Scrollbar */}
+        {layout.nodes.length > 0 && (
+          <div
+            className={`absolute bottom-0 left-0 right-0 h-4 z-30 flex items-center select-none cursor-pointer border-t transition-colors shadow-xs ${
+              canvasTheme === 'parchment' || canvasTheme === 'light'
+                ? 'bg-[#e5dbc9] hover:bg-[#ded3bf] border-[#cfc2ad]'
+                : 'bg-[#121518] hover:bg-[#161a1e] border-[#292f38]'
+            }`}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              const ratio = Math.max(0, Math.min(1, clickX / rect.width));
+              const targetWorldX = treeBounds.minX + ratio * treeBounds.width;
+              setPan((prev) => ({
+                ...prev,
+                x: Math.round(containerDimensions.width / 2 - targetWorldX * scale)
+              }));
+            }}
+          >
+            {(() => {
+              const totalW = treeBounds.width;
+              const viewW = (containerDimensions.width || 1200) / scale;
+              const viewLeft = -pan.x / scale;
+              const thumbWPct = Math.max(6, Math.min(100, (viewW / totalW) * 100));
+              const thumbLeftPct = Math.max(0, Math.min(100 - thumbWPct, ((viewLeft - treeBounds.minX) / totalW) * 100));
+
+              return (
+                <div
+                  style={{
+                    left: `${thumbLeftPct}%`,
+                    width: `${thumbWPct}%`
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    const startX = e.clientX;
+                    const startPanX = pan.x;
+                    const onMouseMove = (moveEvent: MouseEvent) => {
+                      const deltaPixels = moveEvent.clientX - startX;
+                      const barWidth = containerDimensions.width || 1200;
+                      const worldDelta = (deltaPixels / barWidth) * treeBounds.width;
+                      setPan((prev) => ({
+                        ...prev,
+                        x: Math.round(startPanX - worldDelta * scale)
+                      }));
+                    };
+                    const onMouseUp = () => {
+                      window.removeEventListener('mousemove', onMouseMove);
+                      window.removeEventListener('mouseup', onMouseUp);
+                    };
+                    window.addEventListener('mousemove', onMouseMove);
+                    window.addEventListener('mouseup', onMouseUp);
+                  }}
+                  className={`absolute top-0.5 bottom-0.5 rounded-full transition-all cursor-grab active:cursor-grabbing flex items-center justify-center ${
+                    canvasTheme === 'parchment' || canvasTheme === 'light'
+                      ? 'bg-stone-500/80 hover:bg-emerald-600 active:bg-emerald-700 shadow-sm'
+                      : 'bg-slate-400/90 hover:bg-emerald-500 active:bg-emerald-400 shadow-sm'
+                  }`}
+                  title="Перетягніть для горизонтальної навігації деревом"
+                >
+                  <div className="w-4 h-1 rounded-full bg-white/40 pointer-events-none" />
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

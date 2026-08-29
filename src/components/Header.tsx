@@ -21,7 +21,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
   } = useGenealogy();
 
   const isMobileMenuOpen = useUIStore((s) => s.isMobileMenuOpen);
-  const setMobileMenuOpen = useUIStore((s) => s.setMobileMenuOpen);
+  const isSidebarVisible = useUIStore((s) => s.isSidebarVisible);
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
 
   const { currentUser, accessRequests, logout } = useAuthStore();
   const theme = getThemeConfig(themePalette);
@@ -45,14 +46,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
   return (
     <>
       <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-3 md:px-6 flex items-center justify-between gap-2 md:gap-4 flex-shrink-0 transition-colors duration-300`}>
-        {/* Mobile Hamburger Menu Toggle */}
+        {/* Left Sidebar Menu Toggle Button */}
         <button
-          id="mobile-drawer-toggle"
-          onClick={() => setMobileMenuOpen(!isMobileMenuOpen)}
-          className="md:hidden p-2 rounded-lg text-[#B88E3E] hover:bg-black/10 dark:hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
-          title="Відкрити навігаційне меню"
+          id="app-sidebar-toggle"
+          onClick={toggleSidebar}
+          className="p-2 rounded-xl text-[#B88E3E] hover:bg-black/10 dark:hover:bg-white/10 transition-colors shrink-0 cursor-pointer flex items-center gap-1.5"
+          title={isSidebarVisible ? "Сховати бічну панель" : "Відкрити бічну панель"}
         >
           <Menu className="w-5 h-5" />
+          <span className="hidden sm:inline text-xs font-semibold">Меню</span>
         </button>
 
         {/* Search Input */}

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   X,
   User,
@@ -18,11 +18,18 @@ import {
   Award,
   BookOpen,
   Tag,
-  Shield
+  Shield,
+  UserPlus,
+  Unlink,
+  Search,
+  Check,
+  RefreshCw,
+  Plus
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
+import { useGenealogy } from '../../../context/GenealogyContext';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 
@@ -35,6 +42,8 @@ interface PersonDetailModalProps {
   onDeletePerson: (id: string) => void;
   onChangeRoot: (id: string) => void;
   onOpenKinshipWith: (id: string) => void;
+  onOpenRelationManager?: (id: string) => void;
+  onAddRelation?: (type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling', targetPersonId: string) => void;
 }
 
 export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
@@ -45,12 +54,19 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   onEditPerson,
   onDeletePerson,
   onChangeRoot,
-  onOpenKinshipWith
+  onOpenKinshipWith,
+  onOpenRelationManager,
+  onAddRelation
 }) => {
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = React.useState(false);
+  const [parentPicker, setParentPicker] = useState<{ isOpen: boolean; type: 'father' | 'mother' } | null>(null);
+  const [parentSearchQuery, setParentSearchQuery] = useState('');
+  const [genderFilter, setGenderFilter] = useState<'all' | 'male' | 'female'>('all');
+
+  const { updatePerson, persons } = useGenealogy();
 
   if (!personId) return null;
   const person = database.persons[personId];
@@ -79,6 +95,95 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
     .filter(Boolean);
 
   const estate = person.estateOrSocialStatus || person.estate || person.socialStatus;
+
+  // Handle parent linking
+  const handleLinkParent = (parentType: 'father' | 'mother', selectedParentId: string) => {
+    const selectedParent = database.persons[selectedParentId];
+    if (!selectedParent) return;
+
+    if (parentType === 'father') {
+      updatePerson({
+        ...person,
+        fatherId: selectedParentId
+      });
+      updatePerson({
+        ...selectedParent,
+        childrenIds: Array.from(new Set([...(selectedParent.childrenIds || []), person.id]))
+      });
+    } else {
+      updatePerson({
+        ...person,
+        motherId: selectedParentId
+      });
+      updatePerson({
+        ...selectedParent,
+        childrenIds: Array.from(new Set([...(selectedParent.childrenIds || []), person.id]))
+      });
+    }
+    setParentPicker(null);
+    setParentSearchQuery('');
+  };
+
+  // Handle parent unlinking
+  const handleUnlinkParent = (parentType: 'father' | 'mother') => {
+    if (parentType === 'father') {
+      const formerId = person.fatherId || parentFamily?.husbandId;
+      updatePerson({
+        ...person,
+        fatherId: undefined
+      });
+      if (formerId && database.persons[formerId]) {
+        const former = database.persons[formerId];
+        updatePerson({
+          ...former,
+          childrenIds: (former.childrenIds || []).filter((cid) => cid !== person.id)
+        });
+      }
+    } else {
+      const formerId = person.motherId || parentFamily?.wifeId;
+      updatePerson({
+        ...person,
+        motherId: undefined
+      });
+      if (formerId && database.persons[formerId]) {
+        const former = database.persons[formerId];
+        updatePerson({
+          ...former,
+          childrenIds: (former.childrenIds || []).filter((cid) => cid !== person.id)
+        });
+      }
+    }
+  };
+
+  // Filter candidates for parent picker
+  const filteredCandidates = useMemo(() => {
+    if (!parentPicker?.isOpen) return [];
+    const targetType = parentPicker.type;
+    const q = parentSearchQuery.toLowerCase().trim();
+
+    return Object.values(database.persons).filter((p) => {
+      if (p.id === person.id) return false;
+      // Filter by type or active gender tab
+      const isCandidateMale = p.gender === 'male' || p.gender === 'M';
+      const isCandidateFemale = p.gender === 'female' || p.gender === 'F';
+
+      if (genderFilter === 'male' && !isCandidateMale) return false;
+      if (genderFilter === 'female' && !isCandidateFemale) return false;
+      if (genderFilter === 'all') {
+        if (targetType === 'father' && isCandidateFemale) return false;
+        if (targetType === 'mother' && isCandidateMale) return false;
+      }
+
+      if (!q) return true;
+
+      const fullName = getFullName(p).toLowerCase();
+      const idMatch = p.id.toLowerCase().includes(q);
+      const birthMatch = p.birthYear?.toString().includes(q) || p.birthDate?.toLowerCase().includes(q);
+      const placeMatch = p.birthPlace?.toLowerCase().includes(q) || p.deathPlace?.toLowerCase().includes(q);
+
+      return fullName.includes(q) || idMatch || Boolean(birthMatch) || Boolean(placeMatch);
+    });
+  }, [parentPicker, parentSearchQuery, genderFilter, database.persons, person.id]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
@@ -306,56 +411,236 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           )}
 
           {/* Parents Section */}
-          <div className="space-y-2">
-            <span className={`text-xs font-semibold ${theme.textMuted} uppercase tracking-wider block`}>
-              Батьки:
-            </span>
-            <div className="grid grid-cols-2 gap-3">
-              {/* Father */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-semibold ${theme.textMuted} uppercase tracking-wider block`}>
+                Батьки:
+              </span>
+              {onOpenRelationManager && (
+                <button
+                  type="button"
+                  onClick={() => onOpenRelationManager(person.id)}
+                  className={`text-[11px] font-medium px-2 py-0.5 rounded flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer`}
+                  title="Відкрити повний менеджер родинних зв'язків"
+                >
+                  <UserPlus className="w-3 h-3" />
+                  <span>Керувати зв'язками</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Father Card */}
               <div
-                onClick={() => father && onSelectPerson(father.id)}
-                className={`p-3 rounded-lg border text-xs cursor-pointer transition-colors ${
+                className={`p-3 rounded-xl border text-xs transition-all relative group ${
                   father
-                    ? `${theme.surfaceBg} ${isDark ? 'border-blue-900/40 hover:border-blue-700' : 'border-blue-200 hover:border-blue-400'}`
-                    : `${theme.surfaceBg} border-dashed ${theme.borderSubtle} ${theme.textMuted}`
+                    ? `${theme.surfaceBg} ${isDark ? 'border-blue-900/40 hover:border-blue-700' : 'border-blue-200 hover:border-blue-400 shadow-xs'}`
+                    : `${theme.surfaceBg} border-dashed ${isDark ? 'border-slate-700' : 'border-neutral-300'}`
                 }`}
               >
-                <span className={`text-[10px] ${isDark ? 'text-blue-400' : 'text-blue-700'} font-semibold block mb-0.5`}>Батько</span>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className={`text-[11px] ${isDark ? 'text-blue-400' : 'text-blue-700'} font-bold flex items-center gap-1`}>
+                    <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                    Батько
+                  </span>
+
+                  {father ? (
+                    <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditPerson(father.id);
+                        }}
+                        className={`p-1 rounded hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer`}
+                        title="Редагувати дані батька"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setParentPicker({ isOpen: true, type: 'father' });
+                          setGenderFilter('male');
+                        }}
+                        className={`p-1 rounded hover:bg-sky-500/10 text-sky-600 dark:text-sky-400 transition-colors cursor-pointer`}
+                        title="Змінити батька (обрати іншого)"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Від'єднати батька «${getFullName(father)}»?`)) {
+                            handleUnlinkParent('father');
+                          }
+                        }}
+                        className={`p-1 rounded hover:bg-rose-500/10 text-rose-500 transition-colors cursor-pointer`}
+                        title="Від'єднати батька"
+                      >
+                        <Unlink className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
                 {father ? (
-                  <div>
-                    <div className={`font-semibold ${theme.textPrimary} truncate`}>
+                  <div
+                    onClick={() => onSelectPerson(father.id)}
+                    className="cursor-pointer group/link hover:opacity-90 transition-opacity"
+                  >
+                    <div className={`font-bold ${theme.textPrimary} text-[13px] leading-tight group-hover/link:text-blue-500 transition-colors truncate`}>
                       {getFullName(father)}
                     </div>
-                    <div className={`text-[10px] ${theme.textMuted} font-mono`}>
-                      {father.birthYear || '?'} — {father.deathYear || '?'}
+                    <div className={`text-[11px] ${theme.textMuted} font-mono mt-0.5`}>
+                      {father.birthYear || father.birthDate || '?'} — {father.deathYear || father.deathDate || (father.isLiving ? 'донині' : '?')}
                     </div>
+                    {father.occupation && (
+                      <div className={`text-[10px] ${theme.textSecondary} truncate mt-0.5 italic`}>
+                        {father.occupation}
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <span className="italic">Не вказаний</span>
+                  <div className="space-y-2 py-0.5">
+                    <div className={`text-[11px] ${theme.textMuted} italic`}>
+                      Батько не вказаний
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setParentPicker({ isOpen: true, type: 'father' });
+                          setGenderFilter('male');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                      >
+                        <Search className="w-3 h-3" />
+                        <span>Обрати з бази</span>
+                      </button>
+                      {onAddRelation && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onAddRelation('father', person.id);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Створити</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
 
-              {/* Mother */}
+              {/* Mother Card */}
               <div
-                onClick={() => mother && onSelectPerson(mother.id)}
-                className={`p-3 rounded-lg border text-xs cursor-pointer transition-colors ${
+                className={`p-3 rounded-xl border text-xs transition-all relative group ${
                   mother
                     ? `${theme.surfaceBg} ${isDark ? 'border-rose-900/40 hover:border-rose-700' : 'border-rose-200 hover:border-rose-400'}`
-                    : `${theme.surfaceBg} border-dashed ${theme.borderSubtle} ${theme.textMuted}`
+                    : `${theme.surfaceBg} border-dashed ${isDark ? 'border-slate-700' : 'border-neutral-300'}`
                 }`}
               >
-                <span className={`text-[10px] ${isDark ? 'text-rose-400' : 'text-rose-700'} font-semibold block mb-0.5`}>Мати</span>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className={`text-[11px] ${isDark ? 'text-rose-400' : 'text-rose-700'} font-bold flex items-center gap-1`}>
+                    <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
+                    Мати
+                  </span>
+
+                  {mother ? (
+                    <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditPerson(mother.id);
+                        }}
+                        className={`p-1 rounded hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer`}
+                        title="Редагувати дані матері"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setParentPicker({ isOpen: true, type: 'mother' });
+                          setGenderFilter('female');
+                        }}
+                        className={`p-1 rounded hover:bg-sky-500/10 text-sky-600 dark:text-sky-400 transition-colors cursor-pointer`}
+                        title="Змінити матір (обрати іншу)"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Від'єднати матір «${getFullName(mother)}»?`)) {
+                            handleUnlinkParent('mother');
+                          }
+                        }}
+                        className={`p-1 rounded hover:bg-rose-500/10 text-rose-500 transition-colors cursor-pointer`}
+                        title="Від'єднати матір"
+                      >
+                        <Unlink className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
                 {mother ? (
-                  <div>
-                    <div className={`font-semibold ${theme.textPrimary} truncate`}>
+                  <div
+                    onClick={() => onSelectPerson(mother.id)}
+                    className="cursor-pointer group/link hover:opacity-90 transition-opacity"
+                  >
+                    <div className={`font-bold ${theme.textPrimary} text-[13px] leading-tight group-hover/link:text-rose-500 transition-colors truncate`}>
                       {getFullName(mother)}
                     </div>
-                    <div className={`text-[10px] ${theme.textMuted} font-mono`}>
-                      {mother.birthYear || '?'} — {mother.deathYear || '?'}
+                    <div className={`text-[11px] ${theme.textMuted} font-mono mt-0.5`}>
+                      {mother.birthYear || mother.birthDate || '?'} — {mother.deathYear || mother.deathDate || (mother.isLiving ? 'донині' : '?')}
                     </div>
+                    {(mother.name?.maidenName || mother.maidenName) && (
+                      <div className={`text-[10px] ${theme.textSecondary} truncate mt-0.5`}>
+                        Дівоче: {mother.name?.maidenName || mother.maidenName}
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <span className="italic">Не вказана</span>
+                  <div className="space-y-2 py-0.5">
+                    <div className={`text-[11px] ${theme.textMuted} italic`}>
+                      Мати не вказана
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setParentPicker({ isOpen: true, type: 'mother' });
+                          setGenderFilter('female');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                      >
+                        <Search className="w-3 h-3" />
+                        <span>Обрати з бази</span>
+                      </button>
+                      {onAddRelation && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onAddRelation('mother', person.id);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Створити</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -484,6 +769,192 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Parent Picker Dialog */}
+      {parentPicker?.isOpen && (
+        <div className="fixed inset-0 z-60 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[85vh]`}>
+            {/* Modal Header */}
+            <div className={`p-4 border-b ${theme.borderSubtle} flex items-center justify-between ${isDark ? 'bg-slate-900/90' : 'bg-neutral-50'}`}>
+              <div className="flex items-center gap-2">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${parentPicker.type === 'father' ? 'bg-blue-500/10 text-blue-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className={`text-sm font-bold ${theme.textPrimary}`}>
+                    {parentPicker.type === 'father' ? 'Вибрати батька' : 'Вибрати матір'}
+                  </h3>
+                  <p className={`text-[11px] ${theme.textMuted}`}>
+                    Для: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{getFullName(person)}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setParentPicker(null);
+                  setParentSearchQuery('');
+                }}
+                className={`p-1.5 rounded-lg ${theme.textMuted} hover:${theme.textPrimary} hover:bg-neutral-200 dark:hover:bg-slate-800 transition-colors`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Search and Filters */}
+            <div className={`p-3 border-b ${theme.borderSubtle} space-y-2`}>
+              <div className="relative">
+                <Search className={`w-4 h-4 absolute left-3 top-2.5 ${theme.textMuted}`} />
+                <input
+                  type="text"
+                  value={parentSearchQuery}
+                  onChange={(e) => setParentSearchQuery(e.target.value)}
+                  placeholder="Пошук за прізвищем, ім'ям, роком чи ID..."
+                  autoFocus
+                  className={`w-full pl-9 pr-8 py-2 rounded-xl text-xs border ${theme.borderSubtle} ${theme.surfaceBg} ${theme.textPrimary} focus:outline-none focus:ring-2 focus:ring-emerald-500`}
+                />
+                {parentSearchQuery && (
+                  <button
+                    onClick={() => setParentSearchQuery('')}
+                    className={`absolute right-2.5 top-2.5 text-xs ${theme.textMuted} hover:${theme.textPrimary}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className={`${theme.textMuted} text-[10px] uppercase font-semibold mr-1`}>Фільтр:</span>
+                <button
+                  type="button"
+                  onClick={() => setGenderFilter(parentPicker.type === 'father' ? 'male' : 'female')}
+                  className={`px-2 py-0.5 rounded-md font-medium transition-colors ${
+                    genderFilter !== 'all'
+                      ? 'bg-emerald-600 text-white'
+                      : `${theme.surfaceBg} ${theme.textSecondary} border ${theme.borderSubtle}`
+                  }`}
+                >
+                  {parentPicker.type === 'father' ? 'Лише чоловіки' : 'Лише жінки'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGenderFilter('all')}
+                  className={`px-2 py-0.5 rounded-md font-medium transition-colors ${
+                    genderFilter === 'all'
+                      ? 'bg-emerald-600 text-white'
+                      : `${theme.surfaceBg} ${theme.textSecondary} border ${theme.borderSubtle}`
+                  }`}
+                >
+                  Всі особи
+                </button>
+              </div>
+            </div>
+
+            {/* Candidates List */}
+            <div className="p-3 overflow-y-auto flex-1 divide-y divide-neutral-200 dark:divide-slate-800/60 space-y-1">
+              {filteredCandidates.length === 0 ? (
+                <div className="py-8 text-center space-y-3">
+                  <User className={`w-8 h-8 mx-auto ${theme.textMuted} opacity-40`} />
+                  <div className={`text-xs ${theme.textMuted}`}>
+                    {parentSearchQuery
+                      ? 'Не знайдено жодної особи за цим запитом'
+                      : 'Немає доступних кандидатів'}
+                  </div>
+                  {onAddRelation && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const t = parentPicker.type;
+                        setParentPicker(null);
+                        onAddRelation(t, person.id);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Створити {parentPicker.type === 'father' ? 'нового батька' : 'нову матір'}</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                filteredCandidates.map((candidate) => {
+                  const isCandMale = candidate.gender === 'male' || candidate.gender === 'M';
+                  return (
+                    <div
+                      key={candidate.id}
+                      className={`p-2.5 rounded-xl hover:${theme.surfaceBg} flex items-center justify-between gap-3 transition-colors cursor-pointer border border-transparent hover:${theme.borderSubtle}`}
+                      onClick={() => handleLinkParent(parentPicker.type, candidate.id)}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                            isCandMale
+                              ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
+                              : 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                          }`}
+                        >
+                          {isCandMale ? 'Ч' : 'Ж'}
+                        </div>
+                        <div className="min-w-0">
+                          <div className={`text-xs font-bold ${theme.textPrimary} truncate`}>
+                            {getFullName(candidate)}
+                          </div>
+                          <div className={`text-[10px] ${theme.textMuted} font-mono flex items-center gap-1.5`}>
+                            <span>
+                              {candidate.birthYear || candidate.birthDate || '?'} — {candidate.deathYear || candidate.deathDate || (candidate.isLiving ? 'живий(а)' : '?')}
+                            </span>
+                            <span className="opacity-50">•</span>
+                            <span className="opacity-75">{candidate.id}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleLinkParent(parentPicker.type, candidate.id);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold flex items-center gap-1 shrink-0 transition-colors shadow-xs cursor-pointer"
+                      >
+                        <Check className="w-3 h-3" />
+                        <span>Обрати</span>
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className={`p-3 border-t ${theme.borderSubtle} flex items-center justify-between ${isDark ? 'bg-slate-900/60' : 'bg-neutral-50'}`}>
+              {onAddRelation ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const t = parentPicker.type;
+                    setParentPicker(null);
+                    onAddRelation(t, person.id);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-600/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Створити нову особу</span>
+                </button>
+              ) : <div />}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setParentPicker(null);
+                  setParentSearchQuery('');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-200 dark:hover:bg-slate-800 transition-colors cursor-pointer`}
+              >
+                Скасувати
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Confirm Delete Modal */}
       {isConfirmDeleteOpen && person && (

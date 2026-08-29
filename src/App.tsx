@@ -8,7 +8,6 @@ import { GenealogyProvider, useUIStore } from './context/GenealogyContext';
 import { useAuthStore } from './stores/useAuthStore';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
-import { BottomNav } from './components/BottomNav';
 import { FamilyTreeView } from './components/Tree/FamilyTreeView';
 import { RodovidView } from './rodovid/RodovidView';
 import { PersonDetailModal } from './components/Tree/PersonDetailModal';
@@ -30,6 +29,7 @@ import { PersonsListView } from './components/PersonsListView';
 import { TimelineView } from './components/TimelineView';
 import { ExperimentView } from './components/ExperimentView';
 import { AccessLockScreen } from './components/AccessLockScreen';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { getThemeConfig } from './utils/theme';
 
 function AppContent() {
@@ -82,7 +82,7 @@ function AppContent() {
         <Header onOpenAddPerson={handleOpenAddModal} />
 
         {/* Tab Router */}
-        <main className="flex-1 flex flex-col h-full min-h-0 relative pb-16 md:pb-0 overflow-hidden">
+        <main className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden">
           {activeTab === 'tree' && <RodovidView />}
 
           {activeTab === 'research' && <ResearchView />}
@@ -109,9 +109,6 @@ function AppContent() {
           {activeTab === 'experiment' && <ExperimentView />}
         </main>
       </div>
-
-      {/* Mobile Bottom Navigation Bar */}
-      <BottomNav />
 
       {/* Inspect Person Profile Modal */}
       {inspectPersonId && (
@@ -153,8 +150,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <GenealogyProvider>
-      <AppContent />
-    </GenealogyProvider>
+    <ErrorBoundary>
+      <GenealogyProvider>
+        <AppContent />
+      </GenealogyProvider>
+    </ErrorBoundary>
   );
 }

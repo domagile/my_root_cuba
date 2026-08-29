@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Palette, 
   Download, 
@@ -31,12 +31,16 @@ import {
   Mail,
   User,
   AlertCircle,
-  KeyRound
+  KeyRound,
+  History,
+  Save,
+  RotateCcw
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { ThemePalette, UserRole } from '../types';
+import { getAllSnapshots, saveSnapshot, deleteSnapshot, DataSnapshot } from '../utils/persistentBackup';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -88,6 +92,75 @@ export const SettingsView: React.FC = () => {
   // Access Lock & Secret Link states
   const [pinEditInput, setPinEditInput] = useState(accessLockConfig?.pinCode || '1234');
   const [copyLinkSuccess, setCopyLinkSuccess] = useState(false);
+
+  // Snapshots state
+  const [snapshots, setSnapshots] = useState<DataSnapshot[]>([]);
+  const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
+  const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null);
+
+  const loadSnapshotsList = async () => {
+    try {
+      const list = await getAllSnapshots();
+      setSnapshots(list);
+    } catch {}
+  };
+
+  useEffect(() => {
+    loadSnapshotsList();
+  }, []);
+
+  const handleCreateSnapshotNow = async () => {
+    setIsSavingSnapshot(true);
+    try {
+      let rawFamilies: any = {};
+      let rawSources: any = {};
+      let rawEvents: any = {};
+      try {
+        const famStr = localStorage.getItem('genealogy_workstation_data_v2_families');
+        if (famStr) rawFamilies = JSON.parse(famStr);
+        const srcStr = localStorage.getItem('genealogy_workstation_data_v2_sources');
+        if (srcStr) rawSources = JSON.parse(srcStr);
+        const evtStr = localStorage.getItem('genealogy_workstation_data_v2_events');
+        if (evtStr) rawEvents = JSON.parse(evtStr);
+      } catch {}
+
+      await saveSnapshot(
+        {
+          persons,
+          families: rawFamilies,
+          sources: rawSources,
+          events: rawEvents,
+          whitelist
+        },
+        'Ручна контрольна точка'
+      );
+      await loadSnapshotsList();
+      setSnapshotMsg('Контрольну точку збережено в незалежне сховище!');
+      setTimeout(() => setSnapshotMsg(null), 3500);
+    } catch (e) {
+      console.warn(e);
+    } finally {
+      setIsSavingSnapshot(false);
+    }
+  };
+
+  const handleRestoreSnapshot = (snap: DataSnapshot) => {
+    if (!snap.data) return;
+    try {
+      if (snap.data.persons) {
+        importJsonData(JSON.stringify(snap.data));
+        setSnapshotMsg(`Архів успішно відновлено з точки ${new Date(snap.timestamp).toLocaleString('uk-UA')}`);
+        setTimeout(() => setSnapshotMsg(null), 4000);
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const handleDeleteSnapshot = async (id: string) => {
+    await deleteSnapshot(id);
+    await loadSnapshotsList();
+  };
 
   const themeList = Object.values(THEME_CONFIGS);
   const lightThemes = themeList.filter(t => t.category === 'light');
@@ -330,6 +403,115 @@ export const SettingsView: React.FC = () => {
                 <RefreshCw className="w-4 h-4" />
                 <span>Відновити демо-архів</span>
               </button>
+            )}
+          </div>
+        </div>
+
+        {/* Multi-layer Persistence & Snapshot Points */}
+        <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-4`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-600 flex items-center justify-center">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className={`text-sm font-bold ${theme.cardTitle} flex items-center gap-2`}>
+                  <span>Подвійний захист від втрати даних</span>
+                  <span className="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-full font-bold">
+                    LocalStorage + IndexedDB Активні
+                  </span>
+                </h3>
+                <p className={`text-xs ${theme.cardSubtext} mt-0.5`}>
+                  Усі додані персони, родичі, зв'язки та списки адміністраторів автоматично дублюються та фіксуються в контрольній точці.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleCreateSnapshotNow}
+              disabled={isSavingSnapshot}
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs shadow-xs transition-all cursor-pointer hover:opacity-90 disabled:opacity-50`}
+            >
+              <Save className="w-4 h-4" />
+              <span>{isSavingSnapshot ? 'Збереження...' : 'Створити контрольну точку'}</span>
+            </button>
+          </div>
+
+          {snapshotMsg && (
+            <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{snapshotMsg}</span>
+            </div>
+          )}
+
+          {/* Snapshots list */}
+          <div className="space-y-2 pt-2 border-t border-black/10">
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-bold uppercase tracking-wider text-[#B88E3E] flex items-center gap-1.5`}>
+                <History className="w-3.5 h-3.5" />
+                <span>Історія авто-збережень та контрольних точок ({snapshots.length})</span>
+              </span>
+            </div>
+
+            {snapshots.length === 0 ? (
+              <p className={`text-xs ${theme.cardSubtext} py-3 text-center italic`}>
+                Поки немає створених контрольних точок. При змінах у дереві вони створюються автоматично кожні кілька секунд.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {snapshots.slice(0, 10).map((snap) => {
+                  const dateStr = new Date(snap.timestamp).toLocaleString('uk-UA', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  });
+
+                  return (
+                    <div
+                      key={snap.id}
+                      className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 flex items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Clock className="w-4 h-4 text-[#B88E3E] shrink-0" />
+                        <div>
+                          <div className="font-bold flex items-center gap-2">
+                            <span>{dateStr}</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-black/10 dark:bg-white/10 opacity-80">
+                              {snap.note}
+                            </span>
+                          </div>
+                          <div className={`text-[11px] ${theme.cardSubtext} flex items-center gap-3 mt-0.5`}>
+                            <span>👥 {snap.personsCount} осіб</span>
+                            <span>💍 {snap.familiesCount} родин</span>
+                            <span>🛡️ {snap.adminsCount} адмінів</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleRestoreSnapshot(snap)}
+                          className="px-3 py-1.5 bg-[#B88E3E]/20 hover:bg-[#B88E3E]/30 text-[#B88E3E] rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                          title="Відновити архів з цієї контрольної точки"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Відновити</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSnapshot(snap.id)}
+                          className="p-1.5 text-rose-500/60 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                          title="Видалити контрольну точку"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
