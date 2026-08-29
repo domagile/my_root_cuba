@@ -247,6 +247,21 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const unsubscribe = subscribeToProjectData((cloudData) => {
       if (!cloudData) return;
       if (cloudData.persons && Array.isArray(cloudData.persons)) setPersons(cloudData.persons);
+      if (cloudData.families && Array.isArray(cloudData.families)) {
+        const famMap: Record<string, any> = {};
+        cloudData.families.forEach((f: any) => { if (f && f.id) famMap[f.id] = f; });
+        setFamilies(famMap);
+      }
+      if (cloudData.events && Array.isArray(cloudData.events)) {
+        const evMap: Record<string, any> = {};
+        cloudData.events.forEach((e: any) => { if (e && e.id) evMap[e.id] = e; });
+        setEvents(evMap);
+      }
+      if (cloudData.sources && Array.isArray(cloudData.sources)) {
+        const srcMap: Record<string, any> = {};
+        cloudData.sources.forEach((s: any) => { if (s && s.id) srcMap[s.id] = s; });
+        setSources(srcMap);
+      }
       if (cloudData.metricRecords && Array.isArray(cloudData.metricRecords)) setMetricRecords(cloudData.metricRecords);
       if (cloudData.documents && Array.isArray(cloudData.documents)) setDocuments(cloudData.documents);
       if (cloudData.tasks && Array.isArray(cloudData.tasks)) setTasks(cloudData.tasks);
@@ -259,13 +274,16 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => {
       unsubscribe();
     };
-  }, [setPersons, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries]);
+  }, [setPersons, setFamilies, setEvents, setSources, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries]);
 
   // Debounced auto-sync to Firestore
   useEffect(() => {
     const timer = setTimeout(() => {
       saveProjectDataToCloud({
         persons,
+        families: Object.values(families || {}),
+        events: Object.values(events || {}),
+        sources: Object.values(sources || {}),
         metricRecords,
         documents,
         tasks,
@@ -278,7 +296,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }, 2500);
 
     return () => clearTimeout(timer);
-  }, [persons, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries]);
+  }, [persons, families, events, sources, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries]);
 
   // Export JSON
   const exportJsonData = useCallback(() => {

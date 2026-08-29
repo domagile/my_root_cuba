@@ -302,6 +302,27 @@ export function calculateFanChart(
   const root = database.persons[rootPersonId];
   if (!root) return sectors;
 
+  // 4 Gramps Quadrant branch colors:
+  // Paternal Grandfather branch (Ahnentafel 4..), Paternal Grandmother branch (Ahnentafel 5..),
+  // Maternal Grandfather branch (Ahnentafel 6..), Maternal Grandmother branch (Ahnentafel 7..)
+  function getBranchColor(ahnentafel: number, gen: number, person: Person): string {
+    if (gen === 0) return '#059669'; // Emerald for root person
+    if (gen === 1) {
+      return person.gender === 'female' || person.gender === 'F' ? '#EC4899' : '#3B82F6';
+    }
+    // Compute root ancestor at generation 2 (ahnentafel 4, 5, 6, 7)
+    let anc2 = ahnentafel;
+    while (anc2 >= 8) {
+      anc2 = Math.floor(anc2 / 2);
+    }
+    if (anc2 === 4) return '#2563EB'; // Blue (Paternal Grandfather)
+    if (anc2 === 5) return '#06B6D4'; // Cyan (Paternal Grandmother)
+    if (anc2 === 6) return '#F97316'; // Amber / Orange (Maternal Grandfather)
+    if (anc2 === 7) return '#E11D48'; // Rose / Red (Maternal Grandmother)
+
+    return person.gender === 'female' || person.gender === 'F' ? '#F43F5E' : '#3B82F6';
+  }
+
   function addAncestorToFan(
     person: Person,
     gen: number,
@@ -314,6 +335,8 @@ export function calculateFanChart(
     const innerRadius = gen === 0 ? 0 : innerRadiusBase + (gen - 1) * ringWidth;
     const outerRadius = innerRadiusBase + gen * ringWidth;
 
+    const branchColor = getBranchColor(ahnentafel, gen, person);
+
     sectors.push({
       ahnentafelNumber: ahnentafel,
       person,
@@ -322,7 +345,7 @@ export function calculateFanChart(
       outerRadius,
       startAngle,
       endAngle,
-      fillColor: person.gender === 'female' || person.gender === 'F' ? '#F43F5E' : '#3B82F6'
+      fillColor: branchColor
     });
 
     const midAngle = (startAngle + endAngle) / 2;
@@ -350,6 +373,9 @@ export function calculateFanChart(
     }
   }
 
-  addAncestorToFan(root, 0, 1, 0, 360);
+  // Semicircle / Full fan in radians from PI to 2*PI (or 0 to 2*PI). Semicircle: Math.PI to 2*Math.PI
+  // Or standard top semicircle for classic fan chart: 180 degrees (Math.PI) to 360 degrees (2*Math.PI)
+  // Let's use Math.PI to 2*Math.PI (180° arc) or 0 to 2*Math.PI (full 360° circle)
+  addAncestorToFan(root, 0, 1, Math.PI, 2 * Math.PI);
   return sectors;
 }

@@ -4,12 +4,13 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, User, Plus, Sparkles, GitFork, ArrowRight, Heart } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, User, Plus, Sparkles, GitFork, ArrowRight, Heart, Download, Upload, Image as ImageIcon } from 'lucide-react';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
 import { Person } from '../../types';
 import { RelationManagerModal } from './RelationManagerModal';
 import { AddPersonModal } from './AddPersonModal';
+import { PngBranchManagerModal } from './PngBranchManagerModal';
 
 export const FamilyTreeView: React.FC = () => {
   const { persons, selectedPersonId, setSelectedPersonId, themePalette } = useGenealogy();
@@ -22,6 +23,9 @@ export const FamilyTreeView: React.FC = () => {
     type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
     targetPersonId: string;
   } | null>(null);
+
+  const [isPngModalOpen, setIsPngModalOpen] = useState<boolean>(false);
+  const [pngModalTab, setPngModalTab] = useState<'export' | 'import'>('export');
 
   const activePerson = persons.find((p) => p.id === selectedPersonId) || persons[0];
 
@@ -45,6 +49,32 @@ export const FamilyTreeView: React.FC = () => {
     <div className={`flex-1 flex flex-col h-full overflow-hidden ${theme.appBg} relative`}>
       {/* Floating Toolbar */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/90 dark:bg-slate-850/90 backdrop-blur-md border border-neutral-200 dark:border-neutral-700 shadow-xl">
+        <button
+          onClick={() => {
+            setPngModalTab('export');
+            setIsPngModalOpen(true);
+          }}
+          className="px-2.5 py-1.5 rounded-xl bg-[#B88E3E]/10 hover:bg-[#B88E3E]/20 text-[#B88E3E] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-[#B88E3E]/30"
+          title="Експортувати дерево в PNG"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">PNG Експорт</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setPngModalTab('import');
+            setIsPngModalOpen(true);
+          }}
+          className="px-2.5 py-1.5 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-500 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-emerald-500/30"
+          title="Додати гілку з PNG фото/схеми"
+        >
+          <Upload className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">+ Гілка з PNG</span>
+        </button>
+
+        <div className="w-[1px] h-5 bg-neutral-300 dark:bg-neutral-700 mx-0.5" />
+
         <button
           onClick={() => setScale((s) => Math.min(s + 0.15, 2))}
           className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
@@ -258,6 +288,13 @@ export const FamilyTreeView: React.FC = () => {
           onClose={() => setAddRelationData(null)}
         />
       )}
+
+      {/* PNG Smart Branch & Export Modal */}
+      <PngBranchManagerModal
+        isOpen={isPngModalOpen}
+        onClose={() => setIsPngModalOpen(false)}
+        initialTab={pngModalTab}
+      />
     </div>
   );
 };

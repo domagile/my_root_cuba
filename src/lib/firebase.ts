@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
   doc,
@@ -17,17 +17,62 @@ import {
   QueryDocumentSnapshot,
   Firestore
 } from 'firebase/firestore';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  User as FirebaseUser,
+  Auth
+} from 'firebase/auth';
+import firebaseConfigRaw from '../../firebase-applet-config.json';
 
 export const DEFAULT_PROJECT_ID = 'defaultProject';
 
+let cachedApp: FirebaseApp | null = null;
 let cachedDb: Firestore | null = null;
+let cachedAuth: Auth | null = null;
+
+export interface FirebaseAppConfig {
+  apiKey?: string;
+  authDomain?: string;
+  projectId?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  firestoreDatabaseId?: string;
+  [key: string]: any;
+}
+
+export function getFirebaseConfig(): FirebaseAppConfig {
+  return (firebaseConfigRaw as FirebaseAppConfig) || {};
+}
+
+export function isFirebaseConfigured(): boolean {
+  const cfg = getFirebaseConfig();
+  return Boolean(cfg && cfg.apiKey && cfg.projectId);
+}
+
+export function getFirebaseApp(): FirebaseApp | null {
+  if (cachedApp) return cachedApp;
+  try {
+    const config = getFirebaseConfig();
+    if (!config || !config.apiKey) return null;
+    cachedApp = !getApps().length ? initializeApp(config) : getApp();
+    return cachedApp;
+  } catch (e) {
+    console.warn('Firebase app init warning:', e);
+    return null;
+  }
+}
 
 export function getDbInstance(): Firestore | null {
   if (cachedDb) return cachedDb;
   try {
-    const config: any = {};
-    if (!config || !config.apiKey) return null;
-    const app = !getApps().length ? initializeApp(config) : getApp();
+    const app = getFirebaseApp();
+    if (!app) return null;
+    const config = getFirebaseConfig();
     if (config.firestoreDatabaseId) {
       try {
         cachedDb = getFirestore(app, config.firestoreDatabaseId);
@@ -38,9 +83,22 @@ export function getDbInstance(): Firestore | null {
       cachedDb = getFirestore(app);
     }
   } catch (e) {
-    console.warn('Firebase initialization warning:', e);
+    console.warn('Firebase Firestore initialization warning:', e);
   }
   return cachedDb;
+}
+
+export function getFirebaseAuth(): Auth | null {
+  if (cachedAuth) return cachedAuth;
+  try {
+    const app = getFirebaseApp();
+    if (!app) return null;
+    cachedAuth = getAuth(app);
+    return cachedAuth;
+  } catch (e) {
+    console.warn('Firebase Auth initialization warning:', e);
+    return null;
+  }
 }
 
 export { cachedDb as db };
@@ -71,6 +129,51 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   return errInfo;
 }
 
+// Authentication Helpers
+export async function signInWithGoogle(): Promise<{ user: FirebaseUser | null; error: string | null }> {
+  try {
+    const auth = getFirebaseAuth();
+    if (!auth) {
+      return { user: null, error: 'Firebase Auth не налаштовано' };
+    }
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const res = await signInWithPopup(auth, provider);
+    return { user: res.user, error: null };
+  } catch (err: any) {
+    console.warn('Google sign-in error:', err);
+    return { user: null, error: err?.message || 'Помилка авторизації через Google' };
+  }
+}
+
+export async function signOutFirebase(): Promise<boolean> {
+  try {
+    const auth = getFirebaseAuth();
+    if (auth) {
+      await signOut(auth);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function subscribeToFirebaseAuth(callback: (user: FirebaseUser | null) => void): () => void {
+  try {
+    const auth = getFirebaseAuth();
+    if (!auth) {
+      callback(null);
+      return () => {};
+    }
+    return onAuthStateChanged(auth, (user) => {
+      callback(user);
+    });
+  } catch {
+    callback(null);
+    return () => {};
+  }
+}
+
 // Subcollection path helpers
 export const getProjectPath = (projectId: string = DEFAULT_PROJECT_ID) => `projects/${projectId}`;
 export const getSubcollectionPath = (subcollection: string, projectId: string = DEFAULT_PROJECT_ID) => 
@@ -88,10 +191,10 @@ export async function saveEntityDoc(
 ): Promise<boolean> {
   try {
     const db = getDbInstance();
-    if (!db) return false;
+    if (!db || !itemId) return false;
     const cleanData = JSON.parse(JSON.stringify(data));
     cleanData.updatedAt = cleanData.updatedAt || new Date().toISOString();
-    const docRef = doc(db, 'projects', projectId, subcollection, itemId);
+    const docRef = doc(db, 'projects', projectId, subcollection, String(itemId));
     await setDoc(docRef, cleanData, { merge: true });
     return true;
   } catch (err) {
@@ -110,8 +213,8 @@ export async function deleteEntityDoc(
 ): Promise<boolean> {
   try {
     const db = getDbInstance();
-    if (!db) return false;
-    const docRef = doc(db, 'projects', projectId, subcollection, itemId);
+    if (!db || !itemId) return false;
+    const docRef = doc(db, 'projects', projectId, subcollection, String(itemId));
     await deleteDoc(docRef);
     return true;
   } catch (err) {
@@ -128,6 +231,24 @@ export const savePersonDoc = (person: any, projectId?: string) =>
 
 export const deletePersonDoc = (personId: string, projectId?: string) =>
   deleteEntityDoc('persons', personId, projectId);
+
+export const saveFamilyDoc = (family: any, projectId?: string) =>
+  saveEntityDoc('families', family.id, family, projectId);
+
+export const deleteFamilyDoc = (familyId: string, projectId?: string) =>
+  deleteEntityDoc('families', familyId, projectId);
+
+export const saveEventDoc = (event: any, projectId?: string) =>
+  saveEntityDoc('events', event.id, event, projectId);
+
+export const deleteEventDoc = (eventId: string, projectId?: string) =>
+  deleteEntityDoc('events', eventId, projectId);
+
+export const saveSourceDoc = (source: any, projectId?: string) =>
+  saveEntityDoc('sources', source.id, source, projectId);
+
+export const deleteSourceDoc = (sourceId: string, projectId?: string) =>
+  deleteEntityDoc('sources', sourceId, projectId);
 
 export const saveMetricRecordDoc = (record: any, projectId?: string) =>
   saveEntityDoc('metricRecords', record.id, record, projectId);
@@ -146,6 +267,78 @@ export const saveHypothesisDoc = (hypothesis: any, projectId?: string) =>
 
 export const deleteHypothesisDoc = (hypothesisId: string, projectId?: string) =>
   deleteEntityDoc('hypotheses', hypothesisId, projectId);
+
+export const saveTaskDoc = (task: any, projectId?: string) =>
+  saveEntityDoc('tasks', task.id, task, projectId);
+
+export const deleteTaskDoc = (taskId: string, projectId?: string) =>
+  deleteEntityDoc('tasks', taskId, projectId);
+
+export const saveFindingDoc = (finding: any, projectId?: string) =>
+  saveEntityDoc('findings', finding.id, finding, projectId);
+
+export const deleteFindingDoc = (findingId: string, projectId?: string) =>
+  deleteEntityDoc('findings', findingId, projectId);
+
+export const saveRequestDoc = (request: any, projectId?: string) =>
+  saveEntityDoc('requests', request.id, request, projectId);
+
+export const deleteRequestDoc = (requestId: string, projectId?: string) =>
+  deleteEntityDoc('requests', requestId, projectId);
+
+export const saveMatrixEntryDoc = (entry: any, projectId?: string) =>
+  saveEntityDoc('matrixEntries', entry.id || `${entry.village}_${entry.year}`, entry, projectId);
+
+export const deleteMatrixEntryDoc = (entryId: string, projectId?: string) =>
+  deleteEntityDoc('matrixEntries', entryId, projectId);
+
+// Access Requests Helpers (both in project and top-level)
+export async function saveAccessRequestToCloud(req: any, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> {
+  try {
+    const db = getDbInstance();
+    if (!db || !req?.id) return false;
+    const cleanData = JSON.parse(JSON.stringify(req));
+    cleanData.updatedAt = new Date().toISOString();
+    
+    // Save in project accessRequests subcollection
+    const docRef = doc(db, 'projects', projectId, 'accessRequests', String(req.id));
+    await setDoc(docRef, cleanData, { merge: true });
+    
+    // Also save in top-level for easy global admin lookup
+    try {
+      const topRef = doc(db, 'accessRequests', String(req.id));
+      await setDoc(topRef, cleanData, { merge: true });
+    } catch {}
+    
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/accessRequests/${req.id}`);
+    return false;
+  }
+}
+
+export function subscribeToAccessRequestsCloud(
+  onUpdate: (requests: any[]) => void,
+  projectId: string = DEFAULT_PROJECT_ID
+): () => void {
+  try {
+    const db = getDbInstance();
+    if (!db) return () => {};
+    const colRef = collection(db, 'projects', projectId, 'accessRequests');
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
+        onUpdate(list);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/accessRequests`);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
 
 /**
  * Batch write items into a subcollection in chunks of 450 items
@@ -166,8 +359,9 @@ export async function batchSaveEntities(
       const batch = writeBatch(db);
 
       chunk.forEach((item) => {
-        if (item && item.id) {
-          const docRef = doc(db, 'projects', projectId, subcollection, String(item.id));
+        if (item && (item.id || item.year)) {
+          const id = String(item.id || `${item.village}_${item.year}`);
+          const docRef = doc(db, 'projects', projectId, subcollection, id);
           const cleanItem = JSON.parse(JSON.stringify(item));
           cleanItem.updatedAt = cleanItem.updatedAt || new Date().toISOString();
           batch.set(docRef, cleanItem, { merge: true });
@@ -184,74 +378,12 @@ export async function batchSaveEntities(
 }
 
 /**
- * Paginated Firestore Fetcher with limit() and startAfter()
- * Prevents memory exhaustion and enables progressive UI loading.
- */
-export interface PaginatedResult<T> {
-  items: T[];
-  lastDoc: QueryDocumentSnapshot | null;
-  hasMore: boolean;
-  totalFetched: number;
-}
-
-export async function fetchSubcollectionPaginated<T = any>(
-  subcollection: string,
-  pageSize: number = 50,
-  lastDocSnapshot: QueryDocumentSnapshot | null = null,
-  projectId: string = DEFAULT_PROJECT_ID
-): Promise<PaginatedResult<T>> {
-  const result: PaginatedResult<T> = {
-    items: [],
-    lastDoc: null,
-    hasMore: false,
-    totalFetched: 0
-  };
-
-  try {
-    const db = getDbInstance();
-    if (!db) return result;
-
-    const colRef = collection(db, 'projects', projectId, subcollection);
-    let q = query(colRef, limit(pageSize));
-
-    if (lastDocSnapshot) {
-      q = query(colRef, startAfter(lastDocSnapshot), limit(pageSize));
-    }
-
-    const querySnapshot = await getDocs(q);
-    const docs = querySnapshot.docs;
-
-    result.items = docs.map((d) => ({ ...d.data(), id: d.id } as T));
-    result.lastDoc = docs.length > 0 ? docs[docs.length - 1] : null;
-    result.hasMore = docs.length === pageSize;
-    result.totalFetched = docs.length;
-
-    return result;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/${subcollection}`);
-    return result;
-  }
-}
-
-export const fetchPersonsPaginated = (pageSize = 50, lastDoc = null, projectId?: string) =>
-  fetchSubcollectionPaginated('persons', pageSize, lastDoc, projectId);
-
-export const fetchMetricRecordsPaginated = (pageSize = 50, lastDoc = null, projectId?: string) =>
-  fetchSubcollectionPaginated('metricRecords', pageSize, lastDoc, projectId);
-
-export const fetchDocumentsPaginated = (pageSize = 50, lastDoc = null, projectId?: string) =>
-  fetchSubcollectionPaginated('documents', pageSize, lastDoc, projectId);
-
-export const fetchHypothesesPaginated = (pageSize = 50, lastDoc = null, projectId?: string) =>
-  fetchSubcollectionPaginated('hypotheses', pageSize, lastDoc, projectId);
-
-/**
  * Real-time Subcollection listener with limit guard
  */
 export function subscribeToSubcollection<T = any>(
   subcollection: string,
   onUpdate: (items: T[]) => void,
-  limitCount: number = 200,
+  limitCount: number = 300,
   projectId: string = DEFAULT_PROJECT_ID
 ): () => void {
   try {
@@ -287,6 +419,9 @@ export function subscribeToSubcollection<T = any>(
 export function subscribeToProjectData(
   onDataUpdate: (data: {
     persons?: any[];
+    families?: any[];
+    events?: any[];
+    sources?: any[];
     metricRecords?: any[];
     documents?: any[];
     tasks?: any[];
@@ -294,6 +429,7 @@ export function subscribeToProjectData(
     hypotheses?: any[];
     requests?: any[];
     matrixEntries?: any[];
+    accessRequests?: any[];
   }) => void,
   projectId: string = DEFAULT_PROJECT_ID
 ) {
@@ -301,13 +437,17 @@ export function subscribeToProjectData(
 
   const subcollections = [
     'persons',
+    'families',
+    'events',
+    'sources',
     'metricRecords',
     'documents',
     'tasks',
     'findings',
     'hypotheses',
     'requests',
-    'matrixEntries'
+    'matrixEntries',
+    'accessRequests'
   ];
 
   subcollections.forEach((colName) => {
@@ -318,7 +458,7 @@ export function subscribeToProjectData(
           onDataUpdate({ [colName]: items });
         }
       },
-      300,
+      400,
       projectId
     );
     unsubscribers.push(unsub);
@@ -335,11 +475,14 @@ export function subscribeToProjectData(
 
 /**
  * Saves all project data cleanly into individual subcollection documents
- * bypassing the 1MB monolithic document limit completely.
+ * bypassing monolithic document limit completely.
  */
 export async function saveProjectDataToCloud(
   data: {
     persons?: any[];
+    families?: any[];
+    events?: any[];
+    sources?: any[];
     metricRecords?: any[];
     documents?: any[];
     tasks?: any[];
@@ -355,11 +498,19 @@ export async function saveProjectDataToCloud(
     const db = getDbInstance();
     if (!db) return false;
 
-    // Save subcollections individually
     const promises: Promise<boolean>[] = [];
 
     if (Array.isArray(data.persons) && data.persons.length > 0) {
       promises.push(batchSaveEntities('persons', data.persons, projectId));
+    }
+    if (Array.isArray(data.families) && data.families.length > 0) {
+      promises.push(batchSaveEntities('families', data.families, projectId));
+    }
+    if (Array.isArray(data.events) && data.events.length > 0) {
+      promises.push(batchSaveEntities('events', data.events, projectId));
+    }
+    if (Array.isArray(data.sources) && data.sources.length > 0) {
+      promises.push(batchSaveEntities('sources', data.sources, projectId));
     }
     if (Array.isArray(data.metricRecords) && data.metricRecords.length > 0) {
       promises.push(batchSaveEntities('metricRecords', data.metricRecords, projectId));
@@ -391,6 +542,7 @@ export async function saveProjectDataToCloud(
         {
           lastUpdated: data.lastUpdated || new Date().toISOString(),
           personsCount: data.persons?.length || 0,
+          familiesCount: data.families?.length || 0,
           metricRecordsCount: data.metricRecords?.length || 0,
           documentsCount: data.documents?.length || 0,
           hypothesesCount: data.hypotheses?.length || 0
@@ -406,3 +558,4 @@ export async function saveProjectDataToCloud(
     return false;
   }
 }
+

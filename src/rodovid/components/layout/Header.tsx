@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { ViewMode } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
+import { getThemeConfig } from '../../../utils/theme';
 
 interface HeaderProps {
   currentView: ViewMode;
@@ -40,14 +41,19 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const isMobileMenuOpen = useUIStore((s) => s.isMobileMenuOpen);
   const setMobileMenuOpen = useUIStore((s) => s.setMobileMenuOpen);
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('gramps_theme_mode');
-      return saved !== null ? saved === 'dark' : true;
-    } catch {
-      return true;
+  const themePalette = useUIStore((s) => s.themePalette);
+  const setThemePalette = useUIStore((s) => s.setThemePalette);
+  const theme = getThemeConfig(themePalette);
+  const isDarkMode = theme.category === 'dark';
+
+  const toggleThemeMode = () => {
+    if (isDarkMode) {
+      setThemePalette('classic');
+    } else {
+      setThemePalette('dark');
     }
-  });
+  };
+
   const moreMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,11 +63,6 @@ export const Header: React.FC<HeaderProps> = ({
     } else {
       document.documentElement.classList.remove('dark');
       document.documentElement.classList.add('light');
-    }
-    try {
-      localStorage.setItem('gramps_theme_mode', isDarkMode ? 'dark' : 'light');
-    } catch {
-      // ignore
     }
   }, [isDarkMode]);
 
@@ -95,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isSecondaryActive = secondaryNav.some((item) => item.id === currentView);
 
   return (
-    <header className="bg-slate-900 text-slate-100 border-b border-slate-800 sticky top-0 z-30 shadow-md">
+    <header className={`${theme.headerBg} ${theme.headerBorder} border-b sticky top-0 z-30 shadow-xs transition-colors duration-200`}>
       <div className="w-full px-3 sm:px-4 h-16 flex items-center justify-between gap-2 sm:gap-4">
         {/* Brand Zone: Icon only as requested */}
         <button
@@ -103,7 +104,7 @@ export const Header: React.FC<HeaderProps> = ({
             onViewChange('tree');
             setMobileMenuOpen(false);
           }}
-          className="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 flex items-center justify-center text-white shadow-sm shrink-0 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          className="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 flex items-center justify-center text-white shadow-xs shrink-0 transition-all focus:outline-hidden focus:ring-2 focus:ring-emerald-400 cursor-pointer"
           title="Gramps Web — Повернутися до дерева"
           aria-label="Gramps Web — Головна"
         >
@@ -123,10 +124,12 @@ export const Header: React.FC<HeaderProps> = ({
                   onViewChange(item.id);
                   setIsMoreMenuOpen(false);
                 }}
-                className={`flex items-center gap-1.5 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                className={`flex items-center gap-1.5 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : isDarkMode
+                    ? 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    : 'text-neutral-700 hover:text-neutral-950 hover:bg-neutral-200/80'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
@@ -144,10 +147,12 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   key={item.id}
                   onClick={() => onViewChange(item.id)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     isActive
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : isDarkMode
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      : 'text-neutral-700 hover:text-neutral-950 hover:bg-neutral-200/80'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -161,10 +166,12 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative 2xl:hidden" ref={moreMenuRef}>
             <button
               onClick={() => setIsMoreMenuOpen((prev) => !prev)}
-              className={`flex items-center gap-1.5 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+              className={`flex items-center gap-1.5 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 isSecondaryActive
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : isDarkMode
+                  ? 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  : 'text-neutral-700 hover:text-neutral-950 hover:bg-neutral-200/80'
               }`}
               title="Додаткові інструменти та розділи"
               aria-expanded={isMoreMenuOpen}
@@ -174,8 +181,8 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {isMoreMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3.5 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-slate-800 mb-1">
+              <div className={`absolute right-0 top-full mt-2 w-56 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200 shadow-xl'} border rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150`}>
+                <div className={`px-3.5 py-1 text-[10px] uppercase font-bold tracking-wider ${isDarkMode ? 'text-slate-400 border-slate-800' : 'text-neutral-500 border-neutral-200'} border-b mb-1`}>
                   Додаткові інструменти
                 </div>
                 {secondaryNav.map((item) => {
@@ -188,13 +195,15 @@ export const Header: React.FC<HeaderProps> = ({
                         onViewChange(item.id);
                         setIsMoreMenuOpen(false);
                       }}
-                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs text-left transition-colors ${
+                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs text-left transition-colors cursor-pointer ${
                         isActive
-                          ? 'bg-emerald-600/90 text-white font-semibold'
-                          : 'text-slate-200 hover:bg-slate-800 hover:text-white'
+                          ? 'bg-emerald-600 text-white font-semibold'
+                          : isDarkMode
+                          ? 'text-slate-200 hover:bg-slate-800 hover:text-white'
+                          : 'text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900'
                       }`}
                     >
-                      <Icon className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <Icon className="w-4 h-4 text-emerald-500 shrink-0" />
                       <span>{item.label}</span>
                     </button>
                   );
@@ -208,30 +217,38 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Night / Day mode toggle */}
           <button
-            onClick={() => setIsDarkMode((prev) => !prev)}
-            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-md text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors flex items-center gap-1.5"
-            title={isDarkMode ? 'Увімкнути денний режим' : 'Увімкнути нічний режим'}
+            onClick={toggleThemeMode}
+            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-md text-xs font-medium ${
+              isDarkMode
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border-neutral-300'
+            } border transition-colors flex items-center gap-1.5 cursor-pointer`}
+            title={isDarkMode ? 'Увімкнути денний / світлий режим' : 'Увімкнути нічний режим'}
             aria-label="Перемикач теми"
           >
             {isDarkMode ? (
               <Sun className="w-3.5 h-3.5 text-amber-400" />
             ) : (
-              <Moon className="w-3.5 h-3.5 text-indigo-400" />
+              <Moon className="w-3.5 h-3.5 text-indigo-600" />
             )}
           </button>
 
           <button
             onClick={onOpenGedcomModal}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors whitespace-nowrap"
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium ${
+              isDarkMode
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border-neutral-300'
+            } border transition-colors whitespace-nowrap cursor-pointer`}
             title="Імпорт / Експорт GEDCOM та резервні копії"
           >
-            <Upload className="w-3.5 h-3.5 text-emerald-400" />
+            <Upload className="w-3.5 h-3.5 text-emerald-500" />
             <span className="hidden sm:inline">GEDCOM / База</span>
           </button>
 
           <button
             onClick={onOpenAddPersonModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition-colors whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors whitespace-nowrap cursor-pointer"
           >
             <UserPlus className="w-3.5 h-3.5" />
             <span>Додати</span>
@@ -240,7 +257,9 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Mobile navigation toggle button */}
           <button
             onClick={() => setMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+            className={`md:hidden p-1.5 ${
+              isDarkMode ? 'text-slate-300 hover:text-white hover:bg-slate-800' : 'text-neutral-700 hover:text-neutral-950 hover:bg-neutral-200'
+            } rounded-lg transition-colors cursor-pointer`}
             title="Меню інструментів та родоводу"
             aria-label="Відкрити меню"
           >

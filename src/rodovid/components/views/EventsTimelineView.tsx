@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { GenealogyDatabase, LifeEvent, EventType, Person, Family } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
+import { useUIStore } from '../../../stores/useUIStore';
+import { getThemeConfig } from '../../../utils/theme';
 
 interface EventsTimelineViewProps {
   database: GenealogyDatabase;
@@ -31,6 +33,10 @@ export const EventsTimelineView: React.FC<EventsTimelineViewProps> = ({
   database,
   onSelectPerson
 }) => {
+  const themePalette = useUIStore((s) => s.themePalette);
+  const theme = getThemeConfig(themePalette);
+  const isDark = theme.category === 'dark';
+
   const [selectedType, setSelectedType] = useState<'ALL' | EventType>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -204,29 +210,29 @@ export const EventsTimelineView: React.FC<EventsTimelineViewProps> = ({
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <div className={`max-w-4xl mx-auto px-4 py-6 space-y-6 ${theme.textPrimary}`}>
       {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm space-y-4">
+      <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 shadow-xs space-y-4`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-white tracking-tight">
+            <h1 className={`text-xl font-bold tracking-tight ${theme.textPrimary}`}>
               Хронологічна стрічка подій
             </h1>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className={`text-xs ${theme.textMuted} mt-0.5`}>
               Всього {filteredEvents.length} подій у хронологічному порядку
             </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-800">
+        <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t ${theme.borderSubtle}`}>
           <div className="sm:col-span-2 relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
             <input
               type="text"
               placeholder="Пошук за особою, місцем, описом..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className={`w-full pl-9 pr-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-400 focus:outline-none focus:border-emerald-500`}
             />
           </div>
 
@@ -234,7 +240,7 @@ export const EventsTimelineView: React.FC<EventsTimelineViewProps> = ({
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value as any)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+              className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
             >
               <option value="ALL">Усі типи подій</option>
               <option value="Birth">Народження</option>
@@ -250,31 +256,33 @@ export const EventsTimelineView: React.FC<EventsTimelineViewProps> = ({
 
       {/* Timeline Stream */}
       {filteredEvents.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
-          <Calendar className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-semibold text-slate-200">Подій не знайдено</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+        <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-12 text-center`}>
+          <Calendar className={`w-12 h-12 ${theme.textMuted} mx-auto mb-3`} />
+          <h3 className={`text-base font-semibold ${theme.textPrimary}`}>Подій не знайдено</h3>
+          <p className={`text-xs ${theme.textMuted} max-w-sm mx-auto mt-1`}>
             Спробуйте змінити параметри пошуку або фільтр подій.
           </p>
         </div>
       ) : (
-        <div className="relative border-l-2 border-slate-800 ml-4 md:ml-28 space-y-6 py-4">
+        <div className={`relative border-l-2 ${theme.borderSubtle} ml-4 md:ml-28 space-y-6 py-4`}>
           {filteredEvents.map(({ event, person, familyId }, index) => {
             return (
               <div key={event.id || index} className="relative pl-6 group">
                 {/* Timeline node bullet */}
-                <div className="absolute -left-[17px] top-1.5 w-8 h-8 rounded-full bg-slate-900 border-2 border-slate-700 flex items-center justify-center shadow group-hover:border-emerald-500 transition-colors">
+                <div className={`absolute -left-[17px] top-1.5 w-8 h-8 rounded-full ${theme.cardBg} border-2 ${theme.cardBorder} flex items-center justify-center shadow-xs group-hover:border-emerald-500 transition-colors`}>
                   {getEventIcon(event.type)}
                 </div>
 
                 {/* Event Card */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+                <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 shadow-xs hover:border-emerald-500/60 transition-all`}>
+                  <div className={`flex flex-wrap items-center justify-between gap-2 border-b ${theme.borderSubtle} pb-2.5`}>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-emerald-400 font-mono bg-emerald-950/60 px-2.5 py-0.5 rounded border border-emerald-800/60">
+                      <span className={`text-xs font-bold font-mono px-2.5 py-0.5 rounded border ${
+                        isDark ? 'text-emerald-400 bg-emerald-950/60 border-emerald-800/60' : 'text-emerald-800 bg-emerald-100 border-emerald-300'
+                      }`}>
                         {event.date || (event.year ? `${event.year} р.` : 'Дата невідома')}
                       </span>
-                      <span className="text-xs font-semibold text-slate-200">
+                      <span className={`text-xs font-semibold ${theme.textPrimary}`}>
                         {getEventTypeNameUk(event.type)}
                       </span>
                     </div>
@@ -282,31 +290,31 @@ export const EventsTimelineView: React.FC<EventsTimelineViewProps> = ({
                     {person && (
                       <button
                         onClick={() => onSelectPerson(person.id)}
-                        className="text-xs font-medium text-slate-300 hover:text-emerald-400 flex items-center gap-1.5 transition-colors"
+                        className={`text-xs font-medium ${theme.textSecondary} hover:text-emerald-500 flex items-center gap-1.5 transition-colors cursor-pointer`}
                       >
-                        <User className="w-3.5 h-3.5 text-slate-500" />
+                        <User className={`w-3.5 h-3.5 ${theme.textMuted}`} />
                         <span>{getFullName(person)}</span>
                       </button>
                     )}
                   </div>
 
                   {event.description && (
-                    <p className="text-xs text-slate-300 mt-2.5 leading-relaxed">
+                    <p className={`text-xs ${theme.textSecondary} mt-2.5 leading-relaxed`}>
                       {event.description}
                     </p>
                   )}
 
                   {event.placeName && (
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-2">
-                      <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <div className={`flex items-center gap-1.5 text-xs ${theme.textMuted} mt-2`}>
+                      <MapPin className={`w-3.5 h-3.5 ${theme.textMuted} shrink-0`} />
                       <span>{event.placeName}</span>
                     </div>
                   )}
 
                   {/* Archival Citations */}
                   {event.citations && event.citations.length > 0 && (
-                    <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-1.5">
-                      <span className="text-[10px] text-slate-500 uppercase font-semibold flex items-center gap-1">
+                    <div className={`mt-3 pt-2.5 border-t ${theme.borderSubtle} space-y-1.5`}>
+                      <span className={`text-[10px] ${theme.textMuted} uppercase font-semibold flex items-center gap-1`}>
                         <BookOpen className="w-3 h-3 text-amber-500" />
                         Архівні посилання ({event.citations.length}):
                       </span>
@@ -315,18 +323,18 @@ export const EventsTimelineView: React.FC<EventsTimelineViewProps> = ({
                         return (
                           <div
                             key={cIdx}
-                            className="bg-slate-950 p-2 rounded text-[11px] text-slate-300 border border-slate-800"
+                            className={`${theme.surfaceBg} p-2 rounded text-[11px] ${theme.textSecondary} border ${theme.borderSubtle}`}
                           >
-                            <div className="font-medium text-amber-300">
+                            <div className={`font-medium ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
                               {source?.title || 'Архівне джерело'}
                             </div>
                             {source?.archiveReference && (
-                              <div className="text-slate-400 text-[10px] font-mono mt-0.5">
+                              <div className={`${theme.textMuted} text-[10px] font-mono mt-0.5`}>
                                 {source.archiveReference}
                               </div>
                             )}
                             {c.page && (
-                              <div className="text-slate-400 text-[10px] mt-0.5">
+                              <div className={`${theme.textMuted} text-[10px] mt-0.5`}>
                                 Аркуш/сторінка: {c.page}
                               </div>
                             )}

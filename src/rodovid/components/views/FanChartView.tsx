@@ -3,19 +3,23 @@ import { PieChart, ZoomIn, ZoomOut, Maximize2, User, GitFork, X, Info, Download,
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { calculateFanChart, FanChartSector } from '../../utils/treeLayout';
 import { getFullName } from '../../utils/relationship';
+import { useUIStore } from '../../../stores/useUIStore';
+import { getThemeConfig } from '../../../utils/theme';
 
 interface FanChartViewProps {
   database: GenealogyDatabase;
   activePersonId: string;
   onSelectPerson: (id: string) => void;
   onChangeRoot: (id: string) => void;
+  onSwitchToTree?: () => void;
 }
 
 export const FanChartView: React.FC<FanChartViewProps> = ({
   database,
   activePersonId,
   onSelectPerson,
-  onChangeRoot
+  onChangeRoot,
+  onSwitchToTree
 }) => {
   const [generations, setGenerations] = useState<number>(5);
   const [hoveredSector, setHoveredSector] = useState<FanChartSector | null>(null);
@@ -47,6 +51,42 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     setPan({ x: 0, y: 0 });
     setScale(1);
   }, [activePersonId]);
+
+  const themePalette = useUIStore((s) => s.themePalette);
+  const theme = getThemeConfig(themePalette);
+  const isDark = theme.category === 'dark';
+
+  const [canvasTheme, setCanvasTheme] = useState<'dark' | 'parchment' | 'emerald'>(() => {
+    try {
+      const saved = localStorage.getItem('gramps_tree_canvas_theme');
+      if (saved && (saved === 'dark' || saved === 'parchment' || saved === 'emerald')) {
+        return saved as any;
+      }
+      return theme.category === 'light' ? 'parchment' : theme.id === 'emerald' || theme.id === 'dark-emerald' ? 'emerald' : 'dark';
+    } catch {
+      return theme.category === 'light' ? 'parchment' : 'dark';
+    }
+  });
+
+  // Automatically update canvasTheme when global theme palette changes
+  useEffect(() => {
+    if (theme.category === 'light') {
+      setCanvasTheme('parchment');
+    } else if (theme.id === 'emerald' || theme.id === 'dark-emerald') {
+      setCanvasTheme('emerald');
+    } else {
+      setCanvasTheme('dark');
+    }
+  }, [theme.id, theme.category]);
+
+  const handleSetCanvasTheme = (t: 'dark' | 'parchment' | 'emerald') => {
+    setCanvasTheme(t);
+    try {
+      localStorage.setItem('gramps_tree_canvas_theme', t);
+    } catch {
+      // ignore
+    }
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0) {
@@ -167,7 +207,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   }, [database, activePersonId, generations]);
 
   const centerX = 450;
-  const centerY = 380;
+  const centerY = 400;
 
   // Function to describe SVG arc path
   function describeArc(
@@ -280,21 +320,34 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 overflow-hidden relative select-none">
+    <div className={`flex flex-col h-[calc(100vh-4rem)] ${theme.appBg} ${theme.textPrimary} overflow-hidden relative select-none`}>
       {/* Top Controls */}
-      <div className="h-14 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 flex items-center justify-between z-20 shrink-0 print:hidden">
+      <div className={`h-14 ${theme.headerBg} backdrop-blur border-b ${theme.headerBorder} px-4 flex items-center justify-between z-20 shrink-0 print:hidden`}>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
-            <PieChart className="w-3.5 h-3.5 text-emerald-400" />
+          {onSwitchToTree && (
+            <button
+              onClick={onSwitchToTree}
+              className={`flex items-center gap-1.5 px-3 py-1.5 ${theme.surfaceBg} hover:brightness-110 ${theme.textPrimary} border ${theme.borderSubtle} rounded-lg text-xs font-medium transition-colors cursor-pointer`}
+              title="Повернутися до дерева роду"
+            >
+              <GitFork className="w-3.5 h-3.5 text-emerald-500 rotate-90" />
+              <span>Дерево</span>
+            </button>
+          )}
+
+          <div className={`flex items-center gap-1.5 text-xs ${theme.textSecondary} ${theme.surfaceBg} px-3 py-1.5 rounded-lg border ${theme.borderSubtle}`}>
+            <PieChart className="w-3.5 h-3.5 text-amber-500" />
             <span>Поколінь віяла:</span>
             {[3, 4, 5, 6, 7].map((g) => (
               <button
                 key={g}
                 onClick={() => setGenerations(g)}
-                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
                   generations === g
-                    ? 'bg-emerald-600 text-white'
-                    : 'hover:bg-slate-700 text-slate-400'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : isDark
+                    ? 'hover:bg-slate-700 text-slate-400'
+                    : 'hover:bg-neutral-200 text-neutral-600'
                 }`}
               >
                 {g}
@@ -303,14 +356,14 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
           </div>
 
           <div className="hidden md:flex items-center gap-2">
-            <span className="text-xs text-slate-400">Центральна особа:</span>
+            <span className={`text-xs ${theme.textMuted}`}>Центральна особа:</span>
             <select
               value={activePersonId}
               onChange={(e) => onChangeRoot(e.target.value)}
-              className="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-md px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[200px] truncate"
+              className={`${theme.surfaceBg} ${theme.textPrimary} text-xs border ${theme.borderSubtle} rounded-md px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[200px] truncate cursor-pointer`}
             >
               {(Object.values(database.persons) as Person[]).map((p) => (
-                <option key={p.id} value={p.id}>
+                <option key={p.id} value={p.id} className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-neutral-900'}>
                   {getFullName(p)} {p.birthYear ? `(${p.birthYear})` : ''}
                 </option>
               ))}
@@ -324,22 +377,22 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
           <div className="relative" ref={exportMenuRef}>
             <button
               onClick={() => setIsExportOpen((prev) => !prev)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
                 isExportOpen
-                  ? 'bg-slate-700 text-white border-slate-600 shadow-sm'
-                  : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border-slate-700'
+                  ? `${theme.buttonSecondaryBg} ${theme.textPrimary} border-emerald-500 shadow-sm`
+                  : `${theme.surfaceBg} ${theme.textSecondary} hover:brightness-110 border ${theme.borderSubtle}`
               }`}
               title="Експорт та друк віяла"
               aria-expanded={isExportOpen}
             >
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <Download className="w-3.5 h-3.5 text-emerald-500" />
               <span className="hidden sm:inline">Експорт</span>
-              <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${isExportOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3 h-3 ${theme.textMuted} transition-transform duration-200 ${isExportOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {isExportOpen && (
-              <div className="absolute right-0 top-full mt-2 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-slate-800 mb-1">
+              <div className={`absolute right-0 top-full mt-2 w-64 ${theme.cardBg} border ${theme.cardBorder} rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150`}>
+                <div className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider ${theme.textMuted} border-b ${theme.borderSubtle} mb-1`}>
                   Збереження та друк
                 </div>
                 <button
@@ -347,12 +400,12 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     handleExportSvg();
                     setIsExportOpen(false);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-slate-800 hover:text-white transition-colors"
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left ${theme.textPrimary} hover:bg-emerald-500/10 transition-colors cursor-pointer`}
                 >
-                  <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <Download className="w-4 h-4 text-emerald-500 shrink-0" />
                   <div>
-                    <div className="font-medium text-slate-200">Скачати векторне віяло (SVG)</div>
-                    <div className="text-[10px] text-slate-400">Векторне віяло 3–7 поколінь без втрати якості</div>
+                    <div className="font-medium">Скачати векторне віяло (SVG)</div>
+                    <div className={`text-[10px] ${theme.textMuted}`}>Векторне віяло 3–7 поколінь без втрати якості</div>
                   </div>
                 </button>
                 <button
@@ -360,30 +413,61 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     handlePrint();
                     setIsExportOpen(false);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-slate-800 hover:text-white transition-colors"
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left ${theme.textPrimary} hover:bg-emerald-500/10 transition-colors cursor-pointer`}
                 >
-                  <Printer className="w-4 h-4 text-sky-400 shrink-0" />
+                  <Printer className="w-4 h-4 text-sky-500 shrink-0" />
                   <div>
-                    <div className="font-medium text-slate-200">Роздрукувати / Зберегти в PDF</div>
-                    <div className="text-[10px] text-slate-400">Друк на папері або експорт у PDF-документ</div>
+                    <div className="font-medium">Роздрукувати / Зберегти в PDF</div>
+                    <div className={`text-[10px] ${theme.textMuted}`}>Друк на папері або експорт у PDF-документ</div>
                   </div>
                 </button>
               </div>
             )}
           </div>
 
+          {/* Background Theme Selector */}
+          <div className={`hidden lg:flex items-center gap-1 ${theme.surfaceBg} p-1 rounded-lg border ${theme.borderSubtle}`}>
+            <button
+              onClick={() => handleSetCanvasTheme('dark')}
+              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                canvasTheme === 'dark' ? 'bg-slate-700 text-white shadow-xs' : `${theme.textMuted} hover:${theme.textPrimary}`
+              }`}
+              title="Темний графітовий фон"
+            >
+              Темний
+            </button>
+            <button
+              onClick={() => handleSetCanvasTheme('parchment')}
+              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                canvasTheme === 'parchment' ? 'bg-amber-100 text-amber-950 font-bold shadow-xs' : `${theme.textMuted} hover:${theme.textPrimary}`
+              }`}
+              title="Світлий архівний пергамент"
+            >
+              Пергамент
+            </button>
+            <button
+              onClick={() => handleSetCanvasTheme('emerald')}
+              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                canvasTheme === 'emerald' ? 'bg-emerald-700 text-white shadow-xs' : `${theme.textMuted} hover:${theme.textPrimary}`
+              }`}
+              title="Смарагдовий літописний фон"
+            >
+              Ліс
+            </button>
+          </div>
+
           {/* Zoom Controls */}
-          <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700">
+          <div className={`flex items-center gap-1 ${theme.surfaceBg} p-1 rounded-lg border ${theme.borderSubtle}`}>
             <button
               onClick={() => setScale((s) => Math.min(s * 1.15, 2.2))}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              className={`p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
               title="Збільшити"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
             <button
               onClick={() => setScale((s) => Math.max(s * 0.85, 0.4))}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              className={`p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
               title="Зменшити"
             >
               <ZoomOut className="w-4 h-4" />
@@ -393,12 +477,12 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                 setScale(1);
                 setPan({ x: 0, y: 0 });
               }}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              className={`p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
               title="Скинути масштаб і центрувати"
             >
               <Maximize2 className="w-4 h-4" />
             </button>
-            <span className="text-[11px] text-slate-400 font-mono px-2">
+            <span className={`text-[11px] ${theme.textMuted} font-mono px-2`}>
               {Math.round(scale * 100)}%
             </span>
           </div>
@@ -416,13 +500,21 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
         onWheel={handleWheel}
-        className={`flex-1 overflow-hidden touch-none relative flex items-center justify-center p-6 bg-radial from-slate-900 to-slate-950 ${
-          isDragging ? 'cursor-grabbing' : 'cursor-grab'
-        }`}
+        className={`flex-1 overflow-hidden touch-none relative flex items-center justify-center p-6 ${
+          canvasTheme === 'parchment'
+            ? 'bg-[#f6f2e8]'
+            : canvasTheme === 'emerald'
+            ? 'bg-[#031c15]'
+            : 'bg-[#0b1324]'
+        } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         style={{
           touchAction: 'none',
           backgroundImage:
-            'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0)',
+            canvasTheme === 'parchment'
+              ? 'radial-gradient(circle at 1px 1px, rgba(160, 110, 60, 0.28) 1.2px, transparent 0)'
+              : canvasTheme === 'emerald'
+              ? 'radial-gradient(circle at 1px 1px, rgba(52, 211, 153, 0.25) 1.2px, transparent 0)'
+              : 'radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.25) 1.2px, transparent 0)',
           backgroundSize: '24px 24px'
         }}
       >
@@ -470,8 +562,8 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                 >
                   <path
                     d={pathD}
-                    fill={sec.color}
-                    stroke="#0f172a"
+                    fill={sec.fillColor || sec.color || (sec.generation === 0 ? '#059669' : sec.person?.gender === 'F' || sec.person?.gender === 'female' ? '#e11d48' : '#2563eb')}
+                    stroke={canvasTheme === 'parchment' ? '#d4caa8' : '#1e293b'}
                     strokeWidth="1.5"
                     className={`transition-all duration-150 ${
                       isHovered ? 'brightness-125 stroke-white stroke-2' : 'hover:brightness-110'
@@ -516,47 +608,53 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
         {/* Hovered Person Tooltip Card */}
         {hoveredSector && hoveredSector.person && (
-          <div className="absolute bottom-6 right-6 bg-slate-900/95 backdrop-blur border border-slate-700 rounded-xl p-4 shadow-2xl max-w-xs z-30 animate-in fade-in duration-150">
+          <div className={`absolute bottom-6 right-6 ${
+            canvasTheme === 'parchment' ? 'bg-white/95 border-neutral-300 text-neutral-900 shadow-xl' : 'bg-slate-900/95 border-slate-700 text-white shadow-2xl'
+          } backdrop-blur border rounded-xl p-4 max-w-xs z-30 animate-in fade-in duration-150`}>
             <div className="flex items-center gap-3">
               {hoveredSector.person.avatarUrl ? (
                 <img
                   src={hoveredSector.person.avatarUrl}
                   alt=""
-                  className="w-12 h-12 rounded-lg object-cover border border-slate-600"
+                  className={`w-12 h-12 rounded-lg object-cover border ${canvasTheme === 'parchment' ? 'border-neutral-300' : 'border-slate-600'}`}
                 />
               ) : (
-                <div className="w-12 h-12 rounded-lg bg-slate-800 flex items-center justify-center text-slate-300">
+                <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                  canvasTheme === 'parchment' ? 'bg-neutral-100 text-neutral-600' : 'bg-slate-800 text-slate-300'
+                }`}>
                   <User className="w-6 h-6" />
                 </div>
               )}
               <div>
-                <span className="text-[10px] uppercase font-mono text-emerald-400 font-semibold">
+                <span className="text-[10px] uppercase font-mono text-emerald-600 font-semibold">
                   Ahnentafel #{hoveredSector.ahnentafelNumber} • Покоління {hoveredSector.generation}
                 </span>
-                <h4 className="font-bold text-sm text-white leading-tight">
+                <h4 className={`font-bold text-sm leading-tight ${canvasTheme === 'parchment' ? 'text-neutral-900' : 'text-white'}`}>
                   {getFullName(hoveredSector.person)}
                 </h4>
-                <p className="text-xs text-slate-400 font-mono mt-0.5">
+                <p className={`text-xs font-mono mt-0.5 ${canvasTheme === 'parchment' ? 'text-neutral-600' : 'text-slate-400'}`}>
                   {hoveredSector.person.birthYear || '?'} —{' '}
                   {hoveredSector.person.isLiving ? 'теп. час' : hoveredSector.person.deathYear || '?'}
                 </p>
               </div>
             </div>
 
-            <p className="text-xs text-slate-300 mt-2 line-clamp-2">
+            <p className={`text-xs mt-2 line-clamp-2 ${canvasTheme === 'parchment' ? 'text-neutral-700' : 'text-slate-300'}`}>
               {hoveredSector.person.occupation || hoveredSector.person.birthPlace || 'Немає опису'}
             </p>
 
-            <div className="flex items-center gap-2 mt-3 pt-2 border-t border-slate-800">
+            <div className={`flex items-center gap-2 mt-3 pt-2 border-t ${canvasTheme === 'parchment' ? 'border-neutral-200' : 'border-slate-800'}`}>
               <button
                 onClick={() => onSelectPerson(hoveredSector.person!.id)}
-                className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-xs font-medium transition-colors text-center"
+                className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-xs font-medium transition-colors text-center cursor-pointer shadow-xs"
               >
                 Відкрити картку
               </button>
               <button
                 onClick={() => onChangeRoot(hoveredSector.person!.id)}
-                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs font-medium transition-colors"
+                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                  canvasTheme === 'parchment' ? 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border border-neutral-300' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                }`}
                 title="Зробити центром віяла"
               >
                 <GitFork className="w-3.5 h-3.5" />
@@ -567,18 +665,22 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
         {/* Legend */}
         {showLegend ? (
-          <div className="absolute top-20 left-6 bg-slate-900/95 backdrop-blur border border-slate-800 rounded-xl p-3.5 shadow-2xl max-w-xs text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150">
+          <div className={`absolute top-20 left-6 ${
+            canvasTheme === 'parchment' ? 'bg-white/95 border-neutral-300 text-neutral-900 shadow-xl' : 'bg-slate-900/95 border-slate-800 text-white shadow-2xl'
+          } backdrop-blur border rounded-xl p-3.5 max-w-xs text-xs space-y-2 animate-in fade-in zoom-in-95 duration-150`}>
             <div className="flex items-center justify-between gap-2">
-              <h4 className="font-semibold text-slate-200">Кольорові гілки Gramps</h4>
+              <h4 className={`font-semibold ${canvasTheme === 'parchment' ? 'text-neutral-900' : 'text-slate-200'}`}>Кольорові гілки Gramps</h4>
               <button
                 onClick={() => handleToggleLegend(false)}
-                className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                  canvasTheme === 'parchment' ? 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
                 title="Закрити легенду"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300">
+            <div className={`grid grid-cols-2 gap-2 text-[11px] ${canvasTheme === 'parchment' ? 'text-neutral-700' : 'text-slate-300'}`}>
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded bg-blue-600 shrink-0" />
                 <span>Гілка дідуся (батькова)</span>
@@ -600,10 +702,12 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
         ) : (
           <button
             onClick={() => handleToggleLegend(true)}
-            className="absolute top-20 left-6 bg-slate-900/90 hover:bg-slate-800 backdrop-blur border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-lg px-2.5 py-1.5 shadow-lg transition-all flex items-center gap-1.5 text-xs font-medium"
+            className={`absolute top-20 left-6 ${
+              canvasTheme === 'parchment' ? 'bg-white/90 hover:bg-white text-neutral-800 border-neutral-300' : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
+            } backdrop-blur border rounded-lg px-2.5 py-1.5 shadow-lg transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer`}
             title="Показати легенду кольорів"
           >
-            <Info className="w-4 h-4 text-emerald-400" />
+            <Info className="w-4 h-4 text-emerald-500" />
             <span>Легенда</span>
           </button>
         )}

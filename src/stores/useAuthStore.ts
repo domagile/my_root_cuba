@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { AuthUser, UserRole, WhitelistEntry, AccessRequest, AccessControlConfig } from '../types';
 import { sendAdminAccessNotification, formatAccessRequestEmail, EmailDispatchResult } from '../services/notificationService';
+import { saveAccessRequestToCloud, subscribeToAccessRequestsCloud } from '../lib/firebase';
 
 const STORAGE_KEY = 'genealogy_auth_security_v1';
 
@@ -333,6 +334,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {}
     set({ accessRequests: nextRequests });
 
+    // Also persist request in Cloud Firestore
+    saveAccessRequestToCloud(newReq).catch(() => {});
+
     // Collect ALL active admin emails from whitelist
     const { accessConfig, whitelist: currentWhitelist } = get();
     const allAdminEmails = currentWhitelist
@@ -420,10 +424,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     // Mark request approved
+    const updatedReq = { ...req, status: 'approved' as const, processedAt: new Date().toISOString() };
     const nextRequests = accessRequests.map((r) =>
-      r.id === requestId
-        ? { ...r, status: 'approved' as const, processedAt: new Date().toISOString() }
-        : r
+      r.id === requestId ? updatedReq : r
     );
 
     try {
@@ -431,10 +434,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(nextRequests));
     } catch {}
 
+    saveAccessRequestToCloud(updatedReq).catch(() => {});
     set({ whitelist: nextWhitelist, accessRequests: nextRequests });
   },
 
   rejectAccessRequest: (requestId: string) => {
+    const { accessRequests } = get();
+    const req = accessRequests.find((r) => r.id === requestId);
+    const updatedReq = req ? { ...req, status: 'rejected' as const, processedAt: new Date().toISOString() } : null;
+    if (updatedReq) {
+      saveAccessRequestToCloud(updatedReq).catch(() => {});
+    }
     set((state) => {
       const nextRequests = state.accessRequests.map((r) =>
         r.id === requestId

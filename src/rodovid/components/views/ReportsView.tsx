@@ -7,6 +7,8 @@ import React, { useState, useMemo } from 'react';
 import { FileText, Printer, Download } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
+import { useUIStore } from '../../../stores/useUIStore';
+import { getThemeConfig } from '../../../utils/theme';
 
 interface ReportsViewProps {
   database: GenealogyDatabase;
@@ -19,6 +21,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   activePersonId,
   onSelectPerson
 }) => {
+  const themePalette = useUIStore((s) => s.themePalette);
+  const theme = getThemeConfig(themePalette);
+  const isDark = theme.category === 'dark';
+
   const [reportType, setReportType] = useState<'ancestors_summary' | 'full_index' | 'vital_records'>('ancestors_summary');
   
   const persons = useMemo(() => {
@@ -56,15 +62,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 bg-slate-900 text-slate-100 space-y-6">
+    <div className={`max-w-5xl mx-auto px-4 py-6 space-y-6 ${theme.textPrimary}`}>
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
         <div>
-          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            <FileText className="w-6 h-6 text-[#B88E3E]" />
+          <h2 className={`text-xl font-bold ${theme.textPrimary} flex items-center gap-2`}>
+            <FileText className="w-5 h-5 text-amber-500" />
             <span>Генеалогічні Звіти та Виписки</span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className={`text-xs ${theme.textMuted} mt-1`}>
             Генерація поколінних розписів, поіменних покажчиків та довідок для друку
           </p>
         </div>
@@ -72,14 +78,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         <div className="flex items-center gap-3">
           <button
             onClick={handleExportText}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-sm font-medium flex items-center gap-2 border border-slate-700 transition-all cursor-pointer"
+            className={`px-3.5 py-2 ${theme.surfaceBg} hover:opacity-80 ${theme.textPrimary} rounded-lg text-xs font-medium flex items-center gap-2 border ${theme.borderSubtle} transition-all cursor-pointer`}
           >
             <Download className="w-4 h-4" />
             <span>Завантажити TXT</span>
           </button>
           <button
             onClick={handlePrint}
-            className="px-4 py-2 bg-[#B88E3E] hover:bg-[#A37B30] text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer"
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
           >
             <Printer className="w-4 h-4" />
             <span>Друкувати звіт</span>
@@ -88,23 +94,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+      <div className={`flex items-center gap-2 border-b ${theme.borderSubtle} pb-3`}>
         <button
           onClick={() => setReportType('ancestors_summary')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+          className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
             reportType === 'ancestors_summary'
-              ? 'bg-[#B88E3E] text-white'
-              : 'bg-slate-800 text-slate-400 hover:text-white'
+              ? 'bg-amber-600 text-white'
+              : `${theme.surfaceBg} ${theme.textSecondary} hover:${theme.textPrimary}`
           }`}
         >
           Поколінний розпис
         </button>
         <button
           onClick={() => setReportType('full_index')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+          className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
             reportType === 'full_index'
-              ? 'bg-[#B88E3E] text-white'
-              : 'bg-slate-800 text-slate-400 hover:text-white'
+              ? 'bg-amber-600 text-white'
+              : `${theme.surfaceBg} ${theme.textSecondary} hover:${theme.textPrimary}`
           }`}
         >
           Поіменний покажчик ({persons.length})
@@ -112,45 +118,45 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       </div>
 
       {/* Report Canvas */}
-      <div className="p-8 rounded-2xl bg-white text-neutral-900 shadow-2xl space-y-6 max-w-4xl mx-auto font-serif">
-        <div className="text-center border-b border-neutral-300 pb-6 space-y-2">
-          <span className="text-[11px] uppercase tracking-widest font-sans font-bold text-[#8E6C28]">
+      <div className={`p-8 rounded-xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-6 max-w-4xl mx-auto`}>
+        <div className={`text-center border-b ${theme.borderSubtle} pb-6 space-y-2`}>
+          <span className="text-[10px] uppercase tracking-widest font-bold text-amber-600">
             Архівний звіт родоводу
           </span>
-          <h1 className="text-2xl font-bold font-serif text-neutral-900">
+          <h1 className={`text-xl font-bold font-serif ${theme.textPrimary}`}>
             Поіменний родовідний розпис родини
           </h1>
-          <p className="text-xs text-neutral-600 font-sans">
-            Досліджувана гілка: <strong>{activePerson ? getFullName(activePerson) : 'Всі особи'}</strong> | Складено: {new Date().toLocaleDateString('uk-UA')}
+          <p className={`text-xs ${theme.textMuted}`}>
+            Досліджувана гілка: <strong className={theme.textPrimary}>{activePerson ? getFullName(activePerson) : 'Всі особи'}</strong> | Складено: {new Date().toLocaleDateString('uk-UA')}
           </p>
         </div>
 
-        <div className="space-y-4 font-sans text-sm">
+        <div className="space-y-3 text-xs">
           {persons.map((person, index) => (
             <div
               key={person.id}
-              className="p-4 rounded-xl border border-neutral-200 bg-neutral-50/50 hover:bg-neutral-100 transition-colors"
+              className={`p-4 rounded-lg border ${theme.borderSubtle} ${theme.surfaceBg} hover:border-amber-500/50 transition-colors`}
             >
               <div className="flex items-start justify-between">
                 <div className="space-y-1">
-                  <div className="font-bold text-base text-neutral-900 flex items-center gap-2">
-                    <span className="font-mono text-xs text-[#B88E3E] font-bold">№{index + 1}</span>
+                  <div className={`font-bold text-sm ${theme.textPrimary} flex items-center gap-2`}>
+                    <span className="font-mono text-xs text-amber-600 font-bold">№{index + 1}</span>
                     <span>{getFullName(person)}</span>
                   </div>
-                  <div className="text-xs text-neutral-600 flex flex-wrap gap-x-4 gap-y-1">
+                  <div className={`text-xs ${theme.textMuted} flex flex-wrap gap-x-4 gap-y-1`}>
                     {person.birthDate && <span>Нар.: {person.birthDate} {person.birthPlace ? `(${person.birthPlace})` : ''}</span>}
                     {person.deathDate && <span>Пом.: {person.deathDate} {person.deathPlace ? `(${person.deathPlace})` : ''}</span>}
                     {person.occupation && <span>Фах: {person.occupation}</span>}
                   </div>
                   {person.notes && (
-                    <p className="text-xs text-neutral-700 italic pt-1">
+                    <p className={`text-xs ${theme.textSecondary} italic pt-1`}>
                       "{person.notes}"
                     </p>
                   )}
                 </div>
                 <button
                   onClick={() => onSelectPerson(person.id)}
-                  className="text-xs text-[#8E6C28] hover:underline font-medium print:hidden"
+                  className="text-xs text-amber-600 hover:underline font-medium print:hidden cursor-pointer"
                 >
                   Перейти →
                 </button>

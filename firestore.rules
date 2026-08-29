@@ -21,6 +21,24 @@ service cloud.firestore {
         allow write: if true;
       }
 
+      // Families subcollection
+      match /families/{familyId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Events subcollection
+      match /events/{eventId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Sources subcollection
+      match /sources/{sourceId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
       // Metric records subcollection
       match /metricRecords/{recordId} {
         allow read: if true;
@@ -57,11 +75,29 @@ service cloud.firestore {
         allow write: if true;
       }
 
+      // Access requests subcollection
+      match /accessRequests/{requestId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
       // Matrix entries subcollection
       match /matrixEntries/{entryId} {
         allow read: if true;
         allow write: if true;
       }
+    }
+
+    // Access requests top-level collection
+    match /accessRequests/{requestId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Trees collection
+    match /trees/{treeId} {
+      allow read: if true;
+      allow write: if true;
     }
 
     // Default deny catch-all

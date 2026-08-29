@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   ZoomIn,
   ZoomOut,
@@ -15,11 +15,18 @@ import {
   Info,
   Printer,
   Download,
-  ChevronDown
+  Upload,
+  Image as ImageIcon,
+  Sparkles,
+  ChevronDown,
+  PieChart
 } from 'lucide-react';
 import { GenealogyDatabase, TreeLayoutType, Person } from '../../types/genealogy';
 import { calculateAncestorsLayout, calculateDescendantsLayout } from '../../utils/treeLayout';
 import { getFullName } from '../../utils/relationship';
+import { useUIStore } from '../../../stores/useUIStore';
+import { getThemeConfig } from '../../../utils/theme';
+import { PngBranchManagerModal } from '../../../components/Tree/PngBranchManagerModal';
 
 interface TreeViewProps {
   database: GenealogyDatabase;
@@ -29,6 +36,7 @@ interface TreeViewProps {
   onOpenAddParent: (childId: string) => void;
   onChangeRoot: (id: string) => void;
   onOpenRelationManager?: (personId: string) => void;
+  onSwitchToFan?: () => void;
 }
 
 export const TreeView: React.FC<TreeViewProps> = ({
@@ -38,7 +46,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
   onOpenAddChild,
   onOpenAddParent,
   onChangeRoot,
-  onOpenRelationManager
+  onOpenRelationManager,
+  onSwitchToFan
 }) => {
   const [layoutType, setLayoutType] = useState<TreeLayoutType>('ancestors');
   const [generations, setGenerations] = useState<number>(5);
@@ -55,6 +64,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }
   });
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
+  const [isPngModalOpen, setIsPngModalOpen] = useState<boolean>(false);
+  const [pngModalTab, setPngModalTab] = useState<'export' | 'import'>('export');
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -152,11 +163,82 @@ export const TreeView: React.FC<TreeViewProps> = ({
   // Level of Detail (LOD): When zoomed far out, render ultra-lightweight simplified cards
   const isLowDetail = scale < 0.52;
 
-  // Center tree on person change or initial mount
+  const themePalette = useUIStore((s) => s.themePalette);
+  const theme = getThemeConfig(themePalette);
+  const isDark = theme.category === 'dark';
+
+  const [canvasTheme, setCanvasTheme] = useState<'dark' | 'parchment' | 'emerald'>(() => {
+    try {
+      const saved = localStorage.getItem('gramps_tree_canvas_theme');
+      if (saved && (saved === 'dark' || saved === 'parchment' || saved === 'emerald')) {
+        return saved as any;
+      }
+      return theme.category === 'light' ? 'parchment' : theme.id === 'emerald' || theme.id === 'dark-emerald' ? 'emerald' : 'dark';
+    } catch {
+      return theme.category === 'light' ? 'parchment' : 'dark';
+    }
+  });
+
+  // Automatically update canvasTheme when global theme palette changes
   useEffect(() => {
-    setPan({ x: 80, y: 120 });
-    setScale(1);
-  }, [activePersonId, layoutType]);
+    if (theme.category === 'light') {
+      setCanvasTheme('parchment');
+    } else if (theme.id === 'emerald' || theme.id === 'dark-emerald') {
+      setCanvasTheme('emerald');
+    } else {
+      setCanvasTheme('dark');
+    }
+  }, [theme.id, theme.category]);
+
+  const handleSetCanvasTheme = (t: 'dark' | 'parchment' | 'emerald') => {
+    setCanvasTheme(t);
+    try {
+      localStorage.setItem('gramps_tree_canvas_theme', t);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Center tree on container dimensions and tree bounding box
+  const centerTree = useCallback(() => {
+    if (!layout.nodes.length) return;
+    const container = containerRef.current;
+    const cw = container ? container.clientWidth : containerDimensions.width || 1000;
+    const ch = container ? container.clientHeight : containerDimensions.height || 700;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    layout.nodes.forEach((n) => {
+      minX = Math.min(minX, n.x);
+      maxX = Math.max(maxX, n.x + (n.width || 220));
+      minY = Math.min(minY, n.y);
+      maxY = Math.max(maxY, n.y + (n.height || 110));
+    });
+
+    const treeW = Math.max(maxX - minX, 220);
+    const treeH = Math.max(maxY - minY, 110);
+
+    const fitScaleX = (cw - 80) / treeW;
+    const fitScaleY = (ch - 80) / treeH;
+    const optimalScale = Math.min(Math.max(Math.min(fitScaleX, fitScaleY), 0.55), 1.05);
+
+    const treeCenterX = (minX + maxX) / 2;
+    const treeCenterY = (minY + maxY) / 2;
+
+    const newPanX = cw / 2 - treeCenterX * optimalScale;
+    const newPanY = ch / 2 - treeCenterY * optimalScale;
+
+    setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
+    setScale(optimalScale);
+  }, [layout.nodes, containerDimensions]);
+
+  // Center tree on person change, layout change or container resize
+  useEffect(() => {
+    // slight timeout to allow layout to settle
+    const timer = setTimeout(() => {
+      centerTree();
+    }, 30);
+    return () => clearTimeout(timer);
+  }, [centerTree, activePersonId, layoutType]);
 
   const touchStateRef = useRef<{
     initialDist: number;
@@ -370,47 +452,67 @@ export const TreeView: React.FC<TreeViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 overflow-hidden relative select-none">
+    <div className={`flex flex-col h-[calc(100vh-4rem)] ${theme.appBg} overflow-hidden relative select-none`}>
       {/* Control Bar */}
-      <div className="h-14 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 flex items-center justify-between z-20 shrink-0 print:hidden">
+      <div className={`h-14 ${theme.headerBg} ${theme.headerBorder} border-b px-4 flex items-center justify-between z-20 shrink-0 print:hidden transition-colors duration-200`}>
         <div className="flex items-center gap-3">
           {/* Layout switch */}
-          <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700">
+          <div className={`flex items-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-neutral-100 border-neutral-300'} p-0.5 rounded-lg border`}>
             <button
               onClick={() => setLayoutType('ancestors')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                 layoutType === 'ancestors'
-                  ? 'bg-emerald-600 text-white shadow'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : isDark
+                  ? 'text-slate-300 hover:text-white'
+                  : 'text-neutral-700 hover:text-neutral-900'
               }`}
+              title="Висхідне класичне дерево предків"
             >
               <GitFork className="w-3.5 h-3.5 rotate-90" />
-              <span>Висхідне (Предки)</span>
+              <span>Предки</span>
             </button>
             <button
               onClick={() => setLayoutType('descendants')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                 layoutType === 'descendants'
-                  ? 'bg-emerald-600 text-white shadow'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : isDark
+                  ? 'text-slate-300 hover:text-white'
+                  : 'text-neutral-700 hover:text-neutral-900'
               }`}
+              title="Низхідне дерево нащадків"
             >
               <ArrowDownUp className="w-3.5 h-3.5" />
-              <span>Низхідне (Нащадки)</span>
+              <span>Нащадки</span>
             </button>
+            {onSwitchToFan && (
+              <button
+                onClick={onSwitchToFan}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                  isDark ? 'text-slate-300 hover:text-white hover:bg-slate-700/60' : 'text-neutral-700 hover:text-neutral-950 hover:bg-neutral-200'
+                }`}
+                title="Перемкнути у кругове віяло Gramps"
+              >
+                <PieChart className="w-3.5 h-3.5 text-amber-500" />
+                <span>Віяло</span>
+              </button>
+            )}
           </div>
 
           {/* Generations counter */}
-          <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-300 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+          <div className={`hidden sm:flex items-center gap-1.5 text-xs ${isDark ? 'text-slate-300 bg-slate-800 border-slate-700' : 'text-neutral-700 bg-neutral-100 border-neutral-300'} px-3 py-1.5 rounded-lg border`}>
             <span>Поколінь:</span>
             {[3, 4, 5, 6].map((g) => (
               <button
                 key={g}
                 onClick={() => setGenerations(g)}
-                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
                   generations === g
-                    ? 'bg-emerald-600 text-white'
-                    : 'hover:bg-slate-700 text-slate-400'
+                    ? 'bg-emerald-600 text-white font-bold'
+                    : isDark
+                    ? 'hover:bg-slate-700 text-slate-400'
+                    : 'hover:bg-neutral-200 text-neutral-600'
                 }`}
               >
                 {g}
@@ -420,11 +522,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
           {/* Quick Root Person Selector */}
           <div className="hidden md:flex items-center gap-2">
-            <span className="text-xs text-slate-400">Корінь дерева:</span>
+            <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-neutral-500'}`}>Корінь дерева:</span>
             <select
               value={activePersonId}
               onChange={(e) => onChangeRoot(e.target.value)}
-              className="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-md px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[200px] truncate"
+              className={`${isDark ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-white text-neutral-900 border-neutral-300 shadow-xs'} text-xs border rounded-md px-2.5 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[200px] truncate`}
             >
               {(Object.values(database.persons) as Person[]).map((p) => (
                 <option key={p.id} value={p.id}>
@@ -441,35 +543,73 @@ export const TreeView: React.FC<TreeViewProps> = ({
           <div className="relative" ref={exportMenuRef}>
             <button
               onClick={() => setIsExportOpen((prev) => !prev)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
                 isExportOpen
-                  ? 'bg-slate-700 text-white border-slate-600 shadow-sm'
-                  : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border-slate-700'
+                  ? isDark
+                    ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
+                    : 'bg-neutral-200 text-neutral-900 border-neutral-400 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border-slate-700'
+                  : 'bg-neutral-100 text-neutral-700 hover:text-neutral-900 hover:bg-neutral-200 border-neutral-300'
               }`}
               title="Експорт та друк дерева"
               aria-expanded={isExportOpen}
             >
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <Download className="w-3.5 h-3.5 text-emerald-500" />
               <span className="hidden sm:inline">Експорт</span>
-              <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${isExportOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3 h-3 ${isDark ? 'text-slate-400' : 'text-neutral-500'} transition-transform duration-200 ${isExportOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {isExportOpen && (
-              <div className="absolute right-0 top-full mt-2 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-slate-800 mb-1">
-                  Збереження та друк
+              <div className={`absolute right-0 top-full mt-2 w-72 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200 shadow-xl'} border rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150`}>
+                <div className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider ${isDark ? 'text-slate-400 border-slate-800' : 'text-neutral-500 border-neutral-200'} border-b mb-1`}>
+                  Збереження та експорт
                 </div>
+                <button
+                  onClick={() => {
+                    setPngModalTab('export');
+                    setIsPngModalOpen(true);
+                    setIsExportOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left ${isDark ? 'text-slate-200 hover:bg-slate-800 hover:text-white' : 'text-neutral-800 hover:bg-neutral-100 hover:text-neutral-950'} transition-colors cursor-pointer`}
+                >
+                  <ImageIcon className="w-4 h-4 text-amber-500 shrink-0" />
+                  <div>
+                    <div className={`font-bold flex items-center gap-1.5 ${isDark ? 'text-slate-100' : 'text-neutral-900'}`}>
+                      <span>Скачати картинку дерева (PNG)</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-bold">HD</span>
+                    </div>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-neutral-500'}`}>Висока роздільна здатність, стилі та вбудовані метадані</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => {
+                    setPngModalTab('import');
+                    setIsPngModalOpen(true);
+                    setIsExportOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left ${isDark ? 'text-slate-200 hover:bg-slate-800 hover:text-white' : 'text-neutral-800 hover:bg-neutral-100 hover:text-neutral-950'} transition-colors cursor-pointer border-b ${isDark ? 'border-slate-800' : 'border-neutral-200'}`}
+                >
+                  <Upload className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <div>
+                    <div className={`font-bold flex items-center gap-1.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                      <span>Приєднати нову гілку з PNG</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-bold">AI</span>
+                    </div>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-neutral-500'}`}>Розпізнавання зв'язків з фото та приєднання до роду</div>
+                  </div>
+                </button>
                 <button
                   onClick={() => {
                     handleExportSvg();
                     setIsExportOpen(false);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-slate-800 hover:text-white transition-colors"
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left ${isDark ? 'text-slate-200 hover:bg-slate-800 hover:text-white' : 'text-neutral-800 hover:bg-neutral-100 hover:text-neutral-950'} transition-colors cursor-pointer`}
                 >
-                  <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <Download className="w-4 h-4 text-emerald-500 shrink-0" />
                   <div>
-                    <div className="font-medium text-slate-200">Скачати векторне дерево (SVG)</div>
-                    <div className="text-[10px] text-slate-400">Векторний файл без втрати якості для плакатів</div>
+                    <div className={`font-medium ${isDark ? 'text-slate-200' : 'text-neutral-900'}`}>Скачати векторне дерево (SVG)</div>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-neutral-500'}`}>Векторний файл без втрати якості для плакатів</div>
                   </div>
                 </button>
                 <button
@@ -477,45 +617,90 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     handlePrint();
                     setIsExportOpen(false);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-slate-800 hover:text-white transition-colors"
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left ${isDark ? 'text-slate-200 hover:bg-slate-800 hover:text-white' : 'text-neutral-800 hover:bg-neutral-100 hover:text-neutral-950'} transition-colors cursor-pointer`}
                 >
-                  <Printer className="w-4 h-4 text-sky-400 shrink-0" />
+                  <Printer className="w-4 h-4 text-sky-500 shrink-0" />
                   <div>
-                    <div className="font-medium text-slate-200">Роздрукувати / Зберегти в PDF</div>
-                    <div className="text-[10px] text-slate-400">Друк на папері або експорт у PDF-документ</div>
+                    <div className={`font-medium ${isDark ? 'text-slate-200' : 'text-neutral-900'}`}>Роздрукувати / Зберегти в PDF</div>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-neutral-500'}`}>Друк на папері або експорт у PDF-документ</div>
                   </div>
                 </button>
               </div>
             )}
           </div>
 
+          {/* Quick Import PNG Branch Toolbar Button */}
+          <button
+            onClick={() => {
+              setPngModalTab('import');
+              setIsPngModalOpen(true);
+            }}
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+              isDark
+                ? 'bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border-emerald-700/60'
+                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 shadow-xs'
+            }`}
+            title="Додати нові гілки або родичів з PNG зображення / фотографії схеми"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>+ Гілка з PNG</span>
+          </button>
+
+          {/* Background Theme Selector */}
+          <div className={`hidden lg:flex items-center gap-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-neutral-100 border-neutral-300'} p-1 rounded-lg border`}>
+            <button
+              onClick={() => handleSetCanvasTheme('dark')}
+              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                canvasTheme === 'dark' ? 'bg-slate-700 text-white shadow-xs font-bold' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+              title="Темний графітовий фон (Slate)"
+            >
+              Темний
+            </button>
+            <button
+              onClick={() => handleSetCanvasTheme('parchment')}
+              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                canvasTheme === 'parchment' ? 'bg-amber-200 text-amber-950 font-bold shadow-xs' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+              title="Світлий архівний пергамент"
+            >
+              Пергамент
+            </button>
+            <button
+              onClick={() => handleSetCanvasTheme('emerald')}
+              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                canvasTheme === 'emerald' ? 'bg-emerald-700 text-white shadow-xs font-bold' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+              title="Смарагдовий літописний фон"
+            >
+              Ліс
+            </button>
+          </div>
+
           {/* Zoom Controls */}
-          <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700">
+          <div className={`flex items-center gap-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-neutral-100 border-neutral-300'} p-1 rounded-lg border`}>
             <button
               onClick={() => setScale((s) => Math.min(s * 1.2, 2.5))}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              className={`p-1.5 ${isDark ? 'text-slate-300 hover:text-white hover:bg-slate-700' : 'text-neutral-700 hover:text-neutral-950 hover:bg-neutral-200'} rounded transition-colors cursor-pointer`}
               title="Збільшити"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
             <button
               onClick={() => setScale((s) => Math.max(s * 0.8, 0.3))}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              className={`p-1.5 ${isDark ? 'text-slate-300 hover:text-white hover:bg-slate-700' : 'text-neutral-700 hover:text-neutral-950 hover:bg-neutral-200'} rounded transition-colors cursor-pointer`}
               title="Зменшити"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
             <button
-              onClick={() => {
-                setScale(1);
-                setPan({ x: 80, y: 120 });
-              }}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
-              title="Скинути масштаб"
+              onClick={centerTree}
+              className={`p-1.5 ${isDark ? 'text-slate-300 hover:text-white hover:bg-slate-700' : 'text-neutral-700 hover:text-neutral-950 hover:bg-neutral-200'} rounded transition-colors cursor-pointer`}
+              title="Центрувати дерево у вікні"
             >
               <Maximize2 className="w-4 h-4" />
             </button>
-            <span className="text-[11px] text-slate-400 font-mono px-2">
+            <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-neutral-600'} font-mono px-2`}>
               {Math.round(scale * 100)}%
             </span>
           </div>
@@ -534,12 +719,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
         onWheel={handleWheel}
-        className={`flex-1 relative overflow-hidden touch-none bg-radial from-slate-900 to-slate-950 ${
-          isDragging ? 'cursor-grabbing' : 'cursor-grab'
-        }`}
+        className={`flex-1 relative overflow-hidden touch-none ${
+          canvasTheme === 'parchment'
+            ? 'bg-[#f6f2e8]'
+            : canvasTheme === 'emerald'
+            ? 'bg-[#031c15]'
+            : 'bg-[#0b1324]'
+        } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         style={{
           backgroundImage:
-            'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0)',
+            canvasTheme === 'parchment'
+              ? 'radial-gradient(circle at 1px 1px, rgba(160, 110, 60, 0.28) 1.2px, transparent 0)'
+              : canvasTheme === 'emerald'
+              ? 'radial-gradient(circle at 1px 1px, rgba(52, 211, 153, 0.25) 1.2px, transparent 0)'
+              : 'radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.25) 1.2px, transparent 0)',
           backgroundSize: '24px 24px',
           touchAction: 'none'
         }}
@@ -570,11 +763,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   <path
                     d={pathData}
                     fill="none"
-                    stroke="#475569"
-                    strokeWidth="2"
+                    stroke="#64748b"
+                    strokeWidth="2.5"
                     strokeLinecap="round"
                   />
-                  <circle cx={link.targetX} cy={link.targetY} r="3.5" fill="#10b981" />
+                  <circle cx={link.targetX} cy={link.targetY} r="4" fill="#10b981" />
                 </g>
               );
             })}
@@ -586,12 +779,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
             const isRoot = p.id === activePersonId;
             const isMale = p.gender === 'M';
             const isFemale = p.gender === 'F';
+            const isLightCanvas = canvasTheme === 'parchment';
 
-            const genderBg = isMale
-              ? 'border-blue-500/40 bg-slate-900/95 hover:border-blue-400'
+            const genderBg = isLightCanvas
+              ? isMale
+                ? 'border-sky-500/70 bg-white/95 text-neutral-900 hover:border-sky-600 shadow-md shadow-sky-900/10'
+                : isFemale
+                ? 'border-rose-400/80 bg-white/95 text-neutral-900 hover:border-rose-500 shadow-md shadow-rose-900/10'
+                : 'border-amber-600/70 bg-white/95 text-neutral-900 hover:border-amber-700 shadow-md shadow-amber-900/10'
+              : isMale
+              ? 'border-sky-500/60 bg-slate-800/95 text-white hover:border-sky-400 shadow-md shadow-sky-950/30'
               : isFemale
-              ? 'border-rose-500/40 bg-slate-900/95 hover:border-rose-400'
-              : 'border-slate-600 bg-slate-900/95';
+              ? 'border-rose-500/60 bg-slate-800/95 text-white hover:border-rose-400 shadow-md shadow-rose-950/30'
+              : 'border-slate-600 bg-slate-800/95 text-white shadow-md';
 
             // LOD (Level of Detail) Lightweight node for distant zoom
             if (isLowDetail) {
@@ -605,18 +805,18 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     width: `${node.width}px`,
                     height: `${node.height}px`
                   }}
-                  className={`group rounded-lg border p-2 shadow-sm transition-all cursor-pointer flex flex-col justify-center ${genderBg} ${
-                    isRoot ? 'ring-2 ring-emerald-500' : ''
+                  className={`group rounded-xl border p-2 shadow-xs transition-all cursor-pointer flex flex-col justify-center ${genderBg} ${
+                    isRoot ? (isLightCanvas ? 'ring-2 ring-emerald-600 border-emerald-600 shadow-lg' : 'ring-2 ring-emerald-500 shadow-lg') : ''
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
                     onSelectPerson(p.id);
                   }}
                 >
-                  <div className="font-bold text-xs text-white truncate">
+                  <div className={`font-bold text-xs truncate ${isLightCanvas ? 'text-neutral-900' : 'text-white'}`}>
                     {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''}
                   </div>
-                  <div className="text-[10px] font-mono text-slate-400 truncate mt-0.5">
+                  <div className={`text-[10px] font-mono truncate mt-0.5 ${isLightCanvas ? 'text-neutral-600' : 'text-slate-300'}`}>
                     {p.birthYear || '?'} — {p.isLiving ? 'теп. час' : p.deathYear || '?'}
                   </div>
                 </div>
@@ -633,8 +833,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   width: `${node.width}px`,
                   height: `${node.height}px`
                 }}
-                className={`group rounded-xl border p-2.5 shadow-lg transition-all cursor-pointer flex flex-col justify-between ${genderBg} ${
-                  isRoot ? 'ring-2 ring-emerald-500 shadow-emerald-950/50' : ''
+                className={`group rounded-xl border p-2.5 shadow-xl transition-all cursor-pointer flex flex-col justify-between ${genderBg} ${
+                  isRoot ? (isLightCanvas ? 'ring-2 ring-emerald-600 border-emerald-600 shadow-md' : 'ring-2 ring-emerald-400 border-emerald-500/80 shadow-emerald-950/60') : ''
                 }`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -648,31 +848,41 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       <img
                         src={p.avatarUrl}
                         alt={p.name?.given || p.firstName || ''}
-                        className="w-11 h-11 rounded-lg object-cover border border-slate-700 shadow-sm"
+                        className={`w-11 h-11 rounded-lg object-cover border shadow-xs ${isLightCanvas ? 'border-neutral-300' : 'border-slate-600'}`}
                         loading="lazy"
                       />
                     ) : (
                       <div
                         className={`w-11 h-11 rounded-lg flex items-center justify-center border ${
-                          isMale
-                            ? 'bg-blue-950/60 border-blue-800 text-blue-300'
+                          isLightCanvas
+                            ? isMale
+                              ? 'bg-sky-50 border-sky-300 text-sky-700'
+                              : isFemale
+                              ? 'bg-rose-50 border-rose-300 text-rose-700'
+                              : 'bg-neutral-100 border-neutral-300 text-neutral-600'
+                            : isMale
+                            ? 'bg-sky-950/70 border-sky-700 text-sky-300'
                             : isFemale
-                            ? 'bg-rose-950/60 border-rose-800 text-rose-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-400'
+                            ? 'bg-rose-950/70 border-rose-700 text-rose-300'
+                            : 'bg-slate-700/80 border-slate-600 text-slate-300'
                         }`}
                       >
                         <User className="w-5 h-5" />
                       </div>
                     )}
                     {isRoot && (
-                      <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-slate-900" />
+                      <span className={`absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 ${isLightCanvas ? 'border-white' : 'border-slate-800'}`} />
                     )}
                   </div>
 
                   {/* Name and Dates */}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-1">
-                      <h4 className="font-semibold text-xs text-white truncate group-hover:text-emerald-400 transition-colors">
+                      <h4 className={`font-bold text-xs truncate transition-colors ${
+                        isLightCanvas
+                          ? 'text-neutral-900 group-hover:text-emerald-700'
+                          : 'text-white group-hover:text-emerald-400'
+                      }`}>
                         {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''}
                       </h4>
 
@@ -685,7 +895,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                             onOpenRelationManager(p.id);
                           }
                         }}
-                        className="w-5 h-5 -mt-0.5 -mr-0.5 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-sm hover:scale-110 active:scale-95 transition-all cursor-pointer border border-emerald-400/40"
+                        className="w-5 h-5 -mt-0.5 -mr-0.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs hover:scale-110 active:scale-95 transition-all cursor-pointer border border-emerald-400/40"
                         title="Додати родича (+ батька, матір, дітей, подружжя)"
                         aria-label="Додати родича"
                       >
@@ -694,15 +904,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     </div>
 
                     {(p.name?.patronymic || p.patronymic || p.name?.maidenName || p.maidenName) && (
-                      <p className="text-[10px] text-slate-400 truncate -mt-0.5">
+                      <p className={`text-[10px] truncate -mt-0.5 ${isLightCanvas ? 'text-neutral-600 font-medium' : 'text-slate-300'}`}>
                         {p.name?.patronymic || p.patronymic || ''}
                         {(p.name?.maidenName || p.maidenName) && ` (до шлюбу ${p.name?.maidenName || p.maidenName})`}
                       </p>
                     )}
 
                     {/* Life dates */}
-                    <div className="flex items-center gap-1 text-[10px] text-slate-300 font-mono mt-1">
-                      <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
+                    <div className={`flex items-center gap-1 text-[10px] font-mono mt-1 ${isLightCanvas ? 'text-neutral-700' : 'text-slate-200'}`}>
+                      <Calendar className={`w-3 h-3 shrink-0 ${isLightCanvas ? 'text-neutral-500' : 'text-slate-400'}`} />
                       <span className="truncate">
                         {p.birthYear || '?'} — {p.isLiving ? 'теп. час' : p.deathYear || '?'}
                       </span>
@@ -711,7 +921,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 </div>
 
                 {/* Bottom line: Occupation / Place / Badges */}
-                <div className="flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-800/80 pt-1 mt-1">
+                <div className={`flex items-center justify-between text-[10px] border-t pt-1 mt-1 ${
+                  isLightCanvas ? 'text-neutral-600 border-neutral-200' : 'text-slate-300 border-slate-700/70'
+                }`}>
                   <span className="truncate max-w-[110px]" title={p.occupation || p.birthPlace}>
                     {p.occupation || p.birthPlace || 'Немає опису'}
                   </span>
@@ -719,7 +931,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   <div className="flex items-center gap-1 shrink-0">
                     {p.citations && p.citations.length > 0 && (
                       <span
-                        className="flex items-center gap-0.5 px-1 py-0.2 bg-amber-950/50 text-amber-300 border border-amber-800/60 rounded text-[9px]"
+                        className={`flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] ${
+                          isLightCanvas
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            : 'bg-amber-950/60 text-amber-300 border border-amber-700/70'
+                        }`}
                         title={`Цитат з архіву: ${p.citations.length}`}
                       >
                         <BookOpen className="w-2.5 h-2.5" />
@@ -735,7 +951,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           onOpenRelationManager(p.id);
                         }
                       }}
-                      className="px-1.5 py-0.5 bg-slate-800 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-700/40 rounded flex items-center gap-0.5 text-[9px] font-semibold transition-colors cursor-pointer"
+                      className={`px-1.5 py-0.5 rounded flex items-center gap-0.5 text-[9px] font-semibold transition-colors cursor-pointer ${
+                        isLightCanvas
+                          ? 'bg-neutral-100 hover:bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : 'bg-slate-750 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-700/50'
+                      }`}
                       title="Керування родичами / Додати родича"
                     >
                       <Plus className="w-2.5 h-2.5" />
@@ -748,7 +968,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         e.stopPropagation();
                         onChangeRoot(p.id);
                       }}
-                      className="p-1 hover:bg-slate-700 text-slate-400 hover:text-emerald-400 rounded transition-colors cursor-pointer"
+                      className={`p-1 rounded transition-colors cursor-pointer ${
+                        isLightCanvas
+                          ? 'hover:bg-neutral-200 text-neutral-600 hover:text-emerald-700'
+                          : 'hover:bg-slate-700 text-slate-300 hover:text-emerald-400'
+                      }`}
                       title="Зробити фокусною персоною дерева"
                     >
                       <GitFork className="w-3 h-3" />
@@ -762,27 +986,33 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
         {/* Floating Quick Legend & Current Root Info */}
         {showInfoPanel ? (
-          <div className="absolute bottom-4 left-4 bg-slate-900/95 backdrop-blur border border-slate-800 rounded-xl p-3 shadow-2xl max-w-sm pointer-events-auto transition-all animate-in fade-in zoom-in-95 duration-150">
+          <div className={`absolute bottom-4 left-4 ${
+            canvasTheme === 'parchment'
+              ? 'bg-white/95 border-amber-900/20 text-neutral-800 shadow-xl'
+              : 'bg-slate-900/95 border-slate-800 text-white shadow-2xl'
+          } backdrop-blur border rounded-xl p-3 max-w-sm pointer-events-auto transition-all animate-in fade-in zoom-in-95 duration-150`}>
             <div className="flex items-center justify-between gap-3 mb-1.5">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                <span className="text-xs font-semibold text-white truncate">
+                <span className={`text-xs font-semibold truncate ${canvasTheme === 'parchment' ? 'text-neutral-950 font-bold' : 'text-white'}`}>
                   {activePerson ? getFullName(activePerson) : 'Особу не обрано'}
                 </span>
               </div>
               <button
                 onClick={() => handleToggleInfoPanel(false)}
-                className="p-1 -mr-1 -mt-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+                className={`p-1 -mr-1 -mt-1 rounded-lg transition-colors shrink-0 cursor-pointer ${
+                  canvasTheme === 'parchment' ? 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
                 title="Закрити вікно підказки"
                 aria-label="Закрити підказку"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            <p className="text-[11px] text-slate-400 line-clamp-2">
+            <p className={`text-[11px] line-clamp-2 ${canvasTheme === 'parchment' ? 'text-neutral-600' : 'text-slate-400'}`}>
               {activePerson?.bio || activePerson?.occupation || 'Натисніть на будь-яку картку для перегляду повного досьє або зміни кореня.'}
             </p>
-            <div className="flex items-center gap-3 text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800">
+            <div className={`flex items-center gap-3 text-[10px] ${canvasTheme === 'parchment' ? 'text-neutral-600 border-neutral-200' : 'text-slate-400 border-slate-800'} mt-2 pt-2 border-t`}>
               <div className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded bg-blue-500 shrink-0" /> Чоловіча стать
               </div>
@@ -794,13 +1024,23 @@ export const TreeView: React.FC<TreeViewProps> = ({
         ) : (
           <button
             onClick={() => handleToggleInfoPanel(true)}
-            className="absolute bottom-4 left-4 bg-slate-900/90 hover:bg-slate-800 backdrop-blur border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-lg px-2.5 py-1.5 shadow-lg transition-all flex items-center gap-1.5 text-xs font-medium pointer-events-auto"
+            className={`absolute bottom-4 left-4 ${
+              canvasTheme === 'parchment'
+                ? 'bg-white/90 hover:bg-white text-neutral-800 border-neutral-300'
+                : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
+            } backdrop-blur border rounded-lg px-2.5 py-1.5 shadow-lg transition-all flex items-center gap-1.5 text-xs font-medium pointer-events-auto cursor-pointer`}
             title="Показати інформаційну картку та легенду"
           >
-            <Info className="w-4 h-4 text-emerald-400" />
+            <Info className="w-4 h-4 text-emerald-500" />
             <span>Інфо / Легенда</span>
           </button>
         )}
+        {/* PNG Smart Branch & Export Modal */}
+        <PngBranchManagerModal
+          isOpen={isPngModalOpen}
+          onClose={() => setIsPngModalOpen(false)}
+          initialTab={pngModalTab}
+        />
       </div>
     </div>
   );

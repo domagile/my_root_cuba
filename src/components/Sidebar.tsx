@@ -42,7 +42,7 @@ export const Sidebar: React.FC = () => {
 
   const rodovidItems: { id: ViewMode; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'tree', label: 'Дерево', icon: GitFork },
-    { id: 'fan', label: 'Віяло', icon: PieChart },
+    { id: 'fan', label: 'Віяло (Кругове)', icon: PieChart },
     { id: 'persons', label: `Особи (${personsCount})`, icon: Users },
     { id: 'families', label: "Сім'ї", icon: HeartHandshake },
     { id: 'timeline', label: 'Хроніка', icon: Calendar },

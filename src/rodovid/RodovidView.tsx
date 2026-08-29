@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { GenealogyDatabase, ViewMode, Person, Family, Source } from './types/genealogy';
 import { Header } from './components/layout/Header';
 import { TreeView } from './components/views/TreeView';
@@ -25,10 +25,13 @@ import { RelationManagerModal } from '../components/Tree/RelationManagerModal';
 import { AddPersonModal } from '../components/Tree/AddPersonModal';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useUIStore } from '../stores/useUIStore';
+import { getThemeConfig } from '../utils/theme';
 
 export const RodovidView: React.FC = () => {
   const currentView = useUIStore((s) => s.rodovidView);
   const setCurrentView = useUIStore((s) => s.setRodovidView);
+  const themePalette = useUIStore((s) => s.themePalette);
+  const theme = getThemeConfig(themePalette);
 
   const {
     persons,
@@ -134,7 +137,7 @@ export const RodovidView: React.FC = () => {
   const title = database.metadata?.title || 'Генеалогічна база роду';
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 bg-slate-950 text-slate-100 font-sans overflow-hidden selection:bg-emerald-500 selection:text-white">
+    <div className={`flex-1 flex flex-col h-full min-h-0 ${theme.appBg} font-sans overflow-hidden transition-colors duration-200`}>
       {/* Top Navigation Bar inside Rodovid */}
       <Header
         currentView={currentView}
@@ -160,6 +163,7 @@ export const RodovidView: React.FC = () => {
             }}
             onChangeRoot={(id) => setSelectedPersonId(id)}
             onOpenRelationManager={(id) => setRelationManagerPersonId(id)}
+            onSwitchToFan={() => setCurrentView('fan')}
           />
         )}
 
@@ -169,6 +173,7 @@ export const RodovidView: React.FC = () => {
             activePersonId={activePersonId}
             onSelectPerson={(id) => setInspectPersonId(id)}
             onChangeRoot={(id) => setSelectedPersonId(id)}
+            onSwitchToTree={() => setCurrentView('tree')}
           />
         )}
 
@@ -208,7 +213,7 @@ export const RodovidView: React.FC = () => {
           />
         )}
 
-        {currentView === 'map' && (
+        {(currentView === 'map' || currentView === 'places') && (
           <PlacesMapView
             database={database}
             onSelectPerson={(id) => setInspectPersonId(id)}
@@ -224,7 +229,7 @@ export const RodovidView: React.FC = () => {
           />
         )}
 
-        {currentView === 'calculator' && (
+        {(currentView === 'calculator' || currentView === 'kinship') && (
           <KinshipCalculatorView
             database={database}
             initialPersonAId={kinshipInitialAId || activePersonId}
@@ -232,7 +237,7 @@ export const RodovidView: React.FC = () => {
           />
         )}
 
-        {currentView === 'statistics' && (
+        {(currentView === 'statistics' || currentView === 'stats') && (
           <StatisticsView
             database={database}
             onSelectPerson={(id) => setInspectPersonId(id)}
