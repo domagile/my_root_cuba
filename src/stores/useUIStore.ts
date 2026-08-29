@@ -3,10 +3,13 @@ import { ThemePalette, AccessLockConfig, ViewMode } from '../types';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v2';
 
+export type TreeCanvasTheme = 'classic-dark' | 'parchment' | 'light' | 'emerald';
+
 export interface UIState {
   activeTab: string;
   rodovidView: ViewMode;
   themePalette: ThemePalette;
+  treeCanvasTheme: TreeCanvasTheme;
   searchQuery: string;
   treeMode: string;
   isUnlocked: boolean;
@@ -18,6 +21,7 @@ export interface UIState {
   setActiveTab: (tab: string) => void;
   setRodovidView: (view: ViewMode) => void;
   setThemePalette: (palette: ThemePalette) => void;
+  setTreeCanvasTheme: (theme: TreeCanvasTheme) => void;
   setSearchQuery: (query: string) => void;
   setTreeMode: (mode: string) => void;
   setMobileMenuOpen: (isOpen: boolean) => void;
@@ -39,6 +43,18 @@ export const useUIStore = create<UIState>((set, get) => ({
       return (localStorage.getItem(`${STORAGE_KEY}_theme`) as ThemePalette) || 'classic';
     } catch {
       return 'classic';
+    }
+  })(),
+
+  treeCanvasTheme: (() => {
+    try {
+      const saved = localStorage.getItem('rodovid_tree_canvas_theme');
+      if (saved && ['classic-dark', 'parchment', 'light', 'emerald'].includes(saved)) {
+        return saved as TreeCanvasTheme;
+      }
+      return 'light'; // Default to light background as requested by user
+    } catch {
+      return 'light';
     }
   })(),
   
@@ -72,6 +88,13 @@ export const useUIStore = create<UIState>((set, get) => ({
       localStorage.setItem(`${STORAGE_KEY}_theme`, themePalette);
     } catch {}
     set({ themePalette });
+  },
+
+  setTreeCanvasTheme: (treeCanvasTheme: TreeCanvasTheme) => {
+    try {
+      localStorage.setItem('rodovid_tree_canvas_theme', treeCanvasTheme);
+    } catch {}
+    set({ treeCanvasTheme });
   },
 
   setSearchQuery: (searchQuery: string) => set({ searchQuery }),

@@ -71,6 +71,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
   onOpenRelationManager,
   onSwitchToFan
 }) => {
+  const canvasTheme = useUIStore((s) => s.treeCanvasTheme);
+  const setCanvasTheme = useUIStore((s) => s.setTreeCanvasTheme);
+
   const [layoutType, setLayoutType] = useState<TreeLayoutType>('ancestors');
   // Default to 0 = ALL generations
   const [generations, setGenerations] = useState<number>(0);
@@ -244,8 +247,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
-
-  const [canvasTheme, setCanvasTheme] = useState<'classic-dark' | 'parchment' | 'light' | 'emerald'>('classic-dark');
 
   // Tree Bounding Box
   const treeBounds = useMemo(() => {
@@ -1019,26 +1020,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       e.stopPropagation();
                       toggleCollapseParents(p.id);
                     }}
-                    className={`absolute -top-3 left-1/2 -translate-x-1/2 z-10 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer border ${
+                    className={`absolute -top-2.5 left-1/2 -translate-x-1/2 z-10 w-6 h-5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
                       node.isParentsCollapsed
                         ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 scale-105'
                         : isLightCanvas
                         ? 'bg-[#ece5d8] hover:bg-[#ded5c5] text-stone-900 border-[#cfc3af]'
                         : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
                     }`}
-                    title={node.isParentsCollapsed ? `Розгорнути батьків (${node.parentsCount})` : 'Сховати батьків'}
+                    title={node.isParentsCollapsed ? `Розгорнути предків (${node.parentsCount})` : 'Сховати предків'}
                   >
-                    {node.isParentsCollapsed ? (
-                      <>
-                        <ChevronUp className="w-3 h-3" />
-                        <span>+Батьки ({node.parentsCount})</span>
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown className="w-3 h-3" />
-                        <span>Батьки</span>
-                      </>
-                    )}
+                    <ChevronUp className={`w-3 h-3 ${node.isParentsCollapsed ? 'text-white' : 'text-amber-500'}`} />
+                    {node.isParentsCollapsed && <span className="text-[9px] leading-none">{node.parentsCount}</span>}
                   </button>
                 )}
 
@@ -1177,26 +1169,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       e.stopPropagation();
                       toggleCollapseChildren(p.id);
                     }}
-                    className={`absolute -bottom-3 left-1/2 -translate-x-1/2 z-10 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer border ${
+                    className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 z-10 w-6 h-5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
                       node.isChildrenCollapsed
                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 scale-105'
                         : isLightCanvas
                         ? 'bg-[#ece5d8] hover:bg-[#ded5c5] text-stone-900 border-[#cfc3af]'
                         : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
                     }`}
-                    title={node.isChildrenCollapsed ? `Розгорнути дітей (${node.childrenCount})` : 'Сховати дітей'}
+                    title={node.isChildrenCollapsed ? `Розгорнути нащадків (${node.childrenCount})` : 'Сховати нащадків'}
                   >
-                    {node.isChildrenCollapsed ? (
-                      <>
-                        <ChevronDown className="w-3 h-3" />
-                        <span>+Діти ({node.childrenCount})</span>
-                      </>
-                    ) : (
-                      <>
-                        <ChevronUp className="w-3 h-3" />
-                        <span>Діти</span>
-                      </>
-                    )}
+                    <ChevronDown className={`w-3 h-3 ${node.isChildrenCollapsed ? 'text-white' : 'text-emerald-500'}`} />
+                    {node.isChildrenCollapsed && <span className="text-[9px] leading-none">{node.childrenCount}</span>}
                   </button>
                 )}
 
@@ -1224,17 +1207,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
               <GitFork className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
               <h3 className="text-base font-bold mb-1">Візуалізація родоводу</h3>
               <p className="text-xs mb-4 text-slate-300">
-                Натисніть кнопку нижче, щоб відобразити повне родинне дерево Ольги Бом (39 осіб, 9 поколінь).
+                Виберіть або додайте персону, щоб розпочати побудову родинного дерева.
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  onChangeRoot('p_bom_olga');
-                }}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer transition-transform hover:scale-105"
-              >
-                Відобразити родовід (Ольга Бом)
-              </button>
+              {Object.keys(database.persons).length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstId = Object.keys(database.persons)[0];
+                    if (firstId) onChangeRoot(firstId);
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer transition-transform hover:scale-105"
+                >
+                  Відобразити родовід
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1333,7 +1319,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
         {/* Sleek Fixed Bottom Horizontal Scrollbar */}
         {layout.nodes.length > 0 && (
           <div
-            className={`absolute bottom-0 left-0 right-0 h-4 z-30 flex items-center select-none cursor-pointer border-t transition-colors shadow-xs ${
+            className={`absolute bottom-0 left-0 right-4 h-4 z-30 flex items-center select-none cursor-pointer border-t transition-colors shadow-xs ${
               canvasTheme === 'parchment' || canvasTheme === 'light'
                 ? 'bg-[#e5dbc9] hover:bg-[#ded3bf] border-[#cfc2ad]'
                 : 'bg-[#121518] hover:bg-[#161a1e] border-[#292f38]'
@@ -1394,6 +1380,83 @@ export const TreeView: React.FC<TreeViewProps> = ({
               );
             })()}
           </div>
+        )}
+
+        {/* Sleek Fixed Right Vertical Scrollbar */}
+        {layout.nodes.length > 0 && (
+          <div
+            className={`absolute top-0 bottom-4 right-0 w-4 z-30 flex justify-center select-none cursor-pointer border-l transition-colors shadow-xs ${
+              canvasTheme === 'parchment' || canvasTheme === 'light'
+                ? 'bg-[#e5dbc9] hover:bg-[#ded3bf] border-[#cfc2ad]'
+                : 'bg-[#121518] hover:bg-[#161a1e] border-[#292f38]'
+            }`}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clickY = e.clientY - rect.top;
+              const ratio = Math.max(0, Math.min(1, clickY / rect.height));
+              const targetWorldY = treeBounds.minY + ratio * treeBounds.height;
+              setPan((prev) => ({
+                ...prev,
+                y: Math.round(containerDimensions.height / 2 - targetWorldY * scale)
+              }));
+            }}
+          >
+            {(() => {
+              const totalH = treeBounds.height;
+              const viewH = (containerDimensions.height || 800) / scale;
+              const viewTop = -pan.y / scale;
+              const thumbHPct = Math.max(6, Math.min(100, (viewH / totalH) * 100));
+              const thumbTopPct = Math.max(0, Math.min(100 - thumbHPct, ((viewTop - treeBounds.minY) / totalH) * 100));
+
+              return (
+                <div
+                  style={{
+                    top: `${thumbTopPct}%`,
+                    height: `${thumbHPct}%`
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    const startY = e.clientY;
+                    const startPanY = pan.y;
+                    const onMouseMove = (moveEvent: MouseEvent) => {
+                      const deltaPixels = moveEvent.clientY - startY;
+                      const barHeight = containerDimensions.height || 800;
+                      const worldDelta = (deltaPixels / barHeight) * treeBounds.height;
+                      setPan((prev) => ({
+                        ...prev,
+                        y: Math.round(startPanY - worldDelta * scale)
+                      }));
+                    };
+                    const onMouseUp = () => {
+                      window.removeEventListener('mousemove', onMouseMove);
+                      window.removeEventListener('mouseup', onMouseUp);
+                    };
+                    window.addEventListener('mousemove', onMouseMove);
+                    window.addEventListener('mouseup', onMouseUp);
+                  }}
+                  className={`absolute left-0.5 right-0.5 rounded-full transition-all cursor-grab active:cursor-grabbing flex items-center justify-center ${
+                    canvasTheme === 'parchment' || canvasTheme === 'light'
+                      ? 'bg-stone-500/80 hover:bg-emerald-600 active:bg-emerald-700 shadow-sm'
+                      : 'bg-slate-400/90 hover:bg-emerald-500 active:bg-emerald-400 shadow-sm'
+                  }`}
+                  title="Перетягніть для вертикальної навігації деревом"
+                >
+                  <div className="h-4 w-1 rounded-full bg-white/40 pointer-events-none" />
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Scrollbars Corner Intersection */}
+        {layout.nodes.length > 0 && (
+          <div
+            className={`absolute bottom-0 right-0 w-4 h-4 z-30 border-t border-l ${
+              canvasTheme === 'parchment' || canvasTheme === 'light'
+                ? 'bg-[#d8ccb8] border-[#cfc2ad]'
+                : 'bg-[#0f1215] border-[#292f38]'
+            }`}
+          />
         )}
       </div>
     </div>

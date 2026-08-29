@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig } from '../types';
 import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
+import { savePersonDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc } from '../lib/firebase';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
 
@@ -93,15 +94,15 @@ export interface GenealogyDataState {
 export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   persons: (() => {
     try {
-      // Clear legacy storage keys if present to ensure clean state
+      // Clear legacy storage keys if present
       ['genealogy_workstation_data_v1_persons', 'genealogy_workstation_data_v2_persons', 'genealogy_workstation_data_v3_persons'].forEach(k => {
         try { localStorage.removeItem(k); } catch {}
       });
 
       const saved = localStorage.getItem(`${STORAGE_KEY}_persons`);
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 30 && parsed.some((p: any) => p.id === 'p_bom_olga' || p.lastName === 'Бом' || p.lastName === 'Дядькин')) {
+        if (Array.isArray(parsed)) {
           return parsed.map(normalizePerson);
         }
       }
@@ -114,9 +115,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   families: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_families`);
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 10) {
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           return parsed;
         }
       }
@@ -129,9 +130,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   sources: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_sources`);
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 5) {
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           return parsed;
         }
       }
@@ -144,9 +145,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   events: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_events`);
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 5) {
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           return parsed;
         }
       }
@@ -165,7 +166,22 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     }
   })(),
 
-  selectedPersonId: 'p_bom_olga',
+  selectedPersonId: (() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_selectedPersonId`);
+      if (saved) return saved;
+      const personsSaved = localStorage.getItem(`${STORAGE_KEY}_persons`);
+      if (personsSaved) {
+        const parsed = JSON.parse(personsSaved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed[0].id;
+        }
+      }
+      return 'p_bom_olga';
+    } catch {
+      return 'p_bom_olga';
+    }
+  })(),
 
   gitConfig: (() => {
     try {
@@ -188,23 +204,36 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       return { persons: normalized };
     }),
 
-  setSelectedPersonId: (selectedPersonId) => set({ selectedPersonId }),
+  setSelectedPersonId: (selectedPersonId) => {
+    try {
+      if (selectedPersonId) {
+        localStorage.setItem(`${STORAGE_KEY}_selectedPersonId`, selectedPersonId);
+      } else {
+        localStorage.removeItem(`${STORAGE_KEY}_selectedPersonId`);
+      }
+    } catch {}
+    set({ selectedPersonId });
+  },
 
   addPerson: (person) =>
     set((state) => {
-      const next = [...state.persons, normalizePerson(person)];
+      const normalized = normalizePerson(person);
+      const next = [...state.persons, normalized];
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
       } catch {}
+      savePersonDoc(normalized);
       return { persons: next };
     }),
 
   updatePerson: (person) =>
     set((state) => {
-      const next = state.persons.map((p) => (p.id === person.id ? normalizePerson(person) : p));
+      const normalized = normalizePerson(person);
+      const next = state.persons.map((p) => (p.id === person.id ? normalized : p));
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
       } catch {}
+      savePersonDoc(normalized);
       return { persons: next };
     }),
 
@@ -233,6 +262,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
       } catch {}
+      deletePersonDoc(id);
 
       return { persons: nextPersons, trashPersons: nextTrash, families: nextFamilies };
     }),
@@ -250,6 +280,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
+      ids.forEach((id) => deletePersonDoc(id));
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -265,12 +296,14 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         deletedAt: undefined
       };
       const nextTrash = state.trashPersons.filter((p) => p.id !== id);
-      const nextPersons = [...state.persons, normalizePerson(restored)];
+      const normalizedRestored = normalizePerson(restored);
+      const nextPersons = [...state.persons, normalizedRestored];
 
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
+      savePersonDoc(normalizedRestored);
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -290,6 +323,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
+      restored.forEach((r) => savePersonDoc(r));
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -300,6 +334,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
+      deletePersonDoc(id);
       return { trashPersons: nextTrash };
     }),
 
@@ -309,6 +344,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
+      ids.forEach((id) => deletePersonDoc(id));
       return { trashPersons: nextTrash };
     }),
 
@@ -358,6 +394,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
       } catch {}
+      saveFamilyDoc(family);
 
       return { families: nextFamilies, persons: nextPersons };
     }),
@@ -369,6 +406,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
       } catch {}
+      deleteFamilyDoc(id);
       return { families: nextFamilies };
     }),
 
@@ -388,6 +426,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
       } catch {}
+      saveSourceDoc(source);
       return { sources: nextSources };
     }),
 
@@ -398,6 +437,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
       } catch {}
+      deleteSourceDoc(id);
       return { sources: nextSources };
     }),
 
@@ -417,6 +457,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
       } catch {}
+      saveEventDoc(event);
       return { events: nextEvents };
     }),
 
@@ -427,6 +468,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
       } catch {}
+      deleteEventDoc(id);
       return { events: nextEvents };
     }),
 
