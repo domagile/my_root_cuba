@@ -24,6 +24,7 @@ import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
+import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 
 interface PersonDetailModalProps {
   database: GenealogyDatabase;
@@ -49,6 +50,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = React.useState(false);
 
   if (!personId) return null;
   const person = database.persons[personId];
@@ -185,8 +187,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                onDeletePerson(person.id);
-                onClose();
+                setIsConfirmDeleteOpen(true);
               }}
               className={`p-1.5 ${theme.textMuted} hover:text-rose-500 rounded-lg transition-colors cursor-pointer`}
               title="Видалити особу"
@@ -483,6 +484,24 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Confirm Delete Modal */}
+      {isConfirmDeleteOpen && person && (
+        <ConfirmDeleteModal
+          isOpen={isConfirmDeleteOpen}
+          title="Видалення особи"
+          itemName={getFullName(person)}
+          itemType="особу"
+          message={`Ви дійсно бажаєте видалити особу «${getFullName(person)}» з родоводу?`}
+          onConfirm={() => {
+            onDeletePerson(person.id);
+            setIsConfirmDeleteOpen(false);
+            onClose();
+          }}
+          onClose={() => setIsConfirmDeleteOpen(false)}
+          isPermanent={true}
+        />
+      )}
     </div>
   );
 };

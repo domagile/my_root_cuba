@@ -14,6 +14,7 @@ import { GenealogyDatabase, Family } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
+import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 
 interface FamiliesListViewProps {
   database: GenealogyDatabase;
@@ -37,6 +38,7 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
   const isDark = theme.category === 'dark';
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [familyToDelete, setFamilyToDelete] = useState<{ id: string; label: string } | null>(null);
 
   const familiesList = useMemo(() => {
     return (Object.values(database.families) as Family[]).filter((f) => {
@@ -131,7 +133,10 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        onDeleteFamily(fam.id);
+                        const husbName = getFullName(husband || undefined);
+                        const wifeName = getFullName(wife || undefined);
+                        const label = husbName && wifeName ? `${husbName} та ${wifeName}` : husbName || wifeName || fam.id;
+                        setFamilyToDelete({ id: fam.id, label });
                       }}
                       className={`p-1.5 ${theme.textMuted} hover:text-rose-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
                       title="Видалити сім'ю"
@@ -267,6 +272,24 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
             );
           })}
         </div>
+      )}
+      {/* Confirm Delete Family Modal */}
+      {familyToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!familyToDelete}
+          title="Видалення сімейного союзу"
+          itemName={familyToDelete.label}
+          itemType="сімейний союз"
+          message={`Ви дійсно бажаєте видалити сімейний союз «${familyToDelete.label}» (${familyToDelete.id})?`}
+          onConfirm={() => {
+            if (familyToDelete) {
+              onDeleteFamily(familyToDelete.id);
+              setFamilyToDelete(null);
+            }
+          }}
+          onClose={() => setFamilyToDelete(null)}
+          isPermanent={true}
+        />
       )}
     </div>
   );

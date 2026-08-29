@@ -51,6 +51,7 @@ import {
   Person
 } from '../types';
 import { getThemeConfig } from '../utils/theme';
+import { ConfirmDeleteModal } from './common/ConfirmDeleteModal';
 
 // ==========================================
 // 1. RESEARCH & METRICS INDEXING VIEW
@@ -72,6 +73,7 @@ export const ResearchView: React.FC = () => {
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<MetricRecord | null>(null);
+  const [recordToDelete, setRecordToDelete] = useState<MetricRecord | null>(null);
 
   // Form states
   const [title, setTitle] = useState('');
@@ -436,7 +438,7 @@ export const ResearchView: React.FC = () => {
                       type="button"
                       onClick={(e) => { 
                         e.stopPropagation(); 
-                        deleteMetricRecord(rec.id); 
+                        setRecordToDelete(rec); 
                       }}
                       className="p-1 text-[#8BAAA1] hover:text-rose-400 cursor-pointer"
                       title="Видалити"
@@ -512,7 +514,7 @@ export const ResearchView: React.FC = () => {
                 </button>
                 <button 
                   type="button"
-                  onClick={() => { deleteMetricRecord(selectedMetric.id); }}
+                  onClick={() => { setRecordToDelete(selectedMetric); }}
                   className="px-2 py-1 bg-rose-950/60 text-rose-300 text-xs rounded border border-rose-800/40 hover:bg-rose-900/60 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -666,6 +668,28 @@ export const ResearchView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal for Metric Record */}
+      {recordToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!recordToDelete}
+          title="Видалення метричного запису"
+          itemName={recordToDelete.title}
+          itemType="метричний запис"
+          message={`Ви дійсно бажаєте видалити метричний запис «${recordToDelete.title}»?`}
+          onConfirm={() => {
+            if (recordToDelete) {
+              deleteMetricRecord(recordToDelete.id);
+              if (selectedMetric?.id === recordToDelete.id) {
+                setSelectedMetric(null);
+              }
+              setRecordToDelete(null);
+            }
+          }}
+          onClose={() => setRecordToDelete(null)}
+          isPermanent={true}
+        />
+      )}
     </div>
   );
 };
@@ -684,6 +708,8 @@ export const DocumentsView: React.FC = () => {
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDoc, setEditingDoc] = useState<GenealogyDocument | null>(null);
+  const [docToDelete, setDocToDelete] = useState<GenealogyDocument | null>(null);
+  const [isDisconnectDriveConfirmOpen, setIsDisconnectDriveConfirmOpen] = useState(false);
 
   const [title, setTitle] = useState('');
   const [type, setType] = useState('Архівна довідка');
@@ -772,8 +798,9 @@ export const DocumentsView: React.FC = () => {
                 </span>
               </button>
               <button 
-                onClick={handleDisconnectDrive}
-                className="p-2 text-rose-500 hover:text-rose-700 bg-rose-500/10 rounded-xl text-xs font-semibold"
+                type="button"
+                onClick={() => setIsDisconnectDriveConfirmOpen(true)}
+                className="p-2 text-rose-500 hover:text-rose-700 bg-rose-500/10 rounded-xl text-xs font-semibold cursor-pointer"
                 title="Відключити Google Диск"
               >
                 <Trash2 className="w-4 h-4" />
@@ -828,7 +855,7 @@ export const DocumentsView: React.FC = () => {
                 </button>
                 <button 
                   type="button"
-                  onClick={() => { deleteDocument(doc.id); }} 
+                  onClick={() => { setDocToDelete(doc); }} 
                   className="p-1 text-[#8BAAA1] hover:text-rose-400 cursor-pointer"
                   title="Видалити"
                 >
@@ -971,6 +998,40 @@ export const DocumentsView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal for Document */}
+      {docToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!docToDelete}
+          title="Видалення документа"
+          itemName={docToDelete.title}
+          itemType="документ"
+          message={`Ви дійсно бажаєте видалити документ «${docToDelete.title}»?`}
+          onConfirm={() => {
+            if (docToDelete) {
+              deleteDocument(docToDelete.id);
+              setDocToDelete(null);
+            }
+          }}
+          onClose={() => setDocToDelete(null)}
+          isPermanent={true}
+        />
+      )}
+
+      {/* Confirmation Modal for Disconnecting Google Drive */}
+      {isDisconnectDriveConfirmOpen && (
+        <ConfirmDeleteModal
+          isOpen={isDisconnectDriveConfirmOpen}
+          title="Відключення Google Диск"
+          message={`Ви дійсно бажаєте відключити акаунт Google Диск (${googleDriveEmail})?`}
+          confirmText="Відключити"
+          onConfirm={() => {
+            handleDisconnectDrive();
+            setIsDisconnectDriveConfirmOpen(false);
+          }}
+          onClose={() => setIsDisconnectDriveConfirmOpen(false)}
+        />
+      )}
     </div>
   );
 };
@@ -984,6 +1045,7 @@ export const RequestsView: React.FC = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingReq, setEditingReq] = useState<ArchiveRequest | null>(null);
+  const [requestToDelete, setRequestToDelete] = useState<ArchiveRequest | null>(null);
 
   const [title, setTitle] = useState('');
   const [archiveName, setArchiveName] = useState('');
@@ -1085,7 +1147,7 @@ export const RequestsView: React.FC = () => {
                 </button>
                 <button 
                   type="button"
-                  onClick={() => { deleteRequest(r.id); }} 
+                  onClick={() => { setRequestToDelete(r); }} 
                   className="p-1.5 text-[#8BAAA1] hover:text-rose-400 bg-[#133A31] rounded-lg cursor-pointer"
                   title="Видалити"
                 >
@@ -1174,6 +1236,25 @@ export const RequestsView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal for Archive Request */}
+      {requestToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!requestToDelete}
+          title="Видалення архівного запиту"
+          itemName={requestToDelete.title}
+          itemType="архівний запит"
+          message={`Ви дійсно бажаєте видалити запит «${requestToDelete.title}» (${requestToDelete.archiveName})?`}
+          onConfirm={() => {
+            if (requestToDelete) {
+              deleteRequest(requestToDelete.id);
+              setRequestToDelete(null);
+            }
+          }}
+          onClose={() => setRequestToDelete(null)}
+          isPermanent={true}
+        />
+      )}
     </div>
   );
 };
@@ -1191,6 +1272,8 @@ export const YearMatrixView: React.FC = () => {
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<YearMatrixEntry | null>(null);
+  const [entryToDelete, setEntryToDelete] = useState<YearMatrixEntry | null>(null);
+  const [rangeToDelete, setRangeToDelete] = useState<{ id: string; name: string } | null>(null);
 
   const [year, setYear] = useState<number>(1900);
   const [location, setLocation] = useState('с. Чернечий Яр');
@@ -1334,7 +1417,12 @@ export const YearMatrixView: React.FC = () => {
                   <p className="text-[11px] text-[#8BAAA1]">{r.location} • {r.docType}</p>
                   <span className="text-[10px] font-mono text-[#E2C382] mt-1 block">{r.yearFrom} – {r.yearTo} рр.</span>
                 </div>
-                <button onClick={() => deleteRangeAnalysis(r.id)} className="p-1 text-[#8BAAA1] hover:text-rose-400">
+                <button 
+                  type="button"
+                  onClick={() => setRangeToDelete({ id: r.id, name: r.researchName })} 
+                  className="p-1 text-[#8BAAA1] hover:text-rose-400 cursor-pointer"
+                  title="Видалити діапазон"
+                >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -1430,7 +1518,7 @@ export const YearMatrixView: React.FC = () => {
                     </button>
                     <button 
                       type="button"
-                      onClick={() => { deleteMatrixEntry(m.id); }} 
+                      onClick={() => { setEntryToDelete(m); }} 
                       className="p-1.5 text-[#8BAAA1] hover:text-rose-400 bg-[#133A31] rounded-lg cursor-pointer"
                       title="Видалити"
                     >
@@ -1593,6 +1681,44 @@ export const YearMatrixView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal for Matrix Entry */}
+      {entryToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!entryToDelete}
+          title="Видалення запису матриці"
+          itemName={`${entryToDelete.year} р. (${entryToDelete.location})`}
+          itemType="запис матриці"
+          message={`Ви дійсно бажаєте видалити запис матриці для ${entryToDelete.year} року (${entryToDelete.location}, ${entryToDelete.docType})?`}
+          onConfirm={() => {
+            if (entryToDelete) {
+              deleteMatrixEntry(entryToDelete.id);
+              setEntryToDelete(null);
+            }
+          }}
+          onClose={() => setEntryToDelete(null)}
+          isPermanent={true}
+        />
+      )}
+
+      {/* Delete Confirmation Modal for Range Analysis */}
+      {rangeToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!rangeToDelete}
+          title="Видалення діапазону досліджень"
+          itemName={rangeToDelete.name}
+          itemType="діапазон досліджень"
+          message={`Ви дійсно бажаєте видалити діапазон «${rangeToDelete.name}»?`}
+          onConfirm={() => {
+            if (rangeToDelete) {
+              deleteRangeAnalysis(rangeToDelete.id);
+              setRangeToDelete(null);
+            }
+          }}
+          onClose={() => setRangeToDelete(null)}
+          isPermanent={true}
+        />
+      )}
     </div>
   );
 };
@@ -1606,6 +1732,7 @@ export const TasksView: React.FC = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<GenealogyTask | null>(null);
+  const [taskToDelete, setTaskToDelete] = useState<GenealogyTask | null>(null);
 
   const [title, setTitle] = useState('');
   const [archiveName, setArchiveName] = useState('');

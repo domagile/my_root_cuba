@@ -244,23 +244,37 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
   // Soft delete actions
   const handleDeleteSingle = (p: Person) => {
-    deletePerson(p.id);
-    setToast({
-      message: `Особу «${p.firstName} ${p.lastName}» переміщено у кошик.`,
-      actionText: 'Скасувати',
-      onAction: () => restorePerson(p.id)
+    setConfirmModal({
+      title: 'Видалення особи у кошик',
+      message: `Ви дійсно бажаєте перемістити особу «${p.firstName} ${p.lastName}» у кошик?`,
+      confirmText: 'Перемістити у кошик',
+      onConfirm: () => {
+        deletePerson(p.id);
+        setToast({
+          message: `Особу «${p.firstName} ${p.lastName}» переміщено у кошик.`,
+          actionText: 'Скасувати',
+          onAction: () => restorePerson(p.id)
+        });
+      }
     });
   };
 
   const handleBatchDelete = () => {
     if (selectedIds.size === 0) return;
     const ids: string[] = Array.from(selectedIds);
-    deletePersons(ids);
-    setSelectedIds(new Set<string>());
-    setToast({
-      message: `Вибраних осіб (${ids.length}) переміщено у кошик.`,
-      actionText: 'Відновити',
-      onAction: () => restorePersons(ids)
+    setConfirmModal({
+      title: 'Видалення вибраних осіб у кошик',
+      message: `Ви дійсно бажаєте перемістити обраних осіб (${ids.length}) у кошик?`,
+      confirmText: 'Перемістити у кошик',
+      onConfirm: () => {
+        deletePersons(ids);
+        setSelectedIds(new Set<string>());
+        setToast({
+          message: `Вибраних осіб (${ids.length}) переміщено у кошик.`,
+          actionText: 'Відновити',
+          onAction: () => restorePersons(ids)
+        });
+      }
     });
   };
 

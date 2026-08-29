@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { GenealogyDocument, CustomField } from '../types';
+import { ConfirmDeleteModal } from './common/ConfirmDeleteModal';
 
 export const DOCUMENT_TYPES = [
   'народження',
@@ -81,6 +82,7 @@ export const DocumentsView: React.FC = () => {
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDoc, setEditingDoc] = useState<GenealogyDocument | null>(null);
+  const [docToDelete, setDocToDelete] = useState<GenealogyDocument | null>(null);
 
   // Form Fields
   const [researchTitle, setResearchTitle] = useState("Без прив'язки");
@@ -688,7 +690,7 @@ export const DocumentsView: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => {
-                            deleteDocument(doc.id);
+                            setDocToDelete(doc);
                           }}
                           className="p-1 text-[#737373] hover:text-rose-400 cursor-pointer"
                           title="Видалити"
@@ -1176,6 +1178,24 @@ export const DocumentsView: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+      {/* Delete Confirmation Modal */}
+      {docToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!docToDelete}
+          title="Видалення документа"
+          itemName={docToDelete.title}
+          itemType="документ"
+          message={`Ви дійсно бажаєте видалити документ «${docToDelete.title}»?`}
+          onConfirm={() => {
+            if (docToDelete) {
+              deleteDocument(docToDelete.id);
+              setDocToDelete(null);
+            }
+          }}
+          onClose={() => setDocToDelete(null)}
+          isPermanent={true}
+        />
       )}
     </div>
   );

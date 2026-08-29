@@ -19,6 +19,7 @@ import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
+import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 
 interface PersonsListViewProps {
   database: GenealogyDatabase;
@@ -49,6 +50,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [sortBy, setSortBy] = useState<'surname' | 'birth' | 'events' | 'citations'>('surname');
   const [sortAsc, setSortAsc] = useState(true);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  const [personToDelete, setPersonToDelete] = useState<Person | null>(null);
 
   const personsList = useMemo(() => {
     return (Object.values(database.persons) as Person[]).filter((p) => {
@@ -369,7 +371,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                           <button
                             type="button"
                             onClick={() => {
-                              onDeletePerson(p.id);
+                              setPersonToDelete(p);
                             }}
                             className={`p-1.5 ${theme.textMuted} hover:text-rose-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
                             title="Видалити"
@@ -497,6 +499,24 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             );
           })}
         </div>
+      )}
+      {/* Confirm Delete Person Modal */}
+      {personToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!personToDelete}
+          title="Видалення особи"
+          itemName={getFullName(personToDelete)}
+          itemType="особу"
+          message={`Ви дійсно бажаєте видалити особу «${getFullName(personToDelete)}» з родоводу?`}
+          onConfirm={() => {
+            if (personToDelete) {
+              onDeletePerson(personToDelete.id);
+              setPersonToDelete(null);
+            }
+          }}
+          onClose={() => setPersonToDelete(null)}
+          isPermanent={true}
+        />
       )}
     </div>
   );
