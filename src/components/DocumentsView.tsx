@@ -686,12 +686,11 @@ export const DocumentsView: React.FC = () => {
                           Редагувати
                         </button>
                         <button
+                          type="button"
                           onClick={() => {
-                            if (confirm('Видалити цей речовий доказ?')) {
-                              deleteDocument(doc.id);
-                            }
+                            deleteDocument(doc.id);
                           }}
-                          className="p-1 text-[#737373] hover:text-rose-400"
+                          className="p-1 text-[#737373] hover:text-rose-400 cursor-pointer"
                           title="Видалити"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

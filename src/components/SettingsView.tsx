@@ -775,12 +775,13 @@ export const SettingsView: React.FC = () => {
                         <td className="py-2.5 px-3 text-right">
                           {!isSelf && (
                             <button
+                              type="button"
                               onClick={() => {
-                                if (confirm(`Видалити ${w.email} з білого списку?`)) {
-                                  removeFromWhitelist(w.id);
-                                }
+                                removeFromWhitelist(w.id);
+                                setWhiteSuccessMsg(`Користувача ${w.email} видалено з білого списку.`);
+                                setTimeout(() => setWhiteSuccessMsg(null), 4000);
                               }}
-                              className="text-rose-500 hover:text-rose-700 p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
+                              className="text-rose-500 hover:text-rose-700 p-1.5 rounded-lg hover:bg-rose-500/15 active:scale-95 transition-all cursor-pointer"
                               title="Видалити з білого списку"
                             >
                               <Trash2 className="w-3.5 h-3.5" />

@@ -8,12 +8,20 @@ import { ZoomIn, ZoomOut, Maximize2, User, Plus, Sparkles, GitFork, ArrowRight, 
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
 import { Person } from '../../types';
+import { RelationManagerModal } from './RelationManagerModal';
+import { AddPersonModal } from './AddPersonModal';
 
 export const FamilyTreeView: React.FC = () => {
   const { persons, selectedPersonId, setSelectedPersonId, themePalette } = useGenealogy();
   const theme = getThemeConfig(themePalette);
   const [scale, setScale] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 40, y: 40 });
+
+  const [relationTargetPerson, setRelationTargetPerson] = useState<Person | null>(null);
+  const [addRelationData, setAddRelationData] = useState<{
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
+    targetPersonId: string;
+  } | null>(null);
 
   const activePerson = persons.find((p) => p.id === selectedPersonId) || persons[0];
 
@@ -72,8 +80,18 @@ export const FamilyTreeView: React.FC = () => {
               <div
                 key={parent.id}
                 onClick={() => setSelectedPersonId(parent.id)}
-                className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:shadow-xl hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1.5`}
+                className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:shadow-xl hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1.5 relative group`}
               >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRelationTargetPerson(parent);
+                  }}
+                  className="absolute top-2 right-2 w-6 h-6 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                  title="Додати родича (+ батьків, дітей, подружжя)"
+                >
+                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                </button>
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#B88E3E]">
                   {parent.gender === 'male' ? 'Батько' : 'Мати'}
                 </span>
@@ -86,9 +104,17 @@ export const FamilyTreeView: React.FC = () => {
               </div>
             ))}
             {familyData.parents.length === 0 && (
-              <div className="p-4 rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700 text-xs text-neutral-400">
-                Батьків не вказано
-              </div>
+              <button
+                onClick={() => {
+                  if (activePerson) {
+                    setRelationTargetPerson(activePerson);
+                  }
+                }}
+                className="p-4 rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700 hover:border-emerald-500 text-xs text-neutral-400 hover:text-emerald-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Додати батьків для {activePerson?.firstName}</span>
+              </button>
             )}
           </div>
 
@@ -96,8 +122,19 @@ export const FamilyTreeView: React.FC = () => {
           <div className="flex items-center gap-6">
             {activePerson && (
               <div
-                className={`p-6 rounded-3xl border-2 border-[#B88E3E] ${theme.cardBg} shadow-2xl w-72 text-center space-y-2 relative overflow-hidden`}
+                className={`p-6 rounded-3xl border-2 border-[#B88E3E] ${theme.cardBg} shadow-2xl w-72 text-center space-y-2 relative overflow-hidden group`}
               >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRelationTargetPerson(activePerson);
+                  }}
+                  className="absolute top-3 right-3 z-10 w-7 h-7 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer border border-emerald-400/40"
+                  title="Додати родича (+ батьків, дітей, подружжя, братів/сестер)"
+                >
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                </button>
+
                 <div className="absolute -top-10 -right-10 w-28 h-28 bg-[#B88E3E]/20 rounded-full blur-xl pointer-events-none" />
                 <span className="text-[10px] uppercase font-extrabold tracking-widest px-2.5 py-1 rounded-full bg-[#B88E3E] text-white">
                   Фокусна персона
@@ -121,8 +158,18 @@ export const FamilyTreeView: React.FC = () => {
               <div
                 key={spouse.id}
                 onClick={() => setSelectedPersonId(spouse.id)}
-                className={`p-5 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1`}
+                className={`p-5 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1 relative group`}
               >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRelationTargetPerson(spouse);
+                  }}
+                  className="absolute top-2 right-2 w-6 h-6 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                  title="Додати родича"
+                >
+                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                </button>
                 <span className="text-[10px] uppercase font-bold text-rose-500 flex items-center justify-center gap-1">
                   <Heart className="w-3 h-3 fill-rose-500" />
                   <span>{spouse.gender === 'female' ? 'Дружина' : 'Чоловік'}</span>
@@ -139,16 +186,40 @@ export const FamilyTreeView: React.FC = () => {
 
           {/* 3. Children Level */}
           <div className="space-y-3 text-center">
-            <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-              Діти ({familyData.children.length})
-            </span>
+            <div className="flex items-center justify-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                Діти ({familyData.children.length})
+              </span>
+              {activePerson && (
+                <button
+                  onClick={() => {
+                    setAddRelationData({ type: 'child', targetPersonId: activePerson.id });
+                  }}
+                  className="px-2 py-0.5 rounded-md bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Додати дитину"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>Додати</span>
+                </button>
+              )}
+            </div>
             <div className="flex flex-wrap justify-center gap-4">
               {familyData.children.map((child) => (
                 <div
                   key={child.id}
                   onClick={() => setSelectedPersonId(child.id)}
-                  className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-md hover:border-[#B88E3E] transition-all cursor-pointer w-56 text-center space-y-1`}
+                  className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-md hover:border-[#B88E3E] transition-all cursor-pointer w-56 text-center space-y-1 relative group`}
                 >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRelationTargetPerson(child);
+                    }}
+                    className="absolute top-2 right-2 w-5 h-5 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                    title="Додати родича"
+                  >
+                    <Plus className="w-3 h-3 stroke-[2.5]" />
+                  </button>
                   <span className="text-[10px] uppercase font-bold text-blue-500">
                     {child.gender === 'male' ? 'Син' : 'Донька'}
                   </span>
@@ -167,6 +238,26 @@ export const FamilyTreeView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Relation Manager Modal */}
+      {relationTargetPerson && (
+        <RelationManagerModal
+          targetPerson={relationTargetPerson}
+          onClose={() => setRelationTargetPerson(null)}
+          onOpenAddModalWithRelation={(type, targetId) => {
+            setRelationTargetPerson(null);
+            setAddRelationData({ type, targetPersonId: targetId });
+          }}
+        />
+      )}
+
+      {/* Add Person Modal */}
+      {addRelationData && (
+        <AddPersonModal
+          initialRelation={addRelationData}
+          onClose={() => setAddRelationData(null)}
+        />
+      )}
     </div>
   );
 };

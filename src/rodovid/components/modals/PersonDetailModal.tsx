@@ -177,11 +177,10 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               <span>Редагувати</span>
             </button>
             <button
+              type="button"
               onClick={() => {
-                if (confirm(`Видалити особу ${getFullName(person)}?`)) {
-                  onDeletePerson(person.id);
-                  onClose();
-                }
+                onDeletePerson(person.id);
+                onClose();
               }}
               className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
               title="Видалити особу"

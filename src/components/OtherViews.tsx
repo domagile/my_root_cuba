@@ -433,11 +433,12 @@ export const ResearchView: React.FC = () => {
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button 
+                      type="button"
                       onClick={(e) => { 
                         e.stopPropagation(); 
-                        if (confirm('Видалити цей архівний запис?')) deleteMetricRecord(rec.id); 
+                        deleteMetricRecord(rec.id); 
                       }}
-                      className="p-1 text-[#8BAAA1] hover:text-rose-400"
+                      className="p-1 text-[#8BAAA1] hover:text-rose-400 cursor-pointer"
                       title="Видалити"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -510,8 +511,9 @@ export const ResearchView: React.FC = () => {
                   Редагувати
                 </button>
                 <button 
-                  onClick={() => { if (confirm('Видалити запис?')) deleteMetricRecord(selectedMetric.id); }}
-                  className="px-2 py-1 bg-rose-950/60 text-rose-300 text-xs rounded border border-rose-800/40 hover:bg-rose-900/60"
+                  type="button"
+                  onClick={() => { deleteMetricRecord(selectedMetric.id); }}
+                  className="px-2 py-1 bg-rose-950/60 text-rose-300 text-xs rounded border border-rose-800/40 hover:bg-rose-900/60 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -740,9 +742,7 @@ export const DocumentsView: React.FC = () => {
   };
 
   const handleDisconnectDrive = () => {
-    if (confirm('Ви впевнені, що хочете відключити Google Диск?')) {
-      setGoogleDriveEmail(null);
-    }
+    setGoogleDriveEmail(null);
   };
 
   return (
@@ -827,8 +827,10 @@ export const DocumentsView: React.FC = () => {
                   <Edit2 className="w-3.5 h-3.5" />
                 </button>
                 <button 
-                  onClick={() => { if (confirm('Видалити документ?')) deleteDocument(doc.id); }} 
-                  className="p-1 text-[#8BAAA1] hover:text-rose-400"
+                  type="button"
+                  onClick={() => { deleteDocument(doc.id); }} 
+                  className="p-1 text-[#8BAAA1] hover:text-rose-400 cursor-pointer"
+                  title="Видалити"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -1081,7 +1083,12 @@ export const RequestsView: React.FC = () => {
                 <button onClick={() => openEdit(r)} className="p-1.5 text-[#8BAAA1] hover:text-[#E2C382] bg-[#133A31] rounded-lg">
                   <Edit2 className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => { if (confirm('Видалити запит?')) deleteRequest(r.id); }} className="p-1.5 text-[#8BAAA1] hover:text-rose-400 bg-[#133A31] rounded-lg">
+                <button 
+                  type="button"
+                  onClick={() => { deleteRequest(r.id); }} 
+                  className="p-1.5 text-[#8BAAA1] hover:text-rose-400 bg-[#133A31] rounded-lg cursor-pointer"
+                  title="Видалити"
+                >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -1421,7 +1428,12 @@ export const YearMatrixView: React.FC = () => {
                     <button onClick={() => openEditEntry(m)} className="p-1.5 text-[#8BAAA1] hover:text-[#E2C382] bg-[#133A31] rounded-lg">
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => { if (confirm('Видалити запис з матриці?')) deleteMatrixEntry(m.id); }} className="p-1.5 text-[#8BAAA1] hover:text-rose-400 bg-[#133A31] rounded-lg">
+                    <button 
+                      type="button"
+                      onClick={() => { deleteMatrixEntry(m.id); }} 
+                      className="p-1.5 text-[#8BAAA1] hover:text-rose-400 bg-[#133A31] rounded-lg cursor-pointer"
+                      title="Видалити"
+                    >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1706,7 +1718,12 @@ export const TasksView: React.FC = () => {
                 <button onClick={() => openEdit(t)} className="p-1.5 text-[#8BAAA1] hover:text-[#E2C382] bg-[#133A31] rounded-lg">
                   <Edit2 className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => { if (confirm('Видалити замітку?')) deleteTask(t.id); }} className="p-1.5 text-[#8BAAA1] hover:text-rose-400 bg-[#133A31] rounded-lg">
+                <button 
+                  type="button"
+                  onClick={() => { deleteTask(t.id); }} 
+                  className="p-1.5 text-[#8BAAA1] hover:text-rose-400 bg-[#133A31] rounded-lg cursor-pointer"
+                  title="Видалити"
+                >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -1883,7 +1900,12 @@ export const FindingsView: React.FC = () => {
                 <button onClick={() => openEdit(f)} className="p-1 text-[#8BAAA1] hover:text-[#E2C382]">
                   <Edit2 className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => { if (confirm('Видалити знахідку?')) deleteFinding(f.id); }} className="p-1 text-[#8BAAA1] hover:text-rose-400">
+                <button 
+                  type="button"
+                  onClick={() => { deleteFinding(f.id); }} 
+                  className="p-1 text-[#8BAAA1] hover:text-rose-400 cursor-pointer"
+                  title="Видалити"
+                >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -2294,7 +2316,12 @@ export const HypothesesView: React.FC = () => {
                   <button onClick={() => openEdit(h)} className={`p-2 ${theme.badgeBg} ${theme.badgeText} rounded-lg hover:opacity-80`}>
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
-                  <button onClick={() => { if (confirm('Видалити підозру?')) deleteHypothesis(h.id); }} className={`p-2 bg-rose-500/10 text-rose-600 rounded-lg hover:bg-rose-500/20`}>
+                  <button 
+                    type="button"
+                    onClick={() => { deleteHypothesis(h.id); }} 
+                    className={`p-2 bg-rose-500/10 text-rose-600 rounded-lg hover:bg-rose-500/20 cursor-pointer`}
+                    title="Видалити"
+                  >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>

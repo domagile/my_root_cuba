@@ -347,12 +347,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
+                            type="button"
                             onClick={() => {
-                              if (confirm(`Видалити особу ${getFullName(p)}?`)) {
-                                onDeletePerson(p.id);
-                              }
+                              onDeletePerson(p.id);
                             }}
-                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors"
+                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors cursor-pointer"
                             title="Видалити"
                           >
                             <Trash2 className="w-3.5 h-3.5" />

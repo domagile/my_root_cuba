@@ -671,10 +671,26 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
                   {/* Name and Dates */}
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-start justify-between gap-1">
                       <h4 className="font-semibold text-xs text-white truncate group-hover:text-emerald-400 transition-colors">
                         {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''}
                       </h4>
+
+                      {/* Prominent Quick-Add Relative (+) Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onOpenRelationManager) {
+                            onOpenRelationManager(p.id);
+                          }
+                        }}
+                        className="w-5 h-5 -mt-0.5 -mr-0.5 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-sm hover:scale-110 active:scale-95 transition-all cursor-pointer border border-emerald-400/40"
+                        title="Додати родича (+ батька, матір, дітей, подружжя)"
+                        aria-label="Додати родича"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      </button>
                     </div>
 
                     {(p.name?.patronymic || p.patronymic || p.name?.maidenName || p.maidenName) && (
@@ -696,7 +712,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
                 {/* Bottom line: Occupation / Place / Badges */}
                 <div className="flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-800/80 pt-1 mt-1">
-                  <span className="truncate max-w-[130px]" title={p.occupation || p.birthPlace}>
+                  <span className="truncate max-w-[110px]" title={p.occupation || p.birthPlace}>
                     {p.occupation || p.birthPlace || 'Немає опису'}
                   </span>
 
@@ -712,25 +728,28 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     )}
 
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         if (onOpenRelationManager) {
                           onOpenRelationManager(p.id);
                         }
                       }}
-                      className="p-1 hover:bg-slate-700 text-slate-400 hover:text-emerald-400 rounded transition-colors"
+                      className="px-1.5 py-0.5 bg-slate-800 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-700/40 rounded flex items-center gap-0.5 text-[9px] font-semibold transition-colors cursor-pointer"
                       title="Керування родичами / Додати родича"
                     >
-                      <Plus className="w-3 h-3" />
+                      <Plus className="w-2.5 h-2.5" />
+                      <span>Родичі</span>
                     </button>
 
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         onChangeRoot(p.id);
                       }}
-                      className="p-1 hover:bg-slate-700 text-slate-400 hover:text-emerald-400 rounded transition-colors"
-                      title="Зробити коренем дерева"
+                      className="p-1 hover:bg-slate-700 text-slate-400 hover:text-emerald-400 rounded transition-colors cursor-pointer"
+                      title="Зробити фокусною персоною дерева"
                     >
                       <GitFork className="w-3 h-3" />
                     </button>

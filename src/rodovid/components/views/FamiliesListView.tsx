@@ -123,12 +123,11 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
-                        if (confirm('Видалити цю сім\'ю з бази даних?')) {
-                          onDeleteFamily(fam.id);
-                        }
+                        onDeleteFamily(fam.id);
                       }}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors"
+                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors cursor-pointer"
                       title="Видалити сім'ю"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
