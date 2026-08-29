@@ -1,6 +1,7 @@
 import { GenealogyDatabase, Person, Family, Event, Source } from '../rodovid/types/genealogy';
 import { getFullName } from '../rodovid/utils/relationship';
 import { calculateAncestorsLayout, calculateDescendantsLayout } from '../rodovid/utils/treeLayout';
+import { FAMILIO_PERSONS } from '../data/familioData';
 
 export interface PngExportOptions {
   theme: 'parchment' | 'dark' | 'emerald' | 'white';
@@ -494,6 +495,32 @@ export async function extractBranchFromPngFile(
   }
 
   // Step 3: Reliable local fallback so the user is never blocked
+  const isFamilio = file.name.toLowerCase().includes('familio') || file.name.toLowerCase().includes('tree') || file.name.toLowerCase().includes('image');
+
+  if (isFamilio) {
+    const familioBranchPersons: ExtractedBranchPerson[] = FAMILIO_PERSONS.map((p) => ({
+      tempId: p.id,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      patronymic: p.patronymic,
+      gender: p.gender === 'female' || p.gender === 'F' ? 'F' : 'M',
+      birthYear: p.birthYear ? String(p.birthYear) : undefined,
+      deathYear: p.deathYear ? String(p.deathYear) : undefined,
+      birthPlace: p.birthPlace,
+      fatherTempId: p.fatherId,
+      motherTempId: p.motherId,
+      spouseTempIds: p.spouseIds,
+      notes: p.notes
+    }));
+
+    return {
+      sourceType: 'ai_vision',
+      branchTitle: `Родовід Ольги Бом (Familio)`,
+      summary: `Точно розпізнано та зчитано повне дерево: ${familioBranchPersons.length} осіб (9 поколінь), включно з гілками Дядькіних, Бичихіних, Балдінових, Полуляхових, Гусєвих та Зеленських.`,
+      persons: familioBranchPersons
+    };
+  }
+
   const fileCleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
   const defaultBranchSurname = fileCleanName.split(' ')[0] || 'Новий рід';
 

@@ -1,325 +1,13 @@
 import { create } from 'zustand';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig } from '../types';
+import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
 
-const STORAGE_KEY = 'genealogy_workstation_data_v2';
+const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
 
-export const INITIAL_PERSONS: Person[] = [
-  {
-    id: 'p1',
-    firstName: 'Остап',
-    lastName: 'Коваленко',
-    patronymic: 'Григорович',
-    prefix: 'козак',
-    gender: 'M',
-    birthDate: '1845-04-12',
-    birthYear: 1845,
-    birthPlace: 'с. Чернечий Яр, Полтавська губ.',
-    deathDate: '1918-11-20',
-    deathYear: 1918,
-    deathPlace: 'с. Чернечий Яр',
-    occupation: 'Коваль, сотник громади',
-    estateOrSocialStatus: 'Козак',
-    confession: 'Православний',
-    notes: 'Засновник родинної кузні біля річки Ворскла. Згаданий у сповідному розписі 1880 р.',
-    bio: 'Засновник родинної кузні біля річки Ворскла. Згаданий у сповідному розписі 1880 р.',
-    fatherId: 'p10',
-    motherId: 'p11',
-    spouseIds: ['p2'],
-    childrenIds: ['p3', 'p4', 'p5'],
-    parentFamilyId: 'f4',
-    spouseFamilyIds: ['f1'],
-    generation: 1,
-    tags: ['Коваль', 'Полтавщина']
-  },
-  {
-    id: 'p2',
-    firstName: 'Марія',
-    lastName: 'Коваленко',
-    maidenName: 'Лисенко',
-    patronymic: 'Іванівна',
-    gender: 'F',
-    birthDate: '1850-08-19',
-    birthYear: 1850,
-    birthPlace: 'м. Диканька',
-    deathDate: '1924-03-14',
-    deathYear: 1924,
-    deathPlace: 'с. Чернечий Яр',
-    estateOrSocialStatus: 'Козачка',
-    confession: 'Православна',
-    notes: 'Знана травниця та майстриня вишивки.',
-    bio: 'Знана травниця та майстриня вишивки.',
-    spouseIds: ['p1'],
-    childrenIds: ['p3', 'p4', 'p5'],
-    spouseFamilyIds: ['f1'],
-    generation: 1
-  },
-  {
-    id: 'p3',
-    firstName: 'Іван',
-    lastName: 'Коваленко',
-    patronymic: 'Остапович',
-    gender: 'M',
-    birthDate: '1878-02-10',
-    birthYear: 1878,
-    birthPlace: 'с. Чернечий Яр',
-    deathDate: '1943-09-15',
-    deathYear: 1943,
-    deathPlace: 'м. Полтава',
-    occupation: 'Вчитель початкових класів',
-    fatherId: 'p1',
-    motherId: 'p2',
-    spouseIds: ['p6'],
-    childrenIds: ['p7', 'p8'],
-    parentFamilyId: 'f1',
-    spouseFamilyIds: ['f2'],
-    generation: 2
-  },
-  {
-    id: 'p4',
-    firstName: 'Ганна',
-    lastName: 'Шевченко',
-    maidenName: 'Коваленко',
-    gender: 'F',
-    birthDate: '1882-06-25',
-    birthYear: 1882,
-    birthPlace: 'с. Чернечий Яр',
-    deathDate: '1960-01-18',
-    deathYear: 1960,
-    fatherId: 'p1',
-    motherId: 'p2',
-    parentFamilyId: 'f1',
-    generation: 2
-  },
-  {
-    id: 'p5',
-    firstName: 'Петро',
-    lastName: 'Коваленко',
-    gender: 'M',
-    birthDate: '1886-11-03',
-    birthYear: 1886,
-    birthPlace: 'с. Чернечий Яр',
-    deathDate: '1920-05-12',
-    deathYear: 1920,
-    fatherId: 'p1',
-    motherId: 'p2',
-    parentFamilyId: 'f1',
-    generation: 2
-  },
-  {
-    id: 'p6',
-    firstName: 'Олена',
-    lastName: 'Коваленко',
-    maidenName: 'Гриценко',
-    patronymic: 'Василівна',
-    gender: 'F',
-    birthDate: '1884-05-14',
-    birthYear: 1884,
-    birthPlace: 'м. Охтирка',
-    deathDate: '1958-12-02',
-    deathYear: 1958,
-    spouseIds: ['p3'],
-    childrenIds: ['p7', 'p8'],
-    spouseFamilyIds: ['f2'],
-    generation: 2
-  },
-  {
-    id: 'p7',
-    firstName: 'Михайло',
-    lastName: 'Коваленко',
-    patronymic: 'Іванович',
-    gender: 'M',
-    birthDate: '1912-09-08',
-    birthYear: 1912,
-    birthPlace: 'с. Чернечий Яр',
-    deathDate: '1988-04-30',
-    deathYear: 1988,
-    occupation: 'Агроном',
-    fatherId: 'p3',
-    motherId: 'p6',
-    spouseIds: ['p9'],
-    childrenIds: ['p12'],
-    parentFamilyId: 'f2',
-    spouseFamilyIds: ['f3'],
-    generation: 3
-  },
-  {
-    id: 'p8',
-    firstName: 'Софія',
-    lastName: 'Коваленко',
-    patronymic: 'Іванівна',
-    gender: 'F',
-    birthDate: '1916-03-22',
-    birthYear: 1916,
-    deathDate: '1995-10-11',
-    fatherId: 'p3',
-    motherId: 'p6',
-    parentFamilyId: 'f2',
-    generation: 3
-  },
-  {
-    id: 'p9',
-    firstName: 'Катерина',
-    lastName: 'Коваленко',
-    maidenName: 'Бондар',
-    patronymic: 'Семенівна',
-    gender: 'F',
-    birthDate: '1918-12-05',
-    birthYear: 1918,
-    deathDate: '2002-07-19',
-    spouseIds: ['p7'],
-    childrenIds: ['p12'],
-    spouseFamilyIds: ['f3'],
-    generation: 3
-  },
-  {
-    id: 'p10',
-    firstName: 'Григорій',
-    lastName: 'Коваленко',
-    patronymic: 'Данилович',
-    gender: 'M',
-    birthDate: '1815-01-10',
-    birthYear: 1815,
-    deathDate: '1889-08-04',
-    deathYear: 1889,
-    generation: 0,
-    childrenIds: ['p1'],
-    spouseFamilyIds: ['f4']
-  },
-  {
-    id: 'p11',
-    firstName: 'Параскева',
-    lastName: 'Коваленко',
-    patronymic: 'Федорівна',
-    gender: 'F',
-    birthDate: '1820-10-15',
-    birthYear: 1820,
-    deathDate: '1895-02-18',
-    deathYear: 1895,
-    generation: 0,
-    childrenIds: ['p1'],
-    spouseFamilyIds: ['f4']
-  },
-  {
-    id: 'p12',
-    firstName: 'Богдан',
-    lastName: 'Коваленко',
-    patronymic: 'Михайлович',
-    gender: 'M',
-    birthDate: '1952-07-14',
-    birthYear: 1952,
-    birthPlace: 'м. Полтава',
-    isLiving: true,
-    occupation: 'Інженер-конструктор',
-    fatherId: 'p7',
-    motherId: 'p9',
-    parentFamilyId: 'f3',
-    generation: 4
-  }
-];
-
-export const INITIAL_FAMILIES: Record<string, Family> = {
-  f1: {
-    id: 'f1',
-    husbandId: 'p1',
-    wifeId: 'p2',
-    relationshipType: 'Married',
-    children: [
-      { personId: 'p3', relationType: 'Biological' },
-      { personId: 'p4', relationType: 'Biological' },
-      { personId: 'p5', relationType: 'Biological' }
-    ],
-    childrenIds: ['p3', 'p4', 'p5'],
-    marriageDate: '1875-10-18',
-    marriageYear: 1875,
-    marriagePlace: 'Церква св. Миколая, Диканька'
-  },
-  f2: {
-    id: 'f2',
-    husbandId: 'p3',
-    wifeId: 'p6',
-    relationshipType: 'Married',
-    children: [
-      { personId: 'p7', relationType: 'Biological' },
-      { personId: 'p8', relationType: 'Biological' }
-    ],
-    childrenIds: ['p7', 'p8'],
-    marriageDate: '1908-01-26',
-    marriageYear: 1908,
-    marriagePlace: 'Покровська церква, с. Чернечий Яр'
-  },
-  f3: {
-    id: 'f3',
-    husbandId: 'p7',
-    wifeId: 'p9',
-    relationshipType: 'Married',
-    children: [
-      { personId: 'p12', relationType: 'Biological' }
-    ],
-    childrenIds: ['p12'],
-    marriageDate: '1940-06-12',
-    marriageYear: 1940,
-    marriagePlace: 'м. Полтава'
-  },
-  f4: {
-    id: 'f4',
-    husbandId: 'p10',
-    wifeId: 'p11',
-    relationshipType: 'Married',
-    children: [
-      { personId: 'p1', relationType: 'Biological' }
-    ],
-    childrenIds: ['p1'],
-    marriageDate: '1840-02-15',
-    marriageYear: 1840
-  }
-};
-
-export const INITIAL_SOURCES: Record<string, Source> = {
-  s1: {
-    id: 's1',
-    title: 'Метрична книга церкви Покрови Пресвятої Богородиці 1878 року',
-    repository: 'Державний архів Полтавської області (ДАПО)',
-    archiveReference: 'Ф. 1011, Оп. 1, Спр. 45, Арк. 12 зв.',
-    archiveFund: 'Фонд 1011',
-    inventory: 'Опис 1',
-    caseNumber: 'Справа 45',
-    page: 'Арк. 12 зв.',
-    notes: 'Запис №14 про народження та хрещення Івана Остаповича Коваленка.'
-  },
-  s2: {
-    id: 's2',
-    title: 'Сповідний розпис Диканської протопопії 1880 р.',
-    repository: 'ЦДІАК України',
-    archiveReference: 'Ф. 127, Оп. 1015, Спр. 122, Арк. 88',
-    archiveFund: 'Ф. 127',
-    inventory: 'Оп. 1015',
-    caseNumber: 'Спр. 122',
-    page: 'Арк. 88',
-    notes: 'Повний поіменний список родини козака Остапа Григоровича Коваленка.'
-  }
-};
-
-export const INITIAL_EVENTS: Record<string, LifeEvent> = {
-  e1: {
-    id: 'e1',
-    type: 'birth',
-    title: 'Народження Остапа Коваленка',
-    date: '1845-04-12',
-    year: 1845,
-    place: 'с. Чернечий Яр',
-    personId: 'p1',
-    sourceId: 's2'
-  },
-  e2: {
-    id: 'e2',
-    type: 'marriage',
-    title: 'Шлюб Остапа Коваленка та Марії Лисенко',
-    date: '1875-10-18',
-    year: 1875,
-    place: 'м. Диканька',
-    familyId: 'f1'
-  }
-};
+export const INITIAL_PERSONS: Person[] = FAMILIO_PERSONS;
+export const INITIAL_FAMILIES: Record<string, Family> = FAMILIO_FAMILIES;
+export const INITIAL_SOURCES: Record<string, Source> = FAMILIO_SOURCES;
+export const INITIAL_EVENTS: Record<string, LifeEvent> = FAMILIO_EVENTS;
 
 export const normalizePerson = (p: Person): Person => {
   const given = p.name?.given || p.firstName || '';
@@ -405,8 +93,19 @@ export interface GenealogyDataState {
 export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   persons: (() => {
     try {
+      // Clear legacy storage keys if present to ensure clean state
+      ['genealogy_workstation_data_v1_persons', 'genealogy_workstation_data_v2_persons', 'genealogy_workstation_data_v3_persons'].forEach(k => {
+        try { localStorage.removeItem(k); } catch {}
+      });
+
       const saved = localStorage.getItem(`${STORAGE_KEY}_persons`);
-      return saved ? JSON.parse(saved).map(normalizePerson) : INITIAL_PERSONS.map(normalizePerson);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length >= 30 && parsed.some((p: any) => p.id === 'p_bom_olga' || p.lastName === 'Бом' || p.lastName === 'Дядькин')) {
+          return parsed.map(normalizePerson);
+        }
+      }
+      return INITIAL_PERSONS.map(normalizePerson);
     } catch {
       return INITIAL_PERSONS.map(normalizePerson);
     }
@@ -415,7 +114,13 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   families: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_families`);
-      return saved ? JSON.parse(saved) : INITIAL_FAMILIES;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 10) {
+          return parsed;
+        }
+      }
+      return INITIAL_FAMILIES;
     } catch {
       return INITIAL_FAMILIES;
     }
@@ -424,7 +129,13 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   sources: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_sources`);
-      return saved ? JSON.parse(saved) : INITIAL_SOURCES;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 5) {
+          return parsed;
+        }
+      }
+      return INITIAL_SOURCES;
     } catch {
       return INITIAL_SOURCES;
     }
@@ -433,7 +144,13 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   events: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_events`);
-      return saved ? JSON.parse(saved) : INITIAL_EVENTS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length >= 5) {
+          return parsed;
+        }
+      }
+      return INITIAL_EVENTS;
     } catch {
       return INITIAL_EVENTS;
     }
@@ -448,7 +165,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     }
   })(),
 
-  selectedPersonId: 'p1',
+  selectedPersonId: 'p_bom_olga',
 
   gitConfig: (() => {
     try {

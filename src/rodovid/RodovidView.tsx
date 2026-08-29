@@ -58,12 +58,12 @@ export const RodovidView: React.FC = () => {
 
     return {
       metadata: {
-        title: 'Родовід родини Коваленків та Шевченків',
-        description: 'Єдине сховище генеалогічних даних',
+        title: 'Родовід родини Бом, Дядькіних та Бичихіних',
+        description: 'Єдине сховище генеалогічних даних (39 осіб, 9 поколінь)',
         lastModified: new Date().toISOString(),
         author: 'Дослідник'
       },
-      rootPersonId: selectedPersonId || persons[0]?.id || 'p1',
+      rootPersonId: selectedPersonId || 'p_bom_olga',
       persons: personsMap,
       families: families || {},
       sources: sources || {},
@@ -72,7 +72,14 @@ export const RodovidView: React.FC = () => {
     };
   }, [persons, families, sources, events, selectedPersonId]);
 
-  const activePersonId = selectedPersonId || persons[0]?.id || 'p1';
+  const activePersonId = useMemo(() => {
+    if (selectedPersonId && database.persons[selectedPersonId]) {
+      return selectedPersonId;
+    }
+    if (database.persons['p_bom_olga']) return 'p_bom_olga';
+    const firstPerson = Object.values(database.persons)[0];
+    return firstPerson?.id || 'p_bom_olga';
+  }, [selectedPersonId, database.persons]);
 
   // Modals state
   const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);

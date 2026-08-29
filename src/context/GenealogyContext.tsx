@@ -246,18 +246,20 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     const unsubscribe = subscribeToProjectData((cloudData) => {
       if (!cloudData) return;
-      if (cloudData.persons && Array.isArray(cloudData.persons)) setPersons(cloudData.persons);
-      if (cloudData.families && Array.isArray(cloudData.families)) {
+      if (cloudData.persons && Array.isArray(cloudData.persons) && cloudData.persons.length >= 30) {
+        setPersons(cloudData.persons);
+      }
+      if (cloudData.families && Array.isArray(cloudData.families) && cloudData.families.length >= 10) {
         const famMap: Record<string, any> = {};
         cloudData.families.forEach((f: any) => { if (f && f.id) famMap[f.id] = f; });
         setFamilies(famMap);
       }
-      if (cloudData.events && Array.isArray(cloudData.events)) {
+      if (cloudData.events && Array.isArray(cloudData.events) && cloudData.events.length >= 5) {
         const evMap: Record<string, any> = {};
         cloudData.events.forEach((e: any) => { if (e && e.id) evMap[e.id] = e; });
         setEvents(evMap);
       }
-      if (cloudData.sources && Array.isArray(cloudData.sources)) {
+      if (cloudData.sources && Array.isArray(cloudData.sources) && cloudData.sources.length >= 5) {
         const srcMap: Record<string, any> = {};
         cloudData.sources.forEach((s: any) => { if (s && s.id) srcMap[s.id] = s; });
         setSources(srcMap);
