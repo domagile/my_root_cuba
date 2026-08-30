@@ -10,6 +10,7 @@ import {
   Compass,
   BarChart3,
   FileText,
+  ShieldAlert,
   Upload,
   UserPlus,
   TreeDeciduous,
@@ -76,7 +77,8 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'sources', label: 'Архів', icon: BookOpen },
     { id: 'kinship', label: 'Спорідненість', icon: Compass },
     { id: 'stats', label: 'Статистика', icon: BarChart3 },
-    { id: 'reports', label: 'Звіти', icon: FileText }
+    { id: 'reports', label: 'Звіти', icon: FileText },
+    { id: 'conflicts', label: 'Аудит', icon: ShieldAlert }
   ];
 
   // Close dropdown on click outside

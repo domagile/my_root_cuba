@@ -357,18 +357,25 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                   </p>
                 </button>
 
+                {/* Primary Spouse / Secondary Spouse Options */}
                 <button
                   onClick={() => onOpenAddModalWithRelation('spouse', liveTargetPerson.id)}
-                  className="p-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50/60 dark:bg-slate-800/60 hover:border-emerald-600 dark:hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-slate-800 transition-all text-left group cursor-pointer shadow-2xs"
+                  className="p-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50/60 dark:bg-slate-800/60 hover:border-pink-600 dark:hover:border-pink-500 hover:bg-pink-50/50 dark:hover:bg-slate-800 transition-all text-left group cursor-pointer shadow-2xs"
                 >
                   <div className="flex items-center gap-2 mb-0.5">
                     <Heart className="w-3 h-3 text-pink-500 shrink-0" />
-                    <span className="font-bold text-xs text-neutral-900 dark:text-neutral-100 group-hover:text-emerald-700 dark:group-hover:text-emerald-300">
-                      Партнер / Подружжя
+                    <span className="font-bold text-xs text-neutral-900 dark:text-neutral-100 group-hover:text-pink-700 dark:group-hover:text-pink-300">
+                      {linkedSpouses.length === 0
+                        ? 'Чоловік / Дружина'
+                        : linkedSpouses.length === 1
+                        ? '+ 2-га дружина / 2-й чоловік'
+                        : `+ ${linkedSpouses.length + 1}-й шлюб`}
                     </span>
                   </div>
                   <p className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate">
-                    {linkedSpouses.length > 0 ? `${linkedSpouses.length} у списку` : '+ Чоловік / Дружина'}
+                    {linkedSpouses.length === 0
+                      ? '+ Додати подружжя'
+                      : `Уже є ${linkedSpouses.length} (${linkedSpouses.map(s => getPersonName(s)).join(', ')})`}
                   </p>
                 </button>
 
@@ -546,11 +553,18 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                     </div>
                   )}
 
-                  {linkedSpouses.map((sp) => (
+                  {linkedSpouses.map((sp, idx) => (
                     <div key={sp.id} className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-slate-800/40 flex items-center justify-between">
                       <div className="min-w-0">
-                        <span className="text-[10px] font-bold text-pink-600 dark:text-pink-400 block">Партнер / Подружжя:</span>
-                        <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate block">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-pink-600 dark:text-pink-400">
+                            {idx === 0 ? '1-й шлюб:' : `${idx + 1}-й шлюб:`}
+                          </span>
+                          <span className="text-[10px] px-1 rounded bg-pink-100 dark:bg-pink-950/60 text-pink-700 dark:text-pink-300 font-medium">
+                            {sp.gender === 'female' || sp.gender === 'F' ? 'Дружина' : 'Чоловік'}
+                          </span>
+                        </div>
+                        <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate block mt-0.5">
                           {getPersonName(sp)}
                         </span>
                       </div>

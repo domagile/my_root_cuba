@@ -16,6 +16,7 @@ import { SourcesView } from './components/views/SourcesView';
 import { KinshipCalculatorView } from './components/views/KinshipCalculatorView';
 import { StatisticsView } from './components/views/StatisticsView';
 import { ReportsView } from './components/views/ReportsView';
+import { ConflictsView } from './components/views/ConflictsView';
 import { PersonDetailModal } from './components/modals/PersonDetailModal';
 import { EditPersonModal } from './components/modals/EditPersonModal';
 import { EditFamilyModal } from './components/modals/EditFamilyModal';
@@ -35,7 +36,9 @@ export const RodovidView: React.FC = () => {
 
   const {
     persons,
+    setPersons,
     families,
+    setFamilies,
     sources,
     events,
     selectedPersonId,
@@ -274,6 +277,16 @@ export const RodovidView: React.FC = () => {
           <ReportsView
             database={database}
             activePersonId={activePersonId}
+            onSelectPerson={(id) => setInspectPersonId(id)}
+          />
+        )}
+
+        {(currentView === 'conflicts' || currentView === 'audit' || currentView === 'duplicates') && (
+          <ConflictsView
+            persons={persons}
+            families={families}
+            onUpdatePersons={(newPersons) => setPersons(newPersons)}
+            onUpdateFamilies={(newFamilies) => setFamilies(newFamilies)}
             onSelectPerson={(id) => setInspectPersonId(id)}
           />
         )}

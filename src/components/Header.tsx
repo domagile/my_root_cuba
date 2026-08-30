@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon } from 'lucide-react';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
@@ -17,7 +17,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
     metricRecords, 
     themePalette, 
     setThemePalette,
-    setActiveTab
+    setActiveTab,
+    syncStatus,
+    lastSyncTime,
+    lastSyncError,
+    isManualPushing,
+    isManualPulling,
+    triggerUploadToCloud,
+    triggerDownloadFromCloud
   } = useGenealogy();
 
   const isMobileMenuOpen = useUIStore((s) => s.isMobileMenuOpen);
@@ -30,16 +37,34 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
   const pendingRequestsCount = accessRequests.filter((r) => r.status === 'pending').length;
 
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const [showCloudPopover, setShowCloudPopover] = useState(false);
+  const [cloudActionMsg, setCloudActionMsg] = useState<{ text: string; isError?: boolean } | null>(null);
 
   const themeList = Object.values(THEME_CONFIGS);
   const lightThemes = themeList.filter(t => t.category === 'light');
   const darkThemes = themeList.filter(t => t.category === 'dark');
 
-  const toggleLightDarkQuick = () => {
-    if (theme.category === 'light') {
-      setThemePalette('dark-emerald');
-    } else {
-      setThemePalette('light-parchment');
+  const handleHeaderPush = async () => {
+    setCloudActionMsg(null);
+    const res = await triggerUploadToCloud();
+    setCloudActionMsg({ text: res.message, isError: !res.success });
+    setTimeout(() => setCloudActionMsg(null), 4000);
+  };
+
+  const handleHeaderPull = async () => {
+    setCloudActionMsg(null);
+    const res = await triggerDownloadFromCloud();
+    setCloudActionMsg({ text: res.message, isError: !res.success });
+    setTimeout(() => setCloudActionMsg(null), 4000);
+  };
+
+  const formatLastSync = (iso: string | null) => {
+    if (!iso) return 'Немає даних';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return iso;
     }
   };
 
@@ -69,17 +94,131 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
           />
         </div>
 
-        {/* Quick Stats Badges */}
-        <div className="hidden lg:flex items-center gap-4 text-xs opacity-80">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Cloud Firestore: <strong>Синхронізовано</strong></span>
+        {/* Quick Stats Badges & Cloud Sync Status Indicator */}
+        <div className="hidden lg:flex items-center gap-3 text-xs">
+          {/* Cloud Sync Status Interactive Badge */}
+          <div className="relative">
+            <button
+              onClick={() => setShowCloudPopover(!showCloudPopover)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full font-medium transition-all cursor-pointer shadow-xs border ${
+                syncStatus === 'syncing' || isManualPushing || isManualPulling
+                  ? 'bg-amber-950/60 border-amber-500/40 text-amber-300'
+                  : syncStatus === 'error'
+                  ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                  : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/60'
+              }`}
+              title="Статус синхронізації з Firestore (натисніть для деталей та ручного оновлення)"
+            >
+              {syncStatus === 'syncing' || isManualPushing || isManualPulling ? (
+                <RefreshCw className="w-3 h-3 text-amber-400 animate-spin" />
+              ) : syncStatus === 'error' ? (
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              )}
+              <span>
+                Firestore:{' '}
+                <strong>
+                  {syncStatus === 'syncing' || isManualPushing || isManualPulling
+                    ? 'Збереження...'
+                    : syncStatus === 'error'
+                    ? 'Помилка'
+                    : 'Синхронізовано'}
+                </strong>
+              </span>
+            </button>
+
+            {/* Cloud Details Popover */}
+            {showCloudPopover && (
+              <div className={`absolute left-0 mt-2 w-80 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-4 z-50 space-y-3 ${theme.cardTitle}`}>
+                <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-[#B88E3E]" />
+                    <span className="font-bold text-xs">Хмарна синхронізація Firestore</span>
+                  </div>
+                  <button
+                    onClick={() => setShowCloudPopover(false)}
+                    className="text-xs opacity-60 hover:opacity-100 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 text-[11px] opacity-90">
+                  <div className="flex justify-between">
+                    <span className="opacity-70">Стан зв'язку:</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      {syncStatus === 'syncing' ? 'Йде запис...' : syncStatus === 'error' ? 'Помилка підключення' : 'Атомарно підключено'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-70">Останній запис:</span>
+                    <span className="font-mono">{formatLastSync(lastSyncTime)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-70">Записів у базі:</span>
+                    <span>{persons.length} осіб / {metricRecords.length} метрик</span>
+                  </div>
+                  {lastSyncError && (
+                    <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[10px]">
+                      {lastSyncError}
+                    </div>
+                  )}
+                </div>
+
+                {cloudActionMsg && (
+                  <div className={`p-2 rounded-lg text-[10px] flex items-center gap-1.5 ${
+                    cloudActionMsg.isError
+                      ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
+                      : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                  }`}>
+                    {cloudActionMsg.isError ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                    <span>{cloudActionMsg.text}</span>
+                  </div>
+                )}
+
+                {/* Quick Actions inside Popover */}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={handleHeaderPush}
+                    disabled={isManualPushing || isManualPulling}
+                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-[11px] transition-all cursor-pointer disabled:opacity-50`}
+                  >
+                    <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />
+                    <span>{isManualPushing ? 'Запис...' : 'Вивантажити'}</span>
+                  </button>
+
+                  <button
+                    onClick={handleHeaderPull}
+                    disabled={isManualPushing || isManualPulling}
+                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-[11px] transition-all cursor-pointer hover:opacity-90 disabled:opacity-50`}
+                  >
+                    <Download className={`w-3.5 h-3.5 ${isManualPulling ? 'animate-bounce' : ''}`} />
+                    <span>{isManualPulling ? 'Читання...' : 'Завантажити'}</span>
+                  </button>
+                </div>
+
+                <div className="text-center pt-1 border-t border-black/5 dark:border-white/5">
+                  <button
+                    onClick={() => {
+                      setShowCloudPopover(false);
+                      setActiveTab('settings');
+                    }}
+                    className="text-[10px] text-[#B88E3E] hover:underline font-medium cursor-pointer"
+                  >
+                    Відкрити повні налаштування Firestore →
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-2 opacity-80">
             <span className="w-2 h-2 rounded-full bg-[#B88E3E]"></span>
             <span>Дерево: <strong className="font-semibold">{persons.length}</strong> осіб</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 opacity-80">
             <span className="w-2 h-2 rounded-full bg-[#52C480]"></span>
             <span>Метрики: <strong className="font-semibold">{metricRecords.length}</strong> збережено</span>
           </div>

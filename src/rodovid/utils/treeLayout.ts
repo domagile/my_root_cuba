@@ -15,6 +15,12 @@ export interface TreeNodeLayout {
   generation: number;
   spouseId?: string;
   isSpouseNode?: boolean;
+  marriageOrder?: number;
+  marriageStatus?: string;
+  marriageDate?: string;
+  marriageYear?: number;
+  divorceDate?: string;
+  divorceYear?: number;
   hasParents?: boolean;
   hasSiblings?: boolean;
   hasChildren?: boolean;
@@ -54,6 +60,8 @@ export interface TreeLinkLayout {
   sourcePersonId?: string;
   targetPersonId?: string;
   childPersonId?: string;
+  marriageOrder?: number;
+  marriageStatus?: string;
 }
 
 export interface TreeLayoutResult {
@@ -232,6 +240,24 @@ export function calculateClassicFamilyTreeLayout(
         personGen.set(mId, gen - 1);
         queueAnc.push({ id: mId, gen: gen - 1 });
       }
+
+      // Include all spouses of ancestors at the same generation (e.g. 1st wife, 2nd wife)
+      const ancSpouseIds = new Set<string>();
+      if (p.spouseIds) p.spouseIds.forEach(s => ancSpouseIds.add(s));
+      if (p.spouseFamilyIds) {
+        p.spouseFamilyIds.forEach(fId => {
+          const fam = database.families[fId];
+          if (fam) {
+            if (fam.husbandId && fam.husbandId !== p.id) ancSpouseIds.add(fam.husbandId);
+            if (fam.wifeId && fam.wifeId !== p.id) ancSpouseIds.add(fam.wifeId);
+          }
+        });
+      }
+      ancSpouseIds.forEach(sId => {
+        if (database.persons[sId] && !personGen.has(sId)) {
+          personGen.set(sId, gen);
+        }
+      });
     }
   }
 
@@ -286,14 +312,16 @@ export function calculateClassicFamilyTreeLayout(
     }
   }
 
-  // Also include siblings for active ancestors and root
+  // Also include siblings for active ancestors and root (collapsible collateral lines)
   if (showSiblings) {
-    Array.from(personGen.entries()).forEach(([pId, gen]) => {
+    const baseIds = Array.from(personGen.keys());
+    baseIds.forEach((pId) => {
       // If this person has siblings collapsed, skip expanding their siblings
       if (collapsedSiblings.has(pId)) return;
 
       const p = database.persons[pId];
       if (!p) return;
+      const gen = personGen.get(pId)!;
       const fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
       const mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
 
@@ -303,15 +331,27 @@ export function calculateClassicFamilyTreeLayout(
             const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
             const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
             if ((fId && cF === fId) || (mId && cM === mId)) {
+              // If candidate itself or sibling cohort is collapsed, don't show
+              if (collapsedSiblings.has(cand.id)) return;
+
               personGen.set(cand.id, gen);
-              // also include cand's spouse if present
-              if (cand.spouseIds) {
-                cand.spouseIds.forEach(sId => {
-                  if (database.persons[sId] && !personGen.has(sId)) {
-                    personGen.set(sId, gen);
+              // Also include candidate's spouse(s) if present
+              const candSpouseIds = new Set<string>();
+              if (cand.spouseIds) cand.spouseIds.forEach(s => candSpouseIds.add(s));
+              if (cand.spouseFamilyIds) {
+                cand.spouseFamilyIds.forEach(f => {
+                  const fam = database.families[f];
+                  if (fam) {
+                    if (fam.husbandId && fam.husbandId !== cand.id) candSpouseIds.add(fam.husbandId);
+                    if (fam.wifeId && fam.wifeId !== cand.id) candSpouseIds.add(fam.wifeId);
                   }
                 });
               }
+              candSpouseIds.forEach(sId => {
+                if (database.persons[sId] && !personGen.has(sId)) {
+                  personGen.set(sId, gen);
+                }
+              });
             }
           }
         });
@@ -341,16 +381,27 @@ export function calculateClassicFamilyTreeLayout(
     }
   });
 
-  // Helper structure for layout positioning
+  // Multi-spouse support structure for layout positioning
+  interface SpouseInfo {
+    spouse: Person;
+    family?: any;
+    marriageOrder: number;
+    relationshipType?: string;
+    marriageDate?: string;
+    marriageYear?: number;
+    divorceDate?: string;
+    divorceYear?: number;
+    childrenIds: string[];
+  }
+
   interface Unit {
-    type: 'couple' | 'single';
+    type: 'single' | 'couple' | 'multi_spouse';
     primary: Person;
-    spouse?: Person;
+    spouses: SpouseInfo[];
     width: number;
     x: number;
     y: number;
     childrenIds: string[];
-    familyId?: string;
   }
 
   const genUnits: Map<number, Unit[]> = new Map();
@@ -359,79 +410,160 @@ export function calculateClassicFamilyTreeLayout(
     const units: Unit[] = [];
     const processed = new Set<string>();
 
-    // 1. First pair up spouses
     personsInGen.forEach(p => {
       if (processed.has(p.id)) return;
 
-      let spouse: Person | undefined = undefined;
-      const spouseIds = p.spouseIds || [];
-      for (const sId of spouseIds) {
-        const sp = database.persons[sId];
-        if (sp && normalizedGen.get(sId) === gen && !processed.has(sId)) {
-          spouse = sp;
-          break;
-        }
-      }
-
-      // Check families table if spouseIds wasn't populated
-      if (!spouse && p.spouseFamilyIds) {
-        for (const fId of p.spouseFamilyIds) {
+      // Find all spouses for this person in this generation
+      const spouseIdsSet = new Set<string>();
+      if (p.spouseIds) p.spouseIds.forEach(s => spouseIdsSet.add(s));
+      if (p.spouseFamilyIds) {
+        p.spouseFamilyIds.forEach(fId => {
           const fam = database.families[fId];
           if (fam) {
             const partnerId = fam.husbandId === p.id ? fam.wifeId : fam.husbandId;
-            if (partnerId && database.persons[partnerId] && normalizedGen.get(partnerId) === gen && !processed.has(partnerId)) {
-              spouse = database.persons[partnerId];
+            if (partnerId) spouseIdsSet.add(partnerId);
+          }
+        });
+      }
+
+      const rawSpouses: Person[] = [];
+      spouseIdsSet.forEach(sId => {
+        const sp = database.persons[sId];
+        if (sp && normalizedGen.get(sId) === gen && !processed.has(sId)) {
+          rawSpouses.push(sp);
+        }
+      });
+
+      // Build enriched spouse info (with family metadata, marriage order, dates, divorce status)
+      const spousesInfo: SpouseInfo[] = rawSpouses.map((sp, idx) => {
+        // Find family connecting p and sp
+        let matchedFam: any = undefined;
+        if (p.spouseFamilyIds) {
+          for (const fId of p.spouseFamilyIds) {
+            const fam = database.families[fId];
+            if (fam && ((fam.husbandId === p.id && fam.wifeId === sp.id) || (fam.husbandId === sp.id && fam.wifeId === p.id))) {
+              matchedFam = fam;
               break;
             }
           }
         }
-      }
+        if (!matchedFam && database.families) {
+          matchedFam = Object.values(database.families).find((fam: any) => 
+            (fam.husbandId === p.id && fam.wifeId === sp.id) || (fam.husbandId === sp.id && fam.wifeId === p.id)
+          );
+        }
 
-      const isMale = p.gender === 'male' || p.gender === 'M';
-      let primary = p;
-      let secondary = spouse;
+        // Determine children for this specific marriage union
+        const unionChildren = new Set<string>();
+        if (matchedFam?.children) {
+          matchedFam.children.forEach((c: any) => unionChildren.add(c.personId || c.id));
+        }
+        // Also check if any children have both p and sp as parents
+        Object.values(database.persons).forEach(candChild => {
+          if (
+            (candChild.fatherId === p.id && candChild.motherId === sp.id) ||
+            (candChild.fatherId === sp.id && candChild.motherId === p.id)
+          ) {
+            unionChildren.add(candChild.id);
+          }
+        });
 
-      // Always order husband on left, wife on right for standard pedigree view
-      if (spouse && !isMale && (spouse.gender === 'male' || spouse.gender === 'M')) {
-        primary = spouse;
-        secondary = p;
-      }
+        const validUnionChildren = Array.from(unionChildren).filter(
+          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1
+        );
 
-      // Find children of this couple or single person
-      const childrenSet = new Set<string>();
-      if (primary.childrenIds) primary.childrenIds.forEach(c => childrenSet.add(c));
-      if (secondary?.childrenIds) secondary.childrenIds.forEach(c => childrenSet.add(c));
+        return {
+          spouse: sp,
+          family: matchedFam,
+          marriageOrder: idx + 1,
+          relationshipType: matchedFam?.relationshipType || 'Married',
+          marriageDate: matchedFam?.marriageDate,
+          marriageYear: matchedFam?.marriageYear,
+          divorceDate: matchedFam?.divorceDate,
+          divorceYear: matchedFam?.divorceYear,
+          childrenIds: validUnionChildren
+        };
+      });
 
-      if (primary.spouseFamilyIds) {
-        primary.spouseFamilyIds.forEach(fId => {
+      // Sort spouses chronologically by marriage year if available
+      spousesInfo.sort((a, b) => {
+        const yearA = a.marriageYear || (a.marriageDate ? parseInt(a.marriageDate.match(/\d{4}/)?.[0] || '0', 10) : 0);
+        const yearB = b.marriageYear || (b.marriageDate ? parseInt(b.marriageDate.match(/\d{4}/)?.[0] || '0', 10) : 0);
+        if (yearA && yearB) return yearA - yearB;
+        return 0;
+      });
+
+      // Re-assign accurate 1-indexed marriage order
+      spousesInfo.forEach((s, idx) => {
+        s.marriageOrder = idx + 1;
+      });
+
+      // All children of primary person
+      const allChildren = new Set<string>();
+      if (p.childrenIds) p.childrenIds.forEach(c => allChildren.add(c));
+      spousesInfo.forEach(s => s.childrenIds.forEach(c => allChildren.add(c)));
+      if (p.spouseFamilyIds) {
+        p.spouseFamilyIds.forEach(fId => {
           const fam = database.families[fId];
-          if (fam?.children) fam.children.forEach(c => childrenSet.add(c.personId));
+          if (fam?.children) fam.children.forEach((c: any) => allChildren.add(c.personId || c.id));
         });
       }
+      const validAllChildren = Array.from(allChildren).filter(
+        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1
+      );
 
-      const validChildren = Array.from(childrenSet).filter(cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1);
+      const totalMembers = 1 + spousesInfo.length;
+      const unitWidth = CLASSIC_CARD_WIDTH * totalMembers + SPOUSE_GAP * (totalMembers - 1);
 
-      if (secondary) {
-        processed.add(primary.id);
-        processed.add(secondary.id);
-        units.push({
-          type: 'couple',
-          primary,
-          spouse: secondary,
-          width: CLASSIC_CARD_WIDTH * 2 + SPOUSE_GAP,
-          x: 0,
-          y: gen * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 80,
-          childrenIds: validChildren
-        });
-      } else {
-        processed.add(primary.id);
+      processed.add(p.id);
+      spousesInfo.forEach(s => processed.add(s.spouse.id));
+
+      if (spousesInfo.length === 0) {
         units.push({
           type: 'single',
-          primary,
+          primary: p,
+          spouses: [],
           width: CLASSIC_CARD_WIDTH,
           x: 0,
           y: gen * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 80,
-          childrenIds: validChildren
+          childrenIds: validAllChildren
+        });
+      } else if (spousesInfo.length === 1) {
+        // Standard couple: husband on left, wife on right
+        const isMale = p.gender === 'male' || p.gender === 'M';
+        const spouse = spousesInfo[0].spouse;
+        const spouseIsMale = spouse.gender === 'male' || spouse.gender === 'M';
+
+        let primaryPerson = p;
+        let spousePerson = spousesInfo[0];
+
+        if (!isMale && spouseIsMale) {
+          primaryPerson = spouse;
+          spousePerson = {
+            ...spousesInfo[0],
+            spouse: p
+          };
+        }
+
+        units.push({
+          type: 'couple',
+          primary: primaryPerson,
+          spouses: [spousePerson],
+          width: CLASSIC_CARD_WIDTH * 2 + SPOUSE_GAP,
+          x: 0,
+          y: gen * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 80,
+          childrenIds: validAllChildren
+        });
+      } else {
+        // Multiple spouses (e.g. 1st wife, 2nd wife)
+        units.push({
+          type: 'multi_spouse',
+          primary: p,
+          spouses: spousesInfo,
+          width: unitWidth,
+          x: 0,
+          y: gen * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 80,
+          childrenIds: validAllChildren
         });
       }
     });
@@ -464,7 +596,7 @@ export function calculateClassicFamilyTreeLayout(
       parentUnits.forEach((pUnit) => {
         if (pUnit.childrenIds.length > 0) {
           const childUnitMatches = childUnits.filter(cu => 
-            pUnit.childrenIds.includes(cu.primary.id) || (cu.spouse && pUnit.childrenIds.includes(cu.spouse.id))
+            pUnit.childrenIds.includes(cu.primary.id) || (cu.spouses && cu.spouses.some(s => pUnit.childrenIds.includes(s.spouse.id)))
           );
 
           if (childUnitMatches.length > 0) {
@@ -498,7 +630,7 @@ export function calculateClassicFamilyTreeLayout(
       parentUnits.forEach((pUnit) => {
         if (pUnit.childrenIds.length > 0) {
           const childUnitMatches = childUnits.filter(cu => 
-            pUnit.childrenIds.includes(cu.primary.id) || (cu.spouse && pUnit.childrenIds.includes(cu.spouse.id))
+            pUnit.childrenIds.includes(cu.primary.id) || (cu.spouses && cu.spouses.some(s => pUnit.childrenIds.includes(s.spouse.id)))
           );
 
           if (childUnitMatches.length > 0) {
@@ -605,8 +737,8 @@ export function calculateClassicFamilyTreeLayout(
   // 1. First Pass: create all node objects and populate nodeMap
   genUnits.forEach((units, gen) => {
     units.forEach((unit) => {
-      if (unit.type === 'couple' && unit.spouse) {
-        // Husband (left)
+      if (unit.type === 'couple' && unit.spouses.length === 1) {
+        // Husband / Primary (left)
         const hX = unit.x;
         const hY = unit.y;
         const hFlags = getNodeFlags(unit.primary);
@@ -618,7 +750,7 @@ export function calculateClassicFamilyTreeLayout(
           width: CLASSIC_CARD_WIDTH,
           height: CLASSIC_CARD_HEIGHT,
           generation: gen,
-          spouseId: unit.spouse.id,
+          spouseId: unit.spouses[0].spouse.id,
           ...hFlags
         });
         nodeMap.set(unit.primary.id, {
@@ -630,13 +762,14 @@ export function calculateClassicFamilyTreeLayout(
           centerY: hY + CLASSIC_CARD_HEIGHT / 2
         });
 
-        // Wife (right)
+        // Wife / Spouse (right)
+        const spInfo = unit.spouses[0];
         const wX = unit.x + CLASSIC_CARD_WIDTH + SPOUSE_GAP;
         const wY = unit.y;
-        const wFlags = getNodeFlags(unit.spouse);
+        const wFlags = getNodeFlags(spInfo.spouse);
         nodes.push({
-          id: unit.spouse.id,
-          person: unit.spouse,
+          id: spInfo.spouse.id,
+          person: spInfo.spouse,
           x: wX,
           y: wY,
           width: CLASSIC_CARD_WIDTH,
@@ -644,15 +777,77 @@ export function calculateClassicFamilyTreeLayout(
           generation: gen,
           spouseId: unit.primary.id,
           isSpouseNode: true,
+          marriageOrder: spInfo.marriageOrder,
+          marriageStatus: spInfo.relationshipType,
+          marriageDate: spInfo.marriageDate,
+          marriageYear: spInfo.marriageYear,
+          divorceDate: spInfo.divorceDate,
+          divorceYear: spInfo.divorceYear,
           ...wFlags
         });
-        nodeMap.set(unit.spouse.id, {
+        nodeMap.set(spInfo.spouse.id, {
           x: wX,
           y: wY,
           width: CLASSIC_CARD_WIDTH,
           height: CLASSIC_CARD_HEIGHT,
           centerX: wX + CLASSIC_CARD_WIDTH / 2,
           centerY: wY + CLASSIC_CARD_HEIGHT / 2
+        });
+      } else if (unit.type === 'multi_spouse') {
+        // Multi-spouse family unit: Primary person followed by 1st wife/husband, 2nd wife/husband etc.
+        let curX = unit.x;
+        const pY = unit.y;
+        const pFlags = getNodeFlags(unit.primary);
+        nodes.push({
+          id: unit.primary.id,
+          person: unit.primary,
+          x: curX,
+          y: pY,
+          width: CLASSIC_CARD_WIDTH,
+          height: CLASSIC_CARD_HEIGHT,
+          generation: gen,
+          spouseId: unit.spouses[0]?.spouse.id,
+          ...pFlags
+        });
+        nodeMap.set(unit.primary.id, {
+          x: curX,
+          y: pY,
+          width: CLASSIC_CARD_WIDTH,
+          height: CLASSIC_CARD_HEIGHT,
+          centerX: curX + CLASSIC_CARD_WIDTH / 2,
+          centerY: pY + CLASSIC_CARD_HEIGHT / 2
+        });
+        curX += CLASSIC_CARD_WIDTH + SPOUSE_GAP;
+
+        unit.spouses.forEach((spInfo) => {
+          const sFlags = getNodeFlags(spInfo.spouse);
+          nodes.push({
+            id: spInfo.spouse.id,
+            person: spInfo.spouse,
+            x: curX,
+            y: pY,
+            width: CLASSIC_CARD_WIDTH,
+            height: CLASSIC_CARD_HEIGHT,
+            generation: gen,
+            spouseId: unit.primary.id,
+            isSpouseNode: true,
+            marriageOrder: spInfo.marriageOrder,
+            marriageStatus: spInfo.relationshipType,
+            marriageDate: spInfo.marriageDate,
+            marriageYear: spInfo.marriageYear,
+            divorceDate: spInfo.divorceDate,
+            divorceYear: spInfo.divorceYear,
+            ...sFlags
+          });
+          nodeMap.set(spInfo.spouse.id, {
+            x: curX,
+            y: pY,
+            width: CLASSIC_CARD_WIDTH,
+            height: CLASSIC_CARD_HEIGHT,
+            centerX: curX + CLASSIC_CARD_WIDTH / 2,
+            centerY: pY + CLASSIC_CARD_HEIGHT / 2
+          });
+          curX += CLASSIC_CARD_WIDTH + SPOUSE_GAP;
         });
       } else {
         // Single person
@@ -691,94 +886,107 @@ export function calculateClassicFamilyTreeLayout(
       const baseJunctionY = pY + CLASSIC_CARD_HEIGHT + 36;
       const junctionY = baseJunctionY + (unitIdx % 4) * 22;
 
-      if (unit.type === 'couple' && unit.spouse) {
-        const hNode = nodeMap.get(unit.primary.id)!;
-        const wNode = nodeMap.get(unit.spouse.id)!;
-        const marriageMidX = (hNode.x + CLASSIC_CARD_WIDTH + wNode.x) / 2;
-        const marriageMidY = hNode.y + CLASSIC_CARD_HEIGHT / 2;
+      if ((unit.type === 'couple' || unit.type === 'multi_spouse') && unit.spouses.length > 0) {
+        unit.spouses.forEach((spInfo, spIdx) => {
+          const pNode = nodeMap.get(unit.primary.id);
+          const sNode = nodeMap.get(spInfo.spouse.id);
+          if (!pNode || !sNode) return;
 
-        // Marriage link between husband and wife
-        links.push({
-          id: `m_${unit.primary.id}_${unit.spouse.id}`,
-          sourceX: hNode.x + CLASSIC_CARD_WIDTH,
-          sourceY: marriageMidY,
-          targetX: wNode.x,
-          targetY: marriageMidY,
-          type: 'marriage',
-          color: '#a1a1aa',
-          sourcePersonId: unit.primary.id,
-          targetPersonId: unit.spouse.id,
-          path: `M ${hNode.x + CLASSIC_CARD_WIDTH} ${marriageMidY} L ${wNode.x} ${marriageMidY}`
-        });
+          const leftCardRightEdge = Math.min(pNode.x, sNode.x) + CLASSIC_CARD_WIDTH;
+          const rightCardLeftEdge = Math.max(pNode.x, sNode.x);
+          const marriageMidX = (leftCardRightEdge + rightCardLeftEdge) / 2;
+          const marriageMidY = pNode.y + CLASSIC_CARD_HEIGHT / 2;
 
-        // If couple has children, create stem and bus down
-        if (unit.childrenIds.length > 0) {
-          const childCoords = unit.childrenIds
-            .map(cId => ({ id: cId, ...nodeMap.get(cId)! }))
-            .filter(c => c && c.centerX !== undefined);
+          // Marriage link between primary and this spouse
+          links.push({
+            id: `m_${unit.primary.id}_${spInfo.spouse.id}`,
+            sourceX: leftCardRightEdge,
+            sourceY: marriageMidY,
+            targetX: rightCardLeftEdge,
+            targetY: marriageMidY,
+            type: 'marriage',
+            color: '#a1a1aa',
+            sourcePersonId: unit.primary.id,
+            targetPersonId: spInfo.spouse.id,
+            marriageOrder: spInfo.marriageOrder,
+            marriageStatus: spInfo.relationshipType,
+            path: `M ${leftCardRightEdge} ${marriageMidY} L ${rightCardLeftEdge} ${marriageMidY}`
+          });
 
-          if (childCoords.length > 0) {
-            // Vertical stem from marriage midpoint down to staggered junctionY
-            links.push({
-              id: `stem_${unit.primary.id}_${unit.spouse.id}`,
-              sourceX: marriageMidX,
-              sourceY: marriageMidY,
-              targetX: marriageMidX,
-              targetY: junctionY,
-              type: 'stem',
-              color: unitColor,
-              familyId: unit.primary.id,
-              sourcePersonId: unit.primary.id,
-              targetPersonId: unit.spouse.id,
-              path: `M ${marriageMidX} ${marriageMidY} L ${marriageMidX} ${junctionY}`
-            });
+          // Children born from this specific union
+          const unionChildren = spInfo.childrenIds.length > 0 ? spInfo.childrenIds : (unit.spouses.length === 1 ? unit.childrenIds : []);
+          if (unionChildren.length > 0) {
+            const childCoords = unionChildren
+              .map(cId => ({ id: cId, ...nodeMap.get(cId)! }))
+              .filter(c => c && c.centerX !== undefined);
 
-            // Calculate horizontal span of bus bar
-            const minChildX = Math.min(...childCoords.map(c => c.centerX));
-            const maxChildX = Math.max(...childCoords.map(c => c.centerX));
-            const busLeft = Math.min(marriageMidX, minChildX);
-            const busRight = Math.max(marriageMidX, maxChildX);
-
-            // Horizontal sibling bus bar (only for this specific family)
-            if (busLeft !== busRight || childCoords.length > 1) {
+            if (childCoords.length > 0) {
+              const unionJunctionY = junctionY + (spIdx * 16);
+              // Vertical stem from marriage midpoint down to staggered junctionY
               links.push({
-                id: `bus_${unit.primary.id}_${unit.spouse.id}`,
-                sourceX: busLeft,
-                sourceY: junctionY,
-                targetX: busRight,
-                targetY: junctionY,
-                type: 'bus',
+                id: `stem_${unit.primary.id}_${spInfo.spouse.id}`,
+                sourceX: marriageMidX,
+                sourceY: marriageMidY,
+                targetX: marriageMidX,
+                targetY: unionJunctionY,
+                type: 'stem',
                 color: unitColor,
-                familyId: unit.primary.id,
+                familyId: spInfo.family?.id || unit.primary.id,
                 sourcePersonId: unit.primary.id,
-                path: `M ${busLeft} ${junctionY} L ${busRight} ${junctionY}`
+                targetPersonId: spInfo.spouse.id,
+                marriageOrder: spInfo.marriageOrder,
+                path: `M ${marriageMidX} ${marriageMidY} L ${marriageMidX} ${unionJunctionY}`
+              });
+
+              // Calculate horizontal span of bus bar
+              const minChildX = Math.min(...childCoords.map(c => c.centerX));
+              const maxChildX = Math.max(...childCoords.map(c => c.centerX));
+              const busLeft = Math.min(marriageMidX, minChildX);
+              const busRight = Math.max(marriageMidX, maxChildX);
+
+              // Horizontal sibling bus bar (only for this specific family)
+              if (busLeft !== busRight || childCoords.length > 1) {
+                links.push({
+                  id: `bus_${unit.primary.id}_${spInfo.spouse.id}`,
+                  sourceX: busLeft,
+                  sourceY: unionJunctionY,
+                  targetX: busRight,
+                  targetY: unionJunctionY,
+                  type: 'bus',
+                  color: unitColor,
+                  familyId: spInfo.family?.id || unit.primary.id,
+                  sourcePersonId: unit.primary.id,
+                  marriageOrder: spInfo.marriageOrder,
+                  path: `M ${busLeft} ${unionJunctionY} L ${busRight} ${unionJunctionY}`
+                });
+              }
+
+              // Drop lines to each child
+              childCoords.forEach(child => {
+                links.push({
+                  id: `drop_${spInfo.spouse.id}_${child.id}`,
+                  sourceX: child.centerX,
+                  sourceY: unionJunctionY,
+                  targetX: child.centerX,
+                  targetY: child.y,
+                  type: 'drop',
+                  color: unitColor,
+                  familyId: spInfo.family?.id || unit.primary.id,
+                  sourcePersonId: unit.primary.id,
+                  childPersonId: child.id,
+                  arrow: 'down',
+                  arrowX: child.centerX,
+                  arrowY: child.y,
+                  path: `M ${child.centerX} ${unionJunctionY} L ${child.centerX} ${child.y}`
+                });
               });
             }
-
-            // Drop lines to each child
-            childCoords.forEach(child => {
-              links.push({
-                id: `drop_${unit.primary.id}_${child.id}`,
-                sourceX: child.centerX,
-                sourceY: junctionY,
-                targetX: child.centerX,
-                targetY: child.y,
-                type: 'drop',
-                color: unitColor,
-                familyId: unit.primary.id,
-                sourcePersonId: unit.primary.id,
-                childPersonId: child.id,
-                arrow: 'down',
-                arrowX: child.centerX,
-                arrowY: child.y,
-                path: `M ${child.centerX} ${junctionY} L ${child.centerX} ${child.y}`
-              });
-            });
           }
-        }
+        });
       } else {
         // Single parent
-        const pNode = nodeMap.get(unit.primary.id)!;
+        const pNode = nodeMap.get(unit.primary.id);
+        if (!pNode) return;
         const stemX = pNode.centerX;
         const stemY = pNode.y + CLASSIC_CARD_HEIGHT;
 
@@ -894,65 +1102,229 @@ export function calculateHourglassLayout(
   return calculateClassicFamilyTreeLayout(database, rootPersonId, maxGenerations);
 }
 
+export type FanColorMode = 'clans' | 'grandparents' | 'greatgrandparents' | 'gender' | 'generation';
+
+export interface FanChartClan {
+  id: string;
+  name: string;
+  color: string;
+  count: number;
+  persons: Person[];
+}
+
+export interface FanChartSector {
+  ahnentafelNumber: number;
+  person: Person;
+  generation: number;
+  innerRadius: number;
+  outerRadius: number;
+  startAngle: number;
+  endAngle: number;
+  fillColor?: string;
+  color?: string;
+  side?: 'ancestor' | 'spouse' | 'child';
+  clanId?: string;
+  clanName?: string;
+  clanColor?: string;
+  relationshipLabel?: string;
+  isDescendant?: boolean;
+  isSpouse?: boolean;
+  rodName?: string;
+}
+
+// Distinct, vibrant lineage colors for family branches and rods matching user screenshot
+export const LINEAGE_PALETTE = [
+  '#059669', // Emerald Green (Болотный)
+  '#0284c7', // Rich Cyan (Болотна/Лазаренко)
+  '#d97706', // Amber Gold (Надточей)
+  '#ea580c', // Bright Orange (Бычихин)
+  '#7c3aed', // Royal Violet (Яковлева)
+  '#e11d48', // Vibrant Rose/Red
+  '#0891b2', // Teal Blue (Дядькин)
+  '#be123c', // Bordeaux Crimson (Балдинов)
+  '#a855f7', // Lilac (Зеленский)
+  '#16a34a', // Forest Green (Кармазин)
+  '#9333ea', // Deep Violet (Кармазина)
+  '#d97706', // Golden Ochre (Пирковский)
+  '#475569', // Slate Gray (Лазаренко)
+  '#2563eb', // Royal Blue (Бом)
+  '#ca8a04', // Golden Olive
+  '#db2777', // Deep Rose
+  '#0f766e', // Deep Teal
+  '#1e40af', // Navy Blue
+];
+
+// Helper to get normalized rod / surname name
+export function getPersonRodName(person?: Person | null): string {
+  if (!person) return 'Рід';
+  const raw = person.name?.surname || person.lastName || person.name?.maidenName || person.maidenName || '';
+  return raw.trim() || 'Рід';
+}
+
+/**
+ * Build a stable surname-to-color mapping for all persons in the database
+ */
+export function getLineageColorMap(database: GenealogyDatabase): Record<string, string> {
+  const map: Record<string, string> = {};
+  let colorIdx = 0;
+
+  // Prioritize root and direct ancestors
+  const seen = new Set<string>();
+  Object.values(database.persons).forEach((p) => {
+    const rod = getPersonRodName(p);
+    if (rod && rod !== 'Рід' && !seen.has(rod.toLowerCase())) {
+      seen.add(rod.toLowerCase());
+      map[rod.toLowerCase()] = LINEAGE_PALETTE[colorIdx % LINEAGE_PALETTE.length];
+      map[rod] = LINEAGE_PALETTE[colorIdx % LINEAGE_PALETTE.length];
+      colorIdx++;
+    }
+  });
+
+  return map;
+}
+
+export function extractFanChartClans(sectors: FanChartSector[]): FanChartClan[] {
+  const clanMap = new Map<string, FanChartClan>();
+
+  sectors.forEach((sec) => {
+    if (!sec.person) return;
+    const rawRod = getPersonRodName(sec.person);
+    const clanId = sec.clanId || rawRod;
+    const clanName = sec.clanName || (clanId.startsWith('Рід ') ? clanId : `Рід ${clanId}`);
+    const clanColor = sec.clanColor || sec.fillColor || sec.color || '#2563eb';
+
+    if (!clanMap.has(clanId)) {
+      clanMap.set(clanId, {
+        id: clanId,
+        name: clanName,
+        color: clanColor,
+        count: 0,
+        persons: []
+      });
+    }
+
+    const item = clanMap.get(clanId)!;
+    item.count += 1;
+    if (!item.persons.some((p) => p.id === sec.person.id)) {
+      item.persons.push(sec.person);
+    }
+  });
+
+  return Array.from(clanMap.values()).sort((a, b) => b.count - a.count);
+}
+
+export interface FanChartOptions {
+  generations?: number;
+  customInnerRadius?: number;
+  customRingWidth?: number;
+  colorMode?: FanColorMode | 'lineage' | 'familysearch' | 'gender' | 'generation';
+  includeDescendantsAndSpouses?: boolean;
+}
+
 export function calculateFanChart(
   database: GenealogyDatabase,
   rootPersonId: string,
   generations: number = 0,
-  customInnerRadius?: number,
-  customRingWidth?: number
+  colorModeOrCustomInner?: FanColorMode | number | FanChartOptions,
+  customRingWidth?: number,
+  options?: FanChartOptions
 ): FanChartSector[] {
   const sectors: FanChartSector[] = [];
   const root = database.persons[rootPersonId];
   if (!root) return sectors;
 
-  // Determine actual max depth for adaptive sizing
-  const maxAvailableGens = getMaxAncestorGenerations(database, rootPersonId);
-  const effectiveGens = generations > 0 ? generations : maxAvailableGens;
+  let colorMode: FanColorMode = 'clans';
+  let customInnerRadius: number | undefined = undefined;
 
-  // Adaptive ring sizing based on number of generations to fit perfectly
-  let innerRadiusBase = customInnerRadius !== undefined ? customInnerRadius : 60;
-  let ringWidth = customRingWidth !== undefined ? customRingWidth : 72;
-
-  if (customRingWidth === undefined) {
-    if (effectiveGens <= 4) {
-      innerRadiusBase = 65;
-      ringWidth = 80;
-    } else if (effectiveGens === 5) {
-      innerRadiusBase = 60;
-      ringWidth = 72;
-    } else if (effectiveGens === 6) {
-      innerRadiusBase = 56;
-      ringWidth = 64;
-    } else if (effectiveGens === 7) {
-      innerRadiusBase = 52;
-      ringWidth = 56;
-    } else if (effectiveGens === 8) {
-      innerRadiusBase = 48;
-      ringWidth = 50;
-    } else if (effectiveGens === 9) {
-      innerRadiusBase = 45;
-      ringWidth = 46;
+  if (typeof colorModeOrCustomInner === 'string') {
+    if (colorModeOrCustomInner === 'lineage' as any) {
+      colorMode = 'clans';
+    } else if (colorModeOrCustomInner === 'familysearch' as any) {
+      colorMode = 'grandparents';
     } else {
-      innerRadiusBase = 40;
-      ringWidth = Math.max(36, Math.floor(450 / Math.max(effectiveGens, 10)));
+      colorMode = colorModeOrCustomInner as FanColorMode;
+    }
+  } else if (typeof colorModeOrCustomInner === 'number') {
+    customInnerRadius = colorModeOrCustomInner;
+  } else if (colorModeOrCustomInner && typeof colorModeOrCustomInner === 'object') {
+    if (colorModeOrCustomInner.colorMode) {
+      colorMode = colorModeOrCustomInner.colorMode === 'lineage' ? 'clans' : (colorModeOrCustomInner.colorMode as FanColorMode);
+    }
+    if (colorModeOrCustomInner.customInnerRadius !== undefined) {
+      customInnerRadius = colorModeOrCustomInner.customInnerRadius;
+    }
+    if (colorModeOrCustomInner.customRingWidth !== undefined) {
+      customRingWidth = colorModeOrCustomInner.customRingWidth;
     }
   }
 
-  function getBranchColor(ahnentafel: number, gen: number, person: Person): string {
-    if (gen === 0) return '#059669';
-    if (gen === 1) {
-      return person.gender === 'female' || person.gender === 'F' ? '#EC4899' : '#3B82F6';
-    }
-    let anc2 = ahnentafel;
-    while (anc2 >= 8) {
-      anc2 = Math.floor(anc2 / 2);
-    }
-    if (anc2 === 4) return '#2563EB'; // Blue (Paternal Grandfather)
-    if (anc2 === 5) return '#06B6D4'; // Cyan (Paternal Grandmother)
-    if (anc2 === 6) return '#F97316'; // Amber (Maternal Grandfather)
-    if (anc2 === 7) return '#E11D48'; // Rose (Maternal Grandmother)
+  if (options?.colorMode) {
+    colorMode = options.colorMode === 'lineage' ? 'clans' : (options.colorMode as FanColorMode);
+  }
 
-    return person.gender === 'female' || person.gender === 'F' ? '#F43F5E' : '#3B82F6';
+  const lineageColorMap = getLineageColorMap(database);
+
+  // Spacious, clear ring sizing matching user screenshot layout
+  const innerRadiusBase = customInnerRadius !== undefined ? customInnerRadius : 110;
+  const ringWidth = customRingWidth !== undefined ? customRingWidth : 85;
+
+  function getSectorColor(ahnentafel: number, gen: number, person: Person): string {
+    if (gen === 0) {
+      const rod = getPersonRodName(person);
+      return lineageColorMap[rod.toLowerCase()] || '#2563eb';
+    }
+
+    if (colorMode === 'gender') {
+      return person.gender === 'female' || person.gender === 'F' ? '#e11d48' : '#2563eb';
+    }
+
+    if (colorMode === 'generation') {
+      const genColors = ['#2563eb', '#059669', '#0284c7', '#7c3aed', '#ea580c', '#d97706', '#e11d48', '#10b981'];
+      return genColors[gen % genColors.length];
+    }
+
+    if (colorMode === 'grandparents') {
+      if (gen === 1) {
+        return person.gender === 'female' || person.gender === 'F' ? '#0284c7' : '#059669';
+      }
+      let anc2 = ahnentafel;
+      while (anc2 >= 8) {
+        anc2 = Math.floor(anc2 / 2);
+      }
+      if (anc2 === 4) return '#d97706'; // Amber (Paternal Grandfather)
+      if (anc2 === 5) return '#2563eb'; // Blue (Paternal Grandmother)
+      if (anc2 === 6) return '#0891b2'; // Cyan (Maternal Grandfather)
+      if (anc2 === 7) return '#ea580c'; // Orange (Maternal Grandmother)
+      return person.gender === 'female' || person.gender === 'F' ? '#e11d48' : '#2563eb';
+    }
+
+    if (colorMode === 'greatgrandparents') {
+      if (gen === 1 || gen === 2) {
+        return person.gender === 'female' || person.gender === 'F' ? '#0284c7' : '#059669';
+      }
+      let anc3 = ahnentafel;
+      while (anc3 >= 16) {
+        anc3 = Math.floor(anc3 / 2);
+      }
+      const eightBranchColors: Record<number, string> = {
+        8: '#1d4ed8',
+        9: '#3b82f6',
+        10: '#0284c7',
+        11: '#06b6d4',
+        12: '#d97706',
+        13: '#ea580c',
+        14: '#e11d48',
+        15: '#be123c',
+      };
+      if (eightBranchColors[anc3]) return eightBranchColors[anc3];
+    }
+
+    // Default: 'clans' (unique color per rod/surname)
+    const rod = getPersonRodName(person);
+    const mapped = lineageColorMap[rod.toLowerCase()] || lineageColorMap[rod];
+    if (mapped) return mapped;
+
+    return LINEAGE_PALETTE[ahnentafel % LINEAGE_PALETTE.length];
   }
 
   function addAncestorToFan(
@@ -966,7 +1338,8 @@ export function calculateFanChart(
 
     const innerRadius = gen === 0 ? 0 : innerRadiusBase + (gen - 1) * ringWidth;
     const outerRadius = innerRadiusBase + gen * ringWidth;
-    const branchColor = getBranchColor(ahnentafel, gen, person);
+    const branchColor = getSectorColor(ahnentafel, gen, person);
+    const rod = getPersonRodName(person);
 
     sectors.push({
       ahnentafelNumber: ahnentafel,
@@ -976,7 +1349,13 @@ export function calculateFanChart(
       outerRadius,
       startAngle,
       endAngle,
-      fillColor: branchColor
+      fillColor: branchColor,
+      color: branchColor,
+      side: 'ancestor',
+      clanId: rod,
+      clanName: `Рід ${rod}`,
+      clanColor: branchColor,
+      rodName: rod
     });
 
     const midAngle = (startAngle + endAngle) / 2;
@@ -991,6 +1370,8 @@ export function calculateFanChart(
     }
   }
 
+  // Add Ancestor tree in top semicircle (PI to 2*PI)
   addAncestorToFan(root, 0, 1, Math.PI, 2 * Math.PI);
+
   return sectors;
 }

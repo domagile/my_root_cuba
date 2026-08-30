@@ -144,16 +144,34 @@ export const TreeView: React.FC<TreeViewProps> = ({
   }, []);
 
   const toggleCollapseSiblings = useCallback((personId: string) => {
+    const p = database.persons[personId];
+    const fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    const mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+
+    const relatedIds = [personId];
+    if (fId || mId) {
+      Object.values(database.persons).forEach((cand: any) => {
+        const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
+        const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
+        if ((fId && cF === fId) || (mId && cM === mId)) {
+          relatedIds.push(cand.id);
+        }
+      });
+    }
+
     setCollapsedSiblings((prev) => {
       const next = new Set(prev);
-      if (next.has(personId)) {
-        next.delete(personId);
-      } else {
-        next.add(personId);
-      }
+      const isCurrentlyCollapsed = next.has(personId);
+      relatedIds.forEach((id) => {
+        if (isCurrentlyCollapsed) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+      });
       return next;
     });
-  }, []);
+  }, [database.persons, database.families]);
 
   const toggleCollapseChildren = useCallback((personId: string) => {
     setCollapsedChildren((prev) => {
@@ -615,6 +633,30 @@ export const TreeView: React.FC<TreeViewProps> = ({
             </select>
           </div>
 
+          {/* Quick Toggle: Siblings (Direct Line vs Collateral) */}
+          <button
+            type="button"
+            onClick={() => {
+              if (showSiblings && collapsedSiblings.size === 0) {
+                setShowSiblings(false);
+                const allWithSiblings = new Set<string>();
+                Object.keys(database.persons).forEach(id => allWithSiblings.add(id));
+                setCollapsedSiblings(allWithSiblings);
+              } else {
+                setShowSiblings(true);
+                setCollapsedSiblings(new Set());
+              }
+            }}
+            className={`hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+              showSiblings && collapsedSiblings.size === 0
+                ? 'bg-[#15181b] hover:bg-slate-800 text-slate-300 border-[#2d3238]'
+                : 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500 shadow-md'
+            }`}
+            title={showSiblings && collapsedSiblings.size === 0 ? "Сховати всіх братів та сестер (залишити тільки прямих предків)" : "Показати всіх братів та сестер (непрямих предків)"}
+          >
+            <Users className="w-3.5 h-3.5 text-amber-300" />
+            <span>{showSiblings && collapsedSiblings.size === 0 ? "Брати/сестри: Всі" : "Тільки прямі предки"}</span>
+          </button>
         </div>
 
         {/* Action Controls */}
@@ -889,15 +931,28 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     strokeLinejoin="round"
                   />
                   {/* Marriage central connector badge */}
+                  {/* Marriage link midpoint symbol / indicator */}
                   {isMarriage && (
-                    <circle
-                      cx={(link.sourceX + link.targetX) / 2}
-                      cy={link.sourceY}
-                      r={3.5}
-                      fill="#a1a1aa"
-                      stroke="#1e2226"
-                      strokeWidth={1.5}
-                    />
+                    <g>
+                      <circle
+                        cx={(link.sourceX + link.targetX) / 2}
+                        cy={link.sourceY}
+                        r={7}
+                        fill="#1e2226"
+                        stroke="#a1a1aa"
+                        strokeWidth={1.5}
+                      />
+                      <text
+                        x={(link.sourceX + link.targetX) / 2}
+                        y={link.sourceY + 3}
+                        fontSize="8"
+                        textAnchor="middle"
+                        fill="#cbd5e1"
+                        fontWeight="bold"
+                      >
+                        {link.marriageOrder || '1'}
+                      </text>
+                    </g>
                   )}
                   {/* Matching arrowhead in family lineage color */}
                   {link.arrow === 'down' && (
@@ -992,6 +1047,26 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   onSelectPerson(p.id);
                 }}
               >
+                {/* Top Make Root Button in corner */}
+                {!isRoot && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onChangeRoot(p.id);
+                    }}
+                    className={`absolute top-2 left-2 w-5 h-5 rounded-full flex items-center justify-center transition-all cursor-pointer border shadow-xs ${
+                      isLightCanvas
+                        ? 'bg-stone-100 hover:bg-emerald-600 text-stone-600 hover:text-white border-stone-300 hover:border-emerald-500'
+                        : 'bg-[#181b1f] hover:bg-emerald-600 text-slate-400 hover:text-white border-[#30353c] hover:border-emerald-400'
+                    }`}
+                    title="Зробити коренем дерева"
+                    aria-label="Зробити коренем дерева"
+                  >
+                    <GitFork className="w-3 h-3 text-emerald-500 hover:text-white" />
+                  </button>
+                )}
+
                 {/* Top Quick-Add (+) Button in corner */}
                 <button
                   type="button"
@@ -1011,6 +1086,32 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 >
                   <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                 </button>
+
+                {/* Top Collapse/Expand Sibling Branch Badge (Сховати / розгорнути братів/сестер) */}
+                {node.hasSiblings && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCollapseSiblings(p.id);
+                    }}
+                    className={`absolute -top-2.5 right-8 z-10 px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer border ${
+                      node.isSiblingsCollapsed
+                        ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 scale-105'
+                        : isLightCanvas
+                        ? 'bg-[#ece5d8] hover:bg-amber-100 text-stone-800 border-[#cfc3af]'
+                        : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
+                    }`}
+                    title={
+                      node.isSiblingsCollapsed
+                        ? `Розгорнути братів і сестер (непрямих предків): +${node.siblingsCount}`
+                        : `Сховати братів і сестер (непрямих предків): ${node.siblingsCount}`
+                    }
+                  >
+                    <Users className={`w-3 h-3 ${node.isSiblingsCollapsed ? 'text-white' : 'text-amber-400'}`} />
+                    <span>{node.isSiblingsCollapsed ? `+${node.siblingsCount}` : `${node.siblingsCount}`}</span>
+                  </button>
+                )}
 
                 {/* Top Collapse/Expand Parents Branch Badge */}
                 {node.hasParents && (
@@ -1063,6 +1164,25 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#22262a]" />
                     )}
                   </div>
+
+                  {/* Spouse Marriage Order & Status Indicator */}
+                  {node.isSpouseNode && (
+                    <div className="flex items-center justify-center gap-1 mt-1 flex-wrap">
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-950/80 border border-purple-700/60 text-purple-200">
+                        {node.marriageOrder ? `${node.marriageOrder}-й шлюб` : 'Подружжя'}
+                      </span>
+                      {node.marriageStatus === 'Divorced' && (
+                        <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-rose-950/80 border border-rose-800 text-rose-300">
+                          💔 Розлучення
+                        </span>
+                      )}
+                      {node.marriageStatus === 'Widowed' && (
+                        <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-stone-800 border border-stone-600 text-stone-300">
+                          ✝️ Вдівство
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Name & Genealogical Information */}

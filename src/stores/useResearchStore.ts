@@ -9,6 +9,22 @@ import {
   GenealogyHypothesis,
   RangeAnalysis
 } from '../types';
+import {
+  saveMetricRecordDoc,
+  deleteMetricRecordDoc,
+  saveDocumentDoc,
+  deleteDocumentDoc,
+  saveTaskDoc,
+  deleteTaskDoc,
+  saveFindingDoc,
+  deleteFindingDoc,
+  saveHypothesisDoc,
+  deleteHypothesisDoc,
+  saveRequestDoc,
+  deleteRequestDoc,
+  saveMatrixEntryDoc,
+  deleteMatrixEntryDoc
+} from '../lib/firebase';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v2';
 
@@ -272,6 +288,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
       } catch {}
+      saveMetricRecordDoc(newRec);
       return { metricRecords: next };
     }),
 
@@ -279,10 +296,18 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const id = typeof record === 'string' ? record : record.id;
       const patch = typeof record === 'string' ? data : record;
-      const next = state.metricRecords.map((m) => (m.id === id ? { ...m, ...patch } : m));
+      let updatedRec: any = null;
+      const next = state.metricRecords.map((m) => {
+        if (m.id === id) {
+          updatedRec = { ...m, ...patch };
+          return updatedRec;
+        }
+        return m;
+      });
       try {
         localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
       } catch {}
+      if (updatedRec) saveMetricRecordDoc(updatedRec);
       return { metricRecords: next };
     }),
 
@@ -292,6 +317,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
       } catch {}
+      deleteMetricRecordDoc(id);
       return { metricRecords: next };
     }),
 
@@ -319,6 +345,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(next));
       } catch {}
+      saveDocumentDoc(newDoc);
       return { documents: next };
     }),
 
@@ -326,10 +353,18 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const id = typeof docItem === 'string' ? docItem : docItem.id;
       const patch = typeof docItem === 'string' ? data : docItem;
-      const next = state.documents.map((d) => (d.id === id ? { ...d, ...patch } : d));
+      let updatedDoc: any = null;
+      const next = state.documents.map((d) => {
+        if (d.id === id) {
+          updatedDoc = { ...d, ...patch };
+          return updatedDoc;
+        }
+        return d;
+      });
       try {
         localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(next));
       } catch {}
+      if (updatedDoc) saveDocumentDoc(updatedDoc);
       return { documents: next };
     }),
 
@@ -339,6 +374,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(next));
       } catch {}
+      deleteDocumentDoc(id);
       return { documents: next };
     }),
 
@@ -358,6 +394,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(next));
       } catch {}
+      saveTaskDoc(newTask);
       return { tasks: next };
     }),
 
@@ -365,10 +402,18 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const id = typeof taskItem === 'string' ? taskItem : taskItem.id;
       const patch = typeof taskItem === 'string' ? data : taskItem;
-      const next = state.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t));
+      let updatedTask: any = null;
+      const next = state.tasks.map((t) => {
+        if (t.id === id) {
+          updatedTask = { ...t, ...patch };
+          return updatedTask;
+        }
+        return t;
+      });
       try {
         localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(next));
       } catch {}
+      if (updatedTask) saveTaskDoc(updatedTask);
       return { tasks: next };
     }),
 
@@ -378,6 +423,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(next));
       } catch {}
+      deleteTaskDoc(id);
       return { tasks: next };
     }),
 
@@ -397,6 +443,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(next));
       } catch {}
+      saveFindingDoc(newF);
       return { findings: next };
     }),
 
@@ -404,10 +451,18 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const id = typeof findingItem === 'string' ? findingItem : findingItem.id;
       const patch = typeof findingItem === 'string' ? data : findingItem;
-      const next = state.findings.map((f) => (f.id === id ? { ...f, ...patch } : f));
+      let updatedF: any = null;
+      const next = state.findings.map((f) => {
+        if (f.id === id) {
+          updatedF = { ...f, ...patch };
+          return updatedF;
+        }
+        return f;
+      });
       try {
         localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(next));
       } catch {}
+      if (updatedF) saveFindingDoc(updatedF);
       return { findings: next };
     }),
 
@@ -417,6 +472,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(next));
       } catch {}
+      deleteFindingDoc(id);
       return { findings: next };
     }),
 
@@ -436,6 +492,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(next));
       } catch {}
+      saveHypothesisDoc(newH);
       return { hypotheses: next };
     }),
 
@@ -443,10 +500,18 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const id = typeof hypoItem === 'string' ? hypoItem : hypoItem.id;
       const patch = typeof hypoItem === 'string' ? data : hypoItem;
-      const next = state.hypotheses.map((h) => (h.id === id ? { ...h, ...patch } : h));
+      let updatedH: any = null;
+      const next = state.hypotheses.map((h) => {
+        if (h.id === id) {
+          updatedH = { ...h, ...patch };
+          return updatedH;
+        }
+        return h;
+      });
       try {
         localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(next));
       } catch {}
+      if (updatedH) saveHypothesisDoc(updatedH);
       return { hypotheses: next };
     }),
 
@@ -456,6 +521,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(next));
       } catch {}
+      deleteHypothesisDoc(id);
       return { hypotheses: next };
     }),
 
@@ -475,6 +541,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(next));
       } catch {}
+      saveRequestDoc(newR);
       return { requests: next };
     }),
 
@@ -482,10 +549,18 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const id = typeof reqItem === 'string' ? reqItem : reqItem.id;
       const patch = typeof reqItem === 'string' ? data : reqItem;
-      const next = state.requests.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      let updatedR: any = null;
+      const next = state.requests.map((r) => {
+        if (r.id === id) {
+          updatedR = { ...r, ...patch };
+          return updatedR;
+        }
+        return r;
+      });
       try {
         localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(next));
       } catch {}
+      if (updatedR) saveRequestDoc(updatedR);
       return { requests: next };
     }),
 
@@ -495,6 +570,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(next));
       } catch {}
+      deleteRequestDoc(id);
       return { requests: next };
     }),
 
@@ -514,6 +590,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(next));
       } catch {}
+      saveMatrixEntryDoc(newE);
       return { matrixEntries: next };
     }),
 
@@ -521,10 +598,18 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const id = typeof entryItem === 'string' ? entryItem : entryItem.id;
       const patch = typeof entryItem === 'string' ? data : entryItem;
-      const next = state.matrixEntries.map((e) => (e.id === id ? { ...e, ...patch } : e));
+      let updatedE: any = null;
+      const next = state.matrixEntries.map((e) => {
+        if (e.id === id) {
+          updatedE = { ...e, ...patch };
+          return updatedE;
+        }
+        return e;
+      });
       try {
         localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(next));
       } catch {}
+      if (updatedE) saveMatrixEntryDoc(updatedE);
       return { matrixEntries: next };
     }),
 
@@ -534,6 +619,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(next));
       } catch {}
+      deleteMatrixEntryDoc(id);
       return { matrixEntries: next };
     }),
 

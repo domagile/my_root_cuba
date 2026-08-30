@@ -1,1 +1,39 @@
 @import "tailwindcss";
+
+/* Custom visible scrollbar styles for cross-browser and right-side list viewing */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(184, 142, 62, 0.4);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(184, 142, 62, 0.7);
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(226, 195, 130, 0.35);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(226, 195, 130, 0.65);
+}
+
+/* Thin scrollbar utility */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(184, 142, 62, 0.4) transparent;
+}

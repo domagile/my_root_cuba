@@ -20,6 +20,7 @@ export type RecordType = 'birth' | 'marriage' | 'death' | 'confession' | 'revisi
 export type NavigationTab =
   | 'tree'
   | 'persons'
+  | 'conflicts'
   | 'research'
   | 'ai-analysis'
   | 'documents'
@@ -74,6 +75,7 @@ export interface Person {
   motherId?: string;
   spouseIds?: string[];
   childrenIds?: string[];
+  siblingIds?: string[];
   parentFamilyId?: string;
   spouseFamilyIds?: string[];
   occupation?: string;
@@ -329,7 +331,67 @@ export type ViewMode =
   | 'kinship'
   | 'statistics'
   | 'stats'
-  | 'reports';
+  | 'reports'
+  | 'conflicts'
+  | 'audit'
+  | 'duplicates';
+
+export interface TreeConflict {
+  id: string;
+  type: 'chronology' | 'biology' | 'cycles' | 'relations' | 'data_gaps';
+  severity: 'critical' | 'warning' | 'gap';
+  title: string;
+  description: string;
+  recommendation: string;
+  personId: string;
+  personName: string;
+  relatedPersonId?: string;
+  relatedPersonName?: string;
+  familyId?: string;
+  canAutoFix?: boolean;
+  autoFixType?: 'sync_parent_child' | 'sync_spouses' | 'clean_dangling' | 'remove_self_loop';
+  metadata?: Record<string, any>;
+}
+
+export interface DuplicatePair {
+  id: string;
+  personA: Person;
+  personB: Person;
+  confidence: number; // 0 - 100
+  confidenceLevel: 'very_high' | 'high' | 'possible';
+  reasons: string[];
+  breakdown: {
+    surnameScore: number;
+    givenNameScore: number;
+    datesScore: number;
+    locationScore: number;
+    relationsScore: number;
+  };
+}
+
+export interface MergeFieldSelection {
+  given: 'A' | 'B' | 'custom';
+  surname: 'A' | 'B' | 'custom';
+  patronymic: 'A' | 'B' | 'custom';
+  maidenName: 'A' | 'B' | 'custom';
+  gender: 'A' | 'B';
+  birthDate: 'A' | 'B' | 'custom';
+  birthPlace: 'A' | 'B' | 'custom';
+  deathDate: 'A' | 'B' | 'custom';
+  deathPlace: 'A' | 'B' | 'custom';
+  isLiving: 'A' | 'B';
+  occupation: 'A' | 'B' | 'custom';
+  estateOrSocialStatus: 'A' | 'B' | 'custom';
+  militaryRank: 'A' | 'B' | 'custom';
+  confession: 'A' | 'B' | 'custom';
+  avatar: 'A' | 'B' | 'none';
+  customValues?: Record<string, string>;
+  combineBio: boolean;
+  combineNotes: boolean;
+  combineSources: boolean;
+  combineEvents: boolean;
+  combineRelations: boolean;
+}
 
 export type TreeLayoutType = 'ancestors' | 'descendants' | 'hourglass' | 'both';
 
@@ -362,13 +424,18 @@ export interface Source {
   author?: string;
   publication?: string;
   repository?: string;
+  archive?: string;
   archiveReference?: string;
   archiveFund?: string;
+  fund?: string;
   inventory?: string;
   caseNumber?: string;
   page?: string;
+  date?: string;
+  transcription?: string;
   url?: string;
   notes?: string;
+  tags?: string[];
 }
 
 export type EventType =
@@ -436,9 +503,11 @@ export interface GenealogyDatabase {
   persons: Record<string, Person>;
   families: Record<string, Family>;
   sources: Record<string, Source>;
-  events: Record<string, Event>;
+  events?: Record<string, Event>;
   places?: Record<string, any>;
   notes?: Record<string, any>;
+  submitters?: Record<string, any>;
+  repositories?: Record<string, any>;
   metadata?: {
     title: string;
     description?: string;

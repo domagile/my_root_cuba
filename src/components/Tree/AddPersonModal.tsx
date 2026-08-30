@@ -43,12 +43,18 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [prefix, setPrefix] = useState(
     initialPersonToEdit?.name?.prefix || initialPersonToEdit?.prefix || ''
   );
+  const targetPerson = initialRelation
+    ? persons.find((p) => p.id === initialRelation.targetPersonId)
+    : null;
+
   const [gender, setGender] = useState<Gender>(
     initialPersonToEdit?.gender ||
       (initialRelation?.type === 'father'
         ? 'male'
         : initialRelation?.type === 'mother'
         ? 'female'
+        : initialRelation?.type === 'spouse'
+        ? (targetPerson?.gender === 'male' || targetPerson?.gender === 'M' ? 'female' : 'male')
         : 'male')
   );
   const [birthDate, setBirthDate] = useState(initialPersonToEdit?.birthDate || '');
@@ -70,10 +76,6 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [notes, setNotes] = useState(
     typeof initialPersonToEdit?.notes === 'string' ? initialPersonToEdit.notes : ''
   );
-
-  const targetPerson = initialRelation
-    ? persons.find((p) => p.id === initialRelation.targetPersonId)
-    : null;
 
   const getRelationLabel = () => {
     if (!initialRelation) return 'Створення нової особи';

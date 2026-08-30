@@ -22,6 +22,7 @@ import {
   Settings, 
   FolderTree, 
   ShieldCheck, 
+  ShieldAlert,
   Sparkles, 
   PanelLeftClose, 
   PanelLeftOpen, 
@@ -58,7 +59,8 @@ export const Sidebar: React.FC = () => {
     { id: 'sources', label: 'Архів джерел', icon: BookOpen },
     { id: 'kinship', label: 'Спорідненість', icon: Compass },
     { id: 'stats', label: 'Статистика', icon: BarChart3 },
-    { id: 'reports', label: 'Звіти', icon: FileText }
+    { id: 'reports', label: 'Звіти', icon: FileText },
+    { id: 'conflicts', label: 'Аудит & Дублікати', icon: ShieldAlert }
   ];
 
   const researchItems: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [

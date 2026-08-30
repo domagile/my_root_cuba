@@ -34,7 +34,11 @@ import {
   KeyRound,
   History,
   Save,
-  RotateCcw
+  RotateCcw,
+  Cloud,
+  Zap,
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -51,6 +55,9 @@ export const SettingsView: React.FC = () => {
     importJsonData, 
     resetToSampleData,
     persons,
+    families,
+    sources,
+    events,
     metricRecords,
     tasks,
     hypotheses,
@@ -60,7 +67,14 @@ export const SettingsView: React.FC = () => {
     matrixEntries,
     accessLockConfig,
     setAccessLockConfig,
-    lockAppSession
+    lockAppSession,
+    syncStatus,
+    lastSyncTime,
+    lastSyncError,
+    isManualPushing,
+    isManualPulling,
+    triggerUploadToCloud,
+    triggerDownloadFromCloud
   } = useGenealogy();
 
   const {
@@ -81,6 +95,23 @@ export const SettingsView: React.FC = () => {
   const theme = getThemeConfig(themePalette);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmPull, setConfirmPull] = useState(false);
+  const [cloudFeedback, setCloudFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const handleManualUpload = async () => {
+    setCloudFeedback(null);
+    const res = await triggerUploadToCloud();
+    setCloudFeedback({ text: res.message, isError: !res.success });
+    setTimeout(() => setCloudFeedback(null), 5000);
+  };
+
+  const handleManualDownload = async () => {
+    setCloudFeedback(null);
+    setConfirmPull(false);
+    const res = await triggerDownloadFromCloud();
+    setCloudFeedback({ text: res.message, isError: !res.success });
+    setTimeout(() => setCloudFeedback(null), 5000);
+  };
 
   // New Whitelist User Form State
   const [newWhiteEmail, setNewWhiteEmail] = useState('');
@@ -319,15 +350,169 @@ export const SettingsView: React.FC = () => {
         </div>
       </section>
 
-      {/* SECTION 2: Data Storage, Export & Import */}
+      {/* SECTION 2: Cloud Firestore Atomic Synchronization */}
+      <section className="space-y-4 pt-4 border-t border-black/10">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className={`text-lg font-bold ${theme.cardTitle} flex items-center gap-2`}>
+              <Cloud className="w-5 h-5 text-[#B88E3E]" />
+              <span>Хмарна синхронізація з Google Firebase Firestore</span>
+            </h2>
+            <p className={`text-xs ${theme.cardSubtext} mt-0.5`}>
+              Миттєва по-документна (атомарна) синхронізація родоводу та дослідницьких матеріалів з базою даних.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 border ${
+              syncStatus === 'syncing' || isManualPushing || isManualPulling
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-700 dark:text-amber-300'
+                : syncStatus === 'error'
+                ? 'bg-rose-500/15 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+            }`}>
+              {syncStatus === 'syncing' || isManualPushing || isManualPulling ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                  <span>Йде синхронізація...</span>
+                </>
+              ) : syncStatus === 'error' ? (
+                <>
+                  <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Помилка синхронізації</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Синхронізовано з Firestore</span>
+                </>
+              )}
+            </span>
+          </div>
+        </div>
+
+        {cloudFeedback && (
+          <div className={`p-4 rounded-xl text-xs flex items-center gap-3 border transition-all ${
+            cloudFeedback.isError
+              ? 'bg-rose-500/15 border-rose-500/30 text-rose-800 dark:text-rose-200'
+              : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-800 dark:text-emerald-200'
+          }`}>
+            {cloudFeedback.isError ? (
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            ) : (
+              <Check className="w-5 h-5 text-emerald-600 shrink-0" />
+            )}
+            <span className="font-medium">{cloudFeedback.text}</span>
+          </div>
+        )}
+
+        <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-6`}>
+          {/* Cloud Info & Atomic Specs Banner */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-[#B88E3E]" />
+                <strong className={`text-xs font-bold ${theme.cardTitle}`}>Атомарна синхронізація в реальному часі</strong>
+                <span className="px-2 py-0.5 text-[9px] bg-[#B88E3E]/20 text-[#B88E3E] rounded font-mono font-bold uppercase">
+                  Atomic Active
+                </span>
+              </div>
+              <p className={`text-[11px] ${theme.cardSubtext} max-w-xl leading-relaxed`}>
+                Кожна дія (додавання особи, зміна родинних зв'язків, нова метрика чи документ) миттєво зберігається окремим документом у хмарі Firestore без затримок та потреби перезавантажувати сторінку.
+              </p>
+            </div>
+
+            <div className="text-left md:text-right shrink-0 space-y-0.5">
+              <span className={`text-[10px] ${theme.cardSubtext} block`}>Останній успішний запис:</span>
+              <strong className={`text-xs font-mono font-bold ${theme.cardTitle}`}>
+                {lastSyncTime ? new Date(lastSyncTime).toLocaleString('uk-UA') : 'Тільки що'}
+              </strong>
+            </div>
+          </div>
+
+          {/* Detailed Document Count Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+            <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5">
+              <span className={`text-[10px] ${theme.cardSubtext} block`}>Персони (persons)</span>
+              <strong className={`text-sm font-bold ${theme.cardTitle}`}>{persons.length}</strong>
+            </div>
+            <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5">
+              <span className={`text-[10px] ${theme.cardSubtext} block`}>Родини (families)</span>
+              <strong className={`text-sm font-bold ${theme.cardTitle}`}>{Object.keys(families || {}).length}</strong>
+            </div>
+            <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5">
+              <span className={`text-[10px] ${theme.cardSubtext} block`}>Метричні книги</span>
+              <strong className={`text-sm font-bold ${theme.cardTitle}`}>{metricRecords.length}</strong>
+            </div>
+            <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5">
+              <span className={`text-[10px] ${theme.cardSubtext} block`}>Джерела (sources)</span>
+              <strong className={`text-sm font-bold ${theme.cardTitle}`}>{Object.keys(sources || {}).length}</strong>
+            </div>
+            <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5">
+              <span className={`text-[10px] ${theme.cardSubtext} block`}>Архівні справи</span>
+              <strong className={`text-sm font-bold ${theme.cardTitle}`}>{documents.length}</strong>
+            </div>
+            <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5">
+              <span className={`text-[10px] ${theme.cardSubtext} block`}>Гіпотези & Завдання</span>
+              <strong className={`text-sm font-bold ${theme.cardTitle}`}>{hypotheses.length + (tasks?.length || 0)}</strong>
+            </div>
+          </div>
+
+          {/* Manual Push / Pull Trigger Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-black/10 dark:border-white/10">
+            <button
+              onClick={handleManualUpload}
+              disabled={isManualPushing || isManualPulling}
+              className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs shadow-sm transition-all cursor-pointer hover:opacity-90 disabled:opacity-50`}
+            >
+              <Upload className={`w-4 h-4 ${isManualPushing ? 'animate-bounce' : ''}`} />
+              <span>{isManualPushing ? 'Вивантаження всіх даних у Firestore...' : 'Примусово вивантажити все в Firestore'}</span>
+            </button>
+
+            {confirmPull ? (
+              <div className="flex items-center justify-between gap-2 p-2 bg-amber-500/20 border border-amber-500/40 rounded-xl">
+                <span className="text-xs text-amber-800 dark:text-amber-200 font-medium">
+                  Завантажити та обновити всі локальні дані з хмари?
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={handleManualDownload}
+                    disabled={isManualPulling}
+                    className="px-3 py-1.5 bg-[#B88E3E] hover:bg-[#a07a32] text-white rounded-lg text-xs font-bold cursor-pointer"
+                  >
+                    {isManualPulling ? 'Завантаження...' : 'Так, завантажити'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmPull(false)}
+                    className="px-2.5 py-1.5 bg-black/20 hover:bg-black/30 rounded-lg text-xs cursor-pointer"
+                  >
+                    Скасувати
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmPull(true)}
+                disabled={isManualPushing || isManualPulling}
+                className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-xs transition-all cursor-pointer hover:opacity-90 disabled:opacity-50`}
+              >
+                <Download className={`w-4 h-4 ${isManualPulling ? 'animate-bounce' : ''}`} />
+                <span>{isManualPulling ? 'Отримання даних з Firestore...' : 'Завантажити з Firestore'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* SECTION 3: Data Storage, Export & Import */}
       <section className="space-y-4 pt-4 border-t border-black/10">
         <div>
           <h2 className={`text-lg font-bold ${theme.cardTitle} flex items-center gap-2`}>
             <Database className="w-5 h-5 text-[#B88E3E]" />
-            <span>Збереження даних, експорт та імпорт</span>
+            <span>Локальне збереження даних, експорт та імпорт</span>
           </h2>
           <p className={`text-xs ${theme.cardSubtext} mt-1`}>
-            Усі ваші дані родоводу безпечно зберігаються у браузері. Ви можете експортувати резервні копії або завантажувати нові архіви.
+            Усі ваші дані родоводу також безпечно дублюються у локальному браузерному сховищі.
           </p>
         </div>
 

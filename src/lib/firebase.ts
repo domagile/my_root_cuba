@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
+  initializeFirestore,
   getFirestore,
   doc,
   collection,
@@ -15,7 +16,8 @@ import {
   writeBatch,
   DocumentSnapshot,
   QueryDocumentSnapshot,
-  Firestore
+  Firestore,
+  getDocFromServer
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -73,14 +75,28 @@ export function getDbInstance(): Firestore | null {
     const app = getFirebaseApp();
     if (!app) return null;
     const config = getFirebaseConfig();
-    if (config.firestoreDatabaseId) {
+    const dbId = config.firestoreDatabaseId;
+
+    try {
+      if (dbId) {
+        cachedDb = initializeFirestore(
+          app,
+          {
+            experimentalAutoDetectLongPolling: true
+          },
+          dbId
+        );
+      } else {
+        cachedDb = initializeFirestore(app, {
+          experimentalAutoDetectLongPolling: true
+        });
+      }
+    } catch {
       try {
-        cachedDb = getFirestore(app, config.firestoreDatabaseId);
+        cachedDb = dbId ? getFirestore(app, dbId) : getFirestore(app);
       } catch {
         cachedDb = getFirestore(app);
       }
-    } else {
-      cachedDb = getFirestore(app);
     }
   } catch (e) {
     console.warn('Firebase Firestore initialization warning:', e);
@@ -101,7 +117,21 @@ export function getFirebaseAuth(): Auth | null {
   }
 }
 
-export { cachedDb as db };
+// Lazy/safe export for db instance
+export const db = getDbInstance();
+
+// Test connection on boot according to skill guidelines
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    const firestore = getDbInstance();
+    if (firestore) {
+      getDocFromServer(doc(firestore, 'projects', 'healthCheck'))
+        .catch(() => {
+          // Silent offline / cache resilience
+        });
+    }
+  }, 1000);
+}
 
 // Error handling helper conforming to Firestore guidelines
 export enum OperationType {
@@ -174,6 +204,8 @@ export function subscribeToFirebaseAuth(callback: (user: FirebaseUser | null) =>
   }
 }
 
+import { trackAtomicSync, useCloudSyncStore } from '../stores/useCloudSyncStore';
+
 // Subcollection path helpers
 export const getProjectPath = (projectId: string = DEFAULT_PROJECT_ID) => `projects/${projectId}`;
 export const getSubcollectionPath = (subcollection: string, projectId: string = DEFAULT_PROJECT_ID) => 
@@ -189,18 +221,20 @@ export async function saveEntityDoc(
   data: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  try {
-    const db = getDbInstance();
-    if (!db || !itemId) return false;
-    const cleanData = JSON.parse(JSON.stringify(data));
-    cleanData.updatedAt = cleanData.updatedAt || new Date().toISOString();
-    const docRef = doc(db, 'projects', projectId, subcollection, String(itemId));
-    await setDoc(docRef, cleanData, { merge: true });
-    return true;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/${subcollection}/${itemId}`);
-    return false;
-  }
+  return trackAtomicSync(async () => {
+    try {
+      const db = getDbInstance();
+      if (!db || !itemId) return false;
+      const cleanData = JSON.parse(JSON.stringify(data));
+      cleanData.updatedAt = cleanData.updatedAt || new Date().toISOString();
+      const docRef = doc(db, 'projects', projectId, subcollection, String(itemId));
+      await setDoc(docRef, cleanData, { merge: true });
+      return true;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/${subcollection}/${itemId}`);
+      throw err;
+    }
+  }).catch(() => false);
 }
 
 /**
@@ -211,16 +245,18 @@ export async function deleteEntityDoc(
   itemId: string,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  try {
-    const db = getDbInstance();
-    if (!db || !itemId) return false;
-    const docRef = doc(db, 'projects', projectId, subcollection, String(itemId));
-    await deleteDoc(docRef);
-    return true;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/${subcollection}/${itemId}`);
-    return false;
-  }
+  return trackAtomicSync(async () => {
+    try {
+      const db = getDbInstance();
+      if (!db || !itemId) return false;
+      const docRef = doc(db, 'projects', projectId, subcollection, String(itemId));
+      await deleteDoc(docRef);
+      return true;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/${subcollection}/${itemId}`);
+      throw err;
+    }
+  }).catch(() => false);
 }
 
 /**
@@ -558,4 +594,75 @@ export async function saveProjectDataToCloud(
     return false;
   }
 }
+
+/**
+ * Manually fetches all entities from all Firestore subcollections in one batch
+ */
+export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_PROJECT_ID): Promise<{
+  success: boolean;
+  data: {
+    persons?: any[];
+    families?: any[];
+    events?: any[];
+    sources?: any[];
+    metricRecords?: any[];
+    documents?: any[];
+    tasks?: any[];
+    findings?: any[];
+    hypotheses?: any[];
+    requests?: any[];
+    matrixEntries?: any[];
+    accessRequests?: any[];
+    lastUpdated?: string;
+  };
+  error?: string;
+}> {
+  try {
+    const db = getDbInstance();
+    if (!db) return { success: false, data: {}, error: 'База Firestore не ініціалізована' };
+
+    const subcollections = [
+      'persons',
+      'families',
+      'events',
+      'sources',
+      'metricRecords',
+      'documents',
+      'tasks',
+      'findings',
+      'hypotheses',
+      'requests',
+      'matrixEntries',
+      'accessRequests'
+    ];
+
+    const resultData: Record<string, any[]> = {};
+
+    await Promise.all(
+      subcollections.map(async (colName) => {
+        try {
+          const colRef = collection(db, 'projects', projectId, colName);
+          const snap = await getDocs(colRef);
+          resultData[colName] = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+        } catch (e) {
+          console.warn(`Failed to fetch subcollection ${colName}:`, e);
+          resultData[colName] = [];
+        }
+      })
+    );
+
+    return {
+      success: true,
+      data: resultData
+    };
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.LIST, `projects/${projectId}`);
+    return {
+      success: false,
+      data: {},
+      error: err?.message || 'Помилка отримання даних з Firestore'
+    };
+  }
+}
+
 
