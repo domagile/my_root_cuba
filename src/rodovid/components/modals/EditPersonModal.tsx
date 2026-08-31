@@ -217,7 +217,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
           </div>
 
           {/* Gender & Living Status */}
-          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-800">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">Стать</label>
               <select
@@ -232,20 +232,49 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Статус життя</label>
-              <div className="flex items-center gap-4 mt-2">
-                <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isLiving}
-                    onChange={(e) => setIsLiving(e.target.checked)}
-                    className="rounded border-slate-700 text-emerald-600 focus:ring-emerald-500 bg-slate-950"
-                  />
-                  <span>Нині живий(а)</span>
-                </label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                <span>
+                  Статус життя <span className="text-rose-400">*</span>
+                </span>
+                <span className="text-[10px] text-slate-500 font-normal">Обов'язкове</span>
+              </label>
+              <div className="flex items-center h-[38px]">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isLiving}
+                  onClick={() => setIsLiving(!isLiving)}
+                  className="inline-flex items-center gap-2 cursor-pointer select-none py-1 group"
+                  title={isLiving ? 'Статус: Жива особа (натисніть, щоб змінити на померлу)' : 'Статус: Померла особа (натисніть, щоб змінити на живу)'}
+                >
+                  <span
+                    className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                      isLiving ? 'bg-emerald-500' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                        isLiving ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </span>
+                  <span className={`text-xs font-medium ${isLiving ? 'text-emerald-400 font-semibold' : 'text-slate-400'}`}>
+                    {isLiving ? 'Жива особа' : 'Померла особа'}
+                  </span>
+                </button>
               </div>
             </div>
           </div>
+
+          {/* Living Privacy Note */}
+          {isLiving && (
+            <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 text-[11px] flex items-center gap-2">
+              <span className="text-sm">🛡️</span>
+              <div>
+                Дані живої особи будуть захищені (<span className="underline font-bold text-white">«Скрито»</span>) для гостей не з білого списку.
+              </div>
+            </div>
+          )}
 
           {/* Birth Info */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

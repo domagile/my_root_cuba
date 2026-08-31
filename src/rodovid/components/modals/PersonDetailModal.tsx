@@ -41,6 +41,8 @@ import { GenealogyDatabase, Person, Family, Source } from '../../types/genealogy
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { useGenealogy } from '../../../context/GenealogyContext';
+import { useAuthStore } from '../../../stores/useAuthStore';
+import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 
@@ -150,9 +152,17 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
     marriagePlace: string;
   } | null>(null);
 
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
+
   if (!personId) return null;
-  const person = database.persons[personId] || persons.find((p) => p.id === personId);
-  if (!person) return null;
+  const rawPerson = (database?.persons ? database.persons[personId] : undefined) || persons.find((p) => p.id === personId);
+  if (!rawPerson) return null;
+
+  const isLiving = isPersonLiving(rawPerson);
+  const isMasked = !isWhitelisted && isLiving;
+  const person = isMasked ? getPrivacySafePerson(rawPerson, false) : rawPerson;
 
   const isMale = person.gender === 'male' || person.gender === 'M';
   const isFemale = person.gender === 'female' || person.gender === 'F';
@@ -742,7 +752,15 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
         {/* Header Profile */}
         <div className={`p-5 sm:p-6 ${theme.surfaceBg} border-b ${theme.borderSubtle} flex items-start justify-between gap-3 shrink-0`}>
           <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
-            {person.avatarUrl || person.avatar || person.photoUrl ? (
+            {isMasked ? (
+              <div
+                className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center border shadow-inner shrink-0 ${
+                  isDark ? 'bg-emerald-950/70 border-emerald-800 text-emerald-400' : 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                }`}
+              >
+                <Shield className="w-7 h-7 sm:w-8 sm:h-8" />
+              </div>
+            ) : person.avatarUrl || person.avatar || person.photoUrl ? (
               <img
                 src={person.avatarUrl || person.avatar || person.photoUrl}
                 alt={getFullName(person)}
@@ -765,26 +783,33 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 ${isDark ? 'bg-slate-800 text-emerald-400' : 'bg-neutral-200 text-emerald-800'} rounded`}>
-                  {person.id}
+                  {isMasked ? '🔒 Захищено' : person.id}
                 </span>
-                {person.name?.prefix && (
+                {isMasked && (
+                  <span className="text-[10px] px-2 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-700/60 rounded font-medium flex items-center gap-1">
+                    <Shield className="w-2.5 h-2.5" /> Жива особа
+                  </span>
+                )}
+                {!isMasked && person.name?.prefix && (
                   <span className={`text-[10px] font-serif px-2 py-0.5 ${isDark ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60' : 'bg-amber-100 text-amber-800 border border-amber-300'} rounded`}>
                     {person.name.prefix}
                   </span>
                 )}
-                {estate && (
+                {!isMasked && estate && (
                   <span className={`text-[10px] px-2 py-0.5 ${isDark ? 'bg-slate-800 text-slate-300 border border-slate-700' : 'bg-neutral-100 text-neutral-700 border border-neutral-300'} rounded`}>
                     {estate}
                   </span>
                 )}
-                {person.confession && (
+                {!isMasked && person.confession && (
                   <span className={`text-[10px] px-2 py-0.5 ${isDark ? 'bg-indigo-950/60 text-indigo-300 border border-indigo-800/60' : 'bg-indigo-100 text-indigo-800 border border-indigo-300'} rounded`}>
                     {person.confession}
                   </span>
                 )}
               </div>
-              <h2 className={`text-lg sm:text-xl font-bold ${theme.textPrimary} mt-1 truncate`}>{getFullName(person)}</h2>
-              {(person.name?.maidenName || person.maidenName) && (
+              <h2 className={`text-lg sm:text-xl font-bold ${theme.textPrimary} mt-1 truncate`}>
+                {isMasked ? 'Скрито Скрито' : getFullName(person)}
+              </h2>
+              {!isMasked && (person.name?.maidenName || person.maidenName) && (
                 <p className={`text-xs ${theme.textMuted} truncate`}>
                   Дівоче прізвище: {person.name?.maidenName || person.maidenName}
                 </p>
@@ -792,8 +817,9 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               <div className={`flex items-center gap-2 text-xs ${theme.textSecondary} font-mono mt-1`}>
                 <Calendar className={`w-3.5 h-3.5 ${theme.textMuted}`} />
                 <span>
-                  {person.birthDate || person.birthYear || '?'} —{' '}
-                  {person.isLiving ? 'донині' : person.deathDate || person.deathYear || '?'}
+                  {isMasked
+                    ? '🔒 Конфіденційні дані (Жива особа)'
+                    : `${person.birthDate || person.birthYear || '?'} — ${person.isLiving ? 'донині' : person.deathDate || person.deathYear || '?'}`}
                 </span>
               </div>
             </div>
@@ -814,7 +840,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             {/* Tree Navigation Icon Button */}
             <button
               onClick={() => {
-                onChangeRoot(person.id);
+                onChangeRoot?.(rawPerson.id);
                 onClose();
               }}
               className={`p-2 rounded-xl border ${theme.borderSubtle} ${theme.surfaceBg} hover:bg-emerald-600 hover:text-white ${theme.textPrimary} transition-all cursor-pointer shadow-xs`}
@@ -827,7 +853,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             {/* Calculate Kinship Button */}
             <button
               onClick={() => {
-                onOpenKinshipWith(person.id);
+                onOpenKinshipWith?.(rawPerson.id);
                 onClose();
               }}
               className={`flex items-center gap-1.5 px-3 py-1.5 ${theme.surfaceBg} hover:opacity-80 ${theme.textPrimary} border ${theme.borderSubtle} rounded-xl transition-colors cursor-pointer`}
@@ -838,8 +864,39 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             </button>
           </div>
 
-          {!isReadOnly && (
+          {!isReadOnly && !isMasked && (
             <div className="flex items-center gap-2">
+              {/* Classic Compact Living Status Toggle Switch */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={Boolean(rawPerson.isLiving)}
+                onClick={() => {
+                  const newStatus = !rawPerson.isLiving;
+                  updatePerson({
+                    ...rawPerson,
+                    isLiving: newStatus
+                  });
+                }}
+                className={`inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border ${theme.borderSubtle} ${theme.surfaceBg} hover:opacity-95 transition-all cursor-pointer shadow-2xs select-none`}
+                title={rawPerson.isLiving ? 'Статус: Жива особа (натисніть, щоб позначити померлою)' : 'Статус: Померла особа (натисніть, щоб позначити живою)'}
+              >
+                <span
+                  className={`relative inline-flex h-4.5 w-8 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                    rawPerson.isLiving ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-700'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                      rawPerson.isLiving ? 'translate-x-3.5' : 'translate-x-0'
+                    }`}
+                  />
+                </span>
+                <span className={`text-[11px] font-medium ${rawPerson.isLiving ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : theme.textSecondary}`}>
+                  {rawPerson.isLiving ? 'Жива особа' : 'Померла особа'}
+                </span>
+              </button>
+
               {onEditPerson && (
                 <button
                   onClick={() => onEditPerson(person.id)}
@@ -863,8 +920,43 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           )}
         </div>
 
-        {/* Body Content - All Interactive Sections */}
-        <div className={`p-5 sm:p-6 space-y-6 overflow-y-auto flex-1 ${theme.textPrimary} scrollbar-thin`}>
+        {/* Body Content */}
+        {isMasked ? (
+          <div className="p-8 sm:p-10 text-center flex flex-col items-center justify-center space-y-4 my-auto">
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center border shadow-inner ${
+              isDark ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+            }`}>
+              <Shield className="w-8 h-8" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className={`text-base sm:text-lg font-bold ${theme.textPrimary}`}>
+                🔒 Конфіденційні дані живої особи
+              </h3>
+              <p className={`text-xs ${theme.textMuted} max-w-md mx-auto leading-relaxed`}>
+                Відповідно до налаштувань безпеки та приватності родоводу, персональні відомості, біографія, дати та першоджерела живих осіб захищені. Повний доступ мають лише авторизовані родичі з білого списку.
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                onClick={() => {
+                  onChangeRoot?.(rawPerson.id);
+                  onClose();
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold ${theme.surfaceBg} hover:bg-emerald-600 hover:text-white ${theme.textPrimary} border ${theme.borderSubtle} transition-all flex items-center gap-2 cursor-pointer shadow-xs`}
+              >
+                <GitFork className="w-4 h-4 text-emerald-500" />
+                <span>Відкрити зв'язки у дереві</span>
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all cursor-pointer shadow-xs"
+              >
+                Зрозуміло
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className={`p-5 sm:p-6 space-y-6 overflow-y-auto flex-1 ${theme.textPrimary} scrollbar-thin`}>
           {/* SECTION 1: Status & Attributes */}
           <div className={`p-3.5 ${theme.surfaceBg} rounded-2xl border ${theme.borderSubtle} space-y-3`}>
             <div className="flex items-center justify-between">
@@ -884,6 +976,48 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+              <div className="flex items-center gap-2">
+                <Heart className="w-4 h-4 text-rose-500 shrink-0" />
+                <div className="min-w-0">
+                  <span className={`${theme.textMuted} block text-[10px]`}>Статус життя:</span>
+                  {!isReadOnly ? (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={Boolean(rawPerson.isLiving)}
+                      onClick={() => {
+                        const newStatus = !rawPerson.isLiving;
+                        updatePerson({
+                          ...rawPerson,
+                          isLiving: newStatus
+                        });
+                      }}
+                      className="inline-flex items-center gap-2 mt-0.5 cursor-pointer select-none group"
+                      title={rawPerson.isLiving ? 'Статус: Жива особа (натисніть, щоб позначити померлою)' : 'Статус: Померла особа (натисніть, щоб позначити живою)'}
+                    >
+                      <span
+                        className={`relative inline-flex h-4 w-7 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                          rawPerson.isLiving ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-700'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                            rawPerson.isLiving ? 'translate-x-3' : 'translate-x-0'
+                          }`}
+                        />
+                      </span>
+                      <span className={`text-xs font-semibold ${rawPerson.isLiving ? 'text-emerald-600 dark:text-emerald-400' : theme.textSecondary}`}>
+                        {rawPerson.isLiving ? 'Жива особа' : 'Померла особа'}
+                      </span>
+                    </button>
+                  ) : (
+                    <span className={`font-medium ${theme.textPrimary}`}>
+                      {rawPerson.isLiving ? 'Жива особа' : 'Померла особа'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
               <div className="flex items-center gap-2">
                 <Briefcase className="w-4 h-4 text-emerald-500 shrink-0" />
                 <div className="min-w-0">
@@ -1938,6 +2072,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Universal Person Picker Dialog (Parent / Sibling / Child / Spouse) */}

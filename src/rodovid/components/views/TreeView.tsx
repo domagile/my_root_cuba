@@ -34,7 +34,9 @@ import {
   Palette,
   Sun,
   Moon,
-  Check
+  Check,
+  Shield,
+  Lock
 } from 'lucide-react';
 import { GenealogyDatabase, TreeLayoutType, Person } from '../../types/genealogy';
 import {
@@ -48,6 +50,8 @@ import {
 } from '../../utils/treeLayout';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
+import { useAuthStore } from '../../../stores/useAuthStore';
+import { isPersonLiving, getPrivacySafePerson, getPrivacyLifespan, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 
 interface TreeViewProps {
@@ -73,6 +77,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
   onSwitchToFan,
   isReadOnly = false
 }) => {
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
   const canvasTheme = useUIStore((s) => s.treeCanvasTheme);
   const setCanvasTheme = useUIStore((s) => s.setTreeCanvasTheme);
 
@@ -296,10 +303,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
 
-  // Tree Bounding Box
+  // Tree Bounding Box: dynamically wraps the actual nodes with comfortable padding
   const treeBounds = useMemo(() => {
     if (!layout.nodes.length) {
-      return { minX: 0, maxX: 1400, minY: 0, maxY: 900, width: 1400, height: 900 };
+      return { minX: 0, maxX: 1200, minY: 0, maxY: 800, width: 1200, height: 800 };
     }
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     layout.nodes.forEach((n) => {
@@ -308,14 +315,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
       minY = Math.min(minY, n.y);
       maxY = Math.max(maxY, n.y + (n.height || CLASSIC_CARD_HEIGHT));
     });
-    const pad = 100;
+    const padX = 60;
+    const padY = 50;
+    const width = Math.max(maxX - minX + padX * 2, 200);
+    const height = Math.max(maxY - minY + padY * 2, 150);
     return {
-      minX: minX - pad,
-      maxX: maxX + pad,
-      minY: minY - pad,
-      maxY: maxY + pad,
-      width: Math.max(maxX - minX + pad * 2, 800),
-      height: Math.max(maxY - minY + pad * 2, 600)
+      minX: minX - padX,
+      maxX: maxX + padX,
+      minY: minY - padY,
+      maxY: maxY + padY,
+      width,
+      height
     };
   }, [layout.nodes]);
 
@@ -331,7 +341,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
     const fitScaleX = (cw - 120) / treeW;
     const fitScaleY = (ch - 120) / treeH;
-    const optimalScale = Math.min(Math.max(Math.min(fitScaleX, fitScaleY), 0.65), 1.1);
+    const optimalScale = Math.min(Math.max(Math.min(fitScaleX, fitScaleY), 0.5), 1.15);
 
     const treeCenterX = (treeBounds.minX + treeBounds.maxX) / 2;
     const treeCenterY = (treeBounds.minY + treeBounds.maxY) / 2;
@@ -343,11 +353,31 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setScale(optimalScale);
   }, [layout.nodes, containerDimensions, treeBounds]);
 
+  // Smooth zoom around center for UI buttons (+ / - / reset)
+  const zoomAroundCenter = useCallback((multiplier: number) => {
+    const cw = containerDimensions.width || 1000;
+    const ch = containerDimensions.height || 700;
+    const centerX = cw / 2;
+    const centerY = ch / 2;
+
+    setScale((prevScale) => {
+      const newScale = Math.min(Math.max(prevScale * multiplier, 0.2), 2.5);
+      setPan((prevPan) => {
+        const worldX = (centerX - prevPan.x) / prevScale;
+        const worldY = (centerY - prevPan.y) / prevScale;
+        const newPanX = centerX - worldX * newScale;
+        const newPanY = centerY - worldY * newScale;
+        return { x: Math.round(newPanX), y: Math.round(newPanY) };
+      });
+      return newScale;
+    });
+  }, [containerDimensions]);
+
   const fitTreeWidth = useCallback(() => {
     if (!layout.nodes.length) return;
     const cw = containerDimensions.width || 1200;
     const treeW = treeBounds.width;
-    const fitScale = Math.min(Math.max((cw - 80) / treeW, 0.35), 1.5);
+    const fitScale = Math.min(Math.max((cw - 80) / treeW, 0.3), 1.5);
     const treeCenterX = (treeBounds.minX + treeBounds.maxX) / 2;
     setPan({
       x: Math.round(cw / 2 - treeCenterX * fitScale),
@@ -435,7 +465,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setIsDragging(false);
   };
 
-  // Touch Support
+  // Touch Support for tablets and mobile (Smooth pinch-to-zoom anchored to midpoint)
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
       setIsDragging(true);
@@ -473,17 +503,27 @@ export const TreeView: React.FC<TreeViewProps> = ({
       const currentMidX = (t1.clientX + t2.clientX) / 2;
       const currentMidY = (t1.clientY + t2.clientY) / 2;
 
-      const { initialDist, initialScale, initialPan, midPoint } = touchStateRef.current;
-      const zoomFactor = currentDist / initialDist;
-      const targetScale = Math.min(Math.max(initialScale * zoomFactor, 0.3), 2.5);
+      const rect = containerRef.current?.getBoundingClientRect();
+      const containerMidX = rect ? currentMidX - rect.left : currentMidX;
+      const containerMidY = rect ? currentMidY - rect.top : currentMidY;
 
-      const deltaPanX = currentMidX - midPoint.x;
-      const deltaPanY = currentMidY - midPoint.y;
+      const { initialDist, initialScale, initialPan, midPoint } = touchStateRef.current;
+      const initialContainerMidX = rect ? midPoint.x - rect.left : midPoint.x;
+      const initialContainerMidY = rect ? midPoint.y - rect.top : midPoint.y;
+
+      const zoomFactor = currentDist / initialDist;
+      const targetScale = Math.min(Math.max(initialScale * zoomFactor, 0.2), 2.5);
+
+      const worldX = (initialContainerMidX - initialPan.x) / initialScale;
+      const worldY = (initialContainerMidY - initialPan.y) / initialScale;
+
+      const newPanX = containerMidX - worldX * targetScale;
+      const newPanY = containerMidY - worldY * targetScale;
 
       setScale(targetScale);
       setPan({
-        x: initialPan.x + deltaPanX,
-        y: initialPan.y + deltaPanY
+        x: Math.round(newPanX),
+        y: Math.round(newPanY)
       });
     }
   };
@@ -502,22 +542,54 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-      const newScale = Math.min(Math.max(scale * zoomFactor, 0.35), 2.4);
-      setScale(newScale);
-    } else {
-      // Natural 2D trackpad / Shift-wheel horizontal scroll
-      const deltaX = e.shiftKey ? e.deltaY : e.deltaX;
-      const deltaY = e.shiftKey ? 0 : e.deltaY;
-      setPan((prev) => ({
-        x: prev.x - deltaX,
-        y: prev.y - deltaY
-      }));
-    }
-  };
+  // Native non-passive Wheel listener to handle Ctrl+Wheel / Trackpad pinch zoom anchored to mouse pointer without triggering browser UI zoom
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      const rect = container.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
+
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl + Mouse wheel or Trackpad Pinch
+        // Smooth exponential factor based on deltaY
+        const zoomFactor = Math.exp(-e.deltaY * 0.0035);
+
+        setScale((prevScale) => {
+          const newScale = Math.min(Math.max(prevScale * zoomFactor, 0.2), 2.5);
+
+          setPan((prevPan) => {
+            // Anchor point under cursor
+            const worldX = (cursorX - prevPan.x) / prevScale;
+            const worldY = (cursorY - prevPan.y) / prevScale;
+
+            const newPanX = cursorX - worldX * newScale;
+            const newPanY = cursorY - worldY * newScale;
+            return { x: Math.round(newPanX), y: Math.round(newPanY) };
+          });
+
+          return newScale;
+        });
+      } else {
+        // Natural 2D scroll (trackpad or mouse wheel)
+        const deltaX = e.shiftKey ? e.deltaY : e.deltaX;
+        const deltaY = e.shiftKey ? 0 : e.deltaY;
+        setPan((prev) => ({
+          x: Math.round(prev.x - deltaX),
+          y: Math.round(prev.y - deltaY)
+        }));
+      }
+    };
+
+    container.addEventListener('wheel', onNativeWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', onNativeWheel);
+    };
+  }, []);
 
   const activePerson = database.persons[activePersonId];
 
@@ -872,16 +944,16 @@ export const TreeView: React.FC<TreeViewProps> = ({
           {/* Zoom Controls */}
           <div className="flex items-center gap-1 bg-[#15181b] border border-[#2d3238] p-1 rounded-lg">
             <button
-              onClick={() => setScale((s) => Math.min(s * 1.15, 2.4))}
+              onClick={() => zoomAroundCenter(1.18)}
               className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
-              title="Збільшити"
+              title="Збільшити масштаб"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
             <button
-              onClick={() => setScale((s) => Math.max(s * 0.85, 0.35))}
+              onClick={() => zoomAroundCenter(0.85)}
               className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
-              title="Зменшити"
+              title="Зменшити масштаб"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
@@ -892,9 +964,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
             >
               <Maximize2 className="w-4 h-4" />
             </button>
-            <span className="text-[11px] text-slate-400 font-mono px-2">
+            <button
+              onClick={() => {
+                const cw = containerDimensions.width || 1000;
+                const ch = containerDimensions.height || 700;
+                setScale(1.0);
+              }}
+              className="text-[11px] text-slate-400 hover:text-white font-mono px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Скинути масштаб до 100%"
+            >
               {Math.round(scale * 100)}%
-            </span>
+            </button>
           </div>
         </div>
       </div>
@@ -910,7 +990,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
-        onWheel={handleWheel}
         className={`flex-1 relative overflow-hidden touch-none ${
           canvasTheme === 'parchment'
             ? 'bg-[#f4efe4]'
@@ -1026,16 +1105,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
           {/* HTML Classic Pedigree Nodes (Image 2 style) */}
           {visibleNodes.map((node) => {
-            const p = node.person;
+            const rawPerson = node.person;
+            const isLiving = isPersonLiving(rawPerson);
+            const isMasked = !isWhitelisted && isLiving;
+            const p = isMasked ? getPrivacySafePerson(rawPerson, false) : rawPerson;
+
             const isRoot = p.id === activePersonId;
             const isMale = p.gender === 'male' || p.gender === 'M';
             const isFemale = p.gender === 'female' || p.gender === 'F';
             const isLightCanvas = canvasTheme === 'parchment' || canvasTheme === 'light';
 
-            const firstName = p.name?.given || p.firstName || '—';
-            const lastName = p.name?.surname || p.lastName || '—';
-            const lifespanStr = formatLifespan(p);
-            const fsCode = getGenealogyCode(p);
+            const firstName = isMasked ? 'Скрито' : (p.name?.given || p.firstName || '—');
+            const lastName = isMasked ? 'Скрито' : (p.name?.surname || p.lastName || '—');
+            const lifespanStr = isMasked ? '🔒 Скрито (Жива особа)' : formatLifespan(p);
+            const fsCode = isMasked ? '🔒 ЗАХИЩЕНО' : getGenealogyCode(p);
 
             // LOD distant zoom
             if (isLowDetail) {
@@ -1062,9 +1145,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   }}
                 >
                   <div className={`w-8 h-8 mx-auto mb-1.5 rounded-full flex items-center justify-center ${
-                    isMale ? 'bg-[#0e4e6d] text-cyan-300' : isFemale ? 'bg-[#6b1b48] text-pink-300' : 'bg-slate-700 text-slate-300'
+                    isMasked
+                      ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-700/60'
+                      : isMale ? 'bg-[#0e4e6d] text-cyan-300' : isFemale ? 'bg-[#6b1b48] text-pink-300' : 'bg-slate-700 text-slate-300'
                   }`}>
-                    <User className="w-4 h-4" />
+                    {isMasked ? <Lock className="w-3.5 h-3.5" /> : <User className="w-4 h-4" />}
                   </div>
                   <div className={`font-bold text-xs truncate leading-tight ${isLightCanvas ? 'text-neutral-900' : 'text-white'}`}>{firstName}</div>
                   <div className={`font-bold text-xs truncate leading-tight ${isLightCanvas ? 'text-neutral-900' : 'text-white'}`}>{lastName}</div>
@@ -1176,7 +1261,18 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 {/* Centered Avatar (Image 2 style) */}
                 <div className="flex flex-col items-center mt-1">
                   <div className="relative">
-                    {p.avatarUrl || p.photoUrl ? (
+                    {isMasked ? (
+                      <div
+                        className={`w-12 h-12 rounded-full flex items-center justify-center border shadow-inner ${
+                          isLightCanvas
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                            : 'bg-emerald-950/80 border-emerald-700/60 text-emerald-400'
+                        }`}
+                        title="Дані живої особи захищено (доступно для білого списку)"
+                      >
+                        <Lock className="w-5 h-5" />
+                      </div>
+                    ) : p.avatarUrl || p.photoUrl ? (
                       <img
                         src={p.avatarUrl || p.photoUrl}
                         alt={firstName}
@@ -1261,62 +1357,71 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 <div className={`flex items-center justify-center gap-1.5 pt-1.5 border-t ${
                   isLightCanvas ? 'border-stone-200' : 'border-[#2e343c]'
                 }`}>
-                  {/* Citations / Documents Badge */}
-                  <div
-                    className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors ${
-                      isLightCanvas
-                        ? 'bg-sky-50 text-sky-800 border-sky-300'
-                        : 'bg-[#0e7490]/30 text-[#38bdf8] border-[#0e7490]/50'
-                    }`}
-                    title={`Джерела та архівні записи: ${p.citations?.length || (p.sourceIds?.length || 1)}`}
-                  >
-                    <FileText className="w-3 h-3" />
-                  </div>
+                  {isMasked ? (
+                    <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold py-0.5">
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>Захищено</span>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Citations / Documents Badge */}
+                      <div
+                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors ${
+                          isLightCanvas
+                            ? 'bg-sky-50 text-sky-800 border-sky-300'
+                            : 'bg-[#0e7490]/30 text-[#38bdf8] border-[#0e7490]/50'
+                        }`}
+                        title={`Джерела та архівні записи: ${p.citations?.length || (p.sourceIds?.length || 1)}`}
+                      >
+                        <FileText className="w-3 h-3" />
+                      </div>
 
-                  {/* Sibling Toggle Badge */}
-                  {node.hasSiblings && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleCollapseSiblings(p.id, node.isSiblingsCollapsed);
-                      }}
-                      className={`h-5 px-1.5 rounded-md flex items-center gap-1 text-[10px] font-medium border transition-colors cursor-pointer ${
-                        node.isSiblingsCollapsed
-                          ? 'bg-sky-600 text-white border-sky-400 hover:bg-sky-500'
-                          : isLightCanvas
-                          ? 'bg-stone-100 hover:bg-sky-100 text-stone-800 border-stone-300'
-                          : 'bg-[#334155]/60 hover:bg-sky-900 text-slate-300 border-slate-600/50'
-                      }`}
-                      title={
-                        node.isSiblingsCollapsed
-                          ? `Розгорнути братів/сестер (${node.siblingsCount})`
-                          : `Сховати братів/сестер (${node.siblingsCount})`
-                      }
-                    >
-                      <Users className="w-3 h-3 text-sky-500" />
-                      <span>{node.isSiblingsCollapsed ? `+${node.siblingsCount}` : `${node.siblingsCount}`}</span>
-                    </button>
+                      {/* Sibling Toggle Badge */}
+                      {node.hasSiblings && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCollapseSiblings(p.id, node.isSiblingsCollapsed);
+                          }}
+                          className={`h-5 px-1.5 rounded-md flex items-center gap-1 text-[10px] font-medium border transition-colors cursor-pointer ${
+                            node.isSiblingsCollapsed
+                              ? 'bg-sky-600 text-white border-sky-400 hover:bg-sky-500'
+                              : isLightCanvas
+                              ? 'bg-stone-100 hover:bg-sky-100 text-stone-800 border-stone-300'
+                              : 'bg-[#334155]/60 hover:bg-sky-900 text-slate-300 border-slate-600/50'
+                          }`}
+                          title={
+                            node.isSiblingsCollapsed
+                              ? `Розгорнути братів/сестер (${node.siblingsCount})`
+                              : `Сховати братів/сестер (${node.siblingsCount})`
+                          }
+                        >
+                          <Users className="w-3 h-3 text-sky-500" />
+                          <span>{node.isSiblingsCollapsed ? `+${node.siblingsCount}` : `${node.siblingsCount}`}</span>
+                        </button>
+                      )}
+
+                      {/* Estate / Confession / Relatives Badge */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onOpenRelationManager) {
+                            onOpenRelationManager(p.id);
+                          }
+                        }}
+                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
+                          isLightCanvas
+                            ? 'bg-stone-100 hover:bg-emerald-600 text-stone-700 hover:text-white border-stone-300'
+                            : 'bg-[#334155]/60 hover:bg-emerald-700/80 text-slate-300 hover:text-white border-slate-600/50'
+                        }`}
+                        title="Родинні зв'язки"
+                      >
+                        <GitFork className="w-3 h-3 rotate-90" />
+                      </button>
+                    </>
                   )}
-
-                  {/* Estate / Confession / Relatives Badge */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (onOpenRelationManager) {
-                        onOpenRelationManager(p.id);
-                      }
-                    }}
-                    className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
-                      isLightCanvas
-                        ? 'bg-stone-100 hover:bg-emerald-600 text-stone-700 hover:text-white border-stone-300'
-                        : 'bg-[#334155]/60 hover:bg-emerald-700/80 text-slate-300 hover:text-white border-slate-600/50'
-                    }`}
-                    title="Родинні зв'язки"
-                  >
-                    <GitFork className="w-3 h-3 rotate-90" />
-                  </button>
                 </div>
 
                 {/* Bottom Collapse/Expand Children Branch Badge */}
@@ -1399,84 +1504,108 @@ export const TreeView: React.FC<TreeViewProps> = ({
           </div>
         )}
 
-        {/* Mini-Map / Overview Navigator (Image 2 style bottom-left) */}
+        {/* Mini-Map / Overview Navigator (Dynamically scales to tree content) */}
         {showMinimap && layout.nodes.length > 0 && (
-          <div className="absolute bottom-16 left-4 z-20 p-2.5 rounded-xl bg-[#1a1e22]/90 backdrop-blur-md border border-[#323840] shadow-2xl">
+          <div className="absolute bottom-16 left-4 z-20 p-2.5 rounded-xl bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] shadow-2xl">
             <div className="flex items-center justify-between gap-2 mb-1.5 pb-1 border-b border-[#282d33]">
-              <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider text-slate-400">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider text-slate-300">
                 <Compass className="w-3 h-3 text-emerald-400" />
                 <span>Огляд дерева ({layout.nodes.length})</span>
               </div>
               <button
                 onClick={() => setShowMinimap(false)}
-                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer p-0.5 rounded"
                 title="Сховати міні-мапу"
               >
                 <X className="w-3 h-3" />
               </button>
             </div>
 
-            {/* Miniature Canvas */}
-            <div
-              className="w-40 h-28 bg-[#121518] rounded-lg border border-[#262a30] relative overflow-hidden cursor-crosshair"
-              onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                const clickY = e.clientY - rect.top;
-                const normX = clickX / 160;
-                const normY = clickY / 112;
+            {/* Dynamic Miniature Canvas tightly mapped to actual treeBounds */}
+            {(() => {
+              const MINI_W = 180;
+              const MINI_H = 120;
+              const safeTreeW = Math.max(treeBounds.width, 100);
+              const safeTreeH = Math.max(treeBounds.height, 100);
 
-                const worldX = normX * layout.width;
-                const worldY = normY * layout.height;
+              const viewWorldLeft = -pan.x / scale;
+              const viewWorldTop = -pan.y / scale;
+              const viewWorldW = (containerDimensions.width || 1000) / scale;
+              const viewWorldH = (containerDimensions.height || 700) / scale;
 
-                setPan({
-                  x: containerDimensions.width / 2 - worldX * scale,
-                  y: containerDimensions.height / 2 - worldY * scale
-                });
-              }}
-            >
-              {/* Miniature Node dots */}
-              {layout.nodes.map((n) => {
-                const isMale = n.person.gender === 'male' || n.person.gender === 'M';
-                const isFemale = n.person.gender === 'female' || n.person.gender === 'F';
-                const isRoot = n.person.id === activePersonId;
+              const frameLeft = ((viewWorldLeft - treeBounds.minX) / safeTreeW) * MINI_W;
+              const frameTop = ((viewWorldTop - treeBounds.minY) / safeTreeH) * MINI_H;
+              const frameWidth = Math.max(6, (viewWorldW / safeTreeW) * MINI_W);
+              const frameHeight = Math.max(6, (viewWorldH / safeTreeH) * MINI_H);
 
-                const miniX = (n.x / layout.width) * 160;
-                const miniY = (n.y / layout.height) * 112;
+              return (
+                <div
+                  className="w-[180px] h-[120px] bg-[#121518] rounded-lg border border-[#262a30] relative overflow-hidden cursor-crosshair select-none"
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    const clickY = e.clientY - rect.top;
+                    const normX = Math.max(0, Math.min(1, clickX / MINI_W));
+                    const normY = Math.max(0, Math.min(1, clickY / MINI_H));
 
-                return (
+                    const targetWorldX = treeBounds.minX + normX * safeTreeW;
+                    const targetWorldY = treeBounds.minY + normY * safeTreeH;
+
+                    setPan({
+                      x: Math.round((containerDimensions.width || 1000) / 2 - targetWorldX * scale),
+                      y: Math.round((containerDimensions.height || 700) / 2 - targetWorldY * scale)
+                    });
+                  }}
+                >
+                  {/* Miniature Node dots */}
+                  {layout.nodes.map((n) => {
+                    const isMale = n.person.gender === 'male' || n.person.gender === 'M';
+                    const isFemale = n.person.gender === 'female' || n.person.gender === 'F';
+                    const isRoot = n.person.id === activePersonId;
+
+                    const miniX = ((n.x - treeBounds.minX) / safeTreeW) * MINI_W;
+                    const miniY = ((n.y - treeBounds.minY) / safeTreeH) * MINI_H;
+                    const cardNodeW = n.width || CLASSIC_CARD_WIDTH;
+                    const cardNodeH = n.height || CLASSIC_CARD_HEIGHT;
+                    const dotW = Math.max(5, Math.min(12, (cardNodeW / safeTreeW) * MINI_W));
+                    const dotH = Math.max(4, Math.min(9, (cardNodeH / safeTreeH) * MINI_H));
+
+                    return (
+                      <div
+                        key={n.id}
+                        style={{
+                          left: `${miniX}px`,
+                          top: `${miniY}px`,
+                          width: `${dotW}px`,
+                          height: `${dotH}px`
+                        }}
+                        className={`absolute rounded-xs transition-all ${
+                          isRoot
+                            ? 'bg-rose-500 ring-1 ring-white shadow-xs z-10'
+                            : isMale
+                            ? 'bg-sky-400'
+                            : isFemale
+                            ? 'bg-pink-400'
+                            : 'bg-slate-400'
+                        }`}
+                        title={`${n.person.name?.given || ''} ${n.person.name?.surname || ''}`}
+                      />
+                    );
+                  })}
+
+                  {/* Viewport Camera Frame */}
                   <div
-                    key={n.id}
                     style={{
-                      left: `${miniX}px`,
-                      top: `${miniY}px`,
-                      width: '6px',
-                      height: '7px'
+                      left: `${frameLeft}px`,
+                      top: `${frameTop}px`,
+                      width: `${frameWidth}px`,
+                      height: `${frameHeight}px`
                     }}
-                    className={`absolute rounded-xs ${
-                      isRoot
-                        ? 'bg-rose-500 ring-1 ring-white'
-                        : isMale
-                        ? 'bg-sky-400'
-                        : isFemale
-                        ? 'bg-pink-400'
-                        : 'bg-slate-400'
-                    }`}
+                    className="absolute border-2 border-emerald-400 bg-emerald-400/15 pointer-events-none rounded-xs shadow-xs"
                   />
-                );
-              })}
-
-              {/* Viewport Frame */}
-              <div
-                style={{
-                  left: `${Math.max(0, ((-pan.x / scale) / layout.width) * 160)}px`,
-                  top: `${Math.max(0, ((-pan.y / scale) / layout.height) * 112)}px`,
-                  width: `${Math.min(160, ((containerDimensions.width / scale) / layout.width) * 160)}px`,
-                  height: `${Math.min(112, ((containerDimensions.height / scale) / layout.height) * 112)}px`
-                }}
-                className="absolute border border-emerald-400/80 bg-emerald-400/10 pointer-events-none rounded-xs"
-              />
-            </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 

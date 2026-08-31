@@ -28,6 +28,8 @@ import {
 } from '../../utils/treeLayout';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
+import { useAuthStore } from '../../../stores/useAuthStore';
+import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 
 interface FanChartViewProps {
@@ -45,6 +47,9 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   onChangeRoot,
   onSwitchToTree
 }) => {
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
   // Default to 0 = ALL generations
   const [generations, setGenerations] = useState<number>(0);
   const [hoveredSector, setHoveredSector] = useState<FanChartSector | null>(null);
@@ -943,20 +948,25 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
                   {/* Text inside sector */}
                   {sec.person && (() => {
-                    const surname = sec.person.name?.surname || sec.person.lastName || '';
-                    const given = sec.person.name?.given || sec.person.firstName || '';
-                    const patronymic = sec.person.name?.patronymic || sec.person.patronymic || '';
-                    const maiden = sec.person.name?.maidenName || sec.person.maidenName || '';
-                    const birth = sec.person.birthYear || (sec.person.birthDate ? sec.person.birthDate.slice(0, 4) : '');
-                    const death = sec.person.deathYear || (sec.person.deathDate ? sec.person.deathDate.slice(0, 4) : '');
+                    const isLiving = isPersonLiving(sec.person);
+                    const isMasked = !isWhitelisted && isLiving;
+
+                    const surname = isMasked ? 'Скрито' : (sec.person.name?.surname || sec.person.lastName || '');
+                    const given = isMasked ? 'Скрито' : (sec.person.name?.given || sec.person.firstName || '');
+                    const patronymic = isMasked ? '' : (sec.person.name?.patronymic || sec.person.patronymic || '');
+                    const maiden = isMasked ? '' : (sec.person.name?.maidenName || sec.person.maidenName || '');
+                    const birth = isMasked ? '' : (sec.person.birthYear || (sec.person.birthDate ? sec.person.birthDate.slice(0, 4) : ''));
+                    const death = isMasked ? '' : (sec.person.deathYear || (sec.person.deathDate ? sec.person.deathDate.slice(0, 4) : ''));
                     const isFemale = sec.person.gender === 'female' || sec.person.gender === 'F';
 
-                    const statusStr = sec.person.isLiving
-                      ? `${birth || ''}–${isFemale ? 'Живущая' : 'Живущий'}`
+                    const statusStr = isMasked
+                      ? '🔒 Скрито'
+                      : sec.person.isLiving
+                      ? `${birth || ''}–${isFemale ? 'Нині жива' : 'Нині живий'}`
                       : birth && death
                       ? `${birth}–${death}`
                       : birth
-                      ? `${birth}–${isFemale ? 'Умершая' : 'Умерший'}`
+                      ? `${birth}–†`
                       : death
                       ? `?–${death}`
                       : '';
@@ -1239,103 +1249,118 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
         </div>
 
         {/* Hovered Person Tooltip Card */}
-        {hoveredSector && hoveredSector.person && (
-          <div
-            className={`absolute bottom-6 right-6 ${
-              canvasTheme === 'parchment'
-                ? 'bg-white/95 border-neutral-300 text-neutral-900 shadow-xl'
-                : 'bg-slate-900/95 border-slate-700 text-white shadow-2xl'
-            } backdrop-blur border rounded-xl p-4 max-w-xs z-30 animate-in fade-in duration-150`}
-          >
-            <div className="flex items-center gap-3">
-              {hoveredSector.person.avatarUrl ? (
-                <img
-                  src={hoveredSector.person.avatarUrl}
-                  alt=""
-                  className={`w-12 h-12 rounded-lg object-cover border ${
-                    canvasTheme === 'parchment' ? 'border-neutral-300' : 'border-slate-600'
-                  }`}
-                />
-              ) : (
-                <div
-                  className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                    canvasTheme === 'parchment'
-                      ? 'bg-neutral-100 text-neutral-600'
-                      : 'bg-slate-800 text-slate-300'
-                  }`}
-                >
-                  <User className="w-6 h-6" />
-                </div>
-              )}
-              <div>
-                <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                  <span className="text-[10px] uppercase font-mono text-emerald-600 font-semibold">
-                    #{hoveredSector.ahnentafelNumber} • Покоління {hoveredSector.generation}
-                  </span>
-                  {hoveredSector.clanName && (
-                    <span
-                      className="px-1.5 py-0.2 rounded text-[10px] font-bold text-white shadow-2xs"
-                      style={{ backgroundColor: hoveredSector.clanColor || '#2563eb' }}
-                    >
-                      {hoveredSector.clanName}
+        {hoveredSector && hoveredSector.person && (() => {
+          const isLiving = isPersonLiving(hoveredSector.person);
+          const isMasked = !isWhitelisted && isLiving;
+          const safePerson = isMasked ? getPrivacySafePerson(hoveredSector.person, false) : hoveredSector.person;
+
+          return (
+            <div
+              className={`absolute bottom-6 right-6 ${
+                canvasTheme === 'parchment'
+                  ? 'bg-white/95 border-neutral-300 text-neutral-900 shadow-xl'
+                  : 'bg-slate-900/95 border-slate-700 text-white shadow-2xl'
+              } backdrop-blur border rounded-xl p-4 max-w-xs z-30 animate-in fade-in duration-150`}
+            >
+              <div className="flex items-center gap-3">
+                {isMasked ? (
+                  <div
+                    className={`w-12 h-12 rounded-lg flex items-center justify-center border ${
+                      canvasTheme === 'parchment'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                        : 'bg-emerald-950/80 border-emerald-700/60 text-emerald-400'
+                    }`}
+                  >
+                    <User className="w-6 h-6" />
+                  </div>
+                ) : safePerson.avatarUrl ? (
+                  <img
+                    src={safePerson.avatarUrl}
+                    alt=""
+                    className={`w-12 h-12 rounded-lg object-cover border ${
+                      canvasTheme === 'parchment' ? 'border-neutral-300' : 'border-slate-600'
+                    }`}
+                  />
+                ) : (
+                  <div
+                    className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                      canvasTheme === 'parchment'
+                        ? 'bg-neutral-100 text-neutral-600'
+                        : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    <User className="w-6 h-6" />
+                  </div>
+                )}
+                <div>
+                  <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                    <span className="text-[10px] uppercase font-mono text-emerald-600 font-semibold">
+                      #{hoveredSector.ahnentafelNumber} • Покоління {hoveredSector.generation}
                     </span>
-                  )}
+                    {hoveredSector.clanName && !isMasked && (
+                      <span
+                        className="px-1.5 py-0.2 rounded text-[10px] font-bold text-white shadow-2xs"
+                        style={{ backgroundColor: hoveredSector.clanColor || '#2563eb' }}
+                      >
+                        {hoveredSector.clanName}
+                      </span>
+                    )}
+                  </div>
+                  <h4
+                    className={`font-bold text-sm leading-tight ${
+                      canvasTheme === 'parchment' ? 'text-neutral-900' : 'text-white'
+                    }`}
+                  >
+                    {isMasked ? 'Скрито Скрито' : getFullName(safePerson)}
+                  </h4>
+                  <p
+                    className={`text-xs font-mono mt-0.5 ${
+                      canvasTheme === 'parchment' ? 'text-neutral-600' : 'text-slate-400'
+                    }`}
+                  >
+                    {isMasked
+                      ? '🔒 Конфіденційні дані'
+                      : `${safePerson.birthYear || '?'} — ${safePerson.isLiving ? 'теп. час' : safePerson.deathYear || '?'}`}
+                  </p>
                 </div>
-                <h4
-                  className={`font-bold text-sm leading-tight ${
-                    canvasTheme === 'parchment' ? 'text-neutral-900' : 'text-white'
-                  }`}
+              </div>
+
+              <p
+                className={`text-xs mt-2 line-clamp-2 ${
+                  canvasTheme === 'parchment' ? 'text-neutral-700' : 'text-slate-300'
+                }`}
+              >
+                {isMasked
+                  ? '🔒 Дані живої особи приховані (доступно для користувачів з білого списку).'
+                  : safePerson.occupation || safePerson.birthPlace || 'Немає опису'}
+              </p>
+
+              <div
+                className={`flex items-center gap-2 mt-3 pt-2 border-t ${
+                  canvasTheme === 'parchment' ? 'border-neutral-200' : 'border-slate-800'
+                }`}
+              >
+                <button
+                  onClick={() => onSelectPerson(hoveredSector.person!.id)}
+                  className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-xs font-medium transition-colors text-center cursor-pointer shadow-xs"
                 >
-                  {getFullName(hoveredSector.person)}
-                </h4>
-                <p
-                  className={`text-xs font-mono mt-0.5 ${
-                    canvasTheme === 'parchment' ? 'text-neutral-600' : 'text-slate-400'
+                  Відкрити картку
+                </button>
+                <button
+                  onClick={() => onChangeRoot(hoveredSector.person!.id)}
+                  className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    canvasTheme === 'parchment'
+                      ? 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border border-neutral-300'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
                   }`}
+                  title="Зробити центром віяла"
                 >
-                  {hoveredSector.person.birthYear || '?'} —{' '}
-                  {hoveredSector.person.isLiving
-                    ? 'теп. час'
-                    : hoveredSector.person.deathYear || '?'}
-                </p>
+                  <GitFork className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
-
-            <p
-              className={`text-xs mt-2 line-clamp-2 ${
-                canvasTheme === 'parchment' ? 'text-neutral-700' : 'text-slate-300'
-              }`}
-            >
-              {hoveredSector.person.occupation ||
-                hoveredSector.person.birthPlace ||
-                'Немає опису'}
-            </p>
-
-            <div
-              className={`flex items-center gap-2 mt-3 pt-2 border-t ${
-                canvasTheme === 'parchment' ? 'border-neutral-200' : 'border-slate-800'
-              }`}
-            >
-              <button
-                onClick={() => onSelectPerson(hoveredSector.person!.id)}
-                className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-xs font-medium transition-colors text-center cursor-pointer shadow-xs"
-              >
-                Відкрити картку
-              </button>
-              <button
-                onClick={() => onChangeRoot(hoveredSector.person!.id)}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                  canvasTheme === 'parchment'
-                    ? 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border border-neutral-300'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                }`}
-                title="Зробити центром віяла"
-              >
-                <GitFork className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Legend */}
         {showLegend ? (

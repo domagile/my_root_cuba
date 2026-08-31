@@ -13,11 +13,15 @@ import {
   Edit2,
   Trash2,
   LayoutGrid,
-  List
+  List,
+  Shield,
+  Lock
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
+import { useAuthStore } from '../../../stores/useAuthStore';
+import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 
@@ -40,6 +44,10 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   onChangeRoot,
   onOpenKinshipWith
 }) => {
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
+
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
@@ -239,7 +247,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 </tr>
               </thead>
               <tbody className={`divide-y ${theme.borderSubtle}`}>
-                {sortedPersons.map((p) => {
+                {sortedPersons.map((rawP) => {
+                  const isLiving = isPersonLiving(rawP);
+                  const isMasked = !isWhitelisted && isLiving;
+                  const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
+
                   const isMale = p.gender === 'M';
                   const isFemale = p.gender === 'F';
 
@@ -251,7 +263,18 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     >
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
-                          {p.avatarUrl ? (
+                          {isMasked ? (
+                            <div
+                              className={`w-9 h-9 rounded-lg flex items-center justify-center border ${
+                                isDark
+                                  ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400'
+                                  : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                              }`}
+                              title="Дані захищено"
+                            >
+                              <Lock className="w-4 h-4" />
+                            </div>
+                          ) : p.avatarUrl ? (
                             <img
                               src={p.avatarUrl}
                               alt=""
@@ -278,16 +301,20 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                           )}
                           <div>
                             <div className={`font-semibold ${theme.textPrimary} flex items-center gap-1.5`}>
-                              <span>{getFullName(p)}</span>
-                              {p.name?.prefix && (
+                              <span>{isMasked ? 'Скрито Скрито' : getFullName(p)}</span>
+                              {isMasked && (
+                                <span className="text-[10px] px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded font-normal flex items-center gap-1">
+                                  <Shield className="w-2.5 h-2.5" /> Скрито
+                                </span>
+                              )}
+                              {!isMasked && p.name?.prefix && (
                                 <span className={`text-[10px] px-1.5 py-0.2 ${isDark ? 'bg-slate-800 text-amber-300' : 'bg-amber-100 text-amber-800'} rounded font-normal`}>
                                   {p.name.prefix}
                                 </span>
                               )}
                             </div>
                             <div className={`text-[10px] ${theme.textMuted} font-mono`}>
-                              ID: {p.id}
-                              {(p.name?.maidenName || p.maidenName) && ` • до шлюбу ${p.name?.maidenName || p.maidenName}`}
+                              {isMasked ? '🔒 Конфіденційна жива особа' : `ID: ${p.id}${(p.name?.maidenName || p.maidenName) ? ` • до шлюбу ${p.name?.maidenName || p.maidenName}` : ''}`}
                             </div>
                           </div>
                         </div>
@@ -314,23 +341,25 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       </td>
 
                       <td className={`py-3 px-4 font-mono ${theme.textPrimary}`}>
-                        {p.birthYear || '?'} — {p.isLiving ? 'живий' : p.deathYear || '?'}
+                        {isMasked ? '🔒 Скрито' : `${p.birthYear || '?'} — ${p.isLiving ? 'живий' : p.deathYear || '?'}`}
                       </td>
 
                       <td className={`py-3 px-4 ${theme.textMuted} max-w-[160px] truncate`}>
-                        {p.birthPlace || '—'}
+                        {isMasked ? '🔒 Скрито' : (p.birthPlace || '—')}
                       </td>
 
                       <td className={`py-3 px-4 ${theme.textSecondary} max-w-[180px] truncate`}>
-                        {p.occupation || '—'}
+                        {isMasked ? '🔒 Скрито' : (p.occupation || '—')}
                       </td>
 
                       <td className={`py-3 px-4 text-center font-mono ${theme.textMuted}`}>
-                        {p.events?.length || 0}
+                        {isMasked ? '—' : (p.events?.length || 0)}
                       </td>
 
                       <td className="py-3 px-4 text-center">
-                        {p.citations && p.citations.length > 0 ? (
+                        {isMasked ? (
+                          <span className={theme.textMuted}>—</span>
+                        ) : p.citations && p.citations.length > 0 ? (
                           <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 ${
                             isDark ? 'bg-amber-950/60 text-amber-300 border-amber-800/60' : 'bg-amber-100 text-amber-900 border-amber-300'
                           } border rounded text-[10px] font-mono`}>
@@ -361,23 +390,27 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                           >
                             <Compass className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            onClick={() => onEditPerson(p.id)}
-                            className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
-                            title="Редагувати"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPersonToDelete(p);
-                            }}
-                            className={`p-1.5 ${theme.textMuted} hover:text-rose-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
-                            title="Видалити"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {!isMasked && (
+                            <>
+                              <button
+                                onClick={() => onEditPerson(p.id)}
+                                className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+                                title="Редагувати"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPersonToDelete(rawP);
+                                }}
+                                className={`p-1.5 ${theme.textMuted} hover:text-rose-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+                                title="Видалити"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -389,7 +422,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sortedPersons.map((p) => {
+          {sortedPersons.map((rawP) => {
+            const isLiving = isPersonLiving(rawP);
+            const isMasked = !isWhitelisted && isLiving;
+            const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
+
             const isMale = p.gender === 'M';
             const isFemale = p.gender === 'F';
 
@@ -401,7 +438,18 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               >
                 <div>
                   <div className="flex items-start gap-3">
-                    {p.avatarUrl ? (
+                    {isMasked ? (
+                      <div
+                        className={`w-14 h-14 rounded-lg flex items-center justify-center border shrink-0 ${
+                          isDark
+                            ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400'
+                            : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        }`}
+                        title="Дані захищено"
+                      >
+                        <Lock className="w-6 h-6" />
+                      </div>
+                    ) : p.avatarUrl ? (
                       <img
                         src={p.avatarUrl}
                         alt=""
@@ -427,10 +475,15 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <h3 className={`font-semibold text-sm ${theme.textPrimary} truncate`}>
-                        {getFullName(p)}
+                      <h3 className={`font-semibold text-sm ${theme.textPrimary} truncate flex items-center gap-1.5`}>
+                        <span>{isMasked ? 'Скрито Скрито' : getFullName(p)}</span>
+                        {isMasked && (
+                          <span className="text-[10px] px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded font-normal flex items-center gap-1">
+                            <Shield className="w-2.5 h-2.5" /> Скрито
+                          </span>
+                        )}
                       </h3>
-                      {(p.name?.maidenName || p.maidenName) && (
+                      {!isMasked && (p.name?.maidenName || p.maidenName) && (
                         <p className={`text-[11px] ${theme.textMuted} truncate`}>
                           до шлюбу {p.name?.maidenName || p.maidenName}
                         </p>
@@ -438,24 +491,30 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       <div className={`flex items-center gap-1.5 text-xs ${theme.textMuted} font-mono mt-1`}>
                         <Calendar className={`w-3.5 h-3.5 ${theme.textMuted}`} />
                         <span>
-                          {p.birthYear || '?'} — {p.isLiving ? 'живий' : p.deathYear || '?'}
+                          {isMasked ? '🔒 Скрито (Жива особа)' : `${p.birthYear || '?'} — ${p.isLiving ? 'живий' : p.deathYear || '?'}`}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {p.occupation && (
+                  {!isMasked && p.occupation && (
                     <p className={`text-xs ${theme.textSecondary} mt-3 line-clamp-2`}>{p.occupation}</p>
                   )}
 
-                  {p.birthPlace && (
+                  {!isMasked && p.birthPlace && (
                     <div className={`flex items-center gap-1.5 text-[11px] ${theme.textMuted} mt-2`}>
                       <MapPin className={`w-3 h-3 ${theme.textMuted} shrink-0`} />
                       <span className="truncate">{p.birthPlace}</span>
                     </div>
                   )}
 
-                  {p.tags && p.tags.length > 0 && (
+                  {isMasked && (
+                    <p className={`text-xs ${theme.textMuted} mt-3 italic`}>
+                      🔒 Інформація про живу особу прихована згідно з налаштуваннями конфіденційності.
+                    </p>
+                  )}
+
+                  {!isMasked && p.tags && p.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2.5">
                       {p.tags.map((t, idx) => (
                         <span
@@ -470,7 +529,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 </div>
 
                 <div className={`flex items-center justify-between border-t ${theme.borderSubtle} pt-3 mt-4`}>
-                  <span className={`text-[10px] ${theme.textMuted} font-mono`}>ID: {p.id}</span>
+                  <span className={`text-[10px] ${theme.textMuted} font-mono`}>{isMasked ? 'ID: ***' : `ID: ${p.id}`}</span>
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => onChangeRoot(p.id)}
@@ -486,13 +545,15 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     >
                       <Compass className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      onClick={() => onEditPerson(p.id)}
-                      className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer`}
-                      title="Редагувати"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!isMasked && (
+                      <button
+                        onClick={() => onEditPerson(p.id)}
+                        className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer`}
+                        title="Редагувати"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

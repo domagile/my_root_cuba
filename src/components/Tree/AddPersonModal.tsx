@@ -338,6 +338,47 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             </div>
           </div>
 
+          {/* Living Status Toggle Classic */}
+          <div className="space-y-1 pt-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                Статус життя <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-[10px] text-neutral-400 font-normal">Обов'язкове поле</span>
+            </div>
+            <div className="flex items-center py-1">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isLiving}
+                onClick={() => setIsLiving(!isLiving)}
+                className="inline-flex items-center gap-2 cursor-pointer select-none group"
+                title={isLiving ? 'Статус: Жива особа (натисніть, щоб позначити померлою)' : 'Статус: Померла особа (натисніть, щоб позначити живою)'}
+              >
+                <span
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                    isLiving ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-700'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                      isLiving ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </span>
+                <span className={`text-xs font-medium ${isLiving ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-neutral-600 dark:text-neutral-400'}`}>
+                  {isLiving ? 'Жива особа' : 'Померла особа'}
+                </span>
+              </button>
+            </div>
+            {isLiving && (
+              <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] flex items-center gap-2">
+                <span>🛡️</span>
+                <span>Для користувачів не з Білого списку дані цієї особи будуть захищені (<strong>«Скрито»</strong>).</span>
+              </div>
+            )}
+          </div>
+
           {/* Life Dates Row */}
           <div className="grid grid-cols-2 gap-2.5">
             <div className="space-y-1">
@@ -348,37 +389,27 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 type="text"
                 value={birthDate}
                 onChange={(e) => setBirthDate(e.target.value)}
-                placeholder="1814 або 1814-03-09"
+                placeholder="1995 або 1995-03-09"
                 className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
               />
             </div>
 
             <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
-                  {isLiving ? 'Статус' : 'Рік / дата смерті'}
-                </label>
-                <label className="text-[10px] text-neutral-500 flex items-center gap-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isLiving}
-                    onChange={(e) => setIsLiving(e.target.checked)}
-                    className="rounded text-[#B88E3E] text-xs"
-                  />
-                  <span>Живий(а)</span>
-                </label>
-              </div>
+              <label className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
+                {isLiving ? 'Статус смерті' : 'Рік / дата смерті'}
+              </label>
               {!isLiving ? (
                 <input
                   type="text"
                   value={deathDate}
                   onChange={(e) => setDeathDate(e.target.value)}
-                  placeholder="1861 або 1861-03-10"
+                  placeholder="1980 або 1980-10-14"
                   className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
                 />
               ) : (
-                <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-medium border border-emerald-200 dark:border-emerald-800/50">
-                  Нині живий(а)
+                <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>Нині живий(а)</span>
                 </div>
               )}
             </div>
