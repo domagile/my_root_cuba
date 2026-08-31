@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useGenealogy } from '../context/GenealogyContext';
+import { useUIStore } from '../stores/useUIStore';
 import { getThemeConfig } from '../utils/theme';
 import { UserRole } from '../types';
 import { signInWithGoogle } from '../lib/firebase';
@@ -516,28 +517,32 @@ export const AccessLockScreen: React.FC = () => {
               <span>{isSigningInWithFirebase ? 'Авторизація Google...' : 'Увійти через обліковий запис Google'}</span>
             </button>
 
-            {/* Quick Admin One-Click Button */}
+            {/* Direct Open Tree Button */}
             <button
-              onClick={() => handleGoogleLogin('CubaTarara400@gmail.com')}
-              className="w-full p-3 rounded-2xl bg-gradient-to-r from-[#B88E3E]/20 to-[#B88E3E]/10 border border-[#B88E3E]/50 hover:border-[#B88E3E] text-left flex items-center justify-between group transition-all cursor-pointer shadow-md"
+              onClick={() => {
+                const { setActiveTab, setRodovidView } = useUIStore.getState();
+                setActiveTab('tree');
+                setRodovidView('tree');
+              }}
+              className="w-full p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 hover:border-emerald-500/60 text-left flex items-center justify-between group transition-all cursor-pointer shadow-md"
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-[#B88E3E]/30 text-amber-300 flex items-center justify-center font-bold shadow-sm shrink-0 border border-[#B88E3E]/40">
-                  <ShieldCheck className="w-4 h-4" />
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold shadow-sm shrink-0 border border-emerald-500/30">
+                  <GitFork className="w-4 h-4" />
                 </div>
                 <div>
                   <div className="text-xs font-bold text-white flex items-center gap-2">
-                    <span>Швидкий вхід: Власник</span>
+                    <span>Відкрити Дерево та Віяло</span>
                     <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-emerald-500/20 text-emerald-300 font-medium border border-emerald-500/30">
-                      Admin
+                      Публічно
                     </span>
                   </div>
-                  <div className="text-[10px] text-stone-400 font-mono">
-                    CubaTarara400@gmail.com
+                  <div className="text-[10px] text-stone-400">
+                    Перегляд родоводу без потреби у вході
                   </div>
                 </div>
               </div>
-              <ChevronRight className="w-4 h-4 text-[#B88E3E] group-hover:translate-x-1 transition-transform" />
+              <ChevronRight className="w-4 h-4 text-emerald-400 group-hover:translate-x-1 transition-transform" />
             </button>
 
             <div className="relative flex py-1 items-center">

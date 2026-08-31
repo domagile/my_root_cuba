@@ -28,10 +28,12 @@ import {
   PanelLeftOpen, 
   FlaskConical,
   X,
-  ChevronLeft
+  ChevronLeft,
+  Lock
 } from 'lucide-react';
 import { useUIStore } from '../stores/useUIStore';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
+import { useAuthStore } from '../stores/useAuthStore';
 import { NavigationTab, ViewMode } from '../types';
 import { getThemeConfig } from '../utils/theme';
 
@@ -44,14 +46,26 @@ export const Sidebar: React.FC = () => {
   const setMobileMenuOpen = useUIStore((s) => s.setMobileMenuOpen);
   const isSidebarVisible = useUIStore((s) => s.isSidebarVisible);
   const setSidebarVisible = useUIStore((s) => s.setSidebarVisible);
+  const openAuthModal = useUIStore((s) => s.openAuthModal);
   const themePalette = useUIStore((s) => s.themePalette);
   const personsCount = useGenealogyStore((s) => s.persons.length);
+  
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const isWhitelisted = Boolean(
+    currentUser &&
+    currentUser.isAuthenticated &&
+    whitelist.some(
+      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+    )
+  );
+
   const theme = getThemeConfig(themePalette);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const rodovidItems: { id: ViewMode; label: string; icon: React.FC<{ className?: string }> }[] = [
-    { id: 'tree', label: 'Дерево', icon: GitFork },
-    { id: 'fan', label: 'Віяло (Кругове)', icon: PieChart },
+  const rodovidItems: { id: ViewMode; label: string; icon: React.FC<{ className?: string }>; isPublic?: boolean }[] = [
+    { id: 'tree', label: 'Дерево', icon: GitFork, isPublic: true },
+    { id: 'fan', label: 'Віяло (Кругове)', icon: PieChart, isPublic: true },
     { id: 'persons', label: `Особи (${personsCount})`, icon: Users },
     { id: 'families', label: "Сім'ї", icon: HeartHandshake },
     { id: 'timeline', label: 'Хроніка', icon: Calendar },
@@ -74,14 +88,22 @@ export const Sidebar: React.FC = () => {
     { id: 'experiment', label: 'Експеримент', icon: FlaskConical }
   ];
 
-  const handleRodovidClick = (viewId: ViewMode) => {
+  const handleRodovidClick = (item: { id: ViewMode; label: string; isPublic?: boolean }) => {
+    if (!item.isPublic && !isWhitelisted) {
+      openAuthModal(item.label);
+      return;
+    }
     setActiveTab('tree');
-    setRodovidView(viewId);
+    setRodovidView(item.id);
     setMobileMenuOpen(false);
   };
 
-  const handleNavTabClick = (tabId: NavigationTab) => {
-    setActiveTab(tabId);
+  const handleNavTabClick = (item: { id: NavigationTab; label: string }) => {
+    if (!isWhitelisted) {
+      openAuthModal(item.label);
+      return;
+    }
+    setActiveTab(item.id);
     setMobileMenuOpen(false);
   };
 
@@ -165,12 +187,13 @@ export const Sidebar: React.FC = () => {
             {rodovidItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === 'tree' && rodovidView === item.id;
+              const isLocked = !item.isPublic && !isWhitelisted;
               return (
                 <button
                   key={`rodovid-${item.id}`}
                   id={`nav-btn-rodovid-${item.id}`}
-                  onClick={() => handleRodovidClick(item.id)}
-                  title={isCollapsed ? item.label : undefined}
+                  onClick={() => handleRodovidClick(item)}
+                  title={isCollapsed ? (isLocked ? `${item.label} (Потрібен Whitelist)` : item.label) : undefined}
                   className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
                     isActive
                       ? theme.sidebarActiveNav
@@ -178,7 +201,10 @@ export const Sidebar: React.FC = () => {
                   }`}
                 >
                   <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#B88E3E]' : 'text-emerald-500'}`} />
-                  <span className={`truncate ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                  <span className={`truncate flex-1 text-left ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                  {isLocked && !isCollapsed && (
+                    <Lock className="w-3 h-3 text-amber-500/70 shrink-0 ml-auto" />
+                  )}
                 </button>
               );
             })}
@@ -187,19 +213,23 @@ export const Sidebar: React.FC = () => {
           {/* Section 2: Дослідження та Докази */}
           <div className="space-y-1 pt-2 border-t border-white/5">
             {(!isCollapsed || isMobileMenuOpen) && (
-              <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400 opacity-90">
+              <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400 opacity-90 flex items-center justify-between">
                 <span>Дослідження & AI</span>
+                {!isWhitelisted && (
+                  <span className="text-[9px] text-amber-400/80 font-normal">Whitelist</span>
+                )}
               </div>
             )}
             {researchItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
+              const isLocked = !isWhitelisted;
               return (
                 <button
                   key={`research-${item.id}`}
                   id={`nav-btn-${item.id}`}
-                  onClick={() => handleNavTabClick(item.id)}
-                  title={isCollapsed ? item.label : undefined}
+                  onClick={() => handleNavTabClick(item)}
+                  title={isCollapsed ? (isLocked ? `${item.label} (Потрібен Whitelist)` : item.label) : undefined}
                   className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
                     isActive
                       ? theme.sidebarActiveNav
@@ -207,7 +237,10 @@ export const Sidebar: React.FC = () => {
                   }`}
                 >
                   <Icon className="w-4 h-4 flex-shrink-0 text-[#B88E3E]" />
-                  <span className={`truncate ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                  <span className={`truncate flex-1 text-left ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                  {isLocked && !isCollapsed && (
+                    <Lock className="w-3 h-3 text-amber-500/70 shrink-0 ml-auto" />
+                  )}
                 </button>
               );
             })}
@@ -221,12 +254,13 @@ export const Sidebar: React.FC = () => {
             <span className="text-[11px] truncate">Осіб: {personsCount}</span>
           </div>
           <button
-            onClick={() => handleNavTabClick('settings')}
+            onClick={() => handleNavTabClick({ id: 'settings', label: 'Налаштування' })}
             className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-1.5`}
             title="Налаштування"
           >
             <Settings className="w-3.5 h-3.5" />
             {(!isCollapsed || isMobileMenuOpen) && <span className="text-[11px]">Налаштування</span>}
+            {!isWhitelisted && !isCollapsed && <Lock className="w-3 h-3 text-amber-500/70" />}
           </button>
         </div>
       </aside>

@@ -209,154 +209,103 @@ export function calculateClassicFamilyTreeLayout(
     return { nodes: [], links: [], width: 1000, height: 800 };
   }
 
-  // 1. Calculate relative generation level for all ancestors and descendants
+  // 1. Calculate relative generation level for all ancestors, descendants, siblings and spouses
   const personGen = new Map<string, number>();
   personGen.set(root.id, 0);
 
-  // Traverse ancestors (Gen -1, Gen -2...)
-  if (showParents) {
-    const queueAnc: { id: string; gen: number }[] = [{ id: root.id, gen: 0 }];
-    const visitedAnc = new Set<string>([root.id]);
+  // BFS Queue to expand lineage and connections
+  const queue: { id: string; gen: number }[] = [{ id: root.id, gen: 0 }];
+  const processedPersons = new Set<string>();
 
-    while (queueAnc.length > 0) {
-      const { id, gen } = queueAnc.shift()!;
-      if (maxGenerations > 0 && Math.abs(gen) >= maxGenerations) continue;
-      // If this individual's parent branch is collapsed, do not traverse upward
-      if (collapsedParents.has(id)) continue;
+  const enqueuePerson = (pId: string, pGen: number) => {
+    if (!pId || !database.persons[pId]) return;
+    if (!personGen.has(pId)) {
+      personGen.set(pId, pGen);
+      queue.push({ id: pId, gen: pGen });
+    }
+  };
 
-      const p = database.persons[id];
-      if (!p) continue;
+  while (queue.length > 0) {
+    const { id, gen } = queue.shift()!;
+    if (processedPersons.has(id)) continue;
+    processedPersons.add(id);
 
-      const fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-      const mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    const p = database.persons[id];
+    if (!p) continue;
 
-      if (fId && database.persons[fId] && !visitedAnc.has(fId)) {
-        visitedAnc.add(fId);
-        personGen.set(fId, gen - 1);
-        queueAnc.push({ id: fId, gen: gen - 1 });
-      }
-      if (mId && database.persons[mId] && !visitedAnc.has(mId)) {
-        visitedAnc.add(mId);
-        personGen.set(mId, gen - 1);
-        queueAnc.push({ id: mId, gen: gen - 1 });
-      }
-
-      // Include all spouses of ancestors at the same generation (e.g. 1st wife, 2nd wife)
-      const ancSpouseIds = new Set<string>();
-      if (p.spouseIds) p.spouseIds.forEach(s => ancSpouseIds.add(s));
-      if (p.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach(fId => {
-          const fam = database.families[fId];
-          if (fam) {
-            if (fam.husbandId && fam.husbandId !== p.id) ancSpouseIds.add(fam.husbandId);
-            if (fam.wifeId && fam.wifeId !== p.id) ancSpouseIds.add(fam.wifeId);
-          }
-        });
-      }
-      ancSpouseIds.forEach(sId => {
-        if (database.persons[sId] && !personGen.has(sId)) {
-          personGen.set(sId, gen);
+    // 1. All spouses of this person (at same generation)
+    const spouseIds = new Set<string>();
+    if (p.spouseIds) p.spouseIds.forEach(s => spouseIds.add(s));
+    if (p.spouseFamilyIds) {
+      p.spouseFamilyIds.forEach(fId => {
+        const fam = database.families[fId];
+        if (fam) {
+          if (fam.husbandId && fam.husbandId !== p.id) spouseIds.add(fam.husbandId);
+          if (fam.wifeId && fam.wifeId !== p.id) spouseIds.add(fam.wifeId);
         }
       });
     }
-  }
+    spouseIds.forEach(sId => enqueuePerson(sId, gen));
 
-  // Traverse descendants (gen + 1, +2 ...)
-  if (showDescendants) {
-    const queueDesc: { id: string; gen: number }[] = [{ id: root.id, gen: 0 }];
-    const visitedDesc = new Set<string>([root.id]);
+    // 2. Ancestors (Gen - 1, Gen - 2...) - expandable for ANY person in the tree
+    if (showParents && !collapsedParents.has(id)) {
+      if (maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations) {
+        let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+        let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
 
-    while (queueDesc.length > 0) {
-      const { id, gen } = queueDesc.shift()!;
-      if (maxGenerations > 0 && gen >= maxGenerations) continue;
-      // If this individual's children branch is collapsed, do not traverse downward
-      if (collapsedChildren.has(id)) continue;
-
-      const p = database.persons[id];
-      if (!p) continue;
-
-      const childIds = new Set<string>();
-      if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-      if (p.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach(fId => {
-          const fam = database.families[fId];
-          if (fam?.children) fam.children.forEach(c => childIds.add(c.personId));
-        });
-      }
-
-      childIds.forEach(cId => {
-        if (database.persons[cId] && !visitedDesc.has(cId)) {
-          visitedDesc.add(cId);
-          personGen.set(cId, gen + 1);
-          queueDesc.push({ id: cId, gen: gen + 1 });
-        }
-      });
-
-      // Add spouses at same generation
-      const spouseIds = new Set<string>();
-      if (p.spouseIds) p.spouseIds.forEach(s => spouseIds.add(s));
-      if (p.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach(fId => {
-          const fam = database.families[fId];
-          if (fam) {
-            if (fam.husbandId && fam.husbandId !== p.id) spouseIds.add(fam.husbandId);
-            if (fam.wifeId && fam.wifeId !== p.id) spouseIds.add(fam.wifeId);
+        // Fallback: check if person is child in any family
+        if (!fId && !mId) {
+          const matchingFam = Object.values(database.families || {}).find(fam => 
+            fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
+          );
+          if (matchingFam) {
+            fId = matchingFam.husbandId;
+            mId = matchingFam.wifeId;
           }
-        });
-      }
-      spouseIds.forEach(sId => {
-        if (database.persons[sId] && !personGen.has(sId)) {
-          personGen.set(sId, gen);
         }
-      });
+
+        if (fId && database.persons[fId]) enqueuePerson(fId, gen - 1);
+        if (mId && database.persons[mId]) enqueuePerson(mId, gen - 1);
+      }
     }
-  }
 
-  // Also include siblings for active ancestors and root (collapsible collateral lines)
-  if (showSiblings) {
-    const baseIds = Array.from(personGen.keys());
-    baseIds.forEach((pId) => {
-      // If this person has siblings collapsed, skip expanding their siblings
-      if (collapsedSiblings.has(pId)) return;
+    // 3. Descendants (Gen + 1, Gen + 2...) - expandable for ANY person in the tree
+    if (showDescendants && !collapsedChildren.has(id)) {
+      if (maxGenerations === 0 || (gen + 1) <= maxGenerations) {
+        const childIds = new Set<string>();
+        if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
+        if (p.spouseFamilyIds) {
+          p.spouseFamilyIds.forEach(fId => {
+            const fam = database.families[fId];
+            if (fam?.children) fam.children.forEach(c => childIds.add(c.personId || (c as any).id));
+          });
+        }
+        childIds.forEach(cId => enqueuePerson(cId, gen + 1));
+      }
+    }
 
-      const p = database.persons[pId];
-      if (!p) return;
-      const gen = personGen.get(pId)!;
+    // 4. Siblings (at same generation) - expandable for ANY person in the tree
+    if (showSiblings && !collapsedSiblings.has(id)) {
       const fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
       const mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
 
-      if (fId || mId) {
-        Object.values(database.persons).forEach(cand => {
-          if (cand.id !== p.id && !personGen.has(cand.id)) {
-            const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
-            const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-            if ((fId && cF === fId) || (mId && cM === mId)) {
-              // If candidate itself or sibling cohort is collapsed, don't show
-              if (collapsedSiblings.has(cand.id)) return;
-
-              personGen.set(cand.id, gen);
-              // Also include candidate's spouse(s) if present
-              const candSpouseIds = new Set<string>();
-              if (cand.spouseIds) cand.spouseIds.forEach(s => candSpouseIds.add(s));
-              if (cand.spouseFamilyIds) {
-                cand.spouseFamilyIds.forEach(f => {
-                  const fam = database.families[f];
-                  if (fam) {
-                    if (fam.husbandId && fam.husbandId !== cand.id) candSpouseIds.add(fam.husbandId);
-                    if (fam.wifeId && fam.wifeId !== cand.id) candSpouseIds.add(fam.wifeId);
-                  }
-                });
-              }
-              candSpouseIds.forEach(sId => {
-                if (database.persons[sId] && !personGen.has(sId)) {
-                  personGen.set(sId, gen);
-                }
-              });
-            }
-          }
+      if (p.siblingIds) {
+        p.siblingIds.forEach(sId => {
+          if (!collapsedSiblings.has(sId)) enqueuePerson(sId, gen);
         });
       }
-    });
+
+      Object.values(database.persons).forEach(cand => {
+        if (cand.id !== p.id && !personGen.has(cand.id)) {
+          const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
+          const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
+          const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id));
+          if (isSibling && !collapsedSiblings.has(cand.id)) {
+            enqueuePerson(cand.id, gen);
+          }
+        }
+      });
+    }
   }
 
   // Normalize generations so top-most ancestor level is 0
@@ -682,8 +631,19 @@ export function calculateClassicFamilyTreeLayout(
 
   // Helper to compute relationship collapse/expand flags
   const getNodeFlags = (p: Person) => {
-    const fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    const mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+
+    if (!fId && !mId) {
+      const matchingFam = Object.values(database.families || {}).find(fam => 
+        fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
+      );
+      if (matchingFam) {
+        fId = matchingFam.husbandId;
+        mId = matchingFam.wifeId;
+      }
+    }
+
     const parentsCount = (fId && database.persons[fId] ? 1 : 0) + (mId && database.persons[mId] ? 1 : 0);
     const hasParents = parentsCount > 0;
     const areParentsVisible = (fId && personGen.has(fId)) || (mId && personGen.has(mId));
@@ -691,16 +651,16 @@ export function calculateClassicFamilyTreeLayout(
 
     let siblingCount = 0;
     let areSiblingsVisible = false;
-    if (fId || mId) {
-      const sibs = Object.values(database.persons).filter(cand => 
-        cand.id !== p.id && (
-          (fId && (cand.fatherId === fId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.husbandId === fId))) ||
-          (mId && (cand.motherId === mId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.wifeId === mId)))
-        )
-      );
-      siblingCount = sibs.length;
-      areSiblingsVisible = sibs.some(s => personGen.has(s.id));
-    }
+    const sibs = Object.values(database.persons).filter(cand => 
+      cand.id !== p.id && (
+        (fId && (cand.fatherId === fId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.husbandId === fId))) ||
+        (mId && (cand.motherId === mId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.wifeId === mId))) ||
+        (p.siblingIds && p.siblingIds.includes(cand.id)) ||
+        (cand.siblingIds && cand.siblingIds.includes(p.id))
+      )
+    );
+    siblingCount = sibs.length;
+    areSiblingsVisible = sibs.some(s => personGen.has(s.id));
     const hasSiblings = siblingCount > 0;
     const isSiblingsCollapsed = collapsedSiblings.has(p.id) || !showSiblings || (hasSiblings && !areSiblingsVisible);
 

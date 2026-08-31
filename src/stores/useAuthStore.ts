@@ -133,18 +133,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (saved) {
         return JSON.parse(saved);
       }
-      // By default for initial session in development, authorize as admin CubaTarara400@gmail.com
-      const defaultUser: AuthUser = {
-        id: 'usr-admin',
-        email: 'CubaTarara400@gmail.com',
-        name: 'Cuba Tarara (Адміністратор)',
-        role: 'admin',
-        isAuthenticated: true,
-        isWhitelisted: true,
-        loginMethod: 'google',
-        lastActive: new Date().toISOString()
-      };
-      return defaultUser;
+      return null;
     } catch {
       return null;
     }

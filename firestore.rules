@@ -94,8 +94,13 @@ service cloud.firestore {
       allow write: if true;
     }
 
-    // Trees collection
+    // Trees and sharedTrees collections
     match /trees/{treeId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /sharedTrees/{treeId} {
       allow read: if true;
       allow write: if true;
     }

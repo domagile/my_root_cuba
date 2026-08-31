@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle } from 'lucide-react';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Share2, ShieldCheck, Lock } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
+import { ShareTreeModal } from '../rodovid/components/modals/ShareTreeModal';
 
 interface HeaderProps {
   onOpenAddPerson: () => void;
@@ -24,19 +25,31 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
     isManualPushing,
     isManualPulling,
     triggerUploadToCloud,
-    triggerDownloadFromCloud
+    triggerDownloadFromCloud,
+    getGenealogyDatabase,
+    selectedPersonId
   } = useGenealogy();
 
   const isMobileMenuOpen = useUIStore((s) => s.isMobileMenuOpen);
   const isSidebarVisible = useUIStore((s) => s.isSidebarVisible);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+  const openAuthModal = useUIStore((s) => s.openAuthModal);
 
-  const { currentUser, accessRequests, logout } = useAuthStore();
+  const { currentUser, whitelist, accessRequests, logout } = useAuthStore();
+  const isWhitelisted = Boolean(
+    currentUser &&
+    currentUser.isAuthenticated &&
+    whitelist.some(
+      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+    )
+  );
+
   const theme = getThemeConfig(themePalette);
 
   const pendingRequestsCount = accessRequests.filter((r) => r.status === 'pending').length;
 
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [showCloudPopover, setShowCloudPopover] = useState(false);
   const [cloudActionMsg, setCloudActionMsg] = useState<{ text: string; isError?: boolean } | null>(null);
 
@@ -248,8 +261,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
             </button>
           )}
 
-          {/* User Role & Email Badge */}
-          {currentUser && (
+          {/* User Role & Email Badge or Login Button */}
+          {isWhitelisted && currentUser ? (
             <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs">
               <div className="w-6 h-6 rounded-full bg-[#B88E3E]/20 text-[#B88E3E] flex items-center justify-center font-bold text-[11px]">
                 {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
@@ -263,25 +276,52 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
                 </div>
               </div>
             </div>
+          ) : (
+            <button
+              onClick={() => openAuthModal()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 border border-amber-500/40 text-xs font-bold transition-all shadow-xs cursor-pointer"
+              title="Увійти за поштою або Google для редагування та доступу до документів"
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-500" />
+              <span className="hidden sm:inline">Увійти (Whitelist)</span>
+              <span className="sm:hidden">Вхід</span>
+            </button>
           )}
 
+          {/* Share Tree Modal Trigger */}
           <button
-            onClick={onOpenAddPerson}
-            id="add-person-btn"
-            className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-lg text-xs transition-colors shadow-sm shrink-0 cursor-pointer`}
+            onClick={() => setShowShareModal(true)}
+            className={`flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-lg border font-semibold text-xs transition-colors shrink-0 cursor-pointer ${
+              theme.category === 'dark'
+                ? 'bg-amber-900/30 hover:bg-amber-900/50 text-amber-300 border-amber-500/40'
+                : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+            }`}
+            title="Спільний доступ: Згенерувати посилання для перегляду родичами"
           >
-            <UserPlus className="w-4 h-4" />
+            <Share2 className="w-3.5 h-3.5 text-amber-500" />
+            <span className="hidden sm:inline">Поділитися</span>
+          </button>
+
+          <button
+            onClick={isWhitelisted ? onOpenAddPerson : () => openAuthModal('Додавання особи')}
+            id="add-person-btn"
+            className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-lg text-xs transition-colors shadow-sm shrink-0 cursor-pointer ${!isWhitelisted ? 'opacity-90' : ''}`}
+            title={!isWhitelisted ? 'Редагування доступне після входу за Whitelist' : undefined}
+          >
+            {isWhitelisted ? <UserPlus className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             <span className="hidden sm:inline">Додати особу</span>
           </button>
 
           {/* Sign Out / Lock Session Button */}
-          <button
-            onClick={() => logout()}
-            className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors shrink-0 cursor-pointer"
-            title="Вийти з облікового запису / Заблокувати сесію"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          {isWhitelisted && (
+            <button
+              onClick={() => logout()}
+              className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors shrink-0 cursor-pointer"
+              title="Вийти з облікового запису / Заблокувати сесію"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </header>
 
@@ -394,6 +434,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {showShareModal && (
+        <ShareTreeModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          database={getGenealogyDatabase()}
+          activePersonId={selectedPersonId || undefined}
+        />
       )}
     </>
   );

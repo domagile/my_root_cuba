@@ -1,0 +1,417 @@
+import React, { useState } from 'react';
+import {
+  X,
+  ShieldCheck,
+  Lock,
+  Mail,
+  ArrowRight,
+  Sparkles,
+  AlertCircle,
+  CheckCircle2,
+  Send,
+  Users,
+  Eye,
+  TreeDeciduous,
+  KeyRound
+} from 'lucide-react';
+import { useAuthStore } from '../stores/useAuthStore';
+import { useUIStore } from '../stores/useUIStore';
+import { getThemeConfig } from '../utils/theme';
+import { UserRole } from '../types';
+import { signInWithGoogle } from '../lib/firebase';
+
+interface AuthModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  targetFeatureName?: string;
+}
+
+export const AuthModal: React.FC<AuthModalProps> = ({
+  isOpen,
+  onClose,
+  targetFeatureName
+}) => {
+  const themePalette = useUIStore((s) => s.themePalette);
+  const theme = getThemeConfig(themePalette);
+  const isDark = theme.category === 'dark';
+
+  const {
+    loginWithGoogle,
+    submitAccessRequest,
+    whitelist,
+    currentUser
+  } = useAuthStore();
+
+  const [tab, setTab] = useState<'login' | 'pin' | 'request'>('login');
+  const [emailInput, setEmailInput] = useState('');
+  const [pinInput, setPinInput] = useState('');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // Request Access State
+  const [reqName, setReqName] = useState('');
+  const [reqEmail, setReqEmail] = useState('');
+  const [reqNote, setReqNote] = useState('');
+  const [reqRole, setReqRole] = useState<UserRole>('editor');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
+
+  // Firebase Google Popup Loading
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleFirebaseGoogle = async () => {
+    setIsGoogleLoading(true);
+    setFeedback(null);
+    try {
+      const { user, error } = await signInWithGoogle();
+      if (user && user.email) {
+        const res = loginWithGoogle(user.email, user.displayName || undefined, user.photoURL || undefined);
+        if (res.success) {
+          setFeedback({ type: 'success', message: `Вітаємо, ${user.displayName || user.email}! Доступ підтверджено.` });
+          setTimeout(() => {
+            onClose();
+          }, 700);
+        } else {
+          setFeedback({ 
+            type: 'error', 
+            message: `Пошта ${user.email} не знайдена у Білому списку. Будь ласка, надішліть запит адміністратору.` 
+          });
+          setReqEmail(user.email);
+          if (user.displayName) setReqName(user.displayName);
+          setTab('request');
+        }
+      } else if (error) {
+        setFeedback({ type: 'error', message: error });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.message || 'Помилка авторизації Google' });
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handlePinLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinInput.trim()) return;
+    const { loginWithPin } = useAuthStore.getState();
+    const ok = loginWithPin(pinInput.trim());
+    if (ok) {
+      setFeedback({ type: 'success', message: 'Успішний вхід за PIN-кодом!' });
+      setTimeout(() => {
+        onClose();
+      }, 500);
+    } else {
+      setFeedback({ type: 'error', message: 'Невірний PIN-код. Зверніться до адміністратора.' });
+    }
+  };
+
+  const handleCheckEmailInWhitelist = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = emailInput.trim().toLowerCase();
+    if (!target || !target.includes('@')) {
+      setFeedback({ type: 'error', message: 'Введіть коректну адресу електронної пошти.' });
+      return;
+    }
+
+    const { whitelist } = useAuthStore.getState();
+    const entry = whitelist.find((w) => w.email.toLowerCase() === target && w.status === 'active');
+
+    if (entry) {
+      setFeedback({
+        type: 'info',
+        message: `Адресу ${target} знайдено у списку (Роль: ${entry.role === 'admin' ? 'Адміністратор' : entry.role === 'editor' ? 'Редактор' : 'Дослідник'}). Для входу натисніть кнопку "Увійти через Google" вище з цим акаунтом.`
+      });
+    } else {
+      setFeedback({
+        type: 'error',
+        message: `Адреси ${target} немає в активному списку. Заповніть форму нижче, щоб подати запит на доступ.`
+      });
+      setReqEmail(target);
+      setTab('request');
+    }
+  };
+
+  const handleSendRequest = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reqEmail.trim() || !reqEmail.includes('@')) {
+      setFeedback({ type: 'error', message: 'Вкажіть дійсну адресу електронної пошти.' });
+      return;
+    }
+    if (!reqName.trim()) {
+      setFeedback({ type: 'error', message: "Будь ласка, вкажіть ваше ім'я або родинну лінію." });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = submitAccessRequest(reqEmail, reqName, reqNote, reqRole);
+      if (res.success) {
+        setRequestSent(true);
+        setFeedback({ type: 'success', message: res.message });
+      } else {
+        setFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.message || 'Не вдалося надіслати запит.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className={`w-full max-w-lg ${theme.cardBg} border ${theme.cardBorder} rounded-2xl shadow-2xl overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]`}>
+        
+        {/* Header */}
+        <div className={`p-5 ${theme.surfaceBg} border-b ${theme.borderSubtle} flex items-center justify-between gap-3 shrink-0`}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-emerald-600 text-white flex items-center justify-center shadow-md shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className={`font-bold text-base ${theme.cardTitle}`}>
+                {tab === 'login' ? 'Вхід за Білим списком (Whitelist)' : tab === 'pin' ? 'Вхід за PIN-кодом' : 'Запит доступу до проєкту'}
+              </h3>
+              <p className="text-xs opacity-75">
+                {targetFeatureName
+                  ? `Розділ «${targetFeatureName}» доступний тільки авторизованим дослідникам`
+                  : 'Повний доступ до редагування, архівів та документів'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className={`p-2 rounded-xl text-neutral-400 hover:text-neutral-900 dark:hover:text-white ${theme.cardBgHover} transition-colors cursor-pointer`}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Public Notice Banner */}
+        <div className="px-5 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+          <Eye className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <span>
+            <strong>Публічний доступ:</strong> Дерево та Віяло відкриті для перегляду усім. Вхід потрібен для редагування та доступу до приватних розділів.
+          </span>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-black/5 dark:border-white/10 px-5 pt-3 gap-3 shrink-0">
+          <button
+            onClick={() => {
+              setTab('login');
+              setFeedback(null);
+            }}
+            className={`pb-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+              tab === 'login'
+                ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                : 'border-transparent opacity-60 hover:opacity-100'
+            }`}
+          >
+            Google Вхід
+          </button>
+          <button
+            onClick={() => {
+              setTab('pin');
+              setFeedback(null);
+            }}
+            className={`pb-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+              tab === 'pin'
+                ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                : 'border-transparent opacity-60 hover:opacity-100'
+            }`}
+          >
+            PIN-код
+          </button>
+          <button
+            onClick={() => {
+              setTab('request');
+              setFeedback(null);
+            }}
+            className={`pb-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+              tab === 'request'
+                ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                : 'border-transparent opacity-60 hover:opacity-100'
+            }`}
+          >
+            Подати запит на доступ
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
+          {feedback && (
+            <div
+              className={`p-3 rounded-xl text-xs flex items-start gap-2.5 animate-in fade-in ${
+                feedback.type === 'success'
+                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                  : feedback.type === 'error'
+                  ? 'bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300'
+                  : 'bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300'
+              }`}
+            >
+              {feedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
+              )}
+              <span className="leading-relaxed">{feedback.message}</span>
+            </div>
+          )}
+
+          {tab === 'login' ? (
+            <div className="space-y-4">
+              <div className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
+                Для підтвердження особи та прав редактора увійдіть через ваш обліковий запис Google:
+              </div>
+
+              {/* Real Google Button */}
+              <button
+                type="button"
+                onClick={handleFirebaseGoogle}
+                disabled={isGoogleLoading}
+                className={`w-full py-3 px-4 rounded-xl border ${theme.cardBorder} hover:border-emerald-500 font-semibold text-xs flex items-center justify-center gap-2.5 shadow-xs transition-all cursor-pointer bg-white text-neutral-800 hover:bg-neutral-50 disabled:opacity-50`}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                </svg>
+                <span>{isGoogleLoading ? 'Перевірка Google акаунту...' : 'Увійти через Google (Перевірка Whitelist)'}</span>
+              </button>
+
+              <div className="flex items-center gap-2 opacity-40 my-2">
+                <div className="flex-1 h-px bg-current" />
+                <span className="text-[10px] uppercase font-bold tracking-wider">Перевірити наявність пошти у списку</span>
+                <div className="flex-1 h-px bg-current" />
+              </div>
+
+              {/* Direct Email Verification Form */}
+              <form onSubmit={handleCheckEmailInWhitelist} className="space-y-2">
+                <label className="block text-xs font-semibold opacity-80">
+                  Введіть адресу електронної пошти для перевірки статусу:
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="email"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      placeholder="ваша.пошта@gmail.com"
+                      className={`w-full py-2.5 pl-9 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
+                    />
+                    <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+                  </div>
+                  <button
+                    type="submit"
+                    className={`px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0`}
+                  >
+                    <span>Перевірити</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : tab === 'pin' ? (
+            <form onSubmit={handlePinLogin} className="space-y-3">
+              <div className="text-xs opacity-75">
+                Якщо вам надано спеціальний PIN-код для перегляду розширених розділів, введіть його нижче:
+              </div>
+              <div className="relative">
+                <input
+                  type="password"
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value)}
+                  placeholder="Введіть PIN-код"
+                  className={`w-full py-2.5 pl-9 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono tracking-widest`}
+                />
+                <KeyRound className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+              >
+                <span>Увійти за PIN-кодом</span>
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSendRequest} className="space-y-3.5">
+              {requestSent ? (
+                <div className="text-center py-6 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <h4 className="font-bold text-base">Запит успішно надіслано!</h4>
+                  <p className="text-xs opacity-75 max-w-sm mx-auto">
+                    Адміністратор родоводу отримає повідомлення про ваш запит на доступ для пошти <strong>{reqEmail}</strong>.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-md cursor-pointer hover:bg-emerald-500 transition-colors mt-2"
+                  >
+                    Зрозуміло
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1 opacity-80">
+                      Ваше ім'я та родинна гілка: *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={reqName}
+                      onChange={(e) => setReqName(e.target.value)}
+                      placeholder="Олександр Коваленко (гілка з Полтавщини)"
+                      className={`w-full py-2 px-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold mb-1 opacity-80">
+                      Ваша електронна пошта: *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={reqEmail}
+                      onChange={(e) => setReqEmail(e.target.value)}
+                      placeholder="example@gmail.com"
+                      className={`w-full py-2 px-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold mb-1 opacity-80">
+                      Коментар для адміністратора:
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={reqNote}
+                      onChange={(e) => setReqNote(e.target.value)}
+                      placeholder="Я родич по лінії прадіда Івана. Хочу допомогти з наповненням дат та фотографій."
+                      className={`w-full py-2 px-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner resize-none`}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isSubmitting ? 'Надсилання...' : 'Надіслати запит адміністратору'}</span>
+                  </button>
+                </>
+              )}
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

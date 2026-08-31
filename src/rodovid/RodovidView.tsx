@@ -22,27 +22,49 @@ import { EditPersonModal } from './components/modals/EditPersonModal';
 import { EditFamilyModal } from './components/modals/EditFamilyModal';
 import { EditSourceModal } from './components/modals/EditSourceModal';
 import { GedcomModal } from './components/modals/GedcomModal';
+import { ShareTreeModal } from './components/modals/ShareTreeModal';
 import { RelationManagerModal } from '../components/Tree/RelationManagerModal';
 import { AddPersonModal } from '../components/Tree/AddPersonModal';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useUIStore } from '../stores/useUIStore';
+import { useAuthStore } from '../stores/useAuthStore';
+import { AuthModal } from '../components/AuthModal';
 import { getThemeConfig } from '../utils/theme';
+import { Globe, Shield, ArrowLeft, Download, Check, Sparkles } from 'lucide-react';
 
-export const RodovidView: React.FC = () => {
+interface RodovidViewProps {
+  customDatabase?: GenealogyDatabase;
+  isSharedViewer?: boolean;
+  sharedMeta?: {
+    title: string;
+    authorName: string;
+    updatedAt: string;
+    mode: 'readonly' | 'editable';
+    id?: string;
+  };
+  onExitShared?: () => void;
+}
+
+export const RodovidView: React.FC<RodovidViewProps> = ({
+  customDatabase,
+  isSharedViewer = false,
+  sharedMeta,
+  onExitShared
+}) => {
   const currentView = useUIStore((s) => s.rodovidView);
   const setCurrentView = useUIStore((s) => s.setRodovidView);
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
 
   const {
-    persons,
+    persons: contextPersons,
     setPersons,
-    families,
+    families: contextFamilies,
     setFamilies,
-    sources,
-    events,
-    selectedPersonId,
-    setSelectedPersonId,
+    sources: contextSources,
+    events: contextEvents,
+    selectedPersonId: contextSelectedPersonId,
+    setSelectedPersonId: contextSetSelectedPersonId,
     addPerson,
     updatePerson,
     deletePerson,
@@ -52,8 +74,62 @@ export const RodovidView: React.FC = () => {
     loadGenealogyDatabase
   } = useGenealogy();
 
+  const [localSelectedPersonId, setLocalSelectedPersonId] = useState<string | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const logout = useAuthStore((s) => s.logout);
+
+  // Read-only condition: If guest without whitelisted access or in read-only shared view
+  const isReadOnly = useMemo(() => {
+    if (isSharedViewer && sharedMeta?.mode === 'readonly') return true;
+    if (!currentUser) return true;
+    const entry = whitelist.find(
+      (w) => w.email.toLowerCase() === currentUser.email.toLowerCase() && w.status === 'active'
+    );
+    return !entry;
+  }, [isSharedViewer, sharedMeta, currentUser, whitelist]);
+
+  // If custom database is provided (e.g. shared viewer mode)
+  const persons = useMemo(() => {
+    if (customDatabase) {
+      return Object.values(customDatabase.persons || {});
+    }
+    return contextPersons;
+  }, [customDatabase, contextPersons]);
+
+  const families = useMemo(() => {
+    if (customDatabase) {
+      return customDatabase.families || {};
+    }
+    return contextFamilies;
+  }, [customDatabase, contextFamilies]);
+
+  const sources = useMemo(() => {
+    if (customDatabase) {
+      return customDatabase.sources || {};
+    }
+    return contextSources;
+  }, [customDatabase, contextSources]);
+
+  const events = useMemo(() => {
+    if (customDatabase) {
+      return customDatabase.events || {};
+    }
+    return contextEvents;
+  }, [customDatabase, contextEvents]);
+
+  const selectedPersonId = isSharedViewer 
+    ? (localSelectedPersonId || customDatabase?.rootPersonId || Object.keys(customDatabase?.persons || {})[0] || 'p1')
+    : contextSelectedPersonId;
+
+  const setSelectedPersonId = isSharedViewer ? setLocalSelectedPersonId : contextSetSelectedPersonId;
+
   // Single Source of Truth Database view
   const database: GenealogyDatabase = useMemo(() => {
+    if (customDatabase) return customDatabase;
+
     const personsMap: Record<string, Person> = {};
     persons.forEach((p) => {
       personsMap[p.id] = p;
@@ -73,7 +149,7 @@ export const RodovidView: React.FC = () => {
       events: events || {},
       lastModified: new Date().toISOString()
     };
-  }, [persons, families, sources, events, selectedPersonId]);
+  }, [customDatabase, persons, families, sources, events, selectedPersonId]);
 
   const activePersonId = useMemo(() => {
     if (selectedPersonId && database.persons[selectedPersonId]) {
@@ -94,7 +170,17 @@ export const RodovidView: React.FC = () => {
   const [editFamilyTarget, setEditFamilyTarget] = useState<string | null>(null); // 'NEW' or familyId
   const [editSourceTarget, setEditSourceTarget] = useState<string | null>(null); // 'NEW' or sourceId
   const [isGedcomModalOpen, setIsGedcomModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [kinshipInitialAId, setKinshipInitialAId] = useState<string | undefined>(undefined);
+  const [savedCopySuccess, setSavedCopySuccess] = useState(false);
+
+  const handleSaveCopyToLocal = () => {
+    if (customDatabase) {
+      loadGenealogyDatabase(customDatabase);
+      setSavedCopySuccess(true);
+      setTimeout(() => setSavedCopySuccess(false), 3500);
+    }
+  };
 
   // Handle Person CRUD
   const handleSavePerson = useCallback((person: Person) => {
@@ -167,14 +253,63 @@ export const RodovidView: React.FC = () => {
 
   return (
     <div className={`flex-1 flex flex-col h-full min-h-0 ${theme.appBg} font-sans overflow-hidden transition-colors duration-200`}>
+      {/* Shared Mode Top Notification Bar */}
+      {isSharedViewer && sharedMeta && (
+        <div className="bg-gradient-to-r from-amber-600 via-[#B88E3E] to-emerald-700 text-white px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md z-40 text-xs sm:text-sm">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <span className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+              <Globe className="w-4 h-4 text-white" />
+            </span>
+            <div className="min-w-0">
+              <div className="font-bold truncate flex items-center gap-2">
+                <span>{sharedMeta.title || 'Спільне родинне дерево'}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 font-mono font-medium">
+                  Тільки перегляд
+                </span>
+              </div>
+              <div className="text-[11px] opacity-90 truncate">
+                Дослідник: <strong>{sharedMeta.authorName || 'Головний дослідник'}</strong> • {persons.length} осіб у родинній схемі
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleSaveCopyToLocal}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-neutral-900 hover:bg-neutral-100 font-bold text-xs shadow-xs transition-colors cursor-pointer"
+              title="Зберегти це дерево як власну робочу копію"
+            >
+              {savedCopySuccess ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Download className="w-3.5 h-3.5 text-[#B88E3E]" />}
+              <span>{savedCopySuccess ? 'Збережено в кабінет!' : 'Зберегти копію собі'}</span>
+            </button>
+
+            {onExitShared && (
+              <button
+                onClick={onExitShared}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/25 hover:bg-black/40 text-white text-xs font-semibold transition-colors cursor-pointer"
+                title="Повернутися до власного проєкту"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Вийти</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Top Navigation Bar inside Rodovid */}
       <Header
         currentView={currentView}
         onViewChange={setCurrentView}
         onOpenGedcomModal={() => setIsGedcomModalOpen(true)}
         onOpenAddPersonModal={() => setEditPersonTarget('NEW')}
+        onOpenShareModal={() => setIsShareModalOpen(true)}
         databaseTitle={title}
         totalPersonsCount={persons.length}
+        isReadOnly={isReadOnly}
+        currentUser={currentUser}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onLogout={logout}
       />
 
       {/* Main View Area */}
@@ -185,14 +320,20 @@ export const RodovidView: React.FC = () => {
             activePersonId={activePersonId}
             onSelectPerson={(id) => setInspectPersonId(id)}
             onOpenAddChild={(_parentId) => {
+              if (isReadOnly) return;
               setEditPersonTarget('NEW');
             }}
             onOpenAddParent={(_childId) => {
+              if (isReadOnly) return;
               setEditPersonTarget('NEW');
             }}
             onChangeRoot={(id) => setSelectedPersonId(id)}
-            onOpenRelationManager={(id) => setRelationManagerPersonId(id)}
+            onOpenRelationManager={(id) => {
+              if (isReadOnly) return;
+              setRelationManagerPersonId(id);
+            }}
             onSwitchToFan={() => setCurrentView('fan')}
+            isReadOnly={isReadOnly}
           />
         )}
 
@@ -370,6 +511,22 @@ export const RodovidView: React.FC = () => {
         <AddPersonModal
           initialRelation={addRelation}
           onClose={() => setAddRelation(null)}
+        />
+      )}
+
+      {isShareModalOpen && (
+        <ShareTreeModal
+          isOpen={isShareModalOpen}
+          onClose={() => setIsShareModalOpen(false)}
+          database={database}
+          activePersonId={activePersonId}
+        />
+      )}
+
+      {isAuthModalOpen && (
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
         />
       )}
     </div>

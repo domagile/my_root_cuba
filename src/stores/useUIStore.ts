@@ -16,6 +16,8 @@ export interface UIState {
   accessLockConfig: AccessLockConfig;
   isMobileMenuOpen: boolean;
   isSidebarVisible: boolean;
+  isAuthModalOpen: boolean;
+  authModalFeature?: string;
   
   // Actions
   setActiveTab: (tab: string) => void;
@@ -30,6 +32,8 @@ export interface UIState {
   unlockWithPin: (pin: string) => boolean;
   lockAppSession: () => void;
   setAccessLockConfig: (config: AccessLockConfig) => void;
+  openAuthModal: (feature?: string) => void;
+  closeAuthModal: () => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -37,6 +41,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   rodovidView: 'tree',
   isMobileMenuOpen: false,
   isSidebarVisible: true,
+  isAuthModalOpen: false,
+  authModalFeature: undefined,
   
   themePalette: (() => {
     try {
@@ -131,5 +137,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       localStorage.setItem(`${STORAGE_KEY}_lockConfig`, JSON.stringify(accessLockConfig));
     } catch {}
     set({ accessLockConfig });
-  }
+  },
+
+  openAuthModal: (authModalFeature?: string) => set({ isAuthModalOpen: true, authModalFeature }),
+  closeAuthModal: () => set({ isAuthModalOpen: false, authModalFeature: undefined })
 }));

@@ -145,9 +145,33 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["year"]
+    },
+    "SharedTree": {
+      "title": "SharedTree",
+      "description": "Publicly or PIN-shared genealogy tree snapshot for family viewing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "rootPersonId": { "type": "string" },
+        "mode": { "type": "string" },
+        "isPinProtected": { "type": "boolean" },
+        "pinHash": { "type": "string" },
+        "hideLivingDates": { "type": "boolean" },
+        "personsCount": { "type": "number" }
+      },
+      "required": ["id", "title"]
     }
   },
   "firestore": {
+    "/sharedTrees/{treeId}": {
+      "schema": "SharedTree",
+      "description": "Public or shared genealogy tree document"
+    },
     "/projects/{projectId}": {
       "schema": "ProjectMeta",
       "description": "Root metadata document for the project"

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import {
   ZoomIn,
   ZoomOut,
@@ -59,6 +59,7 @@ interface TreeViewProps {
   onChangeRoot: (id: string) => void;
   onOpenRelationManager?: (personId: string) => void;
   onSwitchToFan?: () => void;
+  isReadOnly?: boolean;
 }
 
 export const TreeView: React.FC<TreeViewProps> = ({
@@ -69,7 +70,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
   onOpenAddParent,
   onChangeRoot,
   onOpenRelationManager,
-  onSwitchToFan
+  onSwitchToFan,
+  isReadOnly = false
 }) => {
   const canvasTheme = useUIStore((s) => s.treeCanvasTheme);
   const setCanvasTheme = useUIStore((s) => s.setTreeCanvasTheme);
@@ -131,68 +133,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [collapsedChildren, setCollapsedChildren] = useState<Set<string>>(new Set());
   const [hoveredPersonId, setHoveredPersonId] = useState<string | null>(null);
 
-  const toggleCollapseParents = useCallback((personId: string) => {
-    setCollapsedParents((prev) => {
-      const next = new Set(prev);
-      if (next.has(personId)) {
-        next.delete(personId);
-      } else {
-        next.add(personId);
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleCollapseSiblings = useCallback((personId: string) => {
-    const p = database.persons[personId];
-    const fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    const mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-
-    const relatedIds = [personId];
-    if (fId || mId) {
-      Object.values(database.persons).forEach((cand: any) => {
-        const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
-        const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-        if ((fId && cF === fId) || (mId && cM === mId)) {
-          relatedIds.push(cand.id);
-        }
-      });
-    }
-
-    setCollapsedSiblings((prev) => {
-      const next = new Set(prev);
-      const isCurrentlyCollapsed = next.has(personId);
-      relatedIds.forEach((id) => {
-        if (isCurrentlyCollapsed) {
-          next.delete(id);
-        } else {
-          next.add(id);
-        }
-      });
-      return next;
-    });
-  }, [database.persons, database.families]);
-
-  const toggleCollapseChildren = useCallback((personId: string) => {
-    setCollapsedChildren((prev) => {
-      const next = new Set(prev);
-      if (next.has(personId)) {
-        next.delete(personId);
-      } else {
-        next.add(personId);
-      }
-      return next;
-    });
-  }, []);
-
-  const handleExpandAll = useCallback(() => {
-    setShowParents(true);
-    setShowSiblings(true);
-    setShowDescendants(true);
-    setCollapsedParents(new Set());
-    setCollapsedSiblings(new Set());
-    setCollapsedChildren(new Set());
-  }, []);
+  // Anchor tracking: preserve viewport screen position on the person card being expanded/collapsed
+  const anchorRef = useRef<{ personId: string; screenX: number; screenY: number } | null>(null);
 
   // Compute Layout (Classic Family Pedigree with grouped spouses, siblings & orthogonal lines)
   const layout = useMemo(() => {
@@ -215,6 +157,94 @@ export const TreeView: React.FC<TreeViewProps> = ({
     collapsedSiblings,
     collapsedChildren
   ]);
+
+  const setAnchorForPerson = useCallback((personId: string) => {
+    const node = layout.nodes.find((n) => n.person.id === personId);
+    if (node) {
+      anchorRef.current = {
+        personId,
+        screenX: node.x * scale + pan.x,
+        screenY: node.y * scale + pan.y
+      };
+    }
+  }, [layout.nodes, scale, pan.x, pan.y]);
+
+  const toggleCollapseParents = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
+    setAnchorForPerson(personId);
+    setShowParents(true);
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      const shouldCollapse = isCurrentlyCollapsed !== undefined ? !isCurrentlyCollapsed : !next.has(personId);
+      if (shouldCollapse) {
+        next.add(personId);
+      } else {
+        next.delete(personId);
+        const p = database.persons[personId];
+        if (p) {
+          if (p.fatherId) next.delete(p.fatherId);
+          if (p.motherId) next.delete(p.motherId);
+        }
+      }
+      return next;
+    });
+  }, [setAnchorForPerson, database.persons]);
+
+  const toggleCollapseSiblings = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
+    setAnchorForPerson(personId);
+    setShowSiblings(true);
+    const p = database.persons[personId];
+    if (!p) return;
+    const fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    const mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+
+    const relatedIds = [personId];
+    if (p.siblingIds) {
+      p.siblingIds.forEach(id => relatedIds.push(id));
+    }
+    Object.values(database.persons).forEach((cand: any) => {
+      const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
+      const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
+      if ((fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(personId))) {
+        relatedIds.push(cand.id);
+      }
+    });
+
+    setCollapsedSiblings((prev) => {
+      const next = new Set(prev);
+      const shouldCollapse = isCurrentlyCollapsed !== undefined ? !isCurrentlyCollapsed : !next.has(personId);
+      relatedIds.forEach((id) => {
+        if (shouldCollapse) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      });
+      return next;
+    });
+  }, [setAnchorForPerson, database.persons, database.families]);
+
+  const toggleCollapseChildren = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
+    setAnchorForPerson(personId);
+    setCollapsedChildren((prev) => {
+      const next = new Set(prev);
+      const shouldCollapse = isCurrentlyCollapsed !== undefined ? !isCurrentlyCollapsed : !next.has(personId);
+      if (shouldCollapse) {
+        next.add(personId);
+      } else {
+        next.delete(personId);
+      }
+      return next;
+    });
+  }, [setAnchorForPerson]);
+
+  const handleExpandAll = useCallback(() => {
+    setShowParents(true);
+    setShowSiblings(true);
+    setShowDescendants(true);
+    setCollapsedParents(new Set());
+    setCollapsedSiblings(new Set());
+    setCollapsedChildren(new Set());
+  }, []);
 
   // Viewport Culling Bounding Box
   const visibleBounds = useMemo(() => {
@@ -347,12 +377,36 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }));
   }, []);
 
+  // When layout updates: if an anchor was set (from branch collapse/expand), adjust pan so that person remains at exact same screen coordinates!
+  useLayoutEffect(() => {
+    if (anchorRef.current) {
+      const { personId, screenX, screenY } = anchorRef.current;
+      anchorRef.current = null;
+      const newNode = layout.nodes.find((n) => n.person.id === personId);
+      if (newNode) {
+        const newPanX = screenX - newNode.x * scale;
+        const newPanY = screenY - newNode.y * scale;
+        setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
+      }
+    }
+  }, [layout, scale]);
+
+  // Center tree ONLY on initial mount or when active root person / layoutType changes
+  const isInitialMount = useRef<boolean>(true);
+  const prevRootId = useRef<string>(activePersonId);
+  const prevLayoutType = useRef<TreeLayoutType>(layoutType);
+
   useEffect(() => {
-    const timer = setTimeout(() => {
-      centerTree();
-    }, 40);
-    return () => clearTimeout(timer);
-  }, [centerTree, activePersonId]);
+    if (isInitialMount.current || prevRootId.current !== activePersonId || prevLayoutType.current !== layoutType) {
+      isInitialMount.current = false;
+      prevRootId.current = activePersonId;
+      prevLayoutType.current = layoutType;
+      const timer = setTimeout(() => {
+        centerTree();
+      }, 40);
+      return () => clearTimeout(timer);
+    }
+  }, [activePersonId, layoutType, centerTree]);
 
   const touchStateRef = useRef<{
     initialDist: number;
@@ -1047,69 +1101,52 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   onSelectPerson(p.id);
                 }}
               >
-                {/* Top Make Root Button in corner */}
-                {!isRoot && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onChangeRoot(p.id);
-                    }}
-                    className={`absolute top-2 left-2 w-5 h-5 rounded-full flex items-center justify-center transition-all cursor-pointer border shadow-xs ${
-                      isLightCanvas
-                        ? 'bg-stone-100 hover:bg-emerald-600 text-stone-600 hover:text-white border-stone-300 hover:border-emerald-500'
-                        : 'bg-[#181b1f] hover:bg-emerald-600 text-slate-400 hover:text-white border-[#30353c] hover:border-emerald-400'
-                    }`}
-                    title="Зробити коренем дерева"
-                    aria-label="Зробити коренем дерева"
-                  >
-                    <GitFork className="w-3 h-3 text-emerald-500 hover:text-white" />
-                  </button>
-                )}
-
-                {/* Top Quick-Add (+) Button in corner */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onOpenRelationManager) {
-                      onOpenRelationManager(p.id);
-                    }
-                  }}
-                  className={`absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center transition-all cursor-pointer border shadow-xs ${
-                    isLightCanvas
-                      ? 'bg-stone-100 hover:bg-emerald-600 text-stone-700 hover:text-white border-stone-300 hover:border-emerald-500'
-                      : 'bg-[#181b1f] hover:bg-emerald-600 text-slate-400 hover:text-white border-[#30353c] hover:border-emerald-400'
-                  }`}
-                  title="Додати родича (+ батьків, дітей, подружжя)"
-                  aria-label="Додати родича"
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                </button>
-
-                {/* Top Collapse/Expand Sibling Branch Badge (Сховати / розгорнути братів/сестер) */}
+                {/* Top-Left: Sibling line toggle (Розкрити / закрити лінію братів і сестер) */}
                 {node.hasSiblings && (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleCollapseSiblings(p.id);
+                      toggleCollapseSiblings(p.id, node.isSiblingsCollapsed);
                     }}
-                    className={`absolute -top-2.5 right-8 z-10 px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer border ${
+                    className={`absolute top-2 left-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer border ${
                       node.isSiblingsCollapsed
-                        ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 scale-105'
+                        ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 scale-105 ring-1 ring-amber-300/40'
                         : isLightCanvas
                         ? 'bg-[#ece5d8] hover:bg-amber-100 text-stone-800 border-[#cfc3af]'
-                        : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
+                        : 'bg-[#181b1f] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
                     }`}
                     title={
                       node.isSiblingsCollapsed
-                        ? `Розгорнути братів і сестер (непрямих предків): +${node.siblingsCount}`
-                        : `Сховати братів і сестер (непрямих предків): ${node.siblingsCount}`
+                        ? `Розгорнути лінію братів та сестер: +${node.siblingsCount}`
+                        : `Сховати лінію братів та сестер (${node.siblingsCount})`
                     }
+                    aria-label="Перемикач лінії братів та сестер"
                   >
-                    <Users className={`w-3 h-3 ${node.isSiblingsCollapsed ? 'text-white' : 'text-amber-400'}`} />
+                    <Users className={`w-3 h-3 ${node.isSiblingsCollapsed ? 'text-white' : 'text-amber-500'}`} />
                     <span>{node.isSiblingsCollapsed ? `+${node.siblingsCount}` : `${node.siblingsCount}`}</span>
+                  </button>
+                )}
+
+                {/* Top Quick-Add (+) Button in corner (Hidden in read-only mode) */}
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenRelationManager) {
+                        onOpenRelationManager(p.id);
+                      }
+                    }}
+                    className={`absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center transition-all cursor-pointer border shadow-xs ${
+                      isLightCanvas
+                        ? 'bg-stone-100 hover:bg-emerald-600 text-stone-700 hover:text-white border-stone-300 hover:border-emerald-500'
+                        : 'bg-[#181b1f] hover:bg-emerald-600 text-slate-400 hover:text-white border-[#30353c] hover:border-emerald-400'
+                    }`}
+                    title="Додати родича (+ батьків, дітей, подружжя)"
+                    aria-label="Додати родича"
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                   </button>
                 )}
 
@@ -1119,7 +1156,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleCollapseParents(p.id);
+                      toggleCollapseParents(p.id, node.isParentsCollapsed);
                     }}
                     className={`absolute -top-2.5 left-1/2 -translate-x-1/2 z-10 w-6 h-5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
                       node.isParentsCollapsed
@@ -1129,6 +1166,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
                     }`}
                     title={node.isParentsCollapsed ? `Розгорнути предків (${node.parentsCount})` : 'Сховати предків'}
+                    aria-label="Перемикач предків"
                   >
                     <ChevronUp className={`w-3 h-3 ${node.isParentsCollapsed ? 'text-white' : 'text-amber-500'}`} />
                     {node.isParentsCollapsed && <span className="text-[9px] leading-none">{node.parentsCount}</span>}
@@ -1241,7 +1279,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggleCollapseSiblings(p.id);
+                        toggleCollapseSiblings(p.id, node.isSiblingsCollapsed);
                       }}
                       className={`h-5 px-1.5 rounded-md flex items-center gap-1 text-[10px] font-medium border transition-colors cursor-pointer ${
                         node.isSiblingsCollapsed
@@ -1287,7 +1325,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleCollapseChildren(p.id);
+                      toggleCollapseChildren(p.id, node.isChildrenCollapsed);
                     }}
                     className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 z-10 w-6 h-5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
                       node.isChildrenCollapsed
@@ -1303,18 +1341,34 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   </button>
                 )}
 
-                {/* Side Expand Chevron (if ancestors/descendants continue) */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onChangeRoot(p.id);
-                  }}
-                  className="absolute -right-2 top-1/2 -translate-y-1/2 w-4 h-6 rounded-r bg-[#181b1f] hover:bg-emerald-600 text-slate-400 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all border border-l-0 border-[#383e46]"
-                  title="Зробити фокусною персоною"
-                >
-                  <ChevronRight className="w-3 h-3" />
-                </button>
+                {/* Side Expand/Collapse Siblings Button */}
+                {node.hasSiblings && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCollapseSiblings(p.id, node.isSiblingsCollapsed);
+                    }}
+                    className={`absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-5 h-7 rounded-r-lg flex items-center justify-center shadow-md transition-all cursor-pointer border border-l-0 ${
+                      node.isSiblingsCollapsed
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 opacity-100 scale-105'
+                        : isLightCanvas
+                        ? 'bg-[#ece5d8] hover:bg-emerald-600 text-stone-700 hover:text-white border-[#cfc3af] opacity-80 group-hover:opacity-100'
+                        : 'bg-[#181b1f] hover:bg-emerald-600 text-slate-300 hover:text-white border-[#383e46] opacity-80 group-hover:opacity-100'
+                    }`}
+                    title={
+                      node.isSiblingsCollapsed
+                        ? `Розгорнути лінію братів/сестер (${node.siblingsCount})`
+                        : `Сховати лінію братів/сестер (${node.siblingsCount})`
+                    }
+                  >
+                    {node.isSiblingsCollapsed ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-white" />
+                    ) : (
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
               </div>
             );
           })}

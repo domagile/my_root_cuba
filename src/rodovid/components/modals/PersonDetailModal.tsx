@@ -55,6 +55,7 @@ interface PersonDetailModalProps {
   onOpenKinshipWith?: (id: string) => void;
   onOpenRelationManager?: (id: string) => void;
   onAddRelation?: (type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling', targetPersonId: string) => void;
+  isReadOnly?: boolean;
 }
 
 export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
@@ -67,7 +68,8 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   onChangeRoot,
   onOpenKinshipWith,
   onOpenRelationManager,
-  onAddRelation
+  onAddRelation,
+  isReadOnly = false
 }) => {
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
@@ -836,23 +838,29 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onEditPerson(person.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 ${theme.surfaceBg} hover:opacity-80 text-amber-600 dark:text-amber-400 border ${theme.borderSubtle} rounded-xl transition-colors cursor-pointer font-medium`}
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-              <span>Редагувати анкету</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsConfirmDeleteOpen(true)}
-              className={`p-1.5 ${theme.textMuted} hover:text-rose-500 rounded-xl transition-colors cursor-pointer`}
-              title="Видалити особу"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
+          {!isReadOnly && (
+            <div className="flex items-center gap-2">
+              {onEditPerson && (
+                <button
+                  onClick={() => onEditPerson(person.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 ${theme.surfaceBg} hover:opacity-80 text-amber-600 dark:text-amber-400 border ${theme.borderSubtle} rounded-xl transition-colors cursor-pointer font-medium`}
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>Редагувати анкету</span>
+                </button>
+              )}
+              {onDeletePerson && (
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmDeleteOpen(true)}
+                  className={`p-1.5 ${theme.textMuted} hover:text-rose-500 rounded-xl transition-colors cursor-pointer`}
+                  title="Видалити особу"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Body Content - All Interactive Sections */}
@@ -863,14 +871,16 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               <span className={`text-[11px] font-bold ${theme.textMuted} uppercase tracking-wider block`}>
                 Біографічні та станові відомості:
               </span>
-              <button
-                type="button"
-                onClick={() => onEditPerson(person.id)}
-                className="text-[11px] text-[#B88E3E] hover:underline flex items-center gap-1 font-medium cursor-pointer"
-              >
-                <Edit2 className="w-3 h-3" />
-                <span>Змінити</span>
-              </button>
+              {!isReadOnly && onEditPerson && (
+                <button
+                  type="button"
+                  onClick={() => onEditPerson(person.id)}
+                  className="text-[11px] text-[#B88E3E] hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                >
+                  <Edit2 className="w-3 h-3" />
+                  <span>Змінити</span>
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
@@ -914,7 +924,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               <span className={`text-xs font-bold ${theme.textMuted} uppercase tracking-wider block`}>
                 Батьки:
               </span>
-              {onOpenRelationManager && (
+              {!isReadOnly && onOpenRelationManager && (
                 <button
                   type="button"
                   onClick={() => onOpenRelationManager(person.id)}
@@ -941,19 +951,21 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                     Батько
                   </span>
 
-                  {father && (
+                  {!isReadOnly && father && (
                     <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditPerson(father.id);
-                        }}
-                        className="p-1 rounded hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer"
-                        title="Редагувати дані батька"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
+                      {onEditPerson && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditPerson(father.id);
+                          }}
+                          className="p-1 rounded hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer"
+                          title="Редагувати дані батька"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={(e) => {
@@ -985,7 +997,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
                 {father ? (
                   <div
-                    onClick={() => onSelectPerson(father.id)}
+                    onClick={() => onSelectPerson && onSelectPerson(father.id)}
                     className="cursor-pointer group/link hover:opacity-90 transition-opacity"
                   >
                     <div className={`font-bold ${theme.textPrimary} text-[13px] leading-tight group-hover/link:text-blue-500 transition-colors truncate`}>
@@ -1003,29 +1015,31 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 ) : (
                   <div className="space-y-2 py-1">
                     <div className={`text-[11px] ${theme.textMuted} italic`}>Батько не вказаний</div>
-                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setParentPicker({ isOpen: true, type: 'father' });
-                          setGenderFilter('male');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
-                      >
-                        <Search className="w-3 h-3" />
-                        <span>Обрати з бази</span>
-                      </button>
-                      {onAddRelation && (
+                    {!isReadOnly && (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                         <button
                           type="button"
-                          onClick={() => onAddRelation('father', person.id)}
-                          className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                          onClick={() => {
+                            setParentPicker({ isOpen: true, type: 'father' });
+                            setGenderFilter('male');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
                         >
-                          <Plus className="w-3 h-3" />
-                          <span>Створити</span>
+                          <Search className="w-3 h-3" />
+                          <span>Обрати з бази</span>
                         </button>
-                      )}
-                    </div>
+                        {onAddRelation && (
+                          <button
+                            type="button"
+                            onClick={() => onAddRelation('father', person.id)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Створити</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1044,19 +1058,21 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                     Мати
                   </span>
 
-                  {mother && (
+                  {!isReadOnly && mother && (
                     <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditPerson(mother.id);
-                        }}
-                        className="p-1 rounded hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer"
-                        title="Редагувати дані матері"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
+                      {onEditPerson && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditPerson(mother.id);
+                          }}
+                          className="p-1 rounded hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer"
+                          title="Редагувати дані матері"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={(e) => {
@@ -1088,7 +1104,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
                 {mother ? (
                   <div
-                    onClick={() => onSelectPerson(mother.id)}
+                    onClick={() => onSelectPerson && onSelectPerson(mother.id)}
                     className="cursor-pointer group/link hover:opacity-90 transition-opacity"
                   >
                     <div className={`font-bold ${theme.textPrimary} text-[13px] leading-tight group-hover/link:text-rose-500 transition-colors truncate`}>
@@ -1106,29 +1122,31 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 ) : (
                   <div className="space-y-2 py-1">
                     <div className={`text-[11px] ${theme.textMuted} italic`}>Мати не вказана</div>
-                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setParentPicker({ isOpen: true, type: 'mother' });
-                          setGenderFilter('female');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
-                      >
-                        <Search className="w-3 h-3" />
-                        <span>Обрати з бази</span>
-                      </button>
-                      {onAddRelation && (
+                    {!isReadOnly && (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                         <button
                           type="button"
-                          onClick={() => onAddRelation('mother', person.id)}
-                          className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                          onClick={() => {
+                            setParentPicker({ isOpen: true, type: 'mother' });
+                            setGenderFilter('female');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
                         >
-                          <Plus className="w-3 h-3" />
-                          <span>Створити</span>
+                          <Search className="w-3 h-3" />
+                          <span>Обрати з бази</span>
                         </button>
-                      )}
-                    </div>
+                        {onAddRelation && (
+                          <button
+                            type="button"
+                            onClick={() => onAddRelation('mother', person.id)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Створити</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1167,45 +1185,47 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSiblingPicker({ isOpen: true, gender: 'male' });
-                    setGenderFilter('male');
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-                  title="Додати брата з бази"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>+ Брат</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSiblingPicker({ isOpen: true, gender: 'female' });
-                    setGenderFilter('female');
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-                  title="Додати сестру з бази"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>+ Сестра</span>
-                </button>
-
-                {onAddRelation && (
+              {!isReadOnly && (
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => onAddRelation('sibling', person.id)}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-                    title="Створити нову особу як брата/сестру"
+                    onClick={() => {
+                      setSiblingPicker({ isOpen: true, gender: 'male' });
+                      setGenderFilter('male');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                    title="Додати брата з бази"
                   >
-                    <UserPlus className="w-3 h-3" />
-                    <span>+ Створити</span>
+                    <Plus className="w-3 h-3" />
+                    <span>+ Брат</span>
                   </button>
-                )}
-              </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSiblingPicker({ isOpen: true, gender: 'female' });
+                      setGenderFilter('female');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                    title="Додати сестру з бази"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Сестра</span>
+                  </button>
+
+                  {onAddRelation && (
+                    <button
+                      type="button"
+                      onClick={() => onAddRelation('sibling', person.id)}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                      title="Створити нову особу як брата/сестру"
+                    >
+                      <UserPlus className="w-3 h-3" />
+                      <span>+ Створити</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {!isSiblingsCollapsed && (
@@ -1253,30 +1273,32 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                             </div>
                           </button>
 
-                          <div className="flex items-center gap-1 opacity-80 group-hover/sib:opacity-100">
-                            {onEditPerson && (
+                          {!isReadOnly && (
+                            <div className="flex items-center gap-1 opacity-80 group-hover/sib:opacity-100">
+                              {onEditPerson && (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditPerson(sib.id)}
+                                  className="p-1 rounded text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+                                  title="Редагувати анкету"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={() => onEditPerson(sib.id)}
-                                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 cursor-pointer"
-                                title="Редагувати анкету"
+                                onClick={() => {
+                                  if (confirm(`Від'єднати брата/сестру «${getFullName(sib)}»?`)) {
+                                    handleUnlinkSibling(sib.id);
+                                  }
+                                }}
+                                className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                                title="Від'єднати"
                               >
-                                <Edit2 className="w-3.5 h-3.5" />
+                                <Unlink className="w-3.5 h-3.5" />
                               </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (confirm(`Від'єднати брата/сестру «${getFullName(sib)}»?`)) {
-                                  handleUnlinkSibling(sib.id);
-                                }
-                              }}
-                              className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                              title="Від'єднати"
-                            >
-                              <Unlink className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1284,28 +1306,30 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 ) : (
                   <div className={`p-3 rounded-xl border border-dashed ${theme.borderSubtle} text-center space-y-1.5`}>
                     <p className={`text-xs ${theme.textMuted} italic`}>Братів та сестер для цієї особи ще не вказано</p>
-                    <div className="flex justify-center items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSiblingPicker({ isOpen: true, gender: 'male' });
-                          setGenderFilter('male');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-xs font-semibold cursor-pointer"
-                      >
-                        + Додати брата
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSiblingPicker({ isOpen: true, gender: 'female' });
-                          setGenderFilter('female');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold cursor-pointer"
-                      >
-                        + Додати сестру
-                      </button>
-                    </div>
+                    {!isReadOnly && (
+                      <div className="flex justify-center items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSiblingPicker({ isOpen: true, gender: 'male' });
+                            setGenderFilter('male');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-xs font-semibold cursor-pointer"
+                        >
+                          + Додати брата
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSiblingPicker({ isOpen: true, gender: 'female' });
+                            setGenderFilter('female');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold cursor-pointer"
+                        >
+                          + Додати сестру
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1322,44 +1346,46 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 </span>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSpousePicker(true);
-                    setGenderFilter(isMale ? 'female' : 'male');
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-                  title={spouseFamilies.length > 0 ? "Додати друге/наступне подружжя" : "Додати подружжя"}
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>{spouseFamilies.length > 0 ? '+ Друге подружжя' : '+ Подружжя'}</span>
-                </button>
-
-                {onAddRelation && (
+              {!isReadOnly && (
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => onAddRelation('spouse', person.id)}
+                    onClick={() => {
+                      setSpousePicker(true);
+                      setGenderFilter(isMale ? 'female' : 'male');
+                    }}
                     className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-                    title="Створити нову особу як дружину/чоловіка"
+                    title={spouseFamilies.length > 0 ? "Додати друге/наступне подружжя" : "Додати подружжя"}
                   >
-                    <UserPlus className="w-3 h-3" />
-                    <span>+ Створити подружжя</span>
+                    <Plus className="w-3 h-3" />
+                    <span>{spouseFamilies.length > 0 ? '+ Друге подружжя' : '+ Подружжя'}</span>
                   </button>
-                )}
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setChildPicker({ isOpen: true });
-                    setGenderFilter('all');
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>+ Дитина</span>
-                </button>
-              </div>
+                  {onAddRelation && (
+                    <button
+                      type="button"
+                      onClick={() => onAddRelation('spouse', person.id)}
+                      className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                      title="Створити нову особу як дружину/чоловіка"
+                    >
+                      <UserPlus className="w-3 h-3" />
+                      <span>+ Створити подружжя</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChildPicker({ isOpen: true });
+                      setGenderFilter('all');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Дитина</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Families List */}
@@ -1394,7 +1420,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                                   Помер(ла)
                                 </span>
                               )}
-                              {onEditPerson && (
+                              {!isReadOnly && onEditPerson && (
                                 <button
                                   type="button"
                                   onClick={() => onEditPerson(spouse.id)}
@@ -1404,18 +1430,20 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                                   <Edit2 className="w-3 h-3" />
                                 </button>
                               )}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (confirm(`Від'єднати подружжя «${getFullName(spouse)}»?`)) {
-                                    handleUnlinkSpouse(spouse.id, fam.id);
-                                  }
-                                }}
-                                className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                                title="Від'єднати подружжя"
-                              >
-                                <Unlink className="w-3 h-3" />
-                              </button>
+                              {!isReadOnly && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm(`Від'єднати подружжя «${getFullName(spouse)}»?`)) {
+                                      handleUnlinkSpouse(spouse.id, fam.id);
+                                    }
+                                  }}
+                                  className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                                  title="Від'єднати подружжя"
+                                >
+                                  <Unlink className="w-3 h-3" />
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <span className={`italic ${theme.textMuted}`}>Не вказано</span>
@@ -1429,20 +1457,22 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                             </span>
                           ) : null}
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setFamilyMarriageEditor({
-                                isOpen: true,
-                                familyId: fam.id,
-                                marriageDate: fam.marriageDate || '',
-                                marriagePlace: fam.marriagePlace || ''
-                              })
-                            }
-                            className="px-2 py-0.5 rounded text-[10px] text-sky-600 dark:text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 font-medium cursor-pointer"
-                          >
-                            {fam.marriageDate ? 'Ред. шлюб' : '+ Дата шлюбу'}
-                          </button>
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFamilyMarriageEditor({
+                                  isOpen: true,
+                                  familyId: fam.id,
+                                  marriageDate: fam.marriageDate || '',
+                                  marriagePlace: fam.marriagePlace || ''
+                                })
+                              }
+                              className="px-2 py-0.5 rounded text-[10px] text-sky-600 dark:text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 font-medium cursor-pointer"
+                            >
+                              {fam.marriageDate ? 'Ред. шлюб' : '+ Дата шлюбу'}
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1452,17 +1482,19 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                           <span className={`text-[11px] font-semibold ${theme.textMuted}`}>
                             Діти ({fam.children?.length || 0}):
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setChildPicker({ isOpen: true, familyId: fam.id });
-                              setGenderFilter('all');
-                            }}
-                            className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 font-medium cursor-pointer"
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Додати дитину в сім'ю</span>
-                          </button>
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setChildPicker({ isOpen: true, familyId: fam.id });
+                                setGenderFilter('all');
+                              }}
+                              className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 font-medium cursor-pointer"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Додати дитину в сім'ю</span>
+                            </button>
+                          )}
                         </div>
 
                         {(!fam.children || fam.children.length === 0) ? (
@@ -1490,30 +1522,32 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                                     </div>
                                   </button>
 
-                                  <div className="flex items-center gap-1 opacity-80 group-hover/child:opacity-100">
-                                    {onEditPerson && (
+                                  {!isReadOnly && (
+                                    <div className="flex items-center gap-1 opacity-80 group-hover/child:opacity-100">
+                                      {onEditPerson && (
+                                        <button
+                                          type="button"
+                                          onClick={() => onEditPerson(child.id)}
+                                          className="p-1 rounded text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+                                          title="Редагувати анкету дитини"
+                                        >
+                                          <Edit2 className="w-3 h-3" />
+                                        </button>
+                                      )}
                                       <button
                                         type="button"
-                                        onClick={() => onEditPerson(child.id)}
-                                        className="p-1 rounded text-amber-500 hover:bg-amber-500/10 cursor-pointer"
-                                        title="Редагувати анкету дитини"
+                                        onClick={() => {
+                                          if (confirm(`Від'єднати дитину «${getFullName(child)}»?`)) {
+                                            handleUnlinkChild(child.id, fam.id);
+                                          }
+                                        }}
+                                        className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                                        title="Від'єднати дитину"
                                       >
-                                        <Edit2 className="w-3 h-3" />
+                                        <Unlink className="w-3 h-3" />
                                       </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (confirm(`Від'єднати дитину «${getFullName(child)}»?`)) {
-                                          handleUnlinkChild(child.id, fam.id);
-                                        }
-                                      }}
-                                      className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                                      title="Від'єднати дитину"
-                                    >
-                                      <Unlink className="w-3 h-3" />
-                                    </button>
-                                  </div>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -1535,9 +1569,11 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                           <button onClick={() => onSelectPerson && onSelectPerson(s.id)} className="font-bold hover:underline cursor-pointer">
                             {getFullName(s)}
                           </button>
-                          <button onClick={() => handleUnlinkSpouse(s.id)} className="text-rose-500 p-0.5 hover:opacity-80 cursor-pointer">
-                            ✕
-                          </button>
+                          {!isReadOnly && (
+                            <button onClick={() => handleUnlinkSpouse(s.id)} className="text-rose-500 p-0.5 hover:opacity-80 cursor-pointer">
+                              ✕
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1553,9 +1589,11 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                           <button onClick={() => onSelectPerson && onSelectPerson(c.id)} className="font-bold hover:underline cursor-pointer">
                             {getFullName(c)}
                           </button>
-                          <button onClick={() => handleUnlinkChild(c.id)} className="text-rose-500 p-0.5 hover:opacity-80 cursor-pointer">
-                            ✕
-                          </button>
+                          {!isReadOnly && (
+                            <button onClick={() => handleUnlinkChild(c.id)} className="text-rose-500 p-0.5 hover:opacity-80 cursor-pointer">
+                              ✕
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1565,28 +1603,30 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             ) : (
               <div className={`p-4 rounded-2xl border border-dashed ${theme.borderSubtle} ${theme.surfaceBg} text-center space-y-2`}>
                 <p className={`text-xs ${theme.textMuted} italic`}>Сімейні зв'язки та діти ще не внесені</p>
-                <div className="flex justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSpousePicker(true);
-                      setGenderFilter(isMale ? 'female' : 'male');
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold cursor-pointer"
-                  >
-                    + Додати подружжя
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setChildPicker({ isOpen: true });
-                      setGenderFilter('all');
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold cursor-pointer"
-                  >
-                    + Додати дитину
-                  </button>
-                </div>
+                {!isReadOnly && (
+                  <div className="flex justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSpousePicker(true);
+                        setGenderFilter(isMale ? 'female' : 'male');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold cursor-pointer"
+                    >
+                      + Додати подружжя
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChildPicker({ isOpen: true });
+                        setGenderFilter('all');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold cursor-pointer"
+                    >
+                      + Додати дитину
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1601,23 +1641,25 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={() =>
-                  setEventModal({
-                    isOpen: true,
-                    type: 'Народження',
-                    date: '',
-                    year: '',
-                    placeName: '',
-                    description: ''
-                  })
-                }
-                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
-                <span>+ Додати подію</span>
-              </button>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEventModal({
+                      isOpen: true,
+                      type: 'Народження',
+                      date: '',
+                      year: '',
+                      placeName: '',
+                      description: ''
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>+ Додати подію</span>
+                </button>
+              )}
             </div>
 
             {person.events && person.events.length > 0 ? (
@@ -1637,38 +1679,40 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1 opacity-80 group-hover/ev:opacity-100">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setEventModal({
-                              isOpen: true,
-                              editIndex: idx,
-                              type: ev.type || 'Подія',
-                              date: ev.date || '',
-                              year: ev.year?.toString() || '',
-                              placeName: ev.placeName || '',
-                              description: ev.description || ''
-                            })
-                          }
-                          className="p-1 rounded text-amber-500 hover:bg-amber-500/10 cursor-pointer"
-                          title="Редагувати подію"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (confirm('Видалити цю подію?')) {
-                              handleDeleteEvent(idx);
+                      {!isReadOnly && (
+                        <div className="flex items-center gap-1 opacity-80 group-hover/ev:opacity-100">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEventModal({
+                                isOpen: true,
+                                editIndex: idx,
+                                type: ev.type || 'Подія',
+                                date: ev.date || '',
+                                year: ev.year?.toString() || '',
+                                placeName: ev.placeName || '',
+                                description: ev.description || ''
+                              })
                             }
-                          }}
-                          className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                          title="Видалити подію"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                            className="p-1 rounded text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+                            title="Редагувати подію"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm('Видалити цю подію?')) {
+                                handleDeleteEvent(idx);
+                              }
+                            }}
+                            className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                            title="Видалити подію"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {ev.placeName && (
@@ -1699,29 +1743,31 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={() =>
-                  setSourceModal({
-                    isOpen: true,
-                    mode: 'create_new',
-                    selectedExistingSourceId: '',
-                    title: '',
-                    archive: '',
-                    fund: '',
-                    inventory: '',
-                    caseNumber: '',
-                    page: '',
-                    date: '',
-                    transcription: '',
-                    url: ''
-                  })
-                }
-                className="px-2.5 py-1 rounded-lg bg-[#B88E3E]/15 hover:bg-[#B88E3E]/25 text-[#B88E3E] text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <FilePlus className="w-3 h-3" />
-                <span>+ Додати джерело</span>
-              </button>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSourceModal({
+                      isOpen: true,
+                      mode: 'create_new',
+                      selectedExistingSourceId: '',
+                      title: '',
+                      archive: '',
+                      fund: '',
+                      inventory: '',
+                      caseNumber: '',
+                      page: '',
+                      date: '',
+                      transcription: '',
+                      url: ''
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-lg bg-[#B88E3E]/15 hover:bg-[#B88E3E]/25 text-[#B88E3E] text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <FilePlus className="w-3 h-3" />
+                  <span>+ Додати джерело</span>
+                </button>
+              )}
             </div>
 
             {/* Research Notes Block */}
@@ -1732,7 +1778,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                   Дослідницькі та архівні примітки
                 </span>
 
-                {!isEditingNotes && (
+                {!isReadOnly && !isEditingNotes && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1819,14 +1865,16 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteCitation(idx)}
-                        className="p-1 rounded text-rose-500 hover:bg-rose-500/10 opacity-80 group-hover/cite:opacity-100 transition-opacity cursor-pointer"
-                        title="Від'єднати джерело"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {!isReadOnly && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCitation(idx)}
+                          className="p-1 rounded text-rose-500 hover:bg-rose-500/10 opacity-80 group-hover/cite:opacity-100 transition-opacity cursor-pointer"
+                          title="Від'єднати джерело"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1841,7 +1889,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 Життєпис / Біографічна довідка:
               </span>
 
-              {!isEditingBio && (
+              {!isReadOnly && !isEditingBio && (
                 <button
                   type="button"
                   onClick={() => {

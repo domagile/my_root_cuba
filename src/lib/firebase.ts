@@ -665,4 +665,151 @@ export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_P
   }
 }
 
+/**
+ * Shared Family Tree Cloud Data Structure
+ */
+export interface SharedTreeData {
+  id: string;
+  title: string;
+  authorName: string;
+  authorEmail?: string;
+  createdAt: string;
+  updatedAt: string;
+  rootPersonId: string;
+  mode: 'readonly' | 'editable';
+  isPinProtected: boolean;
+  pinHash?: string;
+  hideLivingDates?: boolean;
+  personsCount: number;
+  database: {
+    persons: Record<string, any>;
+    families: Record<string, any>;
+    sources?: Record<string, any>;
+    events?: Record<string, any>;
+    metricRecords?: any[];
+  };
+}
+
+/**
+ * Publishes or updates a shared tree snapshot in Firestore
+ */
+export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promise<{
+  success: boolean;
+  shareId: string;
+  shareUrl: string;
+  error?: string;
+}> {
+  try {
+    const db = getDbInstance();
+    if (!db) return { success: false, shareId: treeData.id, shareUrl: '', error: 'База Firestore недоступна' };
+
+    const cleanData: Record<string, any> = {
+      id: treeData.id,
+      title: treeData.title || 'Родинне дерево',
+      authorName: treeData.authorName || 'Дослідник родоводу',
+      authorEmail: treeData.authorEmail || '',
+      createdAt: treeData.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      rootPersonId: treeData.rootPersonId || '',
+      mode: treeData.mode || 'readonly',
+      isPinProtected: Boolean(treeData.isPinProtected),
+      pinHash: treeData.pinHash || '',
+      hideLivingDates: Boolean(treeData.hideLivingDates),
+      personsCount: Object.keys(treeData.database?.persons || {}).length,
+      database: {
+        persons: treeData.database?.persons || {},
+        families: treeData.database?.families || {},
+        sources: treeData.database?.sources || {},
+        events: treeData.database?.events || {},
+        metricRecords: treeData.database?.metricRecords || []
+      }
+    };
+
+    const docRef = doc(db, 'sharedTrees', treeData.id);
+    await setDoc(docRef, cleanData, { merge: true });
+
+    // Generate full URL
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin + window.location.pathname : '';
+    const shareUrl = `${baseUrl}?share=${treeData.id}`;
+
+    return {
+      success: true,
+      shareId: treeData.id,
+      shareUrl
+    };
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.WRITE, `sharedTrees/${treeData.id}`);
+    return {
+      success: false,
+      shareId: treeData.id,
+      shareUrl: '',
+      error: err?.message || 'Помилка публікації дерева в хмару'
+    };
+  }
+}
+
+/**
+ * Fetches a shared tree from Firestore by its shareId
+ */
+export async function getSharedTreeFromCloud(shareId: string): Promise<{
+  success: boolean;
+  data?: SharedTreeData;
+  error?: string;
+}> {
+  try {
+    const db = getDbInstance();
+    if (!db) return { success: false, error: 'База Firestore недоступна' };
+
+    const docRef = doc(db, 'sharedTrees', shareId);
+    const snap = await getDoc(docRef);
+
+    if (!snap.exists()) {
+      return { success: false, error: 'Спільне дерево не знайдено за цим посиланням або термін дії вичерпано.' };
+    }
+
+    const data = snap.data() as SharedTreeData;
+    return {
+      success: true,
+      data
+    };
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.GET, `sharedTrees/${shareId}`);
+    return {
+      success: false,
+      error: err?.message || 'Не вдалося завантажити родинне дерево'
+    };
+  }
+}
+
+/**
+ * Subscribes to real-time updates for a shared tree
+ */
+export function subscribeToSharedTreeCloud(
+  shareId: string,
+  callback: (tree: SharedTreeData | null) => void
+): () => void {
+  const db = getDbInstance();
+  if (!db) {
+    callback(null);
+    return () => {};
+  }
+
+  const docRef = doc(db, 'sharedTrees', shareId);
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (snap.exists()) {
+        callback(snap.data() as SharedTreeData);
+      } else {
+        callback(null);
+      }
+    },
+    (err) => {
+      handleFirestoreError(err, OperationType.GET, `sharedTrees/${shareId}`);
+      callback(null);
+    }
+  );
+}
+
+
 
