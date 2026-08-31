@@ -255,7 +255,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               </div>
               <h2 className={`text-xl font-extrabold ${theme.cardTitle} mt-1`}>
                 {surname} {given} {patronymic}
-                {maidenName ? ` (до шлюбу ${maidenName})` : ''}
+                {maidenName ? ` / ${maidenName}` : ''}
               </h2>
               <p className="text-[11px] text-neutral-400 font-mono">ID: {person.id}</p>
             </div>

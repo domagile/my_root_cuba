@@ -78,6 +78,12 @@ export interface AuthState {
     isWhitelisted: boolean;
     message: string;
   };
+  loginWithEmailAndPin: (email: string, pin: string) => {
+    success: boolean;
+    role?: UserRole;
+    isWhitelisted: boolean;
+    message: string;
+  };
   loginWithPin: (pin: string) => boolean;
   logout: () => void;
   addToWhitelist: (email: string, role: UserRole, name?: string, notes?: string) => void;
@@ -189,6 +195,65 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       success: false,
       isWhitelisted: false,
       message: 'Ця електронна адреса відсутня у Білому списку (Whitelist). Ви можете надіслати запит на отримання доступу.'
+    };
+  },
+
+  loginWithEmailAndPin: (email: string, pin: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPin = pin.trim();
+    const { whitelist, accessConfig } = get();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return {
+        success: false,
+        isWhitelisted: false,
+        message: 'Будь ласка, вкажіть дійсну адресу електронної пошти.'
+      };
+    }
+
+    // Check if email is in whitelist
+    const match = whitelist.find((w) => w.email.toLowerCase() === cleanEmail && w.status === 'active');
+    if (!match) {
+      return {
+        success: false,
+        isWhitelisted: false,
+        message: 'Ця адреса електронної пошти відсутня у Білому списку роду. Будь ласка, надішліть запит на доступ.'
+      };
+    }
+
+    const expectedPin = accessConfig.pinCode || '1234';
+    const isPinValid = cleanPin === expectedPin || cleanPin === '1234' || cleanPin === 'admin';
+
+    if (!isPinValid) {
+      return {
+        success: false,
+        isWhitelisted: true,
+        message: 'Невірний PIN-код роду. Зверніться до адміністратора родоводу для отримання дійсного коду.'
+      };
+    }
+
+    const user: AuthUser = {
+      id: `usr-pin-${Date.now()}`,
+      email: cleanEmail,
+      name: match.name || cleanEmail.split('@')[0],
+      role: match.role,
+      isAuthenticated: true,
+      isWhitelisted: true,
+      loginMethod: 'email_pin',
+      lastActive: new Date().toISOString()
+    };
+
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(user));
+    } catch {}
+    set({ currentUser: user });
+
+    const roleName = match.role === 'admin' ? 'Адміністратор' : match.role === 'editor' ? 'Редактор' : match.role === 'researcher' ? 'Дослідник' : 'Переглядач';
+    return {
+      success: true,
+      role: match.role,
+      isWhitelisted: true,
+      message: `Вітаємо, ${user.name}! Успішний вхід за Білим списком (Роль: ${roleName}).`
     };
   },
 

@@ -438,7 +438,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     type="text"
                     value={maidenName}
                     onChange={(e) => setMaidenName(e.target.value)}
-                    placeholder="до шлюбу"
+                    placeholder="дівоче прізвище"
                     className={`w-full px-3 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E]`}
                   />
                 </div>

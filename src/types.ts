@@ -527,7 +527,7 @@ export interface AuthUser {
   role: UserRole;
   isAuthenticated: boolean;
   isWhitelisted: boolean;
-  loginMethod: 'google' | 'pin' | 'demo';
+  loginMethod: 'google' | 'email_pin' | 'pin' | 'demo';
   lastActive?: string;
 }
 

@@ -9,7 +9,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
-import { calculateKinship, getFullName } from '../../utils/relationship';
+import { calculateKinship, getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
 
@@ -28,10 +28,12 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
 
-  const personKeys = Object.keys(database.persons);
-  const allPersons = Object.values(database.persons) as Person[];
-  const [personAId, setPersonAId] = useState<string>(initialPersonAId || personKeys[0] || '');
-  const [personBId, setPersonBId] = useState<string>(personKeys[1] || personKeys[0] || '');
+  const allPersons = useMemo(() => {
+    return sortPersonsBySurnameAndBirthDesc(Object.values(database.persons) as Person[]);
+  }, [database.persons]);
+
+  const [personAId, setPersonAId] = useState<string>(initialPersonAId || allPersons[0]?.id || '');
+  const [personBId, setPersonBId] = useState<string>(allPersons[1]?.id || allPersons[0]?.id || '');
 
   const result = useMemo(() => {
     return calculateKinship(database, personAId, personBId);

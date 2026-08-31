@@ -48,7 +48,7 @@ import {
   CLASSIC_CARD_WIDTH,
   CLASSIC_CARD_HEIGHT
 } from '../../utils/treeLayout';
-import { getFullName } from '../../utils/relationship';
+import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, getPrivacyLifespan, isUserWhitelisted } from '../../utils/privacy';
@@ -751,7 +751,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
               onChange={(e) => onChangeRoot(e.target.value)}
               className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-md px-2.5 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[210px] truncate cursor-pointer shadow-xs"
             >
-              {(Object.values(database.persons) as Person[]).map((p) => (
+              {sortPersonsBySurnameAndBirthDesc(Object.values(database.persons) as Person[]).map((p) => (
                 <option key={p.id} value={p.id}>
                   {getFullName(p)} {p.birthYear ? `(${p.birthYear})` : ''}
                 </option>
@@ -1299,12 +1299,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     )}
                   </div>
 
-                  {/* Spouse Marriage Order & Status Indicator */}
-                  {node.isSpouseNode && (
+                  {/* Spouse Status Indicator (if divorced or widowed) */}
+                  {node.isSpouseNode && (node.marriageStatus === 'Divorced' || node.marriageStatus === 'Widowed') && (
                     <div className="flex items-center justify-center gap-1 mt-1 flex-wrap">
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-950/80 border border-purple-700/60 text-purple-200">
-                        {node.marriageOrder ? `${node.marriageOrder}-й шлюб` : 'Подружжя'}
-                      </span>
                       {node.marriageStatus === 'Divorced' && (
                         <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-rose-950/80 border border-rose-800 text-rose-300">
                           💔 Розлучення

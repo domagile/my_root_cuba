@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, HeartHandshake, Save, Plus } from 'lucide-react';
 import { GenealogyDatabase, Family, Person } from '../../types/genealogy';
-import { getFullName } from '../../utils/relationship';
+import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
 
 interface EditFamilyModalProps {
   familyId: string | null;
@@ -62,8 +62,8 @@ export const EditFamilyModal: React.FC<EditFamilyModalProps> = ({
   };
 
   const allPersons = Object.values(database.persons) as Person[];
-  const menList = allPersons.filter((p) => p.gender === 'M' || p.gender === 'U');
-  const womenList = allPersons.filter((p) => p.gender === 'F' || p.gender === 'U');
+  const menList = sortPersonsBySurnameAndBirthDesc(allPersons.filter((p) => p.gender === 'M' || p.gender === 'U' || p.gender === 'male'));
+  const womenList = sortPersonsBySurnameAndBirthDesc(allPersons.filter((p) => p.gender === 'F' || p.gender === 'U' || p.gender === 'female'));
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">

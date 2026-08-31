@@ -800,6 +800,37 @@ export const SettingsView: React.FC = () => {
               </div>
             </div>
 
+            {/* Family PIN Code Configuration for Whitelist Users */}
+            <div className="p-4 rounded-xl bg-[#B88E3E]/10 border border-[#B88E3E]/30 space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-[#B88E3E]" />
+                    <span className={`text-xs font-bold ${theme.cardTitle}`}>
+                      Спільний сімейний PIN-код роду (Швидкий вхід за поштою)
+                    </span>
+                  </div>
+                  <p className={`text-[11px] ${theme.cardSubtext}`}>
+                    Родичі з Білого списку можуть увійти за своєю поштою та цим PIN-кодом без авторизації в Google.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={accessConfig.pinCode || '1234'}
+                    onChange={(e) => setAccessConfig({ ...accessConfig, pinCode: e.target.value })}
+                    maxLength={12}
+                    className={`w-32 px-3 py-1.5 rounded-lg text-center font-mono text-sm font-bold tracking-widest border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E] shadow-inner`}
+                    placeholder="1234"
+                  />
+                  <span className="text-[11px] font-mono text-[#B88E3E] bg-[#B88E3E]/20 px-2 py-1 rounded font-bold shrink-0">
+                    PIN роду
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* Email Notification Dispatch Settings for Admin */}
             <div className="p-3.5 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-2.5">
               <div className="flex items-center justify-between">

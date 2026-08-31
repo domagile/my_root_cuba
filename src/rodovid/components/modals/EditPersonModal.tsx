@@ -6,7 +6,7 @@
 import React, { useState, useMemo } from 'react';
 import { X, Save, User, Users } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
-import { getFullName } from '../../utils/relationship';
+import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
 
 interface EditPersonModalProps {
   database: GenealogyDatabase;
@@ -50,9 +50,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
 
   // Available fathers and mothers lists
   const availablePersons = useMemo(() => {
-    return Object.values(database.persons)
-      .filter((p) => !personId || p.id !== personId)
-      .sort((a, b) => getFullName(a).localeCompare(getFullName(b)));
+    const unselected = Object.values(database.persons).filter((p) => !personId || p.id !== personId);
+    return sortPersonsBySurnameAndBirthDesc(unselected as Person[]);
   }, [database.persons, personId]);
 
   const availableFathers = useMemo(() => {
@@ -192,7 +191,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Дівоче прізвище / до шлюбу
+                Дівоче прізвище
               </label>
               <input
                 type="text"

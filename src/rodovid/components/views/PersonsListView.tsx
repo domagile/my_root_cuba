@@ -314,7 +314,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                               )}
                             </div>
                             <div className={`text-[10px] ${theme.textMuted} font-mono`}>
-                              {isMasked ? '🔒 Конфіденційна жива особа' : `ID: ${p.id}${(p.name?.maidenName || p.maidenName) ? ` • до шлюбу ${p.name?.maidenName || p.maidenName}` : ''}`}
+                              {isMasked ? '🔒 Конфіденційна жива особа' : `ID: ${p.id}${(p.name?.maidenName || p.maidenName) ? ` • / ${p.name?.maidenName || p.maidenName}` : ''}`}
                             </div>
                           </div>
                         </div>
@@ -485,7 +485,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       </h3>
                       {!isMasked && (p.name?.maidenName || p.maidenName) && (
                         <p className={`text-[11px] ${theme.textMuted} truncate`}>
-                          до шлюбу {p.name?.maidenName || p.maidenName}
+                          / {p.name?.maidenName || p.maidenName}
                         </p>
                       )}
                       <div className={`flex items-center gap-1.5 text-xs ${theme.textMuted} font-mono mt-1`}>

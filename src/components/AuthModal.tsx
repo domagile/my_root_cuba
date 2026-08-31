@@ -37,6 +37,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const {
     loginWithGoogle,
+    loginWithEmailAndPin,
+    loginWithPin,
     submitAccessRequest,
     whitelist,
     currentUser
@@ -88,6 +90,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setFeedback({ type: 'error', message: err?.message || 'Помилка авторизації Google' });
     } finally {
       setIsGoogleLoading(false);
+    }
+  };
+
+  const handleEmailAndPinLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetEmail = emailInput.trim();
+    const targetPin = pinInput.trim();
+    if (!targetEmail || !targetEmail.includes('@')) {
+      setFeedback({ type: 'error', message: 'Введіть коректну адресу електронної пошти.' });
+      return;
+    }
+    if (!targetPin) {
+      setFeedback({ type: 'error', message: 'Введіть сімейний PIN-код роду.' });
+      return;
+    }
+
+    const res = loginWithEmailAndPin(targetEmail, targetPin);
+    if (res.success) {
+      setFeedback({ type: 'success', message: res.message });
+      setTimeout(() => {
+        onClose();
+      }, 700);
+    } else {
+      setFeedback({ type: 'error', message: res.message });
+      if (!res.isWhitelisted) {
+        setReqEmail(targetEmail);
+        setTab('request');
+      }
     }
   };
 
@@ -262,8 +292,55 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           {tab === 'login' ? (
             <div className="space-y-4">
-              <div className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
-                Для підтвердження особи та прав редактора увійдіть через ваш обліковий запис Google:
+              {/* Option 2: Email + PIN Code Login for Whitelisted Users */}
+              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-[#B88E3E]">
+                  <KeyRound className="w-4 h-4" />
+                  <span>Швидкий вхід за Email та PIN-кодом</span>
+                </div>
+                <p className="text-[11px] opacity-80 leading-tight">
+                  Для родичів з Білого списку: введіть вашу пошту та сімейний PIN-код (без необхідності Google входу).
+                </p>
+
+                <form onSubmit={handleEmailAndPinLogin} className="space-y-2.5">
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      placeholder="ваша.пошта@gmail.com"
+                      className={`w-full py-2 pl-9 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
+                      required
+                    />
+                    <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type="password"
+                      value={pinInput}
+                      onChange={(e) => setPinInput(e.target.value)}
+                      placeholder="Сімейний PIN-код"
+                      className={`w-full py-2 pl-9 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono tracking-widest`}
+                      required
+                    />
+                    <KeyRound className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 rounded-xl bg-[#B88E3E] hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Увійти за Email + PIN</span>
+                  </button>
+                </form>
+              </div>
+
+              <div className="flex items-center gap-2 opacity-40 my-1">
+                <div className="flex-1 h-px bg-current" />
+                <span className="text-[10px] uppercase font-bold tracking-wider">або в 1 клік через Google</span>
+                <div className="flex-1 h-px bg-current" />
               </div>
 
               {/* Real Google Button */}
@@ -271,7 +348,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 type="button"
                 onClick={handleFirebaseGoogle}
                 disabled={isGoogleLoading}
-                className={`w-full py-3 px-4 rounded-xl border ${theme.cardBorder} hover:border-emerald-500 font-semibold text-xs flex items-center justify-center gap-2.5 shadow-xs transition-all cursor-pointer bg-white text-neutral-800 hover:bg-neutral-50 disabled:opacity-50`}
+                className={`w-full py-2.5 px-4 rounded-xl border ${theme.cardBorder} hover:border-emerald-500 font-semibold text-xs flex items-center justify-center gap-2.5 shadow-xs transition-all cursor-pointer bg-white text-neutral-800 hover:bg-neutral-50 disabled:opacity-50`}
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
@@ -279,40 +356,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
                   <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
                 </svg>
-                <span>{isGoogleLoading ? 'Перевірка Google акаунту...' : 'Увійти через Google (Перевірка Whitelist)'}</span>
+                <span>{isGoogleLoading ? 'Перевірка Google акаунту...' : 'Увійти через Google'}</span>
               </button>
-
-              <div className="flex items-center gap-2 opacity-40 my-2">
-                <div className="flex-1 h-px bg-current" />
-                <span className="text-[10px] uppercase font-bold tracking-wider">Перевірити наявність пошти у списку</span>
-                <div className="flex-1 h-px bg-current" />
-              </div>
-
-              {/* Direct Email Verification Form */}
-              <form onSubmit={handleCheckEmailInWhitelist} className="space-y-2">
-                <label className="block text-xs font-semibold opacity-80">
-                  Введіть адресу електронної пошти для перевірки статусу:
-                </label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="email"
-                      value={emailInput}
-                      onChange={(e) => setEmailInput(e.target.value)}
-                      placeholder="ваша.пошта@gmail.com"
-                      className={`w-full py-2.5 pl-9 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
-                    />
-                    <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
-                  </div>
-                  <button
-                    type="submit"
-                    className={`px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0`}
-                  >
-                    <span>Перевірити</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </form>
             </div>
           ) : tab === 'pin' ? (
             <form onSubmit={handlePinLogin} className="space-y-3">

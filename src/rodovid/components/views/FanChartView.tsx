@@ -26,7 +26,7 @@ import {
   FanChartClan,
   getMaxAncestorGenerations
 } from '../../utils/treeLayout';
-import { getFullName } from '../../utils/relationship';
+import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
@@ -666,7 +666,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               onChange={(e) => onChangeRoot(e.target.value)}
               className={`${theme.surfaceBg} ${theme.textPrimary} text-xs border ${theme.borderSubtle} rounded-md px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[190px] truncate cursor-pointer`}
             >
-              {(Object.values(database.persons) as Person[]).map((p) => (
+              {sortPersonsBySurnameAndBirthDesc(Object.values(database.persons) as Person[]).map((p) => (
                 <option
                   key={p.id}
                   value={p.id}

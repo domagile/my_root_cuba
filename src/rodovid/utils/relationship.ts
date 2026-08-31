@@ -14,9 +14,40 @@ export function getFullName(person?: Person | null): string {
   const parts = [surname, given, patronymic].filter(Boolean);
   const isFemale = person.gender === 'female' || person.gender === 'F';
   if (maiden && isFemale) {
-    return `${parts.join(' ')} (до шлюбу ${maiden})`;
+    return `${parts.join(' ')} / ${maiden}`;
   }
   return parts.join(' ') || 'Без імені';
+}
+
+export function getPersonBirthYearNum(p?: Person | null): number {
+  if (!p) return -999999;
+  if (p.birthYear && !isNaN(Number(p.birthYear))) {
+    return Number(p.birthYear);
+  }
+  if (p.birthDate) {
+    const m = String(p.birthDate).match(/\b(1\d{3}|20\d{2})\b/);
+    if (m) return parseInt(m[1], 10);
+  }
+  return -999999;
+}
+
+export function sortPersonsBySurnameAndBirthDesc(persons: Person[]): Person[] {
+  return [...persons].sort((a, b) => {
+    const surnameA = (a.name?.surname || a.lastName || '').trim();
+    const surnameB = (b.name?.surname || b.lastName || '').trim();
+    const surnameCmp = surnameA.localeCompare(surnameB, 'uk', { sensitivity: 'base' });
+    if (surnameCmp !== 0) return surnameCmp;
+
+    // By birth year descending (youngest / most recently born on top)
+    const yearA = getPersonBirthYearNum(a);
+    const yearB = getPersonBirthYearNum(b);
+    if (yearA !== yearB) return yearB - yearA;
+
+    // By given name
+    const givenA = (a.name?.given || a.firstName || '').trim();
+    const givenB = (b.name?.given || b.firstName || '').trim();
+    return givenA.localeCompare(givenB, 'uk', { sensitivity: 'base' });
+  });
 }
 
 export function getPersonFatherId(person: Person, database: GenealogyDatabase): string | undefined {
