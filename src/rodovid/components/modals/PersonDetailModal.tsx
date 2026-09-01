@@ -134,6 +134,8 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
     isOpen: boolean;
     mode: 'link_existing' | 'create_new';
     selectedExistingSourceId: string;
+    customTitle?: string;
+    customDescription?: string;
     title: string;
     archive: string;
     fund: string;
@@ -254,29 +256,85 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const handleUnlinkParent = (parentType: 'father' | 'mother') => {
     if (parentType === 'father') {
       const formerId = person.fatherId || parentFamily?.husbandId;
-      updatePerson({
+      const updatedPerson: Person = {
         ...person,
         fatherId: undefined
+      };
+
+      if (parentFamily) {
+        const fam = effectiveDb.families[parentFamily.id] || families?.[parentFamily.id];
+        if (fam) {
+          if (fam.wifeId) {
+            updatedPerson.motherId = updatedPerson.motherId || fam.wifeId;
+          }
+          updatedPerson.parentFamilyId = undefined;
+          saveFamily({
+            ...fam,
+            children: (fam.children || []).filter((c) => c.personId !== person.id)
+          });
+        }
+      }
+
+      Object.values(effectiveDb.families || {}).forEach((f) => {
+        if (f.husbandId === formerId && f.children?.some((c) => c.personId === person.id)) {
+          saveFamily({
+            ...f,
+            children: f.children.filter((c) => c.personId !== person.id)
+          });
+        }
       });
-      if (formerId && (effectiveDb.persons[formerId] || persons.find((p) => p.id === formerId))) {
-        const former = effectiveDb.persons[formerId] || persons.find((p) => p.id === formerId)!;
-        updatePerson({
-          ...former,
-          childrenIds: (former.childrenIds || []).filter((cid) => cid !== person.id)
-        });
+
+      updatePerson(updatedPerson);
+
+      if (formerId) {
+        const former = effectiveDb.persons[formerId] || persons.find((p) => p.id === formerId);
+        if (former) {
+          updatePerson({
+            ...former,
+            childrenIds: (former.childrenIds || []).filter((cid) => cid !== person.id)
+          });
+        }
       }
     } else {
       const formerId = person.motherId || parentFamily?.wifeId;
-      updatePerson({
+      const updatedPerson: Person = {
         ...person,
         motherId: undefined
+      };
+
+      if (parentFamily) {
+        const fam = effectiveDb.families[parentFamily.id] || families?.[parentFamily.id];
+        if (fam) {
+          if (fam.husbandId) {
+            updatedPerson.fatherId = updatedPerson.fatherId || fam.husbandId;
+          }
+          updatedPerson.parentFamilyId = undefined;
+          saveFamily({
+            ...fam,
+            children: (fam.children || []).filter((c) => c.personId !== person.id)
+          });
+        }
+      }
+
+      Object.values(effectiveDb.families || {}).forEach((f) => {
+        if (f.wifeId === formerId && f.children?.some((c) => c.personId === person.id)) {
+          saveFamily({
+            ...f,
+            children: f.children.filter((c) => c.personId !== person.id)
+          });
+        }
       });
-      if (formerId && (effectiveDb.persons[formerId] || persons.find((p) => p.id === formerId))) {
-        const former = effectiveDb.persons[formerId] || persons.find((p) => p.id === formerId)!;
-        updatePerson({
-          ...former,
-          childrenIds: (former.childrenIds || []).filter((cid) => cid !== person.id)
-        });
+
+      updatePerson(updatedPerson);
+
+      if (formerId) {
+        const former = effectiveDb.persons[formerId] || persons.find((p) => p.id === formerId);
+        if (former) {
+          updatePerson({
+            ...former,
+            childrenIds: (former.childrenIds || []).filter((cid) => cid !== person.id)
+          });
+        }
       }
     }
   };
@@ -634,14 +692,34 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
     const currentSourceIds = Array.from(new Set([...(person.sourceIds || [])]));
 
     if (sourceModal.mode === 'link_existing' && sourceModal.selectedExistingSourceId) {
-      currentSourceIds.push(sourceModal.selectedExistingSourceId);
-      const existingSrc = database.sources[sourceModal.selectedExistingSourceId] || sources?.[sourceModal.selectedExistingSourceId];
-      if (existingSrc) {
-        currentCitations.push({
-          sourceId: existingSrc.id,
+      if (sourceModal.selectedExistingSourceId === 'custom') {
+        const customTitle = sourceModal.customTitle?.trim() || 'Власне джерело';
+        const newSourceId = `S${String(Date.now()).slice(-4)}${Math.floor(Math.random() * 100)}`;
+        const newSource: Source = {
+          id: newSourceId,
+          title: customTitle,
+          transcription: sourceModal.customDescription?.trim() || undefined,
           page: sourceModal.page.trim() || undefined,
-          citation: `${existingSrc.title || 'Архівне джерело'}${sourceModal.page ? ` (Арк./стор. ${sourceModal.page})` : ''}`
+          tags: ['власне']
+        };
+
+        saveSource(newSource);
+        currentSourceIds.push(newSourceId);
+        currentCitations.push({
+          sourceId: newSourceId,
+          page: sourceModal.page.trim() || undefined,
+          citation: `${customTitle}${sourceModal.page.trim() ? ` (Арк./стор. ${sourceModal.page.trim()})` : ''}`
         });
+      } else {
+        currentSourceIds.push(sourceModal.selectedExistingSourceId);
+        const existingSrc = database.sources[sourceModal.selectedExistingSourceId] || sources?.[sourceModal.selectedExistingSourceId];
+        if (existingSrc) {
+          currentCitations.push({
+            sourceId: existingSrc.id,
+            page: sourceModal.page.trim() || undefined,
+            citation: `${existingSrc.title || 'Архівне джерело'}${sourceModal.page ? ` (Арк./стор. ${sourceModal.page})` : ''}`
+          });
+        }
       }
     } else if (sourceModal.mode === 'create_new') {
       const newSourceId = `S${String(Date.now()).slice(-4)}`;
@@ -1128,9 +1206,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (confirm(`Від'єднати батька «${getFullName(father)}»?`)) {
-                            handleUnlinkParent('father');
-                          }
+                          handleUnlinkParent('father');
                         }}
                         className="p-1 rounded hover:bg-rose-500/10 text-rose-500 transition-colors cursor-pointer"
                         title="Від'єднати батька"
@@ -1235,9 +1311,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (confirm(`Від'єднати матір «${getFullName(mother)}»?`)) {
-                            handleUnlinkParent('mother');
-                          }
+                          handleUnlinkParent('mother');
                         }}
                         className="p-1 rounded hover:bg-rose-500/10 text-rose-500 transition-colors cursor-pointer"
                         title="Від'єднати матір"
@@ -1434,9 +1508,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (confirm(`Від'єднати брата/сестру «${getFullName(sib)}»?`)) {
-                                    handleUnlinkSibling(sib.id);
-                                  }
+                                  handleUnlinkSibling(sib.id);
                                 }}
                                 className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
                                 title="Від'єднати"
@@ -1580,9 +1652,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    if (confirm(`Від'єднати подружжя «${getFullName(spouse)}»?`)) {
-                                      handleUnlinkSpouse(spouse.id, fam.id);
-                                    }
+                                    handleUnlinkSpouse(spouse.id, fam.id);
                                   }}
                                   className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
                                   title="Від'єднати подружжя"
@@ -1683,9 +1753,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          if (confirm(`Від'єднати дитину «${getFullName(child)}»?`)) {
-                                            handleUnlinkChild(child.id, fam.id);
-                                          }
+                                          handleUnlinkChild(child.id, fam.id);
                                         }}
                                         className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
                                         title="Від'єднати дитину"
@@ -1848,9 +1916,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                           <button
                             type="button"
                             onClick={() => {
-                              if (confirm('Видалити цю подію?')) {
-                                handleDeleteEvent(idx);
-                              }
+                              handleDeleteEvent(idx);
                             }}
                             className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer"
                             title="Видалити подію"
@@ -2454,25 +2520,55 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
             <div className="space-y-3 text-xs overflow-y-auto flex-1 pr-1 scrollbar-thin">
               {sourceModal.mode === 'link_existing' ? (
-                <div>
-                  <label className="block font-semibold mb-1 opacity-70">Оберіть джерело з бази:</label>
-                  {Object.keys(database.sources || {}).length === 0 ? (
-                    <div className="p-4 text-center opacity-60 italic">Немає збережених джерел. Створіть нове.</div>
-                  ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block font-semibold mb-1 opacity-70">Оберіть джерело з бази:</label>
                     <select
                       value={sourceModal.selectedExistingSourceId}
                       onChange={(e) => setSourceModal({ ...sourceModal, selectedExistingSourceId: e.target.value })}
                       className={`w-full p-2.5 rounded-xl border ${theme.borderSubtle} ${theme.surfaceBg} ${theme.textPrimary}`}
                     >
                       <option value="">-- Оберіть джерело --</option>
-                      {Object.values(database.sources).map((src) => (
+                      <option value="custom">✏️ Свій варіант (вказати опис / джерело вручну)</option>
+                      {Object.values(database.sources || {}).map((src) => (
                         <option key={src.id} value={src.id}>
                           {src.title} {src.archive ? `(${src.archive})` : ''}
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  {sourceModal.selectedExistingSourceId === 'custom' && (
+                    <div className="p-3.5 rounded-xl bg-[#B88E3E]/10 border border-[#B88E3E]/30 space-y-3 animate-in fade-in zoom-in-95 duration-150">
+                      <div>
+                        <label className="block font-bold mb-1 text-[#B88E3E]">
+                          Власна назва / тип джерела: <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={sourceModal.customTitle || ''}
+                          onChange={(e) => setSourceModal({ ...sourceModal, customTitle: e.target.value })}
+                          placeholder="Напр. Спогади дідуся, довідка з РАЦС, родинний щоденник..."
+                          className={`w-full p-2.5 rounded-xl border ${theme.borderSubtle} ${theme.surfaceBg} ${theme.textPrimary} focus:ring-2 focus:ring-[#B88E3E] outline-none`}
+                          autoFocus
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold mb-1 opacity-75">
+                          Опис джерела / додаткові відомості:
+                        </label>
+                        <textarea
+                          value={sourceModal.customDescription || ''}
+                          onChange={(e) => setSourceModal({ ...sourceModal, customDescription: e.target.value })}
+                          rows={2}
+                          placeholder="Опишіть джерело, цитату або де зберігається оригінал..."
+                          className={`w-full p-2.5 rounded-xl border ${theme.borderSubtle} ${theme.surfaceBg} ${theme.textPrimary} focus:ring-2 focus:ring-[#B88E3E] outline-none`}
+                        />
+                      </div>
+                    </div>
                   )}
-                  <div className="mt-3">
+
+                  <div>
                     <label className="block font-semibold mb-1 opacity-70">Аркуш / Сторінка / Номер запису:</label>
                     <input
                       type="text"

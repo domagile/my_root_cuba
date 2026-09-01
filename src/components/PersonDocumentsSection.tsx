@@ -220,7 +220,6 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
   };
 
   const handleDeleteDocument = (docId: string) => {
-    if (!confirm('Видалити цей документ з картки особи?')) return;
     const updatedDocs = (person.documents || []).filter((d) => d.id !== docId);
     onUpdatePerson({
       ...person,
