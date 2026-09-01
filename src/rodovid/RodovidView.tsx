@@ -371,71 +371,85 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         )}
 
         {currentView === 'persons' && (
-          <PersonsListView
-            database={database}
-            isReadOnly={isReadOnly}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-            onEditPerson={(id) => setEditPersonTarget(id)}
-            onDeletePerson={handleDeletePerson}
-            onOpenAddPerson={() => setEditPersonTarget('NEW')}
-            onChangeRoot={(id) => {
-              setSelectedPersonId(id);
-              setCurrentView('tree');
-            }}
-            onOpenKinshipWith={handleOpenKinshipWith}
-          />
+          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+            <PersonsListView
+              database={database}
+              isReadOnly={isReadOnly}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+              onEditPerson={(id) => setEditPersonTarget(id)}
+              onDeletePerson={handleDeletePerson}
+              onOpenAddPerson={() => setEditPersonTarget('NEW')}
+              onChangeRoot={(id) => {
+                setSelectedPersonId(id);
+                setCurrentView('tree');
+              }}
+              onOpenKinshipWith={handleOpenKinshipWith}
+            />
+          </div>
         )}
 
         {currentView === 'families' && (
-          <FamiliesListView
-            database={database}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-            onEditFamily={(id) => setEditFamilyTarget(id)}
-            onDeleteFamily={handleDeleteFamily}
-            onOpenAddFamily={() => setEditFamilyTarget('NEW')}
-            onChangeRoot={(id) => {
-              setSelectedPersonId(id);
-              setCurrentView('tree');
-            }}
-          />
+          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+            <FamiliesListView
+              database={database}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+              onEditFamily={(id) => setEditFamilyTarget(id)}
+              onDeleteFamily={handleDeleteFamily}
+              onOpenAddFamily={() => setEditFamilyTarget('NEW')}
+              onChangeRoot={(id) => {
+                setSelectedPersonId(id);
+                setCurrentView('tree');
+              }}
+            />
+          </div>
         )}
 
         {currentView === 'timeline' && (
-          <EventsTimelineView
-            database={database}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-          />
+          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+            <EventsTimelineView
+              database={database}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+            />
+          </div>
         )}
 
         {(currentView === 'map' || currentView === 'places') && (
-          <PlacesMapView
-            database={database}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-          />
+          <div className="h-full w-full overflow-hidden">
+            <PlacesMapView
+              database={database}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+            />
+          </div>
         )}
 
         {currentView === 'sources' && (
-          <SourcesView
-            database={database}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-            onOpenAddSource={() => setEditSourceTarget('NEW')}
-            onEditSource={(id) => setEditSourceTarget(id)}
-          />
+          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+            <SourcesView
+              database={database}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+              onOpenAddSource={() => setEditSourceTarget('NEW')}
+              onEditSource={(id) => setEditSourceTarget(id)}
+            />
+          </div>
         )}
 
         {(currentView === 'calculator' || currentView === 'kinship') && (
-          <KinshipCalculatorView
-            database={database}
-            initialPersonAId={kinshipInitialAId || activePersonId}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-          />
+          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+            <KinshipCalculatorView
+              database={database}
+              initialPersonAId={kinshipInitialAId || activePersonId}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+            />
+          </div>
         )}
 
         {(currentView === 'statistics' || currentView === 'stats') && (
-          <StatisticsView
-            database={database}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-          />
+          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+            <StatisticsView
+              database={database}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+            />
+          </div>
         )}
 
         {currentView === 'reports' && (

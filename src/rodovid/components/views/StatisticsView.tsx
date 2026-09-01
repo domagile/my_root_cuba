@@ -8,6 +8,7 @@ import { BarChart3, Users, Heart, Calendar, Trophy, PieChart } from 'lucide-reac
 import { GenealogyDatabase, Person, Family } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
+import { normalizeUkrainianSurnameGender } from '../../../utils/ukrainianPhonetics';
 
 interface StatisticsViewProps {
   database: GenealogyDatabase;
@@ -52,12 +53,13 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
 
     const averageLifespan = deceasedWithAgeCount > 0 ? Math.round(totalLifespan / deceasedWithAgeCount) : 0;
 
-    // Surnames distribution
+    // Surnames distribution with gender normalization (e.g. Шевченко, Ковальський/Ковальська -> Ковальський)
     const surnameMap: Record<string, number> = {};
     persons.forEach((p) => {
-      const s = p.lastName?.trim();
-      if (s) {
-        surnameMap[s] = (surnameMap[s] || 0) + 1;
+      const rawSurname = p.lastName?.trim();
+      if (rawSurname) {
+        const canonicalSurname = normalizeUkrainianSurnameGender(rawSurname);
+        surnameMap[canonicalSurname] = (surnameMap[canonicalSurname] || 0) + 1;
       }
     });
 

@@ -6,6 +6,98 @@
  * and historical Slavic surname root matching algorithm.
  */
 
+/**
+ * Normalize Ukrainian surnames across genders into a canonical form for statistics
+ * (e.g. Шевченко -> Шевченко, Ковальський/Ковальська -> Ковальський, Іванов/Іванова -> Іванов, Бондаренко -> Бондаренко)
+ */
+export function normalizeUkrainianSurnameGender(surname: string): string {
+  if (!surname) return '';
+  const trimmed = surname.trim();
+  if (!trimmed) return '';
+
+  const lower = trimmed.toLowerCase();
+
+  // 1. Adjectival endings -ська / -цький, -ський / -ська, -зький / -зька
+  if (lower.endsWith('ська') && lower.length > 4) {
+    const base = trimmed.slice(0, -4);
+    return `${base}ський`;
+  }
+  if (lower.endsWith('цька') && lower.length > 4) {
+    const base = trimmed.slice(0, -4);
+    return `${base}цький`;
+  }
+  if (lower.endsWith('зька') && lower.length > 4) {
+    const base = trimmed.slice(0, -4);
+    return `${base}зький`;
+  }
+  if (lower.endsWith('ая') && lower.length > 3) {
+    const base = trimmed.slice(0, -2);
+    return `${base}ий`;
+  }
+  if (lower.endsWith('яя') && lower.length > 3) {
+    const base = trimmed.slice(0, -2);
+    return `${base}ій`;
+  }
+
+  // 2. Patronymic / possessive endings -ова/-єва/-ева/-іна/-ина -> -ов/-єв/-ев/-ін/-ин
+  if (lower.endsWith('ова') && lower.length > 3) {
+    return trimmed.slice(0, -1);
+  }
+  if (lower.endsWith('єва') && lower.length > 3) {
+    return trimmed.slice(0, -1);
+  }
+  if (lower.endsWith('ева') && lower.length > 3) {
+    return trimmed.slice(0, -1);
+  }
+  if (lower.endsWith('іна') && lower.length > 3) {
+    return trimmed.slice(0, -1);
+  }
+  if (lower.endsWith('ина') && lower.length > 3) {
+    return trimmed.slice(0, -1);
+  }
+
+  // 3. -ина / -іна (e.g. Романишина -> Романишин, Кузьмина -> Кузьмин)
+  if ((lower.endsWith('ишина') || lower.endsWith('ішина') || lower.endsWith('иха')) && lower.length > 4) {
+    if (lower.endsWith('ишина')) return `${trimmed.slice(0, -5)}ишин`;
+    if (lower.endsWith('ішина')) return `${trimmed.slice(0, -5)}ішин`;
+  }
+
+  // 4. Return as capitalized base form
+  return trimmed;
+}
+
+/**
+ * Normalizes Ukrainian location names by stripping administrative prefixes and punctuation
+ * (e.g. "м.Бердянськ", "м. Бердянськ", "місто Бердянськ", "с. Чернечий Яр", "смт. Опішня" -> clean standard name)
+ */
+export function normalizeUkrainianPlace(place: string): string {
+  if (!place) return '';
+  let p = place.trim();
+  if (!p) return '';
+
+  // Remove leading/trailing quotes and noise
+  p = p.replace(/^["'«»„“\s]+|["'«»„“\s]+$/g, '');
+
+  // Strip leading administrative prefixes (case-insensitive)
+  // m., s., s-she, smt., misto, selo, khutir, derevnya, etc.
+  p = p.replace(/^(?:м\.|м\s+|місто\s+|гор\.\s*|г\.\s*|город\s+)/i, '');
+  p = p.replace(/^(?:с\.|с\s+|село\s+|селище\s+|пос\.\s*|поселок\s+)/i, '');
+  p = p.replace(/^(?:смт\.|смт\s+|с\.м\.т\.\s*)/i, '');
+  p = p.replace(/^(?:х\.|х\s+|хутір\s+|хутор\s+)/i, '');
+  p = p.replace(/^(?:дер\.\s*|деревня\s+|д\.\s*)/i, '');
+  p = p.replace(/^(?:ст\.|ст\s+|станиця\s+|станція\s+)/i, '');
+  p = p.replace(/^(?:урочище\s+|ур\.\s*)/i, '');
+
+  // Also clean up any double spaces or leftover leading dots/commas
+  p = p.replace(/^[.,\-–—\s]+/, '').replace(/[.,\-–—\s]+$/, '').trim();
+
+  // If after prefix stripping it becomes empty, revert to original trimmed
+  if (!p) return place.trim();
+
+  // Capitalize first character properly
+  return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
 // Normalize archaic Cyrillic characters from imperial metric books & parish registers
 export function normalizeArchaicUkrainian(text: string): string {
   if (!text) return '';

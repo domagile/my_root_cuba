@@ -23,6 +23,7 @@ import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
+import { normalizeUkrainianPlace } from '../../../utils/ukrainianPhonetics';
 
 interface PlacesMapViewProps {
   database: GenealogyDatabase;
@@ -73,8 +74,9 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
       description?: string
     ) => {
       if (!placeRaw || typeof placeRaw !== 'string') return;
-      const p = placeRaw.trim();
-      if (!p || p === '-' || p === '?') return;
+      const normalizedPlace = normalizeUkrainianPlace(placeRaw);
+      if (!normalizedPlace || normalizedPlace === '-' || normalizedPlace === '?') return;
+      const p = normalizedPlace;
 
       if (!placesMap[p]) {
         placesMap[p] = { 
