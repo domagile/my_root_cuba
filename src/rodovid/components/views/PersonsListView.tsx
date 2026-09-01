@@ -27,6 +27,7 @@ import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModa
 
 interface PersonsListViewProps {
   database: GenealogyDatabase;
+  isReadOnly?: boolean;
   onSelectPerson: (id: string) => void;
   onEditPerson: (id: string) => void;
   onDeletePerson: (id: string) => void;
@@ -37,6 +38,7 @@ interface PersonsListViewProps {
 
 export const PersonsListView: React.FC<PersonsListViewProps> = ({
   database,
+  isReadOnly = false,
   onSelectPerson,
   onEditPerson,
   onDeletePerson,
@@ -47,6 +49,15 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
   const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
+
+  const canEdit = useMemo(() => {
+    if (isReadOnly) return false;
+    if (!currentUser || !isWhitelisted) return false;
+    const entry = whitelist.find(
+      (w) => w.email.toLowerCase() === currentUser.email.toLowerCase() && w.status === 'active'
+    );
+    return Boolean(entry && (entry.role === 'admin' || entry.role === 'editor'));
+  }, [isReadOnly, currentUser, isWhitelisted, whitelist]);
 
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
@@ -117,13 +128,15 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={onOpenAddPerson}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Додати особу</span>
-            </button>
+            {canEdit && (
+              <button
+                onClick={onOpenAddPerson}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Додати особу</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -390,7 +403,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                           >
                             <Compass className="w-3.5 h-3.5" />
                           </button>
-                          {!isMasked && (
+                          {canEdit && !isMasked && (
                             <>
                               <button
                                 onClick={() => onEditPerson(p.id)}
@@ -545,7 +558,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     >
                       <Compass className="w-3.5 h-3.5" />
                     </button>
-                    {!isMasked && (
+                    {canEdit && !isMasked && (
                       <button
                         onClick={() => onEditPerson(p.id)}
                         className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer`}

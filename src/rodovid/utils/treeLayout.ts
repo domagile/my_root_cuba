@@ -209,6 +209,29 @@ export function calculateClassicFamilyTreeLayout(
     return { nodes: [], links: [], width: 1000, height: 800 };
   }
 
+  // Helper to trace direct ancestors of root person
+  const directAncestors = new Set<string>();
+  const collectAncestors = (pId: string) => {
+    if (!pId || directAncestors.has(pId)) return;
+    directAncestors.add(pId);
+    const p = database.persons[pId];
+    if (!p) return;
+    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    if (!fId && !mId && database.families) {
+      const matchingFam = Object.values(database.families).find(fam => 
+        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
+      );
+      if (matchingFam) {
+        fId = matchingFam.husbandId;
+        mId = matchingFam.wifeId;
+      }
+    }
+    if (fId && database.persons[fId]) collectAncestors(fId);
+    if (mId && database.persons[mId]) collectAncestors(mId);
+  };
+  collectAncestors(root.id);
+
   // 1. Calculate relative generation level for all ancestors, descendants, siblings and spouses
   const personGen = new Map<string, number>();
   personGen.set(root.id, 0);
@@ -245,7 +268,12 @@ export function calculateClassicFamilyTreeLayout(
         }
       });
     }
-    spouseIds.forEach(sId => enqueuePerson(sId, gen));
+    spouseIds.forEach(sId => {
+      // In direct ancestors mode (showSiblings = false), only enqueue direct ancestors or spouses of root
+      if (showSiblings || id === root.id || directAncestors.has(sId) || !directAncestors.has(id)) {
+        enqueuePerson(sId, gen);
+      }
+    });
 
     // 2. Ancestors (Gen - 1, Gen - 2...) - expandable for ANY person in the tree
     if (showParents && !collapsedParents.has(id)) {
@@ -280,7 +308,12 @@ export function calculateClassicFamilyTreeLayout(
             if (fam?.children) fam.children.forEach(c => childIds.add(c.personId || (c as any).id));
           });
         }
-        childIds.forEach(cId => enqueuePerson(cId, gen + 1));
+        childIds.forEach(cId => {
+          // Direct Ancestors filter: when showSiblings is false, do not expand collateral children of ancestors
+          if (showSiblings || directAncestors.has(cId) || id === root.id || !directAncestors.has(id)) {
+            enqueuePerson(cId, gen + 1);
+          }
+        });
       }
     }
 
@@ -418,7 +451,7 @@ export function calculateClassicFamilyTreeLayout(
         });
 
         const validUnionChildren = Array.from(unionChildren).filter(
-          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1
+          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
         );
 
         return {
@@ -458,7 +491,7 @@ export function calculateClassicFamilyTreeLayout(
         });
       }
       const validAllChildren = Array.from(allChildren).filter(
-        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1
+        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
       );
 
       const totalMembers = 1 + spousesInfo.length;

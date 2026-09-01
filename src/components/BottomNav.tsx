@@ -1,6 +1,5 @@
 import React from 'react';
 import { 
-  GitFork, 
   Users, 
   Sparkles, 
   Clock, 
@@ -8,6 +7,7 @@ import {
   FileText,
   Compass
 } from 'lucide-react';
+import { TreeIcon } from './common/GenealogyIcons';
 import { useUIStore } from '../stores/useUIStore';
 import { NavigationTab } from '../types';
 import { getThemeConfig } from '../utils/theme';
@@ -21,7 +21,7 @@ export const BottomNav: React.FC = () => {
   const theme = getThemeConfig(themePalette);
 
   const primaryMobileTabs: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [
-    { id: 'tree', label: 'Родовід', icon: GitFork },
+    { id: 'tree', label: 'Родовід', icon: TreeIcon },
     { id: 'persons', label: 'Особи', icon: Users },
     { id: 'ai-analysis', label: 'AI Слідчий', icon: Sparkles },
     { id: 'timeline', label: 'Хроніка', icon: Clock },

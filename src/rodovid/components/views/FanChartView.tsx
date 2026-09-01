@@ -17,6 +17,7 @@ import {
   Sparkles,
   Filter
 } from 'lucide-react';
+import { TreeIcon } from '../../../components/common/GenealogyIcons';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import {
   calculateFanChart,
@@ -474,35 +475,28 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
             <button
               onClick={onSwitchToTree}
               className={`flex items-center gap-1.5 px-3 py-1.5 ${theme.surfaceBg} hover:brightness-110 ${theme.textPrimary} border ${theme.borderSubtle} rounded-lg text-xs font-medium transition-colors cursor-pointer`}
-              title="Повернутися до дерева роду"
+              title="Повернутися до класичного дерева роду"
             >
-              <GitFork className="w-3.5 h-3.5 text-emerald-500 rotate-90" />
+              <TreeIcon className="w-4 h-4 text-emerald-500" />
               <span>Дерево</span>
             </button>
           )}
 
-          {/* Color Mode Selector (Кольорові схеми) */}
+          {/* Style & Background Theme Menu Button */}
           <div className="relative" ref={colorMenuRef}>
             <button
               onClick={() => setIsColorMenuOpen((prev) => !prev)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                colorMode === 'clans'
-                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                isColorMenuOpen
+                  ? `${theme.buttonSecondaryBg} ${theme.textPrimary} border-amber-500 shadow-sm`
                   : `${theme.surfaceBg} ${theme.textPrimary} hover:brightness-110 border ${theme.borderSubtle}`
               }`}
-              title="Схема кольорів віяла"
+              title="Налаштування забарвлення роду та фону полотна"
               aria-expanded={isColorMenuOpen}
             >
-              <Palette className="w-3.5 h-3.5 text-amber-400" />
-              <span>
-                {colorMode === 'clans' && 'Кожен рід своїм кольором'}
-                {colorMode === 'grandparents' && '4 роди (дідусі/бабусі)'}
-                {colorMode === 'greatgrandparents' && '8 ліній пращурів'}
-                {colorMode === 'gender' && 'За статтю (чол/жін)'}
-                {colorMode === 'generation' && 'За поколіннями'}
-              </span>
+              <Palette className="w-4 h-4 text-amber-400" />
               <ChevronDown
-                className={`w-3 h-3 transition-transform duration-200 ${
+                className={`w-3 h-3 ${theme.textMuted} transition-transform duration-200 ${
                   isColorMenuOpen ? 'rotate-180' : ''
                 }`}
               />
@@ -510,16 +504,20 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
             {isColorMenuOpen && (
               <div
-                className={`absolute left-0 top-full mt-2 w-72 ${theme.cardBg} border ${theme.cardBorder} rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150`}
+                className={`absolute left-0 top-full mt-2 w-72 ${theme.cardBg} border ${theme.cardBorder} rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150`}
               >
+                {/* Section 1: Color Schemes */}
                 <div
-                  className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider ${theme.textMuted} border-b ${theme.borderSubtle} mb-1`}
+                  className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider ${theme.textMuted} border-b ${theme.borderSubtle} mb-1.5`}
                 >
-                  Кольорові схеми віяла
+                  Схеми забарвлення роду
                 </div>
 
                 <button
-                  onClick={() => handleSetColorMode('clans')}
+                  onClick={() => {
+                    handleSetColorMode('clans');
+                    setIsColorMenuOpen(false);
+                  }}
                   className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
                     colorMode === 'clans'
                       ? 'bg-emerald-500/15 text-emerald-600 font-bold'
@@ -531,15 +529,18 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     <div>
                       <div className="font-semibold">Кожен рід своїм кольором</div>
                       <div className={`text-[10px] ${theme.textMuted}`}>
-                        Унікальний колір для кожного прізвища та роду
+                        Унікальний колір для кожного прізвища
                       </div>
                     </div>
                   </div>
-                  {colorMode === 'clans' && <span className="text-emerald-500 text-xs">✓</span>}
+                  {colorMode === 'clans' && <span className="text-emerald-500 text-xs font-bold">✓</span>}
                 </button>
 
                 <button
-                  onClick={() => handleSetColorMode('grandparents')}
+                  onClick={() => {
+                    handleSetColorMode('grandparents');
+                    setIsColorMenuOpen(false);
+                  }}
                   className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
                     colorMode === 'grandparents'
                       ? 'bg-emerald-500/15 text-emerald-600 font-bold'
@@ -556,12 +557,15 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     </div>
                   </div>
                   {colorMode === 'grandparents' && (
-                    <span className="text-emerald-500 text-xs">✓</span>
+                    <span className="text-emerald-500 text-xs font-bold">✓</span>
                   )}
                 </button>
 
                 <button
-                  onClick={() => handleSetColorMode('greatgrandparents')}
+                  onClick={() => {
+                    handleSetColorMode('greatgrandparents');
+                    setIsColorMenuOpen(false);
+                  }}
                   className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
                     colorMode === 'greatgrandparents'
                       ? 'bg-emerald-500/15 text-emerald-600 font-bold'
@@ -578,12 +582,15 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     </div>
                   </div>
                   {colorMode === 'greatgrandparents' && (
-                    <span className="text-emerald-500 text-xs">✓</span>
+                    <span className="text-emerald-500 text-xs font-bold">✓</span>
                   )}
                 </button>
 
                 <button
-                  onClick={() => handleSetColorMode('gender')}
+                  onClick={() => {
+                    handleSetColorMode('gender');
+                    setIsColorMenuOpen(false);
+                  }}
                   className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
                     colorMode === 'gender'
                       ? 'bg-emerald-500/15 text-emerald-600 font-bold'
@@ -599,11 +606,14 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                       </div>
                     </div>
                   </div>
-                  {colorMode === 'gender' && <span className="text-emerald-500 text-xs">✓</span>}
+                  {colorMode === 'gender' && <span className="text-emerald-500 text-xs font-bold">✓</span>}
                 </button>
 
                 <button
-                  onClick={() => handleSetColorMode('generation')}
+                  onClick={() => {
+                    handleSetColorMode('generation');
+                    setIsColorMenuOpen(false);
+                  }}
                   className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
                     colorMode === 'generation'
                       ? 'bg-emerald-500/15 text-emerald-600 font-bold'
@@ -620,8 +630,84 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     </div>
                   </div>
                   {colorMode === 'generation' && (
-                    <span className="text-emerald-500 text-xs">✓</span>
+                    <span className="text-emerald-500 text-xs font-bold">✓</span>
                   )}
+                </button>
+
+                {/* Section 2: Background Theme */}
+                <div
+                  className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider ${theme.textMuted} border-b ${theme.borderSubtle} mt-2 mb-1.5`}
+                >
+                  Фон полотна
+                </div>
+
+                <button
+                  onClick={() => {
+                    handleSetCanvasTheme('dark');
+                    setIsColorMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                    canvasTheme === 'dark'
+                      ? 'bg-slate-700/60 text-white font-bold'
+                      : `${theme.textPrimary} hover:bg-neutral-500/10`
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-3.5 h-3.5 rounded-full bg-slate-800 border border-slate-600 shrink-0 inline-block" />
+                    <div>
+                      <div className="font-semibold">Темний графіт</div>
+                      <div className={`text-[10px] ${theme.textMuted}`}>
+                        Глибокий сучасний темний фон
+                      </div>
+                    </div>
+                  </div>
+                  {canvasTheme === 'dark' && <span className="text-emerald-500 text-xs font-bold">✓</span>}
+                </button>
+
+                <button
+                  onClick={() => {
+                    handleSetCanvasTheme('parchment');
+                    setIsColorMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                    canvasTheme === 'parchment'
+                      ? 'bg-amber-100/60 text-amber-900 font-bold'
+                      : `${theme.textPrimary} hover:bg-neutral-500/10`
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-3.5 h-3.5 rounded-full bg-amber-100 border border-amber-300 shrink-0 inline-block" />
+                    <div>
+                      <div className="font-semibold">Архівний пергамент</div>
+                      <div className={`text-[10px] ${theme.textMuted}`}>
+                        Світлий теплий класичний стиль
+                      </div>
+                    </div>
+                  </div>
+                  {canvasTheme === 'parchment' && <span className="text-emerald-500 text-xs font-bold">✓</span>}
+                </button>
+
+                <button
+                  onClick={() => {
+                    handleSetCanvasTheme('emerald');
+                    setIsColorMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                    canvasTheme === 'emerald'
+                      ? 'bg-emerald-900/60 text-emerald-300 font-bold'
+                      : `${theme.textPrimary} hover:bg-neutral-500/10`
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-3.5 h-3.5 rounded-full bg-emerald-900 border border-emerald-600 shrink-0 inline-block" />
+                    <div>
+                      <div className="font-semibold">Смарагдовий ліс</div>
+                      <div className={`text-[10px] ${theme.textMuted}`}>
+                        Глибокий літописний смарагд
+                      </div>
+                    </div>
+                  </div>
+                  {canvasTheme === 'emerald' && <span className="text-emerald-500 text-xs font-bold">✓</span>}
                 </button>
               </div>
             )}
@@ -758,44 +844,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
             )}
           </div>
 
-          {/* Background Theme Selector */}
-          <div
-            className={`hidden md:flex items-center gap-1 ${theme.surfaceBg} p-1 rounded-lg border ${theme.borderSubtle}`}
-          >
-            <button
-              onClick={() => handleSetCanvasTheme('dark')}
-              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                canvasTheme === 'dark'
-                  ? 'bg-slate-700 text-white shadow-xs'
-                  : `${theme.textMuted} hover:${theme.textPrimary}`
-              }`}
-              title="Темний графітовий фон"
-            >
-              Темний
-            </button>
-            <button
-              onClick={() => handleSetCanvasTheme('parchment')}
-              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                canvasTheme === 'parchment'
-                  ? 'bg-amber-100 text-amber-950 font-bold shadow-xs'
-                  : `${theme.textMuted} hover:${theme.textPrimary}`
-              }`}
-              title="Світлий архівний пергамент"
-            >
-              Пергамент
-            </button>
-            <button
-              onClick={() => handleSetCanvasTheme('emerald')}
-              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                canvasTheme === 'emerald'
-                  ? 'bg-emerald-700 text-white shadow-xs'
-                  : `${theme.textMuted} hover:${theme.textPrimary}`
-              }`}
-              title="Смарагдовий літописний фон"
-            >
-              Ліс
-            </button>
-          </div>
+
 
           {/* Zoom Controls (FamilySearch style: Fit, 100%, + / -) */}
           <div

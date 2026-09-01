@@ -6,12 +6,10 @@ import {
   Lock, 
   Unlock, 
   Eye, 
-  Send, 
   QrCode, 
   Globe, 
   ShieldCheck, 
   CloudUpload, 
-  ExternalLink, 
   Sparkles,
   Users,
   AlertCircle,
@@ -64,7 +62,10 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
       const generatedId = storedId || `tree-${Math.random().toString(36).substring(2, 9)}`;
       setShareId(generatedId);
 
-      const baseUrl = typeof window !== 'undefined' ? window.location.origin + window.location.pathname : '';
+      let baseUrl = typeof window !== 'undefined' ? window.location.origin + window.location.pathname : '';
+      if (baseUrl.includes('ais-dev-')) {
+        baseUrl = baseUrl.replace('ais-dev-', 'ais-pre-');
+      }
       setShareUrl(`${baseUrl}?share=${generatedId}`);
 
       const savedMeta = localStorage.getItem(`rodovid_share_meta_${generatedId}`);
@@ -157,12 +158,6 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
       setTimeout(() => setCopied(false), 2500);
     }
   };
-
-  const shareText = encodeURIComponent(`Запрошую переглянути наше родинне генеалогічне дерево "${treeTitle}": ${shareUrl}`);
-  const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(`Родинне дерево: ${treeTitle}`)}`;
-  const viberUrl = `viber://forward?text=${shareText}`;
-  const whatsappUrl = `https://wa.me/?text=${shareText}`;
-  const emailUrl = `mailto:?subject=${encodeURIComponent(`Родинне дерево: ${treeTitle}`)}&body=${shareText}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
@@ -370,52 +365,6 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
                   {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                   <span>{copied ? 'Скопійовано!' : 'Копіювати'}</span>
                 </button>
-              </div>
-
-              {/* Quick Messenger Share Buttons */}
-              <div>
-                <div className="text-[11px] font-semibold opacity-70 mb-2">
-                  Надіслати у месенджер або пошту:
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <a
-                    href={telegramUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-sky-600 dark:text-sky-400 border border-sky-500/30 font-semibold text-[11px] transition-colors"
-                  >
-                    <span>Telegram</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-
-                  <a
-                    href={viberUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-semibold text-[11px] transition-colors"
-                  >
-                    <span>Viber</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-
-                  <a
-                    href={whatsappUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-semibold text-[11px] transition-colors"
-                  >
-                    <span>WhatsApp</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-
-                  <a
-                    href={emailUrl}
-                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold text-[11px] transition-colors"
-                  >
-                    <span>Email</span>
-                    <Send className="w-3 h-3" />
-                  </a>
-                </div>
               </div>
 
               {/* QR Code Toggle */}

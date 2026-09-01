@@ -575,14 +575,14 @@ export async function saveProjectDataToCloud(
     promises.push(
       setDoc(
         metaDocRef,
-        {
+        sanitizeForFirestore({
           lastUpdated: data.lastUpdated || new Date().toISOString(),
           personsCount: data.persons?.length || 0,
           familiesCount: data.families?.length || 0,
           metricRecordsCount: data.metricRecords?.length || 0,
           documentsCount: data.documents?.length || 0,
           hypothesesCount: data.hypotheses?.length || 0
-        },
+        }),
         { merge: true }
       ).then(() => true).catch(() => false)
     );
@@ -691,6 +691,19 @@ export interface SharedTreeData {
 }
 
 /**
+ * Universal deep sanitizer for Firestore to remove all `undefined` fields
+ * which are strictly forbidden by Firestore SDK.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === undefined) return null as unknown as T;
+  try {
+    return JSON.parse(JSON.stringify(data));
+  } catch (e) {
+    return data;
+  }
+}
+
+/**
  * Publishes or updates a shared tree snapshot in Firestore
  */
 export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promise<{
@@ -703,7 +716,7 @@ export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promis
     const db = getDbInstance();
     if (!db) return { success: false, shareId: treeData.id, shareUrl: '', error: 'База Firestore недоступна' };
 
-    const cleanData: Record<string, any> = {
+    const rawData: Record<string, any> = {
       id: treeData.id,
       title: treeData.title || 'Родинне дерево',
       authorName: treeData.authorName || 'Дослідник родоводу',
@@ -725,11 +738,17 @@ export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promis
       }
     };
 
+    // Deep sanitize to eliminate any nested `undefined` properties
+    const cleanData = sanitizeForFirestore(rawData);
+
     const docRef = doc(db, 'sharedTrees', treeData.id);
     await setDoc(docRef, cleanData, { merge: true });
 
     // Generate full URL
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin + window.location.pathname : '';
+    let baseUrl = typeof window !== 'undefined' ? window.location.origin + window.location.pathname : '';
+    if (baseUrl.includes('ais-dev-')) {
+      baseUrl = baseUrl.replace('ais-dev-', 'ais-pre-');
+    }
     const shareUrl = `${baseUrl}?share=${treeData.id}`;
 
     return {

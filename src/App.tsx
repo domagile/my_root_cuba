@@ -203,7 +203,10 @@ function AppContent() {
 
       {/* Main Workspace */}
       <div className="flex-1 flex flex-col h-full min-w-0">
-        <Header onOpenAddPerson={handleOpenAddModal} />
+        <Header 
+          onOpenAddPerson={handleOpenAddModal} 
+          onInspectPerson={(id) => setInspectPersonId(id)}
+        />
 
         {/* Tab Router */}
         <main className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden">

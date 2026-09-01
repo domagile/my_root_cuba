@@ -29,6 +29,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../../context/GenealogyContext';
+import { useAuthStore } from '../../stores/useAuthStore';
 import { getThemeConfig } from '../../utils/theme';
 import { Person, Source, Family } from '../../types';
 
@@ -58,6 +59,21 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   } = useGenealogy();
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const setRodovidView = useUIStore((s) => s.setRodovidView);
+  const openAuthModal = useUIStore((s) => s.openAuthModal);
+
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+
+  const canEdit = Boolean(
+    currentUser &&
+    currentUser.isAuthenticated &&
+    whitelist.some(
+      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() &&
+             w.status === 'active' &&
+             (w.role === 'admin' || w.role === 'editor')
+    )
+  );
+
   const theme = getThemeConfig(themePalette);
 
   const [isEditingNotes, setIsEditingNotes] = useState(false);
@@ -273,8 +289,9 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             </button>
 
             <button
-              onClick={() => onEdit(person)}
+              onClick={canEdit ? () => onEdit(person) : () => openAuthModal('Редагування анкети')}
               className="px-3.5 py-2 bg-[#B88E3E] hover:bg-[#A37B30] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+              title={!canEdit ? 'Редагування доступне лише за Білим списком' : 'Редагувати анкету'}
             >
               <Edit3 className="w-3.5 h-3.5" />
               <span>Редагувати</span>
@@ -369,10 +386,10 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             {!isEditingBio && (
               <button
                 type="button"
-                onClick={() => {
+                onClick={canEdit ? () => {
                   setBioDraft(person.bio || '');
                   setIsEditingBio(true);
-                }}
+                } : () => openAuthModal('Редагування біографії')}
                 className="text-xs text-[#B88E3E] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
               >
                 <Edit3 className="w-3 h-3" />
@@ -426,25 +443,25 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             </h3>
             <div className="flex flex-wrap items-center gap-1.5">
               <button
-                onClick={() => onOpenAddRelation('father', person.id)}
+                onClick={canEdit ? () => onOpenAddRelation('father', person.id) : () => openAuthModal('Додавання родичів')}
                 className="text-[11px] px-2 py-1 bg-neutral-100 dark:bg-neutral-800 hover:bg-[#B88E3E] hover:text-white rounded-lg text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
               >
                 + Батько
               </button>
               <button
-                onClick={() => onOpenAddRelation('mother', person.id)}
+                onClick={canEdit ? () => onOpenAddRelation('mother', person.id) : () => openAuthModal('Додавання родичів')}
                 className="text-[11px] px-2 py-1 bg-neutral-100 dark:bg-neutral-800 hover:bg-[#B88E3E] hover:text-white rounded-lg text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
               >
                 + Мати
               </button>
               <button
-                onClick={() => onOpenAddRelation('child', person.id)}
+                onClick={canEdit ? () => onOpenAddRelation('child', person.id) : () => openAuthModal('Додавання родичів')}
                 className="text-[11px] px-2 py-1 bg-neutral-100 dark:bg-neutral-800 hover:bg-[#B88E3E] hover:text-white rounded-lg text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
               >
                 + Дитина
               </button>
               <button
-                onClick={() => onOpenAddRelation('spouse', person.id)}
+                onClick={canEdit ? () => onOpenAddRelation('spouse', person.id) : () => openAuthModal('Додавання родичів')}
                 className="text-[11px] px-2 py-1 bg-neutral-100 dark:bg-neutral-800 hover:bg-[#B88E3E] hover:text-white rounded-lg text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
               >
                 + Подружжя
@@ -536,7 +553,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
             <button
               type="button"
-              onClick={() =>
+              onClick={canEdit ? () =>
                 setSourceModal({
                   isOpen: true,
                   title: '',
@@ -547,7 +564,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                   page: '',
                   transcription: '',
                   url: ''
-                })
+                }) : () => openAuthModal('Додавання першоджерел')
               }
               className="text-[11px] px-2.5 py-1 rounded-lg bg-[#B88E3E]/15 hover:bg-[#B88E3E]/25 text-[#B88E3E] font-bold flex items-center gap-1 cursor-pointer transition-colors"
             >
@@ -566,10 +583,10 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               {!isEditingNotes && (
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={canEdit ? () => {
                     setNotesDraft(typeof person.notes === 'string' ? person.notes : '');
                     setIsEditingNotes(true);
-                  }}
+                  } : () => openAuthModal('Редагування нотаток')}
                   className="text-xs text-[#B88E3E] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
                 >
                   <Edit3 className="w-3 h-3" />

@@ -81,14 +81,15 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
   const whitelist = useAuthStore((s) => s.whitelist);
   const logout = useAuthStore((s) => s.logout);
 
-  // Read-only condition: If guest without whitelisted access or in read-only shared view
+  // Read-only condition: Only whitelisted users with active status and role admin/editor can edit
   const isReadOnly = useMemo(() => {
     if (isSharedViewer && sharedMeta?.mode === 'readonly') return true;
     if (!currentUser) return true;
     const entry = whitelist.find(
       (w) => w.email.toLowerCase() === currentUser.email.toLowerCase() && w.status === 'active'
     );
-    return !entry;
+    if (!entry) return true;
+    return entry.role !== 'admin' && entry.role !== 'editor';
   }, [isSharedViewer, sharedMeta, currentUser, whitelist]);
 
   // If custom database is provided (e.g. shared viewer mode)
@@ -184,6 +185,10 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
 
   // Handle Person CRUD
   const handleSavePerson = useCallback((person: Person) => {
+    if (isReadOnly) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     const exists = persons.some((p) => p.id === person.id);
     if (exists) {
       updatePerson(person);
@@ -210,9 +215,13 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         });
       }
     }
-  }, [persons, updatePerson, addPerson]);
+  }, [persons, updatePerson, addPerson, isReadOnly]);
 
   const handleDeletePerson = useCallback((personId: string) => {
+    if (isReadOnly) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     deletePerson(personId);
     if (activePersonId === personId) {
       const remaining = persons.filter((p) => p.id !== personId);
@@ -220,21 +229,33 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         setSelectedPersonId(remaining[0].id);
       }
     }
-  }, [deletePerson, activePersonId, persons, setSelectedPersonId]);
+  }, [deletePerson, activePersonId, persons, setSelectedPersonId, isReadOnly]);
 
   // Handle Family CRUD
   const handleSaveFamily = useCallback((family: Family) => {
+    if (isReadOnly) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     saveFamily(family);
-  }, [saveFamily]);
+  }, [saveFamily, isReadOnly]);
 
   const handleDeleteFamily = useCallback((familyId: string) => {
+    if (isReadOnly) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     deleteFamily(familyId);
-  }, [deleteFamily]);
+  }, [deleteFamily, isReadOnly]);
 
   // Handle Source CRUD
   const handleSaveSource = useCallback((source: Source) => {
+    if (isReadOnly) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     saveSource(source);
-  }, [saveSource]);
+  }, [saveSource, isReadOnly]);
 
   // Handle full database import
   const handleImportDatabase = useCallback((newDb: GenealogyDatabase) => {
@@ -297,20 +318,22 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         </div>
       )}
 
-      {/* Top Navigation Bar inside Rodovid */}
-      <Header
-        currentView={currentView}
-        onViewChange={setCurrentView}
-        onOpenGedcomModal={() => setIsGedcomModalOpen(true)}
-        onOpenAddPersonModal={() => setEditPersonTarget('NEW')}
-        onOpenShareModal={() => setIsShareModalOpen(true)}
-        databaseTitle={title}
-        totalPersonsCount={persons.length}
-        isReadOnly={isReadOnly}
-        currentUser={currentUser}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        onLogout={logout}
-      />
+      {/* Top Navigation Bar inside Rodovid - only in standalone shared viewer mode */}
+      {isSharedViewer && (
+        <Header
+          currentView={currentView}
+          onViewChange={setCurrentView}
+          onOpenGedcomModal={() => setIsGedcomModalOpen(true)}
+          onOpenAddPersonModal={() => setEditPersonTarget('NEW')}
+          onOpenShareModal={() => setIsShareModalOpen(true)}
+          databaseTitle={title}
+          totalPersonsCount={persons.length}
+          isReadOnly={isReadOnly}
+          currentUser={currentUser}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          onLogout={logout}
+        />
+      )}
 
       {/* Main View Area */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
@@ -350,6 +373,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         {currentView === 'persons' && (
           <PersonsListView
             database={database}
+            isReadOnly={isReadOnly}
             onSelectPerson={(id) => setInspectPersonId(id)}
             onEditPerson={(id) => setEditPersonTarget(id)}
             onDeletePerson={handleDeletePerson}
@@ -438,6 +462,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         <PersonDetailModal
           personId={inspectPersonId}
           database={database}
+          isReadOnly={isReadOnly}
           onClose={() => setInspectPersonId(null)}
           onSelectPerson={(id) => setInspectPersonId(id)}
           onEditPerson={(id) => {

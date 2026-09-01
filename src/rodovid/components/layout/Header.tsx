@@ -3,7 +3,6 @@ import {
   GitFork,
   PieChart,
   Users,
-  HeartHandshake,
   Calendar,
   MapPin,
   BookOpen,
@@ -28,6 +27,8 @@ import { ViewMode } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
 import { AuthUser } from '../../../types';
+
+import { TreeIcon, FanIcon } from '../../../components/common/GenealogyIcons';
 
 interface HeaderProps {
   currentView: ViewMode;
@@ -84,10 +85,9 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDarkMode]);
 
   const allNavItems: Array<{ id: ViewMode; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { id: 'tree', label: 'Дерево', icon: GitFork },
-    { id: 'fan', label: 'Віяло', icon: PieChart },
+    { id: 'tree', label: 'Дерево', icon: TreeIcon },
+    { id: 'fan', label: 'Віяло', icon: FanIcon },
     { id: 'persons', label: `Особи (${totalPersonsCount})`, icon: Users },
-    { id: 'families', label: "Сім'ї", icon: HeartHandshake },
     { id: 'timeline', label: 'Хроніка', icon: Calendar },
     { id: 'places', label: 'Місця', icon: MapPin },
     { id: 'sources', label: 'Архів', icon: BookOpen },
@@ -100,8 +100,8 @@ export const Header: React.FC<HeaderProps> = ({
   // If in read-only / guest mode, restrict navigation ONLY to Tree and Fan!
   const navItems = isReadOnly
     ? [
-        { id: 'tree' as ViewMode, label: 'Дерево', icon: GitFork },
-        { id: 'fan' as ViewMode, label: 'Віяло', icon: PieChart }
+        { id: 'tree' as ViewMode, label: 'Дерево', icon: TreeIcon },
+        { id: 'fan' as ViewMode, label: 'Віяло', icon: FanIcon }
       ]
     : allNavItems;
 
@@ -275,67 +275,57 @@ export const Header: React.FC<HeaderProps> = ({
           {isReadOnly && onOpenAuthModal && (
             <button
               onClick={onOpenAuthModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors whitespace-nowrap cursor-pointer"
-              title="Вхід за Білим списком (CubaTarara400@gmail.com)"
+              className="p-2 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors shrink-0 cursor-pointer"
+              title="Вхід за Білим списком для редагування"
             >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Увійти (Whitelist)</span>
+              <Lock className="w-4 h-4" />
             </button>
           )}
 
-          {/* Authenticated Admin / Editor Info & Controls */}
+          {/* Authenticated Admin / Editor Controls */}
           {!isReadOnly && currentUser && (
             <>
-              <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-xs">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span className="font-semibold text-emerald-700 dark:text-emerald-300 truncate max-w-[140px]">
-                  {currentUser.email}
-                </span>
-              </div>
-
               <button
                 onClick={onOpenGedcomModal}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium ${
+                className={`p-2 rounded-lg text-xs font-medium ${
                   isDarkMode
                     ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
                     : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border-neutral-300'
-                } border transition-colors whitespace-nowrap cursor-pointer`}
+                } border transition-colors shrink-0 cursor-pointer`}
                 title="Імпорт / Експорт GEDCOM та резервні копії"
               >
-                <Upload className="w-3.5 h-3.5 text-emerald-500" />
-                <span className="hidden sm:inline">GEDCOM / База</span>
+                <Upload className="w-4 h-4 text-emerald-500" />
               </button>
 
               {onOpenShareModal && (
                 <button
                   onClick={onOpenShareModal}
-                  className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-semibold ${
+                  className={`p-2 rounded-lg text-xs font-semibold ${
                     isDarkMode
                       ? 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 border-amber-500/40'
                       : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
-                  } border transition-colors whitespace-nowrap cursor-pointer shadow-xs`}
-                  title="Спільний перегляд: Створити пряме посилання для родичів"
+                  } border transition-colors shrink-0 cursor-pointer shadow-xs`}
+                  title="Поділитися родоводом"
                 >
-                  <Share2 className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="hidden sm:inline">Поділитися</span>
+                  <Share2 className="w-4 h-4 text-amber-500" />
                 </button>
               )}
 
               <button
                 onClick={onOpenAddPersonModal}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors whitespace-nowrap cursor-pointer"
+                className="p-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors shrink-0 cursor-pointer"
+                title="Додати особу"
               >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Додати</span>
+                <UserPlus className="w-4 h-4" />
               </button>
 
               {onLogout && (
                 <button
                   onClick={onLogout}
-                  className="p-1.5 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors cursor-pointer"
+                  className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors shrink-0 cursor-pointer"
                   title="Вийти з облікового запису"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <LogOut className="w-4 h-4" />
                 </button>
               )}
             </>

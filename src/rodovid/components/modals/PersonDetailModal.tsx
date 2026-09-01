@@ -71,7 +71,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   onOpenKinshipWith,
   onOpenRelationManager,
   onAddRelation,
-  isReadOnly = false
+  isReadOnly: isPropReadOnly = false
 }) => {
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
@@ -155,6 +155,17 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
   const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
+
+  const canEdit = useMemo(() => {
+    if (isPropReadOnly) return false;
+    if (!currentUser || !isWhitelisted) return false;
+    const entry = whitelist.find(
+      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+    );
+    return Boolean(entry && (entry.role === 'admin' || entry.role === 'editor'));
+  }, [isPropReadOnly, currentUser, isWhitelisted, whitelist]);
+
+  const isReadOnly = !canEdit;
 
   if (!personId) return null;
   const rawPerson = (database?.persons ? database.persons[personId] : undefined) || persons.find((p) => p.id === personId);

@@ -28,6 +28,7 @@ import {
   MapPin,
   Compass,
   Users,
+  Layers,
   Sparkles,
   Eye,
   EyeOff,
@@ -38,7 +39,12 @@ import {
   Shield,
   Lock
 } from 'lucide-react';
-import { GenealogyDatabase, TreeLayoutType, Person } from '../../types/genealogy';
+import {
+  GenealogyDatabase,
+  TreeLayoutType,
+  Person
+} from '../../types/genealogy';
+import { TreeIcon, FanIcon } from '../../../components/common/GenealogyIcons';
 import {
   calculateClassicFamilyTreeLayout,
   calculateAncestorsLayout,
@@ -208,7 +214,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const toggleCollapseSiblings = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
     setAnchorForPerson(personId);
-    setShowSiblings(true);
     const p = database.persons[personId];
     if (!p) return;
     const fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
@@ -226,6 +231,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
       }
     });
 
+    if (!showSiblings) {
+      // User was in Direct mode and clicked "+1" to see siblings of this specific person
+      setShowSiblings(true);
+      const allOther = new Set<string>();
+      Object.keys(database.persons).forEach(id => {
+        if (!relatedIds.includes(id)) {
+          allOther.add(id);
+        }
+      });
+      setCollapsedSiblings(allOther);
+      return;
+    }
+
     setCollapsedSiblings((prev) => {
       const next = new Set(prev);
       const shouldCollapse = isCurrentlyCollapsed !== undefined ? !isCurrentlyCollapsed : !next.has(personId);
@@ -238,7 +256,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
       });
       return next;
     });
-  }, [setAnchorForPerson, database.persons, database.families]);
+  }, [setAnchorForPerson, database.persons, database.families, showSiblings]);
 
   const toggleCollapseChildren = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
     setAnchorForPerson(personId);
@@ -708,49 +726,43 @@ export const TreeView: React.FC<TreeViewProps> = ({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 text-white shadow-sm cursor-pointer"
               title="Класична вертикальна структура родоводу (FamilySearch style)"
             >
-              <GitFork className="w-3.5 h-3.5" />
-              <span>Класичне дерево</span>
+              <TreeIcon className="w-4 h-4 text-emerald-100" />
+              <span>Дерево</span>
             </button>
 
             {onSwitchToFan && (
               <button
                 onClick={onSwitchToFan}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                title="Перемкнути у віялову діаграму"
+                title="Перемкнути у віялову діаграму (Fan Chart)"
               >
-                <PieChart className="w-3.5 h-3.5 text-amber-400" />
+                <FanIcon className="w-4 h-4 text-amber-400" />
                 <span>Віяло</span>
               </button>
             )}
           </div>
 
-          {/* Generations counter */}
-          <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-3 py-1.5 rounded-lg">
-            <span className="text-slate-400">Поколінь:</span>
-            <button
-              onClick={() => setGenerations(0)}
-              className={`px-2.5 py-0.5 rounded text-xs font-bold transition-colors cursor-pointer ${
-                generations === 0
-                  ? 'bg-emerald-600 text-white font-bold'
-                  : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-              title="Відобразити всі покоління дерева"
+          {/* Generations dropdown */}
+          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-2.5 py-1.5 rounded-lg shadow-xs">
+            <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="text-slate-400 hidden xl:inline">Поколінь:</span>
+            <select
+              value={generations}
+              onChange={(e) => setGenerations(Number(e.target.value))}
+              className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer py-0.5"
+              title="Кількість поколінь родоводу"
             >
-              Всі
-            </button>
-            {[4, 5, 6, 7, 8, 9, 10].map((g) => (
-              <button
-                key={g}
-                onClick={() => setGenerations(g)}
-                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
-                  generations === g
-                    ? 'bg-emerald-600 text-white font-bold'
-                    : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {g}
-              </button>
-            ))}
+              <option value={0} className="bg-[#1b1f24] text-white">Всі покоління</option>
+              <option value={2} className="bg-[#1b1f24] text-white">2 покоління</option>
+              <option value={3} className="bg-[#1b1f24] text-white">3 покоління</option>
+              <option value={4} className="bg-[#1b1f24] text-white">4 покоління</option>
+              <option value={5} className="bg-[#1b1f24] text-white">5 поколінь</option>
+              <option value={6} className="bg-[#1b1f24] text-white">6 поколінь</option>
+              <option value={7} className="bg-[#1b1f24] text-white">7 поколінь</option>
+              <option value={8} className="bg-[#1b1f24] text-white">8 поколінь</option>
+              <option value={9} className="bg-[#1b1f24] text-white">9 поколінь</option>
+              <option value={10} className="bg-[#1b1f24] text-white">10 поколінь</option>
+            </select>
           </div>
 
           {/* Root Person Selector */}
@@ -773,30 +785,44 @@ export const TreeView: React.FC<TreeViewProps> = ({
             </select>
           </div>
 
-          {/* Quick Toggle: Siblings (Direct Line vs Collateral) */}
-          <button
-            type="button"
-            onClick={() => {
-              if (showSiblings && collapsedSiblings.size === 0) {
+          {/* Compact Toggle: Direct Line (1 person) vs All Relatives (many people) */}
+          <div
+            className="flex items-center bg-[#15181b] border border-[#2d3238] p-0.5 rounded-lg text-xs shadow-xs"
+            title="Перемикач: Тільки прямі предки / Всі родичі"
+          >
+            <button
+              type="button"
+              onClick={() => {
                 setShowSiblings(false);
-                const allWithSiblings = new Set<string>();
-                Object.keys(database.persons).forEach(id => allWithSiblings.add(id));
-                setCollapsedSiblings(allWithSiblings);
-              } else {
+                setCollapsedSiblings(new Set());
+              }}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                !showSiblings
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Тільки прямі предки (без братів та сестер)"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Прямі</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setShowSiblings(true);
                 setCollapsedSiblings(new Set());
-              }
-            }}
-            className={`hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-              showSiblings && collapsedSiblings.size === 0
-                ? 'bg-[#15181b] hover:bg-slate-800 text-slate-300 border-[#2d3238]'
-                : 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500 shadow-md'
-            }`}
-            title={showSiblings && collapsedSiblings.size === 0 ? "Сховати всіх братів та сестер (залишити тільки прямих предків)" : "Показати всіх братів та сестер (непрямих предків)"}
-          >
-            <Users className="w-3.5 h-3.5 text-amber-300" />
-            <span>{showSiblings && collapsedSiblings.size === 0 ? "Брати/сестри: Всі" : "Тільки прямі предки"}</span>
-          </button>
+              }}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                showSiblings
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Всі родичі (разом із братами та сестрами)"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Всі</span>
+            </button>
+          </div>
         </div>
 
         {/* Action Controls */}

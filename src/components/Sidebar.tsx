@@ -8,7 +8,6 @@ import {
   GitFork, 
   PieChart,
   Users,
-  HeartHandshake,
   Calendar,
   MapPin,
   BookOpen,
@@ -32,6 +31,7 @@ import {
   Lock,
   KeyRound
 } from 'lucide-react';
+import { TreeIcon, FanIcon } from './common/GenealogyIcons';
 import { useUIStore } from '../stores/useUIStore';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -65,10 +65,9 @@ export const Sidebar: React.FC = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const rodovidItems: { id: ViewMode; label: string; icon: React.FC<{ className?: string }>; isPublic?: boolean }[] = [
-    { id: 'tree', label: 'Дерево', icon: GitFork, isPublic: true },
-    { id: 'fan', label: 'Віяло (Кругове)', icon: PieChart, isPublic: true },
+    { id: 'tree', label: 'Дерево', icon: TreeIcon, isPublic: true },
+    { id: 'fan', label: 'Віяло (Кругове)', icon: FanIcon, isPublic: true },
     { id: 'persons', label: `Особи (${personsCount})`, icon: Users },
-    { id: 'families', label: "Сім'ї", icon: HeartHandshake },
     { id: 'timeline', label: 'Хроніка', icon: Calendar },
     { id: 'places', label: 'Місця', icon: MapPin },
     { id: 'sources', label: 'Архів джерел', icon: BookOpen },

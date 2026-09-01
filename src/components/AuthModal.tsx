@@ -11,8 +11,7 @@ import {
   Send,
   Users,
   Eye,
-  TreeDeciduous,
-  KeyRound
+  TreeDeciduous
 } from 'lucide-react';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useUIStore } from '../stores/useUIStore';
@@ -37,16 +36,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const {
     loginWithGoogle,
-    loginWithEmailAndPin,
-    loginWithPin,
     submitAccessRequest,
     whitelist,
     currentUser
   } = useAuthStore();
 
-  const [tab, setTab] = useState<'login' | 'pin' | 'request'>('login');
+  const [tab, setTab] = useState<'login' | 'request'>('login');
   const [emailInput, setEmailInput] = useState('');
-  const [pinInput, setPinInput] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   // Request Access State
@@ -77,7 +73,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         } else {
           setFeedback({ 
             type: 'error', 
-            message: `Пошта ${user.email} не знайдена у Білому списку. Будь ласка, надішліть запит адміністратору.` 
+            message: `Пошта ${user.email} не знайдена у Білому списку (Whitelist). Ви можете надіслати запит адміністратору для надання доступу.` 
           });
           setReqEmail(user.email);
           if (user.displayName) setReqName(user.displayName);
@@ -93,49 +89,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleEmailAndPinLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    const targetEmail = emailInput.trim();
-    const targetPin = pinInput.trim();
-    if (!targetEmail || !targetEmail.includes('@')) {
-      setFeedback({ type: 'error', message: 'Введіть коректну адресу електронної пошти.' });
-      return;
-    }
-    if (!targetPin) {
-      setFeedback({ type: 'error', message: 'Введіть сімейний PIN-код роду.' });
-      return;
-    }
-
-    const res = loginWithEmailAndPin(targetEmail, targetPin);
-    if (res.success) {
-      setFeedback({ type: 'success', message: res.message });
-      setTimeout(() => {
-        onClose();
-      }, 700);
-    } else {
-      setFeedback({ type: 'error', message: res.message });
-      if (!res.isWhitelisted) {
-        setReqEmail(targetEmail);
-        setTab('request');
-      }
-    }
-  };
-
-  const handlePinLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pinInput.trim()) return;
-    const { loginWithPin } = useAuthStore.getState();
-    const ok = loginWithPin(pinInput.trim());
-    if (ok) {
-      setFeedback({ type: 'success', message: 'Успішний вхід за PIN-кодом!' });
-      setTimeout(() => {
-        onClose();
-      }, 500);
-    } else {
-      setFeedback({ type: 'error', message: 'Невірний PIN-код. Зверніться до адміністратора.' });
-    }
-  };
-
   const handleCheckEmailInWhitelist = (e: React.FormEvent) => {
     e.preventDefault();
     const target = emailInput.trim().toLowerCase();
@@ -148,14 +101,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const entry = whitelist.find((w) => w.email.toLowerCase() === target && w.status === 'active');
 
     if (entry) {
+      const roleTitle = entry.role === 'admin' ? 'Адміністратор' : entry.role === 'editor' ? 'Редактор' : 'Дослідник';
       setFeedback({
         type: 'info',
-        message: `Адресу ${target} знайдено у списку (Роль: ${entry.role === 'admin' ? 'Адміністратор' : entry.role === 'editor' ? 'Редактор' : 'Дослідник'}). Для входу натисніть кнопку "Увійти через Google" вище з цим акаунтом.`
+        message: `Адресу ${target} знайдено у Білому списку (Роль: ${roleTitle}). Натисніть кнопку «Увійти через Google» нижче, використовуючи цей акаунт.`
       });
     } else {
       setFeedback({
         type: 'error',
-        message: `Адреси ${target} немає в активному списку. Заповніть форму нижче, щоб подати запит на доступ.`
+        message: `Адреси ${target} немає в активному Білому списку. Заповніть форму запиту, щоб адміністратор надав вам доступ.`
       });
       setReqEmail(target);
       setTab('request');
@@ -201,12 +155,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
             <div>
               <h3 className={`font-bold text-base ${theme.cardTitle}`}>
-                {tab === 'login' ? 'Вхід за Білим списком (Whitelist)' : tab === 'pin' ? 'Вхід за PIN-кодом' : 'Запит доступу до проєкту'}
+                {tab === 'login' ? 'Вхід за Білим списком (Whitelist)' : 'Запит доступу до проєкту'}
               </h3>
               <p className="text-xs opacity-75">
                 {targetFeatureName
-                  ? `Розділ «${targetFeatureName}» доступний тільки авторизованим дослідникам`
-                  : 'Повний доступ до редагування, архівів та документів'}
+                  ? `Розділ «${targetFeatureName}» доступний авторизованим дослідникам`
+                  : 'Редагувати дані можуть лише користувачі, схвалені адміністратором'}
               </p>
             </div>
           </div>
@@ -222,12 +176,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="px-5 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
           <Eye className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
           <span>
-            <strong>Публічний доступ:</strong> Дерево та Віяло відкриті для перегляду усім. Вхід потрібен для редагування та доступу до приватних розділів.
+            <strong>Публічний доступ:</strong> Дерево відкрито для перегляду. Внесення змін доступне лише особам з Білого списку.
           </span>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-black/5 dark:border-white/10 px-5 pt-3 gap-3 shrink-0">
+        <div className="flex border-b border-black/5 dark:border-white/10 px-5 pt-3 gap-4 shrink-0">
           <button
             onClick={() => {
               setTab('login');
@@ -240,19 +194,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             }`}
           >
             Google Вхід
-          </button>
-          <button
-            onClick={() => {
-              setTab('pin');
-              setFeedback(null);
-            }}
-            className={`pb-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer ${
-              tab === 'pin'
-                ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
-                : 'border-transparent opacity-60 hover:opacity-100'
-            }`}
-          >
-            PIN-код
           </button>
           <button
             onClick={() => {
@@ -292,55 +233,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           {tab === 'login' ? (
             <div className="space-y-4">
-              {/* Option 2: Email + PIN Code Login for Whitelisted Users */}
-              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-[#B88E3E]">
-                  <KeyRound className="w-4 h-4" />
-                  <span>Швидкий вхід за Email та PIN-кодом</span>
-                </div>
-                <p className="text-[11px] opacity-80 leading-tight">
-                  Для родичів з Білого списку: введіть вашу пошту та сімейний PIN-код (без необхідності Google входу).
-                </p>
-
-                <form onSubmit={handleEmailAndPinLogin} className="space-y-2.5">
-                  <div className="relative">
-                    <input
-                      type="email"
-                      value={emailInput}
-                      onChange={(e) => setEmailInput(e.target.value)}
-                      placeholder="ваша.пошта@gmail.com"
-                      className={`w-full py-2 pl-9 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
-                      required
-                    />
-                    <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
-                  </div>
-
-                  <div className="relative">
-                    <input
-                      type="password"
-                      value={pinInput}
-                      onChange={(e) => setPinInput(e.target.value)}
-                      placeholder="Сімейний PIN-код"
-                      className={`w-full py-2 pl-9 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono tracking-widest`}
-                      required
-                    />
-                    <KeyRound className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full py-2.5 rounded-xl bg-[#B88E3E] hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Увійти за Email + PIN</span>
-                  </button>
-                </form>
-              </div>
-
-              <div className="flex items-center gap-2 opacity-40 my-1">
-                <div className="flex-1 h-px bg-current" />
-                <span className="text-[10px] uppercase font-bold tracking-wider">або в 1 клік через Google</span>
-                <div className="flex-1 h-px bg-current" />
+              <div className="text-xs opacity-80 leading-relaxed">
+                Якщо адміністратор надав вам права редактора або адміністратора, увійдіть за допомогою вашого Google-акаунту:
               </div>
 
               {/* Real Google Button */}
@@ -348,7 +242,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 type="button"
                 onClick={handleFirebaseGoogle}
                 disabled={isGoogleLoading}
-                className={`w-full py-2.5 px-4 rounded-xl border ${theme.cardBorder} hover:border-emerald-500 font-semibold text-xs flex items-center justify-center gap-2.5 shadow-xs transition-all cursor-pointer bg-white text-neutral-800 hover:bg-neutral-50 disabled:opacity-50`}
+                className={`w-full py-3 px-4 rounded-xl border ${theme.cardBorder} hover:border-emerald-500 font-semibold text-xs flex items-center justify-center gap-2.5 shadow-sm transition-all cursor-pointer bg-white text-neutral-800 hover:bg-neutral-50 disabled:opacity-50`}
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
@@ -358,29 +252,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </svg>
                 <span>{isGoogleLoading ? 'Перевірка Google акаунту...' : 'Увійти через Google'}</span>
               </button>
+
+              {/* Email Whitelist Checker */}
+              <div className="pt-3 border-t border-black/5 dark:border-white/10 space-y-2">
+                <div className="text-[11px] opacity-70">
+                  Бажаєте перевірити, чи ваша пошта є у Білому списку?
+                </div>
+                <form onSubmit={handleCheckEmailInWhitelist} className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="email"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      placeholder="ваша.пошта@gmail.com"
+                      className={`w-full py-2 pl-8 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
+                    />
+                    <Mail className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-3 py-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-xs font-semibold transition-colors cursor-pointer shrink-0"
+                  >
+                    Перевірити
+                  </button>
+                </form>
+              </div>
             </div>
-          ) : tab === 'pin' ? (
-            <form onSubmit={handlePinLogin} className="space-y-3">
-              <div className="text-xs opacity-75">
-                Якщо вам надано спеціальний PIN-код для перегляду розширених розділів, введіть його нижче:
-              </div>
-              <div className="relative">
-                <input
-                  type="password"
-                  value={pinInput}
-                  onChange={(e) => setPinInput(e.target.value)}
-                  placeholder="Введіть PIN-код"
-                  className={`w-full py-2.5 pl-9 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono tracking-widest`}
-                />
-                <KeyRound className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
-              >
-                <span>Увійти за PIN-кодом</span>
-              </button>
-            </form>
           ) : (
             <form onSubmit={handleSendRequest} className="space-y-3.5">
               {requestSent ? (
