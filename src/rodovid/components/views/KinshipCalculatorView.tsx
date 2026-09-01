@@ -6,11 +6,15 @@ import {
   GitCommit,
   CheckCircle2,
   HelpCircle,
-  Sparkles
+  Sparkles,
+  Shield,
+  Lock
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { calculateKinship, getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
+import { useAuthStore } from '../../../stores/useAuthStore';
+import { getPrivacySafePerson, isPersonLiving, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 
 interface KinshipCalculatorViewProps {
@@ -28,12 +32,21 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
 
-  const allPersons = useMemo(() => {
-    return sortPersonsBySurnameAndBirthDesc(Object.values(database.persons) as Person[]);
-  }, [database.persons]);
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
 
-  const [personAId, setPersonAId] = useState<string>(initialPersonAId || allPersons[0]?.id || '');
-  const [personBId, setPersonBId] = useState<string>(allPersons[1]?.id || allPersons[0]?.id || '');
+  const dropdownPersons = useMemo(() => {
+    const rawList = Object.values(database.persons || {}) as Person[];
+    if (isWhitelisted) {
+      return sortPersonsBySurnameAndBirthDesc(rawList);
+    }
+    const safeList = rawList.map((p) => getPrivacySafePerson(p, false));
+    return sortPersonsBySurnameAndBirthDesc(safeList);
+  }, [database.persons, isWhitelisted]);
+
+  const [personAId, setPersonAId] = useState<string>(initialPersonAId || dropdownPersons[0]?.id || '');
+  const [personBId, setPersonBId] = useState<string>(dropdownPersons[1]?.id || dropdownPersons[0]?.id || '');
 
   const result = useMemo(() => {
     return calculateKinship(database, personAId, personBId);
@@ -68,11 +81,15 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
               onChange={(e) => setPersonAId(e.target.value)}
               className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
             >
-              {allPersons.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {getFullName(p)} {p.birthYear ? `(${p.birthYear})` : ''}
-                </option>
-              ))}
+              {dropdownPersons.map((p) => {
+                const isLiving = isPersonLiving(database.persons[p.id]);
+                const isMasked = !isWhitelisted && isLiving;
+                return (
+                  <option key={p.id} value={p.id}>
+                    {isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -85,11 +102,15 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
               onChange={(e) => setPersonBId(e.target.value)}
               className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
             >
-              {allPersons.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {getFullName(p)} {p.birthYear ? `(${p.birthYear})` : ''}
-                </option>
-              ))}
+              {dropdownPersons.map((p) => {
+                const isLiving = isPersonLiving(database.persons[p.id]);
+                const isMasked = !isWhitelisted && isLiving;
+                return (
+                  <option key={p.id} value={p.id}>
+                    {isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}
+                  </option>
+                );
+              })}
             </select>
           </div>
         </div>
@@ -123,8 +144,8 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
                 {result.relationshipName}
               </h2>
               <p className={`text-xs ${theme.textMuted} mt-1`}>
-                Ким є {getFullName(result.personB)} по відношенню до{' '}
-                {getFullName(result.personA)}
+                Ким є {!isWhitelisted && isPersonLiving(result.personB) ? '🔒 Скрито (Жива особа)' : getFullName(result.personB)} по відношенню до{' '}
+                {!isWhitelisted && isPersonLiving(result.personA) ? '🔒 Скрито (Жива особа)' : getFullName(result.personA)}
               </p>
             </div>
 
@@ -148,23 +169,31 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
                 Найближчий спільний предок:
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {result.commonAncestors.map((anc) => (
-                  <div
-                    key={anc.id}
-                    onClick={() => onSelectPerson(anc.id)}
-                    className={`flex items-center gap-3 p-3 ${theme.surfaceBg} border ${theme.borderSubtle} rounded-lg hover:border-emerald-600 cursor-pointer text-xs transition-colors`}
-                  >
-                    <div className={`w-8 h-8 rounded ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-neutral-200 text-neutral-700'} flex items-center justify-center shrink-0`}>
-                      <User className="w-4 h-4" />
+                {result.commonAncestors.map((rawAnc) => {
+                  const isLiving = isPersonLiving(rawAnc);
+                  const isMasked = !isWhitelisted && isLiving;
+                  const anc = isMasked ? getPrivacySafePerson(rawAnc, false) : rawAnc;
+
+                  return (
+                    <div
+                      key={anc.id}
+                      onClick={() => onSelectPerson(anc.id)}
+                      className={`flex items-center gap-3 p-3 ${theme.surfaceBg} border ${theme.borderSubtle} rounded-lg hover:border-emerald-600 cursor-pointer text-xs transition-colors`}
+                    >
+                      <div className={`w-8 h-8 rounded ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-neutral-200 text-neutral-700'} flex items-center justify-center shrink-0`}>
+                        {isMasked ? <Lock className="w-4 h-4 text-emerald-400" /> : <User className="w-4 h-4" />}
+                      </div>
+                      <div>
+                        <h4 className={`font-semibold ${theme.textPrimary}`}>
+                          {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(anc)}
+                        </h4>
+                        <p className={`text-[10px] ${theme.textMuted} font-mono`}>
+                          {isMasked ? '🔒 Конфіденційно' : `${anc.birthYear || '?'} — ${anc.deathYear || '?'}`}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className={`font-semibold ${theme.textPrimary}`}>{getFullName(anc)}</h4>
-                      <p className={`text-[10px] ${theme.textMuted} font-mono`}>
-                        {anc.birthYear || '?'} — {anc.deathYear || '?'}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -177,8 +206,12 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
 
             <div className="space-y-2 relative">
               {result.path.map((step, idx) => {
-                const person = database.persons[step.personId];
-                if (!person) return null;
+                const rawPerson = database.persons[step.personId];
+                if (!rawPerson) return null;
+                const isLiving = isPersonLiving(rawPerson);
+                const isMasked = !isWhitelisted && isLiving;
+                const person = isMasked ? getPrivacySafePerson(rawPerson, false) : rawPerson;
+
                 const isStart = idx === 0;
                 const isEnd = idx === result.path.length - 1;
 
@@ -205,9 +238,13 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
                           {idx + 1}
                         </span>
                         <div>
-                          <div className={`font-semibold ${theme.textPrimary}`}>{getFullName(person)}</div>
+                          <div className={`font-semibold ${theme.textPrimary}`}>
+                            {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(person)}
+                          </div>
                           <div className={`text-[10px] ${theme.textMuted} font-mono`}>
-                            {person.birthYear || '?'} — {person.isLiving ? 'живий' : person.deathYear || '?'}
+                            {isMasked
+                              ? '🔒 Конфіденційно'
+                              : `${person.birthYear || '?'} — ${person.isLiving ? 'живий' : person.deathYear || '?'}`}
                           </div>
                         </div>
                       </div>

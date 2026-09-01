@@ -4,6 +4,8 @@
  */
 
 import { Person, AuthUser, WhitelistEntry } from '../../types';
+import { GenealogyDatabase } from '../types/genealogy';
+import { getFullName } from './relationship';
 
 /**
  * Checks if the current user has active whitelisted access.
@@ -88,6 +90,7 @@ export const getPrivacySafePerson = (person: Person, isWhitelisted: boolean): Pe
     notes: undefined,
     occupation: undefined,
     estate: undefined,
+    estateOrSocialStatus: undefined,
     socialStatus: undefined,
     militaryRank: undefined,
     confession: undefined,
@@ -96,6 +99,40 @@ export const getPrivacySafePerson = (person: Person, isWhitelisted: boolean): Pe
     sourceCitations: [],
     sourceIds: [],
     isLiving: true
+  };
+};
+
+/**
+ * Returns a privacy-safe label for <select> options or dropdown lists.
+ */
+export const getPrivacyPersonOptionLabel = (person: Person, isWhitelisted: boolean): string => {
+  if (!isWhitelisted && isPersonLiving(person)) {
+    return '🔒 Скрито (Жива особа)';
+  }
+  const fullName = getFullName(person);
+  const bYear = person.birthYear || (person.birthDate ? person.birthDate.match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
+  return bYear ? `${fullName} (${bYear})` : fullName;
+};
+
+/**
+ * Returns a privacy-safe database where all living persons have been sanitized for public viewers.
+ */
+export const getPrivacySafeDatabase = (
+  database: GenealogyDatabase,
+  isWhitelisted: boolean
+): GenealogyDatabase => {
+  if (isWhitelisted) {
+    return database;
+  }
+
+  const safePersons: Record<string, Person> = {};
+  Object.entries(database.persons || {}).forEach(([id, p]) => {
+    safePersons[id] = getPrivacySafePerson(p, false);
+  });
+
+  return {
+    ...database,
+    persons: safePersons
   };
 };
 

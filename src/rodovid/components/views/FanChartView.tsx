@@ -50,6 +50,15 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
   const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
+
+  const dropdownPersons = useMemo(() => {
+    const rawList = Object.values(database.persons || {}) as Person[];
+    if (isWhitelisted) {
+      return sortPersonsBySurnameAndBirthDesc(rawList);
+    }
+    const safeList = rawList.map((p) => getPrivacySafePerson(p, false));
+    return sortPersonsBySurnameAndBirthDesc(safeList);
+  }, [database.persons, isWhitelisted]);
   // Default to 0 = ALL generations
   const [generations, setGenerations] = useState<number>(0);
   const [hoveredSector, setHoveredSector] = useState<FanChartSector | null>(null);
@@ -666,15 +675,19 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               onChange={(e) => onChangeRoot(e.target.value)}
               className={`${theme.surfaceBg} ${theme.textPrimary} text-xs border ${theme.borderSubtle} rounded-md px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[190px] truncate cursor-pointer`}
             >
-              {sortPersonsBySurnameAndBirthDesc(Object.values(database.persons) as Person[]).map((p) => (
-                <option
-                  key={p.id}
-                  value={p.id}
-                  className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-neutral-900'}
-                >
-                  {getFullName(p)} {p.birthYear ? `(${p.birthYear})` : ''}
-                </option>
-              ))}
+              {dropdownPersons.map((p) => {
+                const isLiving = isPersonLiving(database.persons[p.id]);
+                const isMasked = !isWhitelisted && isLiving;
+                return (
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-neutral-900'}
+                  >
+                    {isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}
+                  </option>
+                );
+              })}
             </select>
           </div>
         </div>

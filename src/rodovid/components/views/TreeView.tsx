@@ -80,6 +80,16 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
   const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
+
+  const dropdownPersons = useMemo(() => {
+    const rawList = Object.values(database.persons || {}) as Person[];
+    if (isWhitelisted) {
+      return sortPersonsBySurnameAndBirthDesc(rawList);
+    }
+    const safeList = rawList.map((p) => getPrivacySafePerson(p, false));
+    return sortPersonsBySurnameAndBirthDesc(safeList);
+  }, [database.persons, isWhitelisted]);
+
   const canvasTheme = useUIStore((s) => s.treeCanvasTheme);
   const setCanvasTheme = useUIStore((s) => s.setTreeCanvasTheme);
 
@@ -751,11 +761,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
               onChange={(e) => onChangeRoot(e.target.value)}
               className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-md px-2.5 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[210px] truncate cursor-pointer shadow-xs"
             >
-              {sortPersonsBySurnameAndBirthDesc(Object.values(database.persons) as Person[]).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {getFullName(p)} {p.birthYear ? `(${p.birthYear})` : ''}
-                </option>
-              ))}
+              {dropdownPersons.map((p) => {
+                const isLiving = isPersonLiving(database.persons[p.id]);
+                const isMasked = !isWhitelisted && isLiving;
+                return (
+                  <option key={p.id} value={p.id}>
+                    {isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}
+                  </option>
+                );
+              })}
             </select>
           </div>
 

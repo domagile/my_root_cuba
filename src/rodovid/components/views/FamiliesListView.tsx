@@ -8,11 +8,14 @@ import {
   MapPin,
   Edit2,
   Trash2,
-  GitFork
+  GitFork,
+  Lock
 } from 'lucide-react';
 import { GenealogyDatabase, Family } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
+import { useAuthStore } from '../../../stores/useAuthStore';
+import { getPrivacySafePerson, isPersonLiving, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 
@@ -33,6 +36,10 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
   onOpenAddFamily,
   onChangeRoot
 }) => {
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
+
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
@@ -165,15 +172,22 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
                       Чоловік / Батько
                     </span>
                     {husband ? (
-                      <div>
-                        <h4 className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
-                          {getFullName(husband)}
-                        </h4>
-                        <p className={`text-[10px] ${theme.textMuted} font-mono mt-0.5`}>
-                          {husband.birthYear || '?'} —{' '}
-                          {husband.isLiving ? 'теп. час' : husband.deathYear || '?'}
-                        </p>
-                      </div>
+                      (() => {
+                        const isLiving = isPersonLiving(husband);
+                        const isMasked = !isWhitelisted && isLiving;
+                        return (
+                          <div>
+                            <h4 className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
+                              {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(husband)}
+                            </h4>
+                            <p className={`text-[10px] ${theme.textMuted} font-mono mt-0.5`}>
+                              {isMasked
+                                ? '🔒 Конфіденційно'
+                                : `${husband.birthYear || '?'} — ${husband.isLiving ? 'теп. час' : husband.deathYear || '?'}`}
+                            </p>
+                          </div>
+                        );
+                      })()
                     ) : (
                       <span className="text-xs italic">Не вказано</span>
                     )}
@@ -196,15 +210,22 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
                       Дружина / Мати
                     </span>
                     {wife ? (
-                      <div>
-                        <h4 className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
-                          {getFullName(wife)}
-                        </h4>
-                        <p className={`text-[10px] ${theme.textMuted} font-mono mt-0.5`}>
-                          {wife.birthYear || '?'} —{' '}
-                          {wife.isLiving ? 'теп. час' : wife.deathYear || '?'}
-                        </p>
-                      </div>
+                      (() => {
+                        const isLiving = isPersonLiving(wife);
+                        const isMasked = !isWhitelisted && isLiving;
+                        return (
+                          <div>
+                            <h4 className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
+                              {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(wife)}
+                            </h4>
+                            <p className={`text-[10px] ${theme.textMuted} font-mono mt-0.5`}>
+                              {isMasked
+                                ? '🔒 Конфіденційно'
+                                : `${wife.birthYear || '?'} — ${wife.isLiving ? 'теп. час' : wife.deathYear || '?'}`}
+                            </p>
+                          </div>
+                        );
+                      })()
                     ) : (
                       <span className="text-xs italic">Не вказано</span>
                     )}
@@ -245,6 +266,9 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
                       {fam.children.map((childObj) => {
                         const child = database.persons[childObj.personId];
                         if (!child) return null;
+                        const isLiving = isPersonLiving(child);
+                        const isMasked = !isWhitelisted && isLiving;
+
                         return (
                           <div
                             key={child.id}
@@ -256,8 +280,10 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
                                 child.gender === 'M' ? 'bg-sky-500' : 'bg-rose-500'
                               }`}
                             />
-                            <span className={`${theme.textPrimary} font-medium`}>{getFullName(child)}</span>
-                            {child.birthYear && (
+                            <span className={`${theme.textPrimary} font-medium`}>
+                              {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(child)}
+                            </span>
+                            {!isMasked && child.birthYear && (
                               <span className={`text-[10px] ${theme.textMuted} font-mono`}>
                                 ({child.birthYear})
                               </span>
