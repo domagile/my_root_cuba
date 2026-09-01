@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Share2, ShieldCheck, Lock, Flame } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Share2, ShieldCheck, Lock, Flame, X } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
@@ -58,6 +58,29 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const [showGedcomModal, setShowGedcomModal] = useState(false);
   const [showCloudPopover, setShowCloudPopover] = useState(false);
   const [cloudActionMsg, setCloudActionMsg] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Close cloud popover on click outside or escape key
+  useEffect(() => {
+    if (!showCloudPopover) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+        setShowCloudPopover(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowCloudPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showCloudPopover]);
 
   const toggleDarkLight = () => {
     if (theme.category === 'dark') {
@@ -146,87 +169,99 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
           {/* Cloud Details Popover */}
           {showCloudPopover && (
-            <div className={`absolute left-0 mt-2 w-80 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-4 z-50 space-y-3 ${theme.cardTitle}`}>
-              <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-2">
-                <div className="flex items-center gap-2">
-                  <Flame className="w-4 h-4 text-[#B88E3E]" />
-                  <span className="font-bold text-xs">Хмарна синхронізація Firestore</span>
-                </div>
-                <button
-                  onClick={() => setShowCloudPopover(false)}
-                  className="text-xs opacity-60 hover:opacity-100 cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
+            <>
+              {/* Invisible backdrop to dismiss on click outside anywhere */}
+              <div 
+                className="fixed inset-0 z-40" 
+                onClick={() => setShowCloudPopover(false)} 
+              />
 
-              <div className="space-y-1.5 text-[11px] opacity-90">
-                <div className="flex justify-between">
-                  <span className="opacity-70">Стан зв'язку:</span>
-                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    {syncStatus === 'syncing' ? 'Йде запис...' : syncStatus === 'error' ? 'Помилка підключення' : 'Атомарно підключено'}
-                  </span>
+              <div 
+                ref={popoverRef}
+                className={`absolute top-full mt-2.5 right-0 sm:left-0 sm:right-auto w-80 max-w-[calc(100vw-24px)] rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-4 z-50 space-y-3 ${theme.cardTitle}`}
+              >
+                <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Flame className="w-4 h-4 text-[#B88E3E]" />
+                    <span className="font-bold text-xs">Хмарна синхронізація Firestore</span>
+                  </div>
+                  <button
+                    onClick={() => setShowCloudPopover(false)}
+                    className="p-1 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 opacity-70 hover:opacity-100 transition-colors cursor-pointer"
+                    title="Закрити"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <div className="flex justify-between">
-                  <span className="opacity-70">Останній запис:</span>
-                  <span className="font-mono">{formatLastSync(lastSyncTime)}</span>
+
+                <div className="space-y-1.5 text-[11px] opacity-90">
+                  <div className="flex justify-between">
+                    <span className="opacity-70">Стан зв'язку:</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      {syncStatus === 'syncing' ? 'Йде запис...' : syncStatus === 'error' ? 'Помилка підключення' : 'Атомарно підключено'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-70">Останній запис:</span>
+                    <span className="font-mono">{formatLastSync(lastSyncTime)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-70">Записів у базі:</span>
+                    <span>{persons.length} осіб / {metricRecords.length} метрик</span>
+                  </div>
+                  {lastSyncError && (
+                    <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[10px]">
+                      {lastSyncError}
+                    </div>
+                  )}
                 </div>
-                <div className="flex justify-between">
-                  <span className="opacity-70">Записів у базі:</span>
-                  <span>{persons.length} осіб / {metricRecords.length} метрик</span>
-                </div>
-                {lastSyncError && (
-                  <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[10px]">
-                    {lastSyncError}
+
+                {cloudActionMsg && (
+                  <div className={`p-2 rounded-lg text-[10px] flex items-center gap-1.5 ${
+                    cloudActionMsg.isError
+                      ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
+                      : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                  }`}>
+                    {cloudActionMsg.isError ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                    <span>{cloudActionMsg.text}</span>
                   </div>
                 )}
-              </div>
 
-              {cloudActionMsg && (
-                <div className={`p-2 rounded-lg text-[10px] flex items-center gap-1.5 ${
-                  cloudActionMsg.isError
-                    ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
-                    : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-                }`}>
-                  {cloudActionMsg.isError ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
-                  <span>{cloudActionMsg.text}</span>
+                {/* Quick Actions inside Popover */}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={handleHeaderPush}
+                    disabled={isManualPushing || isManualPulling}
+                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-[11px] transition-all cursor-pointer disabled:opacity-50`}
+                  >
+                    <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />
+                    <span>{isManualPushing ? 'Запис...' : 'Вивантажити'}</span>
+                  </button>
+
+                  <button
+                    onClick={handleHeaderPull}
+                    disabled={isManualPushing || isManualPulling}
+                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-[11px] transition-all cursor-pointer hover:opacity-90 disabled:opacity-50`}
+                  >
+                    <Download className={`w-3.5 h-3.5 ${isManualPulling ? 'animate-bounce' : ''}`} />
+                    <span>{isManualPulling ? 'Читання...' : 'Завантажити'}</span>
+                  </button>
                 </div>
-              )}
 
-              {/* Quick Actions inside Popover */}
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  onClick={handleHeaderPush}
-                  disabled={isManualPushing || isManualPulling}
-                  className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-[11px] transition-all cursor-pointer disabled:opacity-50`}
-                >
-                  <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />
-                  <span>{isManualPushing ? 'Запис...' : 'Вивантажити'}</span>
-                </button>
-
-                <button
-                  onClick={handleHeaderPull}
-                  disabled={isManualPushing || isManualPulling}
-                  className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-[11px] transition-all cursor-pointer hover:opacity-90 disabled:opacity-50`}
-                >
-                  <Download className={`w-3.5 h-3.5 ${isManualPulling ? 'animate-bounce' : ''}`} />
-                  <span>{isManualPulling ? 'Читання...' : 'Завантажити'}</span>
-                </button>
+                <div className="text-center pt-1 border-t border-black/5 dark:border-white/5">
+                  <button
+                    onClick={() => {
+                      setShowCloudPopover(false);
+                      setActiveTab('settings');
+                    }}
+                    className="text-[10px] text-[#B88E3E] hover:underline font-medium cursor-pointer"
+                  >
+                    Відкрити повні налаштування Firestore →
+                  </button>
+                </div>
               </div>
-
-              <div className="text-center pt-1 border-t border-black/5 dark:border-white/5">
-                <button
-                  onClick={() => {
-                    setShowCloudPopover(false);
-                    setActiveTab('settings');
-                  }}
-                  className="text-[10px] text-[#B88E3E] hover:underline font-medium cursor-pointer"
-                >
-                  Відкрити повні налаштування Firestore →
-                </button>
-              </div>
-            </div>
+            </>
           )}
         </div>
 

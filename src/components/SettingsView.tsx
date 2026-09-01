@@ -38,13 +38,16 @@ import {
   Cloud,
   Zap,
   CheckCircle,
-  XCircle
+  XCircle,
+  Archive,
+  FolderGit2
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { ThemePalette, UserRole } from '../types';
 import { getAllSnapshots, saveSnapshot, deleteSnapshot, DataSnapshot } from '../utils/persistentBackup';
+import { getGitHubConfig, saveGitHubConfig, testGitHubConnection } from '../services/githubService';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -128,6 +131,31 @@ export const SettingsView: React.FC = () => {
   const [snapshots, setSnapshots] = useState<DataSnapshot[]>([]);
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
   const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null);
+
+  // GitHub Integration state
+  const [githubConfig, setGithubConfigState] = useState(getGitHubConfig());
+  const [isTestingGitHub, setIsTestingGitHub] = useState(false);
+  const [gitHubTestResult, setGitHubTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleSaveGitHubConfig = () => {
+    const saved = saveGitHubConfig(githubConfig);
+    setGithubConfigState(saved);
+    setGitHubTestResult({ success: true, message: 'Налаштування GitHub успішно збережено!' });
+    setTimeout(() => setGitHubTestResult(null), 4000);
+  };
+
+  const handleTestGitHub = async () => {
+    setIsTestingGitHub(true);
+    setGitHubTestResult(null);
+    const res = await testGitHubConnection({
+      owner: githubConfig.owner,
+      repo: githubConfig.repo,
+      branch: githubConfig.branch,
+      token: githubConfig.token
+    });
+    setIsTestingGitHub(false);
+    setGitHubTestResult(res);
+  };
 
   const loadSnapshotsList = async () => {
     try {
@@ -458,6 +486,72 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
 
+          {/* Firestore Storage & Memory Usage Gauge */}
+          {(() => {
+            let estimatedBytes = 0;
+            try {
+              const fullPayload = JSON.stringify({
+                persons,
+                families,
+                sources,
+                events,
+                metricRecords,
+                tasks,
+                hypotheses,
+                documents,
+                findings,
+                requests,
+                matrixEntries,
+                whitelist,
+                accessConfig
+              });
+              estimatedBytes = new Blob([fullPayload]).size;
+            } catch {
+              estimatedBytes = 0;
+            }
+
+            const formatBytes = (bytes: number) => {
+              if (bytes === 0) return '0 B';
+              const k = 1024;
+              const sizes = ['B', 'KB', 'MB', 'GB'];
+              const i = Math.floor(Math.log(bytes) / Math.log(k));
+              return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            };
+
+            const maxFreeBytes = 1024 * 1024 * 1024; // 1 GB free on Spark Plan
+            const usagePercent = Math.max(0.01, (estimatedBytes / maxFreeBytes) * 100);
+
+            return (
+              <div className="p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-4 h-4 text-[#B88E3E]" />
+                    <span className={`text-xs font-bold ${theme.cardTitle}`}>
+                      Об'єм пам'яті в базі даних Firestore:
+                    </span>
+                    <span className="font-mono font-bold text-xs text-[#B88E3E]">
+                      {formatBytes(estimatedBytes)}
+                    </span>
+                  </div>
+                  <span className={`text-[10px] ${theme.cardSubtext}`}>
+                    Ліміт безкоштовного тарифу Firebase: <strong className="font-mono">1.0 GB</strong> (використано {usagePercent.toFixed(3)}%)
+                  </span>
+                </div>
+
+                <div className="w-full bg-black/10 dark:bg-white/10 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-[#B88E3E] h-2 rounded-full transition-all duration-500" 
+                    style={{ width: `${Math.min(100, Math.max(1, usagePercent * 10))}%` }}
+                  />
+                </div>
+
+                <p className={`text-[10px] ${theme.cardSubtext} leading-relaxed`}>
+                  💡 <em>Порада:</em> База даних зберігає текстові записи, дати, зв'язки та посилання на зовнішні сховища. Якщо зберігати фото/скани як посилання (наприклад, Google Drive або GitHub), навіть база з 10,000+ осіб займе менше 5–10 MB з 1,000 MB доступних.
+                </p>
+              </div>
+            );
+          })()}
+
           {/* Manual Push / Pull Trigger Buttons */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-black/10 dark:border-white/10">
             <button
@@ -501,6 +595,163 @@ export const SettingsView: React.FC = () => {
               </button>
             )}
           </div>
+        </div>
+      </section>
+
+      {/* SECTION: GitHub Archive & Scans Storage */}
+      <section className="space-y-4 pt-4 border-t border-black/10">
+        <div>
+          <h2 className={`text-lg font-bold ${theme.cardTitle} flex items-center gap-2`}>
+            <Archive className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            <span>GitHub Сховище для архівних сканів та документів (1-клік)</span>
+          </h2>
+          <p className={`text-xs ${theme.cardSubtext} mt-1`}>
+            Автоматичне вивантаження важких метричних сканів, ревізій та фотографій померлих предків напряму у ваш GitHub репозиторій.
+          </p>
+        </div>
+
+        <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-5`}>
+          {/* Explanation banner */}
+          <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-start gap-3 text-xs">
+            <div className="w-8 h-8 rounded-lg bg-purple-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+              <FolderGit2 className="w-4 h-4" />
+            </div>
+            <div className="space-y-1 text-purple-950 dark:text-purple-200">
+              <p className="font-bold text-sm">
+                Як працює автоматична структура папок:
+              </p>
+              <p className="leading-relaxed">
+                Кожен завантажений документ автоматично зберігається за шляхом:
+                <br />
+                <code className="bg-purple-950/20 dark:bg-purple-900/40 px-1.5 py-0.5 rounded font-mono text-[11px] text-purple-800 dark:text-purple-200">
+                  archive / [Гілка_Прізвище] / [Покоління_XX] / [ПІБ_Особи] / [Назва_файлу]
+                </code>
+              </p>
+              <p className="text-[11px] text-purple-800 dark:text-purple-300">
+                Це дозволяє мати необмежене, безкоштовне та структуроване сховище документів без заповнення ліміту Firestore.
+              </p>
+            </div>
+          </div>
+
+          {/* GitHub Form */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
+                Власник репозиторію (Username / Org):
+              </label>
+              <input
+                type="text"
+                value={githubConfig.owner}
+                onChange={(e) => setGithubConfigState({ ...githubConfig, owner: e.target.value })}
+                placeholder="наприклад: TararaFamily або ваш нікнейм"
+                className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
+              />
+            </div>
+
+            <div>
+              <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
+                Назва репозиторію:
+              </label>
+              <input
+                type="text"
+                value={githubConfig.repo}
+                onChange={(e) => setGithubConfigState({ ...githubConfig, repo: e.target.value })}
+                placeholder="наприклад: rodovid-archive"
+                className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
+              />
+            </div>
+
+            <div>
+              <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
+                Гілка (Branch):
+              </label>
+              <input
+                type="text"
+                value={githubConfig.branch}
+                onChange={(e) => setGithubConfigState({ ...githubConfig, branch: e.target.value })}
+                placeholder="main"
+                className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
+              />
+            </div>
+
+            <div>
+              <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
+                Базова коренева папка:
+              </label>
+              <input
+                type="text"
+                value={githubConfig.baseFolder}
+                onChange={(e) => setGithubConfigState({ ...githubConfig, baseFolder: e.target.value })}
+                placeholder="archive"
+                className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
+                GitHub Personal Access Token (PAT):
+              </label>
+              <input
+                type="password"
+                value={githubConfig.token}
+                onChange={(e) => setGithubConfigState({ ...githubConfig, token: e.target.value })}
+                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
+              />
+              <p className={`text-[10px] ${theme.cardSubtext} mt-1`}>
+                Створіть токен на GitHub (Settings → Developer Settings → Personal Access Tokens → Tokens (classic) з дозволом <code>repo</code>). Токен зберігається лише локально у вашому браузері.
+              </p>
+            </div>
+          </div>
+
+          {/* Test & Save buttons */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-black/10 dark:border-white/10">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestGitHub}
+                disabled={isTestingGitHub || !githubConfig.owner || !githubConfig.repo || !githubConfig.token}
+                className="px-4 py-2.5 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 text-purple-700 dark:text-purple-300 font-bold text-xs border border-purple-500/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <FolderGit2 className={`w-4 h-4 ${isTestingGitHub ? 'animate-spin' : ''}`} />
+                <span>{isTestingGitHub ? 'Перевірка зв\'язку...' : 'Перевірити зв\'язок з GitHub'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveGitHubConfig}
+                className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>Зберегти налаштування GitHub</span>
+              </button>
+            </div>
+
+            {githubConfig.isConfigured ? (
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" /> GitHub налаштовано та готовий до вивантаження
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs text-neutral-500">
+                <Info className="w-4 h-4" /> Не налаштовано (скани зберігатимуться в базі)
+              </span>
+            )}
+          </div>
+
+          {gitHubTestResult && (
+            <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+              gitHubTestResult.success
+                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'
+            }`}>
+              {gitHubTestResult.success ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+              )}
+              <span>{gitHubTestResult.message}</span>
+            </div>
+          )}
         </div>
       </section>
 

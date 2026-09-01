@@ -45,6 +45,7 @@ import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
+import { PersonDocumentsSection } from '../../../components/PersonDocumentsSection';
 
 interface PersonDetailModalProps {
   database?: GenealogyDatabase;
@@ -2026,6 +2027,15 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               </div>
             ) : null}
           </div>
+
+          {/* SECTION: Archive Documents, Photos & GitHub Sync */}
+          <PersonDocumentsSection
+            person={person}
+            onUpdatePerson={(updatedPerson) => updatePerson(updatedPerson)}
+            isReadOnly={isReadOnly}
+            themePalette={themePalette}
+            isDark={isDark}
+          />
 
           {/* SECTION 6: Biography */}
           <div className={`p-4 ${theme.surfaceBg} rounded-2xl border ${theme.borderSubtle} space-y-2`}>

@@ -18,11 +18,13 @@ import {
   CheckCircle2,
   Paperclip,
   FolderTree,
-  Tag
+  Tag,
+  Eye
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { GenealogyDocument, CustomField } from '../types';
 import { ConfirmDeleteModal } from './common/ConfirmDeleteModal';
+import { DocumentLightboxModal } from './common/DocumentLightboxModal';
 
 export const DOCUMENT_TYPES = [
   'народження',
@@ -83,6 +85,7 @@ export const DocumentsView: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDoc, setEditingDoc] = useState<GenealogyDocument | null>(null);
   const [docToDelete, setDocToDelete] = useState<GenealogyDocument | null>(null);
+  const [previewingDoc, setPreviewingDoc] = useState<{ title: string; url: string; type?: string; archiveRef?: string; year?: string } | null>(null);
 
   // Form Fields
   const [researchTitle, setResearchTitle] = useState("Без прив'язки");
@@ -681,9 +684,28 @@ export const DocumentsView: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-4">
                       <div className="flex items-center gap-2">
+                        {(doc.documentLink || doc.driveUrl || doc.fileUrl || doc.fileData) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetUrl = doc.documentLink || doc.driveUrl || doc.fileUrl || doc.fileData || '';
+                              setPreviewingDoc({
+                                title: doc.title,
+                                url: targetUrl,
+                                type: doc.type,
+                                archiveRef: doc.archive || doc.archiveRef,
+                                year: String(doc.yearFrom || doc.year || '')
+                              });
+                            }}
+                            className="p-1.5 bg-[#121212] hover:bg-emerald-950/40 border border-[#333333] hover:border-emerald-500/50 text-emerald-400 rounded-md text-[11px] font-medium cursor-pointer transition-colors"
+                            title="Переглянути скан / фото"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => openEditModal(doc)}
-                          className="px-2.5 py-1 bg-[#121212] hover:bg-[#262626] border border-[#333333] text-[#E5E5E5] rounded-md text-[11px] font-medium"
+                          className="px-2.5 py-1 bg-[#121212] hover:bg-[#262626] border border-[#333333] text-[#E5E5E5] rounded-md text-[11px] font-medium cursor-pointer"
                         >
                           Редагувати
                         </button>
@@ -1195,6 +1217,14 @@ export const DocumentsView: React.FC = () => {
           }}
           onClose={() => setDocToDelete(null)}
           isPermanent={true}
+        />
+      )}
+
+      {/* Document Lightbox Preview Modal */}
+      {previewingDoc && (
+        <DocumentLightboxModal
+          document={previewingDoc}
+          onClose={() => setPreviewingDoc(null)}
         />
       )}
     </div>

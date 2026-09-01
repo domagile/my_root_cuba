@@ -99,6 +99,32 @@ export interface Person {
   citations?: any[];
   events?: any[];
   customFields?: CustomFieldItem[] | Record<string, string>;
+  documents?: PersonDocumentItem[];
+  media?: PersonDocumentItem[];
+}
+
+export interface PersonDocumentItem {
+  id: string;
+  title: string;
+  url: string;
+  type?: 'photo' | 'metric' | 'revision' | 'confession' | 'passport' | 'military' | 'certificate' | 'other' | string;
+  storageType?: 'github' | 'gdrive' | 'firestore' | 'external';
+  githubPath?: string;
+  year?: string | number;
+  archiveRef?: string;
+  page?: string;
+  notes?: string;
+  createdAt?: string;
+  isLivingTarget?: boolean;
+}
+
+export interface GitHubStorageConfig {
+  owner: string;
+  repo: string;
+  branch: string;
+  token: string;
+  baseFolder?: string;
+  isConfigured: boolean;
 }
 
 export interface MetricIndexedPerson {
