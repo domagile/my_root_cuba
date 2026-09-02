@@ -45,6 +45,12 @@ service cloud.firestore {
         allow write: if true;
       }
 
+      // Research Notes subcollection (Google Keep style notes)
+      match /researchNotes/{noteId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
       // Documents subcollection
       match /documents/{documentId} {
         allow read: if true;

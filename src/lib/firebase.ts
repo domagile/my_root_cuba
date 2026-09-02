@@ -328,6 +328,12 @@ export const saveMatrixEntryDoc = (entry: any, projectId?: string) =>
 export const deleteMatrixEntryDoc = (entryId: string, projectId?: string) =>
   deleteEntityDoc('matrixEntries', entryId, projectId);
 
+export const saveNoteDoc = (note: any, projectId?: string) =>
+  saveEntityDoc('researchNotes', note.id, note, projectId);
+
+export const deleteNoteDoc = (noteId: string, projectId?: string) =>
+  deleteEntityDoc('researchNotes', noteId, projectId);
+
 // Access Requests Helpers (both in project and top-level)
 export async function saveAccessRequestToCloud(req: any, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> {
   try {

@@ -71,6 +71,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
     saveFamily,
     deleteFamily,
     saveSource,
+    deleteSource,
     loadGenealogyDatabase
   } = useGenealogy();
 
@@ -257,6 +258,14 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
     saveSource(source);
   }, [saveSource, isReadOnly]);
 
+  const handleDeleteSource = useCallback((sourceId: string) => {
+    if (isReadOnly) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    deleteSource(sourceId);
+  }, [deleteSource, isReadOnly]);
+
   // Handle full database import
   const handleImportDatabase = useCallback((newDb: GenealogyDatabase) => {
     loadGenealogyDatabase(newDb);
@@ -429,6 +438,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
               onSelectPerson={(id) => setInspectPersonId(id)}
               onOpenAddSource={() => setEditSourceTarget('NEW')}
               onEditSource={(id) => setEditSourceTarget(id)}
+              onDeleteSource={handleDeleteSource}
             />
           </div>
         )}
@@ -524,6 +534,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
           database={database}
           onClose={() => setEditSourceTarget(null)}
           onSave={handleSaveSource}
+          onDelete={handleDeleteSource}
         />
       )}
 

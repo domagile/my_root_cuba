@@ -502,8 +502,11 @@ export interface Source {
   date?: string;
   transcription?: string;
   url?: string;
+  documentLink?: string;
+  documentType?: string;
   notes?: string;
   tags?: string[];
+  customFields?: CustomFieldItem[];
 }
 
 export type EventType =
@@ -630,6 +633,43 @@ export interface AccessControlConfig {
   adminNotificationEmail?: string;
   enableEmailNotifications?: boolean;
   webhookUrl?: string;
+}
+
+export type NoteColor =
+  | 'default'
+  | 'amber'
+  | 'emerald'
+  | 'teal'
+  | 'sky'
+  | 'indigo'
+  | 'purple'
+  | 'rose'
+  | 'coral'
+  | 'slate';
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  isCompleted: boolean;
+}
+
+export interface ResearchNote {
+  id: string;
+  title: string;
+  content: string;
+  isChecklist?: boolean;
+  checklistItems?: ChecklistItem[];
+  color?: NoteColor;
+  isPinned?: boolean;
+  isArchived?: boolean;
+  isTrash?: boolean;
+  tags?: string[];
+  reminderDate?: string;
+  linkedPersonIds?: string[];
+  imageUrl?: string;
+  linkUrl?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 
