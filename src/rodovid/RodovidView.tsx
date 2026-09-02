@@ -549,6 +549,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
       {addRelation && (
         <AddPersonModal
           initialRelation={addRelation}
+          onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
           onClose={() => setAddRelation(null)}
         />
       )}

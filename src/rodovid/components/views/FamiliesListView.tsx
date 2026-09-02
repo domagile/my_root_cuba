@@ -18,6 +18,7 @@ import { useAuthStore } from '../../../stores/useAuthStore';
 import { getPrivacySafePerson, isPersonLiving, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
+import { isPersonMale } from '../../utils/genderUtils';
 
 interface FamiliesListViewProps {
   database: GenealogyDatabase;
@@ -277,7 +278,7 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
                           >
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                child.gender === 'M' ? 'bg-sky-500' : 'bg-rose-500'
+                                isPersonMale(child, database) ? 'bg-sky-500' : 'bg-rose-500'
                               }`}
                             />
                             <span className={`${theme.textPrimary} font-medium`}>

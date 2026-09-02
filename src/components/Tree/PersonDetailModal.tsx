@@ -26,12 +26,14 @@ import {
   Unlink,
   Search,
   Check,
-  ExternalLink
+  ExternalLink,
+  Church
 } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../../context/GenealogyContext';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { getThemeConfig } from '../../utils/theme';
 import { Person, Source, Family } from '../../types';
+import { PersonDocumentsSection } from '../PersonDocumentsSection';
 
 interface PersonDetailModalProps {
   personId: string;
@@ -102,6 +104,28 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const mother = persons.find((p) => p.id === person.motherId);
   const spouses = persons.filter((p) => person.spouseIds?.includes(p.id) || p.spouseIds?.includes(person.id));
   const children = persons.filter((p) => p.fatherId === person.id || p.motherId === person.id || person.childrenIds?.includes(p.id));
+
+  // Godparents (Хрещені батьки та восприємники)
+  const godparents = useMemo(() => {
+    if (!person.godparents || person.godparents.length === 0) return [];
+    return person.godparents.map((gp) => {
+      const linked = gp.personId ? persons.find((p) => p.id === gp.personId) : null;
+      return {
+        ...gp,
+        linkedPerson: linked
+      };
+    });
+  }, [person.godparents, persons]);
+
+  // Godchildren (Похресники)
+  const godchildren = useMemo(() => {
+    return persons.filter((p) => {
+      if (p.godparents && p.godparents.some((gp) => gp.personId === person.id)) return true;
+      if (p.godparentIds && p.godparentIds.includes(person.id)) return true;
+      if (person.godchildrenIds && person.godchildrenIds.includes(p.id)) return true;
+      return false;
+    });
+  }, [person.id, person.godchildrenIds, persons]);
 
   const given = person.name?.given || person.firstName || '';
   const surname = person.name?.surname || person.lastName || '';
@@ -540,8 +564,83 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Godparents & Godchildren (Хрещені батьки та похресники) */}
+            {(godparents.length > 0 || godchildren.length > 0) && (
+              <div className="p-3.5 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-500/20 sm:col-span-2 space-y-2">
+                <span className="text-[11px] text-purple-700 dark:text-purple-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <Church className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  <span>Хрещені батьки ({godparents.length}) та Похресники ({godchildren.length}):</span>
+                </span>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  {/* Godparents */}
+                  <div>
+                    <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 block mb-1">
+                      Хрещені батьки / восприємники:
+                    </span>
+                    {godparents.length > 0 ? (
+                      <div className="space-y-1">
+                        {godparents.map((gp, idx) => (
+                          <div key={gp.id || idx} className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300 font-semibold text-[10px]">
+                              {gp.role === 'godmother' ? 'Хрещена мати' : gp.role === 'witness' ? 'Свідок' : 'Хрещений батько'}
+                            </span>
+                            {gp.linkedPerson ? (
+                              <span
+                                onClick={() => setSelectedPersonId(gp.linkedPerson.id)}
+                                className="font-semibold text-[#B88E3E] cursor-pointer hover:underline"
+                                title="Перейти до профілю особи"
+                              >
+                                {gp.name}
+                              </span>
+                            ) : (
+                              <span className="font-medium text-neutral-700 dark:text-neutral-300">{gp.name}</span>
+                            )}
+                            {gp.notes && <span className="text-neutral-400 italic text-[11px]">({gp.notes})</span>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-neutral-400 italic text-[11px]">Не зазначено</span>
+                    )}
+                  </div>
+
+                  {/* Godchildren */}
+                  <div>
+                    <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 block mb-1">
+                      Похресники (хрещені діти):
+                    </span>
+                    {godchildren.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {godchildren.map((gc) => (
+                          <span
+                            key={gc.id}
+                            onClick={() => setSelectedPersonId(gc.id)}
+                            className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-900 dark:text-purple-200 cursor-pointer hover:bg-purple-200 dark:hover:bg-purple-800/60 font-medium text-[11px]"
+                            title="Перейти до профілю похресника"
+                          >
+                            {gc.name?.given || gc.firstName} {gc.name?.surname || gc.lastName || ''}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-neutral-400 italic text-[11px]">Похресників не зафіксовано</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* SECTION: Archive Documents, Photos, Metric Scans of Person and Children */}
+        <PersonDocumentsSection
+          person={person}
+          onUpdatePerson={(updatedPerson) => updatePerson(updatedPerson)}
+          isReadOnly={!canEdit}
+          themePalette={themePalette}
+        />
 
         {/* Archive Notes & Sources Section */}
         <div className="space-y-3 pt-1">

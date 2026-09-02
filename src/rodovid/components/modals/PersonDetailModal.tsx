@@ -35,7 +35,8 @@ import {
   ChevronUp,
   Users,
   Sparkles,
-  TreePine
+  TreePine,
+  Church
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Family, Source } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
@@ -221,6 +222,28 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const directChildren = (person.childrenIds || [])
     .map((cId) => database.persons[cId] || persons.find((p) => p.id === cId))
     .filter(Boolean) as Person[];
+
+  // Godparents (Хрещені батьки та восприємники)
+  const godparents = useMemo(() => {
+    if (!person.godparents || person.godparents.length === 0) return [];
+    return person.godparents.map((gp) => {
+      const linked = gp.personId ? (database.persons[gp.personId] || persons.find((p) => p.id === gp.personId)) : null;
+      return {
+        ...gp,
+        linkedPerson: linked
+      };
+    });
+  }, [person.godparents, database.persons, persons]);
+
+  // Godchildren (Похресники)
+  const godchildren = useMemo(() => {
+    return persons.filter((p) => {
+      if (p.godparents && p.godparents.some((gp) => gp.personId === person.id)) return true;
+      if (p.godparentIds && p.godparentIds.includes(person.id)) return true;
+      if (person.godchildrenIds && person.godchildrenIds.includes(p.id)) return true;
+      return false;
+    });
+  }, [person.id, person.godchildrenIds, persons]);
 
   const estate = person.estateOrSocialStatus || person.estate || person.socialStatus;
 
@@ -1844,6 +1867,66 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* SECTION: Spiritual Connections (Godparents & Godchildren) */}
+          {(godparents.length > 0 || godchildren.length > 0) && (
+            <div className={`p-4 ${theme.surfaceBg} rounded-2xl border ${theme.borderSubtle} space-y-3 shadow-xs`}>
+              <div className="flex items-center gap-2">
+                <Church className="w-4 h-4 text-purple-500" />
+                <span className={`text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider block`}>
+                  Духовні зв'язки (Хрещені та похресники):
+                </span>
+              </div>
+
+              {godparents.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className={`text-[11px] font-semibold ${theme.textMuted} block`}>Хрещені батьки та восприємники:</span>
+                  <div className="flex flex-wrap gap-2">
+                    {godparents.map((gp, idx) => (
+                      <div
+                        key={gp.id || idx}
+                        onClick={() => gp.personId && onSelectPerson && onSelectPerson(gp.personId)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs transition-colors ${
+                          gp.personId
+                            ? 'bg-purple-500/10 border-purple-500/25 text-purple-700 dark:text-purple-300 hover:bg-purple-500/20 cursor-pointer shadow-xs'
+                            : 'bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 text-neutral-700 dark:text-neutral-300'
+                        }`}
+                        title={gp.personId ? 'Перейти до анкети хрещеного' : undefined}
+                      >
+                        <span className="text-[10px] font-bold opacity-75">
+                          {gp.role === 'godmother' ? 'Хрещена мати:' : gp.role === 'witness' ? 'Свідок:' : 'Хрещений батько:'}
+                        </span>
+                        <span className="font-bold underline decoration-dotted underline-offset-2">{gp.name}</span>
+                        {gp.notes && <span className="text-[10px] opacity-70">({gp.notes})</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {godchildren.length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-purple-500/10">
+                  <span className={`text-[11px] font-semibold ${theme.textMuted} block`}>Похресники:</span>
+                  <div className="flex flex-wrap gap-2">
+                    {godchildren.map((child) => (
+                      <button
+                        key={child.id}
+                        type="button"
+                        onClick={() => onSelectPerson && onSelectPerson(child.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/25 text-purple-700 dark:text-purple-300 hover:bg-purple-500/20 cursor-pointer text-xs font-semibold shadow-xs transition-colors"
+                        title="Перейти до анкети похресника"
+                      >
+                        <span>{getFullName(child)}</span>
+                        {(child.birthYear || child.birthDate) && (
+                          <span className="text-[10px] opacity-70 font-mono">({child.birthYear || child.birthDate})</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* SECTION 4: Life Events */}
           <div className="space-y-2.5">

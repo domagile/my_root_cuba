@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   FileText,
   Plus,
@@ -21,7 +21,10 @@ import {
   Sparkles,
   Info,
   Calendar,
-  X
+  X,
+  Baby,
+  Users,
+  ArrowUpRight
 } from 'lucide-react';
 import { Person, PersonDocumentItem, ThemePalette } from '../types';
 import { getThemeConfig } from '../utils/theme';
@@ -32,6 +35,17 @@ import {
   parseDocumentViewerUrl
 } from '../services/githubService';
 import { DocumentLightboxModal } from './common/DocumentLightboxModal';
+import { useGenealogy } from '../context/GenealogyContext';
+import { isPersonMale, isPersonFemale } from '../utils/genderUtils';
+import { getFullName } from '../rodovid/utils/relationship';
+
+export interface EnrichedDocumentItem extends PersonDocumentItem {
+  isFromChild?: boolean;
+  childId?: string;
+  childName?: string;
+  childBirthYear?: number | string;
+  relationLabel?: string;
+}
 
 interface PersonDocumentsSectionProps {
   person: Person;
@@ -50,9 +64,11 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
 }) => {
   const theme = getThemeConfig(themePalette);
   const githubConfig = getGitHubConfig();
+  const { persons, families, metricRecords, setSelectedPersonId } = useGenealogy();
 
   const [activeModal, setActiveModal] = useState<'add' | null>(null);
-  const [viewingDoc, setViewingDoc] = useState<PersonDocumentItem | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<EnrichedDocumentItem | null>(null);
+  const [filterTab, setFilterTab] = useState<'all' | 'own' | 'children'>('all');
 
   // Form State
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>(githubConfig.isConfigured ? 'file' : 'link');
@@ -69,8 +85,12 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatusMsg, setUploadStatusMsg] = useState<{ text: string; isError?: boolean } | null>(null);
 
-  const existingDocuments: PersonDocumentItem[] = React.useMemo(() => {
-    const list: PersonDocumentItem[] = [...(person.documents || [])];
+  // 1. Own Documents of the person
+  const ownDocuments: EnrichedDocumentItem[] = useMemo(() => {
+    const list: EnrichedDocumentItem[] = (person.documents || []).map((d) => ({
+      ...d,
+      isFromChild: false
+    }));
 
     // Also include photos if they are not already in documents
     if (person.photos && person.photos.length > 0) {
@@ -83,7 +103,8 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
             url: photoUrl,
             type: 'photo',
             storageType: parsed.type === 'gdrive' ? 'gdrive' : parsed.type === 'github' ? 'github' : 'firestore',
-            year: person.birthYear
+            year: person.birthYear,
+            isFromChild: false
           });
         }
       });
@@ -91,6 +112,135 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
 
     return list;
   }, [person.documents, person.photos, person.birthYear]);
+
+  // 2. Discover children of this person
+  const children = useMemo(() => {
+    if (!persons || persons.length === 0) return [];
+    const list: Person[] = [];
+    const seenIds = new Set<string>();
+
+    persons.forEach((p) => {
+      if (p.id === person.id) return;
+      const isDirectChild =
+        p.fatherId === person.id ||
+        p.motherId === person.id ||
+        (Array.isArray(person.childrenIds) && person.childrenIds.includes(p.id));
+
+      // Check families if any
+      const isFamilyChild = Object.values(families || {}).some((f: any) => {
+        if (!f) return false;
+        const isParent = f.husbandId === person.id || f.wifeId === person.id;
+        return isParent && Array.isArray(f.childrenIds) && f.childrenIds.includes(p.id);
+      });
+
+      if ((isDirectChild || isFamilyChild) && !seenIds.has(p.id)) {
+        seenIds.add(p.id);
+        list.push(p);
+      }
+    });
+
+    return list;
+  }, [persons, families, person.id, person.childrenIds]);
+
+  // 3. Aggregate all documents and metric scans of children
+  const childrenDocuments: EnrichedDocumentItem[] = useMemo(() => {
+    const list: EnrichedDocumentItem[] = [];
+    const seenUrls = new Set<string>();
+
+    // Mark own URLs so we avoid duplicate entries if already attached directly
+    ownDocuments.forEach((d) => {
+      if (d.url) seenUrls.add(d.url);
+    });
+
+    children.forEach((child) => {
+      const childName = getFullName(child);
+      const isMale = isPersonMale(child, { persons: persons.reduce((acc, p) => ({ ...acc, [p.id]: p }), {}), families: families || {} } as any);
+      const isFemale = isPersonFemale(child, { persons: persons.reduce((acc, p) => ({ ...acc, [p.id]: p }), {}), families: families || {} } as any);
+      const relationLabel = isMale ? 'Син' : isFemale ? 'Донька' : 'Дитина';
+      const birthYear = child.birthYear || (child.birthDate ? String(child.birthDate).match(/\b(1\d{3}|20\d{2})\b/)?.[1] : undefined);
+
+      // A) child.documents
+      if (child.documents && Array.isArray(child.documents)) {
+        child.documents.forEach((doc, idx) => {
+          if (doc.url && !seenUrls.has(doc.url)) {
+            seenUrls.add(doc.url);
+            list.push({
+              ...doc,
+              id: doc.id || `child-${child.id}-doc-${idx}`,
+              isFromChild: true,
+              childId: child.id,
+              childName,
+              childBirthYear: birthYear,
+              relationLabel
+            });
+          }
+        });
+      }
+
+      // B) child.photos
+      if (child.photos && Array.isArray(child.photos)) {
+        child.photos.forEach((photoUrl, idx) => {
+          if (photoUrl && !seenUrls.has(photoUrl)) {
+            seenUrls.add(photoUrl);
+            const parsed = parseDocumentViewerUrl(photoUrl);
+            list.push({
+              id: `child-${child.id}-photo-${idx}`,
+              title: `Світлина (${relationLabel}: ${childName})`,
+              url: photoUrl,
+              type: 'photo',
+              storageType: parsed.type === 'gdrive' ? 'gdrive' : parsed.type === 'github' ? 'github' : 'firestore',
+              year: birthYear,
+              isFromChild: true,
+              childId: child.id,
+              childName,
+              childBirthYear: birthYear,
+              relationLabel
+            });
+          }
+        });
+      }
+
+      // C) metric records referencing the child
+      if (metricRecords && Array.isArray(metricRecords)) {
+        metricRecords.forEach((m) => {
+          const isLinked = m.indexedPersons?.some(
+            (ip) => ip.linkedPersonId === child.id || 
+                    (ip.name && ip.name.toLowerCase().includes((child.lastName || '').toLowerCase()) && ip.name.toLowerCase().includes((child.firstName || '').toLowerCase()))
+          );
+          if (isLinked && m.documentScanUrl && !seenUrls.has(m.documentScanUrl)) {
+            seenUrls.add(m.documentScanUrl);
+            list.push({
+              id: `metric-rec-${m.id}`,
+              title: m.title || `Метричний запис (${relationLabel}: ${childName})`,
+              url: m.documentScanUrl,
+              type: 'metric',
+              storageType: 'external',
+              year: m.year,
+              archiveRef: `${m.archive || ''} Ф. ${m.fund || ''}, оп. ${m.inventory || ''}, спр. ${m.caseNumber || ''}`.trim(),
+              page: m.page,
+              notes: m.transcription || m.notes,
+              isFromChild: true,
+              childId: child.id,
+              childName,
+              childBirthYear: birthYear,
+              relationLabel
+            });
+          }
+        });
+      }
+    });
+
+    return list;
+  }, [children, ownDocuments, metricRecords, persons, families]);
+
+  // Combined documents according to active filter
+  const displayedDocuments: EnrichedDocumentItem[] = useMemo(() => {
+    if (filterTab === 'own') return ownDocuments;
+    if (filterTab === 'children') return childrenDocuments;
+    return [...ownDocuments, ...childrenDocuments];
+  }, [filterTab, ownDocuments, childrenDocuments]);
+
+  const totalDocumentsCount = ownDocuments.length + childrenDocuments.length;
 
   // Handle File Selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -107,7 +257,7 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
       });
       if (!docTitle) {
         // Humanize default title from filename without extension
-        const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[_\\-]/g, ' ');
+        const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[_\-]/g, ' ');
         setDocTitle(cleanName);
       }
     };
@@ -244,7 +394,7 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
     if (effectiveType === 'gdrive') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/25">
-          <Lock className="w-2.5 h-2.5" /> Google Drive (Приватне)
+          <Lock className="w-2.5 h-2.5" /> Google Drive
         </span>
       );
     }
@@ -258,7 +408,7 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
     if (effectiveType === 'firestore') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/25">
-          <Layers className="w-2.5 h-2.5" /> База даних Firestore
+          <Layers className="w-2.5 h-2.5" /> База даних
         </span>
       );
     }
@@ -272,11 +422,11 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
   return (
     <div className={`p-4 ${theme.surfaceBg} rounded-2xl border ${theme.borderSubtle} space-y-3`}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-[#B88E3E]" />
           <span className={`text-[11px] font-bold ${theme.textMuted} uppercase tracking-wider block`}>
-            Архівні документи, скани та фото ({existingDocuments.length}):
+            Архівні документи, скани та фото ({totalDocumentsCount}):
           </span>
         </div>
 
@@ -294,6 +444,61 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
           </button>
         )}
       </div>
+
+      {/* Filter Tabs if children documents exist */}
+      {childrenDocuments.length > 0 && (
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
+          <button
+            type="button"
+            onClick={() => setFilterTab('all')}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+              filterTab === 'all'
+                ? 'bg-[#B88E3E] text-white shadow-xs'
+                : `${theme.textSecondary} hover:${theme.textPrimary}`
+            }`}
+          >
+            <FolderTree className="w-3.5 h-3.5" />
+            <span>Всі документи ({totalDocumentsCount})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilterTab('own')}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+              filterTab === 'own'
+                ? 'bg-[#B88E3E] text-white shadow-xs'
+                : `${theme.textSecondary} hover:${theme.textPrimary}`
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Особисті ({ownDocuments.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilterTab('children')}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+              filterTab === 'children'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-amber-700 dark:text-amber-400 hover:bg-amber-500/10'
+            }`}
+          >
+            <Baby className="w-3.5 h-3.5" />
+            <span>Метрики дітей ({childrenDocuments.length})</span>
+          </button>
+        </div>
+      )}
+
+      {/* Children Metric Notice Banner */}
+      {childrenDocuments.length > 0 && (
+        <div className="p-2.5 rounded-xl border bg-amber-500/10 border-amber-500/20 text-amber-900 dark:text-amber-200 text-[11px] flex items-start gap-2">
+          <Baby className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="leading-relaxed">
+            <strong>Скани метрик дітей батьків:</strong> Автоматично знайдено та відображено{' '}
+            <strong>{childrenDocuments.length}</strong> архівних метричних записів/сканів у дітей ({children.length} дітей у родинному зв'язку).
+          </div>
+        </div>
+      )}
 
       {/* Advice banner */}
       <div className={`p-2.5 rounded-xl border text-[11px] flex items-start gap-2 ${
@@ -316,14 +521,16 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
       </div>
 
       {/* Documents Grid / List */}
-      {existingDocuments.length > 0 ? (
+      {displayedDocuments.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-          {existingDocuments.map((doc) => {
+          {displayedDocuments.map((doc) => {
             const parsed = parseDocumentViewerUrl(doc.url);
             return (
               <div
                 key={doc.id}
-                className={`p-3 rounded-xl ${theme.cardBg} border ${theme.cardBorder} flex items-start justify-between gap-2.5 group hover:border-[#B88E3E]/50 transition-all shadow-xs`}
+                className={`p-3 rounded-xl ${theme.cardBg} border ${
+                  doc.isFromChild ? 'border-amber-500/40 dark:border-amber-500/30 bg-amber-500/5' : theme.cardBorder
+                } flex items-start justify-between gap-2.5 group hover:border-[#B88E3E]/60 transition-all shadow-xs`}
               >
                 <div
                   onClick={() => setViewingDoc(doc)}
@@ -338,7 +545,7 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <FileText className="w-6 h-6 text-[#B88E3E]" />
+                      <FileText className={`w-6 h-6 ${doc.isFromChild ? 'text-amber-600 dark:text-amber-400' : 'text-[#B88E3E]'}`} />
                     )}
                     <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                       <Eye className="w-4 h-4 text-white" />
@@ -347,9 +554,21 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
 
                   {/* Info */}
                   <div className="space-y-1 min-w-0 flex-1">
+                    {/* Child Attribution Badge if from child */}
+                    {doc.isFromChild && (
+                      <div className="flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30">
+                          <Baby className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400" />
+                          <span>{doc.relationLabel}: {doc.childName}</span>
+                          {doc.childBirthYear ? <span className="opacity-80">({doc.childBirthYear} р.)</span> : null}
+                        </span>
+                      </div>
+                    )}
+
                     <h4 className={`text-xs font-bold ${theme.textPrimary} truncate group-hover:text-[#B88E3E] transition-colors`}>
                       {doc.title}
                     </h4>
+
                     <div className="flex flex-wrap items-center gap-1.5">
                       {getStorageBadge(doc.storageType, doc.url)}
                       {doc.year && (
@@ -367,24 +586,42 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setViewingDoc(doc)}
-                    className="p-1 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 cursor-pointer"
-                    title="Переглянути скан"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                  </button>
-
-                  {!isReadOnly && (
+                <div className="flex flex-col items-end justify-between gap-2 shrink-0 self-stretch">
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => handleDeleteDocument(doc.id)}
-                      className="p-1 rounded-lg text-rose-500 hover:bg-rose-500/10 opacity-70 group-hover:opacity-100 cursor-pointer"
-                      title="Від'єднати документ"
+                      onClick={() => setViewingDoc(doc)}
+                      className="p-1 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 cursor-pointer"
+                      title="Переглянути скан"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+
+                    {!doc.isFromChild && !isReadOnly && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDocument(doc.id)}
+                        className="p-1 rounded-lg text-rose-500 hover:bg-rose-500/10 opacity-70 group-hover:opacity-100 cursor-pointer"
+                        title="Від'єднати документ"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Navigation button to child if from child */}
+                  {doc.isFromChild && doc.childId && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (doc.childId) setSelectedPersonId(doc.childId);
+                      }}
+                      className="text-[10px] text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-0.5 font-medium cursor-pointer"
+                      title="Відкрити картку дитини"
+                    >
+                      <span>Картка</span>
+                      <ArrowUpRight className="w-2.5 h-2.5" />
                     </button>
                   )}
                 </div>
@@ -395,7 +632,11 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
       ) : (
         <div className={`p-4 rounded-xl border border-dashed ${theme.borderSubtle} text-center space-y-1.5`}>
           <p className={`text-xs ${theme.textMuted} italic`}>
-            До цієї особи ще не прикріплено архівних сканів чи фотографій.
+            {filterTab === 'children'
+              ? 'У дітей цієї особи ще не завантажено метричних сканів чи документів.'
+              : filterTab === 'own'
+              ? 'Особистих документів поки не завантажено.'
+              : 'До цієї особи та її дітей ще не прикріплено архівних сканів чи фотографій.'}
           </p>
         </div>
       )}
@@ -674,10 +915,15 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
       {viewingDoc && (
         <DocumentLightboxModal
           document={viewingDoc}
-          personName={`${person.lastName || ''} ${person.firstName || ''}`}
+          personName={
+            viewingDoc.isFromChild && viewingDoc.childName
+              ? `${viewingDoc.childName} (${viewingDoc.relationLabel})`
+              : `${person.lastName || ''} ${person.firstName || ''}`
+          }
           onClose={() => setViewingDoc(null)}
         />
       )}
     </div>
   );
 };
+

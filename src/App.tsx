@@ -264,6 +264,7 @@ function AppContent() {
         <AddPersonModal
           initialPersonToEdit={personToEdit}
           initialRelation={addRelation}
+          onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
           onClose={() => {
             setShowAddModal(false);
             setPersonToEdit(null);

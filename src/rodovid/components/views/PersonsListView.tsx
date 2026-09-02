@@ -15,7 +15,10 @@ import {
   LayoutGrid,
   List,
   Shield,
-  Lock
+  Lock,
+  Hash,
+  Tag,
+  X
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
@@ -24,6 +27,8 @@ import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
+import { getTreeHashtagsWithCounts, formatHashtag } from '../../../utils/tagUtils';
+import { isPersonMale, isPersonFemale, normalizeGender } from '../../utils/genderUtils';
 
 interface PersonsListViewProps {
   database: GenealogyDatabase;
@@ -66,10 +71,16 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [genderFilter, setGenderFilter] = useState<'ALL' | Gender>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'LIVING' | 'DECEASED'>('ALL');
-  const [sortBy, setSortBy] = useState<'surname' | 'birth' | 'events' | 'citations'>('surname');
+  const [tagFilter, setTagFilter] = useState<string>('ALL');
+  const [sortBy, setSortBy] = useState<'surname' | 'birth' | 'events' | 'citations' | 'tag' | 'tagCount'>('surname');
   const [sortAsc, setSortAsc] = useState(true);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [personToDelete, setPersonToDelete] = useState<Person | null>(null);
+
+  // Extract all tree hashtags with counts
+  const availableHashtags = useMemo(() => {
+    return getTreeHashtagsWithCounts(database.persons);
+  }, [database.persons]);
 
   const personsList = useMemo(() => {
     return (Object.values(database.persons) as Person[]).filter((p) => {
@@ -80,10 +91,24 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       const tags = (p.tags || []).join(' ').toLowerCase();
       const q = searchTerm.toLowerCase().trim();
 
-      const matchesSearch = !q || fullName.includes(q) || occu.includes(q) || place.includes(q) || tags.includes(q);
+      const searchTag = q.startsWith('#') ? q.slice(1).trim() : q;
+      const matchesSearch =
+        !q ||
+        fullName.includes(q) ||
+        occu.includes(q) ||
+        place.includes(q) ||
+        tags.includes(q) ||
+        (searchTag && tags.includes(searchTag));
 
       // Gender filter
-      const matchesGender = genderFilter === 'ALL' || p.gender === genderFilter;
+      let matchesGender = true;
+      if (genderFilter === 'M') {
+        matchesGender = isPersonMale(p);
+      } else if (genderFilter === 'F') {
+        matchesGender = isPersonFemale(p);
+      } else if (genderFilter === 'U') {
+        matchesGender = !isPersonMale(p) && !isPersonFemale(p);
+      }
 
       // Status filter
       const matchesStatus =
@@ -91,9 +116,15 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         (statusFilter === 'LIVING' && p.isLiving) ||
         (statusFilter === 'DECEASED' && !p.isLiving);
 
-      return matchesSearch && matchesGender && matchesStatus;
+      // Tag filter
+      const cleanFilterTag = tagFilter !== 'ALL' ? tagFilter.toLowerCase().replace(/^#+/, '') : null;
+      const matchesTag =
+        !cleanFilterTag ||
+        (p.tags || []).some((t) => t.toLowerCase().replace(/^#+/, '') === cleanFilterTag);
+
+      return matchesSearch && matchesGender && matchesStatus && matchesTag;
     });
-  }, [database.persons, searchTerm, genderFilter, statusFilter]);
+  }, [database.persons, searchTerm, genderFilter, statusFilter, tagFilter]);
 
   const sortedPersons = useMemo(() => {
     return [...personsList].sort((a, b) => {
@@ -110,10 +141,26 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         comparison = (a.events?.length || 0) - (b.events?.length || 0);
       } else if (sortBy === 'citations') {
         comparison = (a.citations?.length || 0) - (b.citations?.length || 0);
+      } else if (sortBy === 'tag') {
+        const tagA = (a.tags && a.tags.length > 0) ? a.tags[0] : 'яяя';
+        const tagB = (b.tags && b.tags.length > 0) ? b.tags[0] : 'яяя';
+        comparison = tagA.localeCompare(tagB, 'uk');
+      } else if (sortBy === 'tagCount') {
+        comparison = (b.tags?.length || 0) - (a.tags?.length || 0);
       }
       return sortAsc ? comparison : -comparison;
     });
   }, [personsList, sortBy, sortAsc]);
+
+  const handleTagBadgeClick = (tag: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const clean = tag.replace(/^#+/, '');
+    if (tagFilter.toLowerCase().replace(/^#+/, '') === clean.toLowerCase()) {
+      setTagFilter('ALL');
+    } else {
+      setTagFilter(clean);
+    }
+  };
 
   return (
     <div className={`max-w-7xl mx-auto px-4 py-6 space-y-6 ${theme.textPrimary}`}>
@@ -126,32 +173,38 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               Всього знайдено {sortedPersons.length} з {Object.keys(database.persons).length} записів
             </p>
           </div>
-
-          <div className="flex items-center gap-2">
-            {canEdit && (
-              <button
-                onClick={onOpenAddPerson}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Додати особу</span>
-              </button>
-            )}
-          </div>
         </div>
 
         {/* Filters and Search row */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2 border-t ${theme.borderSubtle}`}>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 pt-2 border-t ${theme.borderSubtle}`}>
           {/* Search Input */}
           <div className="lg:col-span-2 relative">
             <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
             <input
               type="text"
-              placeholder="Пошук за ПІБ, професією, місцем, тегами..."
+              placeholder="Пошук за ПІБ, #хештегом, місцем..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className={`w-full pl-9 pr-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-400 focus:outline-none focus:border-emerald-500`}
             />
+          </div>
+
+          {/* Tag / Hashtag Filter Dropdown */}
+          <div>
+            <select
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className={`w-full px-3 py-2 ${theme.inputBg} border ${
+                tagFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
+              } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+            >
+              <option value="ALL">Всі хештеги ({availableHashtags.length})</option>
+              {availableHashtags.map((h) => (
+                <option key={h.tag} value={h.tag}>
+                  #{h.tag} ({h.count})
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Gender Filter */}
@@ -190,6 +243,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
               >
                 <option value="surname">За прізвищем</option>
+                <option value="tag">За хештегом (А-Я)</option>
+                <option value="tagCount">За к-стю тегів</option>
                 <option value="birth">За датою нар.</option>
                 <option value="events">За подіями</option>
                 <option value="citations">За джерелами</option>
@@ -222,6 +277,50 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Quick Hashtags Horizontal Pills Bar */}
+        {availableHashtags.length > 0 && (
+          <div className={`pt-2.5 border-t ${theme.borderSubtle} flex items-center gap-1.5 overflow-x-auto pb-1 text-xs scrollbar-none`}>
+            <span className={`text-[11px] font-semibold ${theme.textMuted} flex items-center gap-1 shrink-0 mr-1`}>
+              <Hash className="w-3.5 h-3.5 text-emerald-500" />
+              Хештеги:
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setTagFilter('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all shrink-0 cursor-pointer ${
+                tagFilter === 'ALL'
+                  ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                  : `${theme.surfaceBg} ${theme.textSecondary} hover:${theme.textPrimary} border ${theme.borderSubtle}`
+              }`}
+            >
+              Всі ({database.persons ? Object.keys(database.persons).length : 0})
+            </button>
+
+            {availableHashtags.map((h) => {
+              const isSelected = tagFilter.toLowerCase().replace(/^#+/, '') === h.tag.toLowerCase().replace(/^#+/, '');
+              return (
+                <button
+                  key={h.tag}
+                  type="button"
+                  onClick={() => setTagFilter(isSelected ? 'ALL' : h.tag)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all shrink-0 cursor-pointer ${
+                    isSelected
+                      ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                      : `${theme.surfaceBg} ${theme.textSecondary} hover:${theme.textPrimary} border ${theme.borderSubtle}`
+                  }`}
+                >
+                  <span>#{h.tag}</span>
+                  <span className={`text-[10px] opacity-75 ${isSelected ? 'text-white' : theme.textMuted}`}>
+                    {h.count}
+                  </span>
+                  {isSelected && <X className="w-3 h-3 ml-0.5" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Content: Table or Cards */}
@@ -237,6 +336,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               setSearchTerm('');
               setGenderFilter('ALL');
               setStatusFilter('ALL');
+              setTagFilter('ALL');
             }}
             className={`px-3.5 py-1.5 ${theme.surfaceBg} hover:brightness-110 ${theme.textPrimary} border ${theme.borderSubtle} rounded-lg text-xs font-medium transition-colors cursor-pointer`}
           >
@@ -265,8 +365,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   const isMasked = !isWhitelisted && isLiving;
                   const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
 
-                  const isMale = p.gender === 'M';
-                  const isFemale = p.gender === 'F';
+                  const isMale = isPersonMale(p, database);
+                  const isFemale = isPersonFemale(p, database);
 
                   return (
                     <tr
@@ -326,8 +426,30 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                                 </span>
                               )}
                             </div>
-                            <div className={`text-[10px] ${theme.textMuted} font-mono`}>
-                              {isMasked ? '🔒 Конфіденційна жива особа' : `ID: ${p.id}${(p.name?.maidenName || p.maidenName) ? ` • / ${p.name?.maidenName || p.maidenName}` : ''}`}
+                            <div className={`text-[10px] ${theme.textMuted} font-mono flex items-center gap-1.5 flex-wrap`}>
+                              <span>{isMasked ? '🔒 Конфіденційна жива особа' : `ID: ${p.id}${(p.name?.maidenName || p.maidenName) ? ` • / ${p.name?.maidenName || p.maidenName}` : ''}`}</span>
+                              {!isMasked && p.tags && p.tags.length > 0 && (
+                                <div className="inline-flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                                  {p.tags.map((t, idx) => {
+                                    const isCurrent = tagFilter.toLowerCase().replace(/^#+/, '') === t.toLowerCase().replace(/^#+/, '');
+                                    return (
+                                      <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={(e) => handleTagBadgeClick(t, e)}
+                                        className={`px-1.5 py-0.2 rounded text-[9px] font-medium transition-colors cursor-pointer ${
+                                          isCurrent
+                                            ? 'bg-emerald-600 text-white font-semibold'
+                                            : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                        }`}
+                                        title={`Фільтрувати за #${t.replace(/^#+/, '')}`}
+                                      >
+                                        #{t.replace(/^#+/, '')}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -440,8 +562,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             const isMasked = !isWhitelisted && isLiving;
             const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
 
-            const isMale = p.gender === 'M';
-            const isFemale = p.gender === 'F';
+            const isMale = isPersonMale(p, database);
+            const isFemale = isPersonFemale(p, database);
 
             return (
               <div
@@ -528,15 +650,25 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   )}
 
                   {!isMasked && p.tags && p.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2.5">
-                      {p.tags.map((t, idx) => (
-                        <span
-                          key={idx}
-                          className={`px-2 py-0.5 ${theme.surfaceBg} border ${theme.borderSubtle} ${theme.textSecondary} rounded text-[10px]`}
-                        >
-                          {t}
-                        </span>
-                      ))}
+                    <div className="flex flex-wrap gap-1 mt-2.5" onClick={(e) => e.stopPropagation()}>
+                      {p.tags.map((t, idx) => {
+                        const isCurrent = tagFilter.toLowerCase().replace(/^#+/, '') === t.toLowerCase().replace(/^#+/, '');
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={(e) => handleTagBadgeClick(t, e)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+                              isCurrent
+                                ? 'bg-emerald-600 text-white font-semibold'
+                                : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                            }`}
+                            title={`Фільтрувати за #${t.replace(/^#+/, '')}`}
+                          >
+                            #{t.replace(/^#+/, '')}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

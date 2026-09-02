@@ -4,9 +4,11 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { X, Save, User, Users } from 'lucide-react';
+import { X, Save, User, Users, Hash, Tag } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
+import { parseAndNormalizeTags, getTreeHashtagsWithCounts, extractHashtagsFromText } from '../../../utils/tagUtils';
+import { detectGenderFromName, isPersonMale, isPersonFemale } from '../../../utils/genderUtils';
 
 interface EditPersonModalProps {
   database: GenealogyDatabase;
@@ -26,12 +28,25 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const initialFatherId = existingPerson?.fatherId || (existingPerson?.parentFamilyId ? database.families[existingPerson.parentFamilyId]?.husbandId : undefined);
   const initialMotherId = existingPerson?.motherId || (existingPerson?.parentFamilyId ? database.families[existingPerson.parentFamilyId]?.wifeId : undefined);
 
-  const [given, setGiven] = useState(existingPerson?.name?.given || existingPerson?.firstName || '');
-  const [surname, setSurname] = useState(existingPerson?.name?.surname || existingPerson?.lastName || '');
-  const [patronymic, setPatronymic] = useState(existingPerson?.name?.patronymic || existingPerson?.patronymic || '');
-  const [maidenName, setMaidenName] = useState(existingPerson?.name?.maidenName || existingPerson?.maidenName || '');
+  const initialGiven = existingPerson?.name?.given || existingPerson?.firstName || '';
+  const initialSurname = existingPerson?.name?.surname || existingPerson?.lastName || '';
+  const initialPatronymic = existingPerson?.name?.patronymic || existingPerson?.patronymic || '';
+  const initialMaiden = existingPerson?.name?.maidenName || existingPerson?.maidenName || '';
+
+  const [given, setGiven] = useState(initialGiven);
+  const [surname, setSurname] = useState(initialSurname);
+  const [patronymic, setPatronymic] = useState(initialPatronymic);
+  const [maidenName, setMaidenName] = useState(initialMaiden);
   const [prefix, setPrefix] = useState(existingPerson?.name?.prefix || existingPerson?.prefix || '');
-  const [gender, setGender] = useState<Gender>(existingPerson?.gender || 'M');
+  const [gender, setGender] = useState<Gender>(() => {
+    if (existingPerson) {
+      if (isPersonFemale(existingPerson)) return 'F';
+      if (isPersonMale(existingPerson)) return 'M';
+    }
+    const auto = detectGenderFromName(initialGiven, initialSurname, initialPatronymic, initialMaiden);
+    return auto === 'female' ? 'F' : 'M';
+  });
+  const [genderManuallyChanged, setGenderManuallyChanged] = useState(false);
   const [isLiving, setIsLiving] = useState<boolean>(existingPerson?.isLiving ?? false);
   const [fatherId, setFatherId] = useState<string>(initialFatherId || '');
   const [motherId, setMotherId] = useState<string>(initialMotherId || '');
@@ -55,12 +70,37 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   }, [database.persons, personId]);
 
   const availableFathers = useMemo(() => {
-    return availablePersons.filter((p) => p.gender !== 'female' && p.gender !== 'F');
+    return availablePersons.filter((p) => isPersonMale(p));
   }, [availablePersons]);
 
   const availableMothers = useMemo(() => {
-    return availablePersons.filter((p) => p.gender !== 'male' && p.gender !== 'M');
+    return availablePersons.filter((p) => isPersonFemale(p));
   }, [availablePersons]);
+
+  const popularHashtags = useMemo(() => {
+    return getTreeHashtagsWithCounts(database.persons).slice(0, 10);
+  }, [database.persons]);
+
+  const handleAddHashtagSuggestion = (tagToAdd: string) => {
+    const currentList = parseAndNormalizeTags(tagsStr);
+    const clean = tagToAdd.replace(/^#+/, '').trim();
+    if (!currentList.some((t) => t.toLowerCase() === clean.toLowerCase())) {
+      const next = [...currentList, clean];
+      setTagsStr(next.join(', '));
+    }
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    const currentList = parseAndNormalizeTags(tagsStr);
+    const updated = currentList.filter(
+      (t) => t.toLowerCase() !== tagToRemove.toLowerCase()
+    );
+    setTagsStr(updated.join(', '));
+  };
+
+  const currentTagsList = useMemo(() => {
+    return parseAndNormalizeTags(tagsStr);
+  }, [tagsStr]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,10 +116,17 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     const deathYearMatch = deathDate.match(/\b(1\d{3}|20\d{2})\b/);
     const deathYear = deathYearMatch ? parseInt(deathYearMatch[1], 10) : undefined;
 
-    const tags = tagsStr
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
+    // Parse explicit tags input and any hashtags found in bio or notes
+    const inputTags = parseAndNormalizeTags(tagsStr);
+    const textTags = extractHashtagsFromText(`${bio} ${notes}`);
+    const mergedTagsMap = new Map<string, string>();
+    [...inputTags, ...textTags].forEach((t) => {
+      const clean = t.replace(/^#+/, '').trim();
+      if (clean && !mergedTagsMap.has(clean.toLowerCase())) {
+        mergedTagsMap.set(clean.toLowerCase(), clean);
+      }
+    });
+    const tags = Array.from(mergedTagsMap.values());
 
     const generatedId = existingPerson?.id || `I${String(Object.keys(database.persons).length + 1).padStart(4, '0')}`;
 
@@ -160,7 +207,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                 type="text"
                 required
                 value={surname}
-                onChange={(e) => setSurname(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSurname(val);
+                  if (!genderManuallyChanged) {
+                    const detected = detectGenderFromName(given, val, patronymic, maidenName);
+                    if (detected) setGender(detected === 'female' ? 'F' : 'M');
+                  }
+                }}
                 placeholder="Морозов"
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
               />
@@ -171,7 +225,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                 type="text"
                 required
                 value={given}
-                onChange={(e) => setGiven(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setGiven(val);
+                  if (!genderManuallyChanged) {
+                    const detected = detectGenderFromName(val, surname, patronymic, maidenName);
+                    if (detected) setGender(detected === 'female' ? 'F' : 'M');
+                  }
+                }}
                 placeholder="Микола"
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
               />
@@ -181,7 +242,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               <input
                 type="text"
                 value={patronymic}
-                onChange={(e) => setPatronymic(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setPatronymic(val);
+                  if (!genderManuallyChanged) {
+                    const detected = detectGenderFromName(given, surname, val, maidenName);
+                    if (detected) setGender(detected === 'female' ? 'F' : 'M');
+                  }
+                }}
                 placeholder="Олександрович"
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
               />
@@ -196,7 +264,13 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               <input
                 type="text"
                 value={maidenName}
-                onChange={(e) => setMaidenName(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setMaidenName(val);
+                  if (!genderManuallyChanged && val.trim()) {
+                    setGender('F');
+                  }
+                }}
                 placeholder="Оболенська"
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
               />
@@ -218,10 +292,18 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
           {/* Gender & Living Status */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-800">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Стать</label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                <span>Стать</span>
+                {!genderManuallyChanged && (
+                  <span className="text-[10px] text-emerald-400 font-normal">Автоматично</span>
+                )}
+              </label>
               <select
                 value={gender}
-                onChange={(e) => setGender(e.target.value as Gender)}
+                onChange={(e) => {
+                  setGenderManuallyChanged(true);
+                  setGender(e.target.value as Gender);
+                }}
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
               >
                 <option value="M">Чоловіча (M)</option>
@@ -450,16 +532,67 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Теги (через кому)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Хештеги / Теги
+                </label>
+                <span className="text-[10px] text-slate-500">можна з # або через кому</span>
+              </div>
+
+              {currentTagsList.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {currentTagsList.map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-800/60"
+                    >
+                      <span>#{tag}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTag(tag)}
+                        className="p-0.5 hover:bg-emerald-900/80 rounded cursor-pointer transition-colors"
+                        title="Видалити тег"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <input
                 type="text"
                 value={tagsStr}
                 onChange={(e) => setTagsStr(e.target.value)}
-                placeholder="Ветеран, Дворянин, Архітектор"
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                placeholder="#козак, #ветеран, #полтавщина"
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
               />
+              {popularHashtags.length > 0 && (
+                <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                  <span className="text-[10px] text-slate-500 flex items-center gap-0.5">
+                    <Hash className="w-2.5 h-2.5" /> часті:
+                  </span>
+                  {popularHashtags.slice(0, 6).map((h) => {
+                    const isSelected = currentTagsList.some((t) => t.toLowerCase() === h.tag.toLowerCase());
+                    return (
+                      <button
+                        key={h.tag}
+                        type="button"
+                        onClick={() => handleAddHashtagSuggestion(h.tag)}
+                        disabled={isSelected}
+                        className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-emerald-950/20 text-emerald-500 border-emerald-900/40 opacity-50 cursor-default'
+                            : 'bg-slate-900 hover:bg-emerald-950/60 text-slate-400 hover:text-emerald-300 border-slate-800'
+                        }`}
+                        title="Додати цей хештег"
+                      >
+                        #{h.tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 

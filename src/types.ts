@@ -50,9 +50,39 @@ export interface CustomFieldItem {
   label?: string;
   key?: string;
   value: string;
+  type?: 'text' | 'longtext' | 'number' | 'year' | 'date' | 'time' | 'approx_date' | 'place' | 'list' | string;
+  options?: string[];
 }
 
 export type CustomField = CustomFieldItem;
+
+export interface GodparentItem {
+  id?: string;
+  personId?: string;
+  name: string;
+  role?: 'godfather' | 'godmother' | 'witness' | string;
+  notes?: string;
+}
+
+export interface HistoricalPlaceItem {
+  id?: string;
+  type: 'birth' | 'marriage' | 'death' | 'residence' | 'other' | string;
+  modernPlace?: string;
+  historicalText?: string;
+  notes?: string;
+}
+
+export interface PersonLifeEventItem {
+  id?: string;
+  type: 'birth' | 'baptism' | 'marriage' | 'revision' | 'confession' | 'residence' | 'military' | 'education' | 'award' | 'emigration' | 'death' | 'burial' | 'other' | string;
+  title?: string;
+  date?: string;
+  year?: number | string;
+  place?: string;
+  historicalPlace?: string;
+  description?: string;
+  source?: string;
+}
 
 export interface Person {
   id: string;
@@ -70,6 +100,18 @@ export interface Person {
   deathDate?: string;
   deathYear?: number | string;
   deathPlace?: string;
+  deathReason?: string;
+  marriageDate?: string;
+  marriagePlace?: string;
+  residencePlace?: string;
+  researchStatus?: 'hypothetical' | 'confirmed' | 'in_progress' | 'archival_search' | 'needs_verification' | string;
+  researchBranch?: string;
+  nameVariants?: string[];
+  surnameVariants?: string[];
+  godparents?: GodparentItem[];
+  godparentIds?: string[];
+  godchildrenIds?: string[];
+  historicalPlaces?: HistoricalPlaceItem[];
   isLiving?: boolean;
   fatherId?: string;
   motherId?: string;
@@ -97,7 +139,7 @@ export interface Person {
   sourceIds?: string[];
   sourceCitations?: string[];
   citations?: any[];
-  events?: any[];
+  events?: PersonLifeEventItem[] | any[];
   customFields?: CustomFieldItem[] | Record<string, string>;
   documents?: PersonDocumentItem[];
   media?: PersonDocumentItem[];

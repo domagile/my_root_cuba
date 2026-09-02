@@ -4,6 +4,7 @@
  */
 
 import { GenealogyDatabase, Person, Family } from '../types/genealogy';
+import { detectGenderFromName } from '../../utils/genderUtils';
 
 export function parseGedcom(text: string): GenealogyDatabase {
   const lines = text.split(/\r?\n/);
@@ -30,6 +31,8 @@ export function parseGedcom(text: string): GenealogyDatabase {
       if (currentType === 'INDI' && currentId) {
         const given = currentPerson.firstName || currentPerson.name?.given || 'Невідоме';
         const surname = currentPerson.lastName || currentPerson.name?.surname || '';
+        const detected = detectGenderFromName(given, surname, currentPerson.patronymic, currentPerson.maidenName);
+        const resolvedGender = currentPerson.gender || (detected === 'female' ? 'F' : 'M');
         persons[currentId] = {
           id: currentId,
           name: {
@@ -40,7 +43,7 @@ export function parseGedcom(text: string): GenealogyDatabase {
           },
           firstName: given,
           lastName: surname,
-          gender: currentPerson.gender || 'M',
+          gender: resolvedGender,
           birthDate: currentPerson.birthDate,
           birthPlace: currentPerson.birthPlace,
           deathDate: currentPerson.deathDate,
@@ -117,11 +120,14 @@ export function parseGedcom(text: string): GenealogyDatabase {
 
   // Save last record
   if (currentType === 'INDI' && currentId && currentPerson.firstName) {
+    const given = currentPerson.firstName || currentPerson.name?.given || 'Невідоме';
+    const surname = currentPerson.lastName || currentPerson.name?.surname || '';
+    const detected = detectGenderFromName(given, surname, currentPerson.patronymic, currentPerson.maidenName);
     persons[currentId] = {
       id: currentId,
-      firstName: currentPerson.firstName || 'Невідоме',
-      lastName: currentPerson.lastName || '',
-      gender: currentPerson.gender || 'male',
+      firstName: given,
+      lastName: surname,
+      gender: currentPerson.gender || (detected === 'female' ? 'F' : 'M'),
       ...currentPerson
     } as Person;
   } else if (currentType === 'FAM' && currentId) {

@@ -9,6 +9,7 @@ import { GenealogyDatabase, Person, Family } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
 import { normalizeUkrainianSurnameGender } from '../../../utils/ukrainianPhonetics';
+import { isPersonMale, isPersonFemale } from '../../utils/genderUtils';
 
 interface StatisticsViewProps {
   database: GenealogyDatabase;
@@ -30,8 +31,8 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
 
   const stats = useMemo(() => {
     const totalPersons = persons.length;
-    const males = persons.filter((p) => p.gender === 'male' || p.gender === 'M').length;
-    const females = persons.filter((p) => p.gender === 'female' || p.gender === 'F').length;
+    const males = persons.filter((p) => isPersonMale(p, database)).length;
+    const females = persons.filter((p) => isPersonFemale(p, database)).length;
 
     // Lifespan calculations
     let totalLifespan = 0;

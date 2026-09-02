@@ -20,12 +20,16 @@ import {
   Upload,
   RotateCcw,
   AlertTriangle,
-  Trash
+  Trash,
+  Hash,
+  Tag
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { Person } from '../types';
 import { getThemeConfig } from '../utils/theme';
 import { findRelationshipPath, getSummaryRelationTitle } from './Tree/RelationshipPathModal';
+import { getTreeHashtagsWithCounts } from '../utils/tagUtils';
+import { isPersonMale, isPersonFemale } from '../utils/genderUtils';
 
 interface PersonsListViewProps {
   onInspectPerson?: (id: string) => void;
@@ -68,14 +72,20 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [genderFilter, setGenderFilter] = useState<'all' | 'male' | 'female'>('all');
   const [lifeStateFilter, setLifeStateFilter] = useState<'all' | 'alive' | 'deceased'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'hypothesis' | 'archived'>('all');
+  const [tagFilter, setTagFilter] = useState<string>('all');
 
   // Toolbar & Display Options
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-  const [sortOption, setSortOption] = useState<'central' | 'name' | 'birthDate' | 'recent'>('central');
+  const [sortOption, setSortOption] = useState<'central' | 'name' | 'birthDate' | 'recent' | 'tag' | 'tagCount'>('central');
 
   // Selection state for batch actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+
+  // Hashtags list
+  const availableHashtags = useMemo(() => {
+    return getTreeHashtagsWithCounts(persons);
+  }, [persons]);
 
   // Toast notification state
   const [toast, setToast] = useState<{ message: string; actionText?: string; onAction?: () => void } | null>(null);
@@ -156,14 +166,33 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         const places = `${p.birthPlace || ''} ${p.deathPlace || ''}`.toLowerCase();
         const notes = (p.notes || '').toLowerCase();
         const occupation = (p.occupation || '').toLowerCase();
+        const tags = (p.tags || []).join(' ').toLowerCase();
+        const searchTag = q.startsWith('#') ? q.slice(1).trim() : q;
 
-        if (!fullName.includes(q) && !places.includes(q) && !notes.includes(q) && !occupation.includes(q)) {
+        if (
+          !fullName.includes(q) &&
+          !places.includes(q) &&
+          !notes.includes(q) &&
+          !occupation.includes(q) &&
+          !tags.includes(q) &&
+          (!searchTag || !tags.includes(searchTag))
+        ) {
+          return false;
+        }
+      }
+
+      // Hashtag Filter
+      if (tagFilter !== 'all') {
+        const cleanTag = tagFilter.toLowerCase().replace(/^#+/, '');
+        const personTags = (p.tags || []).map((t) => t.toLowerCase().replace(/^#+/, ''));
+        if (!personTags.includes(cleanTag)) {
           return false;
         }
       }
 
       // Gender filter
-      if (genderFilter !== 'all' && p.gender !== genderFilter) return false;
+      if (genderFilter === 'male' && !isPersonMale(p, persons)) return false;
+      if (genderFilter === 'female' && !isPersonFemale(p, persons)) return false;
 
       // Life state filter
       if (lifeStateFilter === 'alive' && p.deathDate) return false;
@@ -175,7 +204,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
       return true;
     });
-  }, [sourceList, tabFilter, searchQuery, genderFilter, lifeStateFilter, statusFilter]);
+  }, [sourceList, tabFilter, searchQuery, tagFilter, genderFilter, lifeStateFilter, statusFilter]);
 
   // Sorted Persons
   const sortedPersons = useMemo(() => {
@@ -190,6 +219,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       list.sort((a, b) => (a.lastName || '').localeCompare(b.lastName || '', 'uk'));
     } else if (sortOption === 'birthDate') {
       list.sort((a, b) => (a.birthDate || '9999').localeCompare(b.birthDate || '9999'));
+    } else if (sortOption === 'tag') {
+      list.sort((a, b) => {
+        const tagA = (a.tags && a.tags.length > 0) ? a.tags[0] : 'яяя';
+        const tagB = (b.tags && b.tags.length > 0) ? b.tags[0] : 'яяя';
+        return tagA.localeCompare(tagB, 'uk');
+      });
+    } else if (sortOption === 'tagCount') {
+      list.sort((a, b) => (b.tags?.length || 0) - (a.tags?.length || 0));
     } else if (sortOption === 'recent') {
       list.reverse();
     }
@@ -239,6 +276,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     setGenderFilter('all');
     setLifeStateFilter('all');
     setStatusFilter('all');
+    setTagFilter('all');
     setTabFilter('all');
   };
 
@@ -481,7 +519,26 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
 
         {/* Bottom row: Filter Selects */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-[#262626]">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 border-t border-[#262626]">
+          {/* Tag Filter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase">Хештег:</span>
+            <select
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className={`flex-1 px-2 py-1 bg-[#121212] border ${
+                tagFilter !== 'all' ? 'border-[#B88E3E] text-[#B88E3E]' : 'border-[#333333] text-[#E5E5E5]'
+              } rounded-md text-xs focus:outline-none focus:border-[#B88E3E] cursor-pointer`}
+            >
+              <option value="all">Усі хештеги ({availableHashtags.length})</option>
+              {availableHashtags.map((h) => (
+                <option key={h.tag} value={h.tag}>
+                  #{h.tag} ({h.count})
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Gender Filter */}
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] font-bold text-[#8C8C8C] uppercase">Стать:</span>
@@ -526,7 +583,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
           {/* RESET BUTTON */}
           <div className="flex justify-end">
-            {(searchQuery || genderFilter !== 'all' || lifeStateFilter !== 'all' || statusFilter !== 'all' || tabFilter !== 'all') ? (
+            {(searchQuery || tagFilter !== 'all' || genderFilter !== 'all' || lifeStateFilter !== 'all' || statusFilter !== 'all' || tabFilter !== 'all') ? (
               <button
                 onClick={resetFilters}
                 className="text-xs font-semibold text-[#B88E3E] hover:text-[#E5E5E5] transition-colors flex items-center gap-1 cursor-pointer px-2.5 py-1 bg-[#262626] hover:bg-[#333333] rounded-md border border-[#333333]"
@@ -537,6 +594,50 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             ) : null}
           </div>
         </div>
+
+        {/* Quick Hashtags Horizontal Pills Bar */}
+        {availableHashtags.length > 0 && (
+          <div className="pt-2 border-t border-[#262626] flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs scrollbar-none">
+            <span className="text-[11px] font-bold text-[#8C8C8C] flex items-center gap-1 shrink-0 mr-1">
+              <Hash className="w-3.5 h-3.5 text-[#B88E3E]" />
+              Хештеги:
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setTagFilter('all')}
+              className={`px-2.5 py-0.5 rounded-md text-[11px] font-medium transition-all shrink-0 cursor-pointer ${
+                tagFilter === 'all'
+                  ? 'bg-[#B88E3E] text-[#0F0F0F] font-bold shadow-xs'
+                  : 'bg-[#1E1E1E] text-[#A3A3A3] hover:text-[#E5E5E5] border border-[#333333]'
+              }`}
+            >
+              Всі ({persons.length})
+            </button>
+
+            {availableHashtags.map((h) => {
+              const isSelected = tagFilter.toLowerCase().replace(/^#+/, '') === h.tag.toLowerCase().replace(/^#+/, '');
+              return (
+                <button
+                  key={h.tag}
+                  type="button"
+                  onClick={() => setTagFilter(isSelected ? 'all' : h.tag)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-medium transition-all shrink-0 cursor-pointer ${
+                    isSelected
+                      ? 'bg-[#B88E3E] text-[#0F0F0F] font-bold shadow-xs'
+                      : 'bg-[#1E1E1E] text-[#A3A3A3] hover:text-[#E5E5E5] border border-[#333333]'
+                  }`}
+                >
+                  <span>#{h.tag}</span>
+                  <span className={`text-[10px] ${isSelected ? 'text-[#0F0F0F]/80' : 'text-[#8C8C8C]'}`}>
+                    {h.count}
+                  </span>
+                  {isSelected && <X className="w-3 h-3 ml-0.5" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* 3. TOOLBAR & DISPLAY OPTIONS */}
@@ -665,6 +766,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           >
             <option value="central">Від центральної особи</option>
             <option value="name">За прізвищем (А-Я)</option>
+            <option value="tag">За хештегом (А-Я)</option>
+            <option value="tagCount">За к-стю тегів</option>
             <option value="birthDate">За датою народження</option>
             <option value="recent">Нещодавно додані</option>
           </select>
@@ -734,7 +837,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   const p = sortedPersons[idx];
                   if (!p) return null;
                   const isChecked = selectedIds.has(p.id);
-                  const feminine = p.gender !== 'male';
+                  const feminine = isPersonFemale(p, persons);
                   const initials = `${p.lastName?.[0] || ''}${p.firstName?.[0] || ''}`.toUpperCase();
                   const isCentral = centralPerson && p.id === centralPerson.id;
                   const relTitle = relationshipMap.get(p.id) || 'Родич';
@@ -797,9 +900,37 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                               <p className="text-[10px] text-[#B88E3E] italic">({p.maidenName})</p>
                             )}
 
-                            <span className="text-[9px] font-mono text-[#8C8C8C] block truncate max-w-[120px]">
-                              {p.id}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                              <span className="text-[9px] font-mono text-[#8C8C8C] truncate max-w-[100px]">
+                                {p.id}
+                              </span>
+                              {p.tags && p.tags.length > 0 && (
+                                <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                                  {p.tags.map((t, tIdx) => {
+                                    const cleanT = t.replace(/^#+/, '');
+                                    const isSel = tagFilter.toLowerCase().replace(/^#+/, '') === cleanT.toLowerCase();
+                                    return (
+                                      <button
+                                        key={tIdx}
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setTagFilter(isSel ? 'all' : cleanT);
+                                        }}
+                                        className={`px-1.5 py-0.2 rounded text-[9px] font-medium transition-colors cursor-pointer ${
+                                          isSel
+                                            ? 'bg-[#B88E3E] text-[#0F0F0F] font-bold'
+                                            : 'bg-[#B88E3E]/10 hover:bg-[#B88E3E]/25 text-[#B88E3E] border border-[#B88E3E]/30'
+                                        }`}
+                                        title={`Фільтрувати за #${cleanT}`}
+                                      >
+                                        #{cleanT}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -930,7 +1061,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {sortedPersons.map((p) => {
             const isChecked = selectedIds.has(p.id);
-            const feminine = p.gender !== 'male';
+            const feminine = isPersonFemale(p, persons);
             const initials = `${p.lastName?.[0] || ''}${p.firstName?.[0] || ''}`.toUpperCase();
             const isCentral = centralPerson && p.id === centralPerson.id;
             const relTitle = relationshipMap.get(p.id) || 'Родич';
@@ -1020,6 +1151,33 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     <div className="flex items-center gap-1 text-[11px] text-[#A3A3A3] truncate pt-0.5">
                       <MapPin className="w-3 h-3 text-[#B88E3E] shrink-0" />
                       <span className="truncate">{p.birthPlace}</span>
+                    </div>
+                  )}
+
+                  {p.tags && p.tags.length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap pt-1" onClick={(e) => e.stopPropagation()}>
+                      {p.tags.map((t, tIdx) => {
+                        const cleanT = t.replace(/^#+/, '');
+                        const isSel = tagFilter.toLowerCase().replace(/^#+/, '') === cleanT.toLowerCase();
+                        return (
+                          <button
+                            key={tIdx}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTagFilter(isSel ? 'all' : cleanT);
+                            }}
+                            className={`px-1.5 py-0.2 rounded text-[9px] font-medium transition-colors cursor-pointer ${
+                              isSel
+                                ? 'bg-[#B88E3E] text-[#0F0F0F] font-bold'
+                                : 'bg-[#B88E3E]/10 hover:bg-[#B88E3E]/25 text-[#B88E3E] border border-[#B88E3E]/30'
+                            }`}
+                            title={`Фільтрувати за #${cleanT}`}
+                          >
+                            #{cleanT}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
