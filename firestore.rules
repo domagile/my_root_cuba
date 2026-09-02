@@ -92,6 +92,30 @@ service cloud.firestore {
         allow read: if true;
         allow write: if true;
       }
+
+      // Whitelist subcollection
+      match /whitelist/{whitelistId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Project configuration subcollection
+      match /config/{configId} {
+        allow read: if true;
+        allow write: if true;
+      }
+    }
+
+    // Top-level Whitelist collection
+    match /whitelist/{whitelistId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Top-level Admins collection
+    match /admins/{adminId} {
+      allow read: if true;
+      allow write: if true;
     }
 
     // Access requests top-level collection

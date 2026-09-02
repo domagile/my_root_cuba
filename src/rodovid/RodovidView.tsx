@@ -30,7 +30,7 @@ import { useUIStore } from '../stores/useUIStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { AuthModal } from '../components/AuthModal';
 import { getThemeConfig } from '../utils/theme';
-import { Globe, Shield, ArrowLeft, Download, Check, Sparkles } from 'lucide-react';
+import { Globe, Shield, ArrowLeft, Download, Check, Sparkles, Mail } from 'lucide-react';
 
 interface RodovidViewProps {
   customDatabase?: GenealogyDatabase;
@@ -38,6 +38,7 @@ interface RodovidViewProps {
   sharedMeta?: {
     title: string;
     authorName: string;
+    authorEmail?: string;
     updatedAt: string;
     mode: 'readonly' | 'editable';
     id?: string;
@@ -77,6 +78,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
 
   const [localSelectedPersonId, setLocalSelectedPersonId] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const openContactModal = useUIStore((s) => s.openContactModal);
 
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
@@ -304,6 +306,15 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => openContactModal()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer border border-emerald-400/40"
+              title="Шукаєте спільних предків? Написати автору (domagile@gmail.com)"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              <span>Зв'язок з автором</span>
+            </button>
+
             <button
               onClick={handleSaveCopyToLocal}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-neutral-900 hover:bg-neutral-100 font-bold text-xs shadow-xs transition-colors cursor-pointer"

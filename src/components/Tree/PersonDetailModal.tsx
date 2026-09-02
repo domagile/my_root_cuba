@@ -69,11 +69,13 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const canEdit = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
-    whitelist.some(
-      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() &&
-             w.status === 'active' &&
-             (w.role === 'admin' || w.role === 'editor')
-    )
+    (currentUser.role === 'admin' ||
+      currentUser.role === 'editor' ||
+      whitelist.some(
+        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() &&
+               w.status === 'active' &&
+               (w.role === 'admin' || w.role === 'editor')
+      ))
   );
 
   const theme = getThemeConfig(themePalette);

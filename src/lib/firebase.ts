@@ -334,6 +334,36 @@ export const saveNoteDoc = (note: any, projectId?: string) =>
 export const deleteNoteDoc = (noteId: string, projectId?: string) =>
   deleteEntityDoc('researchNotes', noteId, projectId);
 
+// Whitelist and Admin Cloud Persistence Helpers
+export const saveWhitelistDoc = (entry: any, projectId: string = DEFAULT_PROJECT_ID) =>
+  saveEntityDoc('whitelist', String(entry.id || entry.email), entry, projectId);
+
+export const deleteWhitelistDoc = (entryId: string, projectId: string = DEFAULT_PROJECT_ID) =>
+  deleteEntityDoc('whitelist', String(entryId), projectId);
+
+export function subscribeToWhitelistCloud(
+  onUpdate: (entries: any[]) => void,
+  projectId: string = DEFAULT_PROJECT_ID
+): () => void {
+  try {
+    const db = getDbInstance();
+    if (!db) return () => {};
+    const colRef = collection(db, 'projects', projectId, 'whitelist');
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
+        onUpdate(list);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/whitelist`);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
 // Access Requests Helpers (both in project and top-level)
 export async function saveAccessRequestToCloud(req: any, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> {
   try {

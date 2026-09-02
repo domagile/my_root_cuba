@@ -18,6 +18,7 @@ export interface UIState {
   isSidebarVisible: boolean;
   isAuthModalOpen: boolean;
   authModalFeature?: string;
+  isContactModalOpen: boolean;
   
   // Actions
   setActiveTab: (tab: string) => void;
@@ -34,6 +35,8 @@ export interface UIState {
   setAccessLockConfig: (config: AccessLockConfig) => void;
   openAuthModal: (feature?: string) => void;
   closeAuthModal: () => void;
+  openContactModal: () => void;
+  closeContactModal: () => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -43,6 +46,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   isSidebarVisible: true,
   isAuthModalOpen: false,
   authModalFeature: undefined,
+  isContactModalOpen: false,
   
   themePalette: (() => {
     try {
@@ -140,5 +144,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
 
   openAuthModal: (authModalFeature?: string) => set({ isAuthModalOpen: true, authModalFeature }),
-  closeAuthModal: () => set({ isAuthModalOpen: false, authModalFeature: undefined })
+  closeAuthModal: () => set({ isAuthModalOpen: false, authModalFeature: undefined }),
+  openContactModal: () => set({ isContactModalOpen: true }),
+  closeContactModal: () => set({ isContactModalOpen: false })
 }));

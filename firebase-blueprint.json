@@ -189,12 +189,31 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "title"]
+    },
+    "WhitelistEntry": {
+      "title": "WhitelistEntry",
+      "description": "Authorized user with specific role in the family archive",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "addedAt": { "type": "string" }
+      },
+      "required": ["id", "email", "role"]
     }
   },
   "firestore": {
     "/sharedTrees/{treeId}": {
       "schema": "SharedTree",
       "description": "Public or shared genealogy tree document"
+    },
+    "/projects/{projectId}/whitelist/{whitelistId}": {
+      "schema": "WhitelistEntry",
+      "description": "Authorized whitelist user entry in project"
     },
     "/projects/{projectId}": {
       "schema": "ProjectMeta",

@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { GenealogyProvider, useUIStore } from './context/GenealogyContext';
-import { useAuthStore } from './stores/useAuthStore';
+import { useAuthStore, initCloudAuthSync } from './stores/useAuthStore';
 import { useSharedTreeStore } from './stores/useSharedTreeStore';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -32,8 +32,9 @@ import { TimelineView } from './components/TimelineView';
 import { ExperimentView } from './components/ExperimentView';
 import { SharedPinScreen } from './components/SharedPinScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ContactModal } from './components/ContactModal';
 import { getThemeConfig } from './utils/theme';
-import { RefreshCw, AlertCircle, ArrowLeft, Lock } from 'lucide-react';
+import { RefreshCw, AlertCircle, ArrowLeft, Lock, X } from 'lucide-react';
 
 function AppContent() {
   const activeTab = useUIStore((s) => s.activeTab);
@@ -43,6 +44,9 @@ function AppContent() {
   const authModalFeature = useUIStore((s) => s.authModalFeature);
   const openAuthModal = useUIStore((s) => s.openAuthModal);
   const closeAuthModal = useUIStore((s) => s.closeAuthModal);
+  const openContactModal = useUIStore((s) => s.openContactModal);
+
+  const [showVisitorBanner, setShowVisitorBanner] = useState(true);
 
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
@@ -51,9 +55,10 @@ function AppContent() {
   const isWhitelisted = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
-    whitelist.some(
-      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-    )
+    (currentUser.role === 'admin' ||
+      whitelist.some(
+        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+      ))
   );
 
   const {
@@ -70,6 +75,13 @@ function AppContent() {
   useEffect(() => {
     initFromUrl();
   }, [initFromUrl]);
+
+  useEffect(() => {
+    const unsub = initCloudAuthSync();
+    return () => {
+      unsub();
+    };
+  }, []);
 
   const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
   const [personToEdit, setPersonToEdit] = useState<Person | null>(null);
@@ -131,6 +143,7 @@ function AppContent() {
           sharedMeta={sharedTree}
           onExitShared={exitSharedMode}
         />
+        <ContactModal />
       </div>
     );
   }
@@ -208,6 +221,42 @@ function AppContent() {
           onInspectPerson={(id) => setInspectPersonId(id)}
         />
 
+        {/* Visitor Contact Notice Banner (for open guest access) */}
+        {!isWhitelisted && showVisitorBanner && (
+          <div className="bg-emerald-500/10 dark:bg-emerald-950/40 border-b border-emerald-500/20 px-3 sm:px-5 py-2 text-xs flex items-center justify-between gap-2.5 text-emerald-900 dark:text-emerald-200 shrink-0">
+            <div className="flex items-center gap-2 truncate">
+              <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">🌿 Шукаєте спільних предків?</span>
+              <span className="hidden md:inline opacity-80 truncate">
+                Дерево відкрите для пошуку. Якщо ви маєте спільні корені чи документи — напишіть автору родоводу:
+              </span>
+              <button
+                type="button"
+                onClick={() => openContactModal()}
+                className="font-mono font-bold underline text-emerald-700 dark:text-emerald-300 hover:text-emerald-500 cursor-pointer shrink-0"
+              >
+                domagile@gmail.com
+              </button>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => openContactModal()}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-xs cursor-pointer transition-colors"
+              >
+                Написати автору
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowVisitorBanner(false)}
+                className="p-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 opacity-60 hover:opacity-100 cursor-pointer"
+                title="Сховати підказку"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Tab Router */}
         <main className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden">
           {activeTab === 'tree' && <RodovidView />}
@@ -279,6 +328,9 @@ function AppContent() {
         onClose={closeAuthModal}
         targetFeatureName={authModalFeature}
       />
+
+      {/* Contact Author Modal */}
+      <ContactModal />
     </div>
   );
 }

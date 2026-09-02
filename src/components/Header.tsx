@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Share2, Copy, ShieldCheck, Lock, Flame, X } from 'lucide-react';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Share2, Copy, ShieldCheck, Lock, Flame, X, Mail } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
@@ -38,15 +38,17 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const isSidebarVisible = useUIStore((s) => s.isSidebarVisible);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const openAuthModal = useUIStore((s) => s.openAuthModal);
+  const openContactModal = useUIStore((s) => s.openContactModal);
   const setRodovidView = useUIStore((s) => s.setRodovidView);
 
   const { currentUser, whitelist, accessRequests, logout } = useAuthStore();
   const isWhitelisted = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
-    whitelist.some(
-      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-    )
+    (currentUser.role === 'admin' ||
+      whitelist.some(
+        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+      ))
   );
 
   const isAdmin = Boolean(
@@ -364,6 +366,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
               <ShieldCheck className="w-4 h-4 text-amber-500" />
             </button>
           )}
+
+          {/* Contact Author Button (domagile@gmail.com) */}
+          <button
+            id="header-contact-author-btn"
+            onClick={() => openContactModal()}
+            className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs font-semibold transition-all shrink-0 cursor-pointer shadow-xs ${
+              theme.category === 'dark'
+                ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-500/30'
+                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+            }`}
+            title="Шукаєте спільних предків? Написати автору дослідження (domagile@gmail.com)"
+          >
+            <Mail className="w-4 h-4 text-emerald-500 shrink-0" />
+            <span className="hidden sm:inline">Зв'язок з автором</span>
+          </button>
 
           {/* Share Tree (Admin only modal) or Copy Address (Others) Button */}
           <button

@@ -29,7 +29,8 @@ export function formatAccessRequestEmail(
       .forEach((em) => em.trim() && emailSet.add(em.trim().toLowerCase()));
   }
 
-  // Ensure default root admin is included
+  // Ensure default root admins are included
+  emailSet.add('fastagile7@gmail.com');
   emailSet.add('cubatarara400@gmail.com');
 
   const adminEmails = Array.from(emailSet);

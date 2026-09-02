@@ -42,6 +42,7 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
   // Stored / generated share ID
   const [treeTitle, setTreeTitle] = useState('Родовід нашої родини');
   const [authorName, setAuthorName] = useState('Дослідник родоводу');
+  const [contactEmail, setContactEmail] = useState('domagile@gmail.com');
   const [isPinProtected, setIsPinProtected] = useState(false);
   const [pinCode, setPinCode] = useState('');
   const [hideLivingDates, setHideLivingDates] = useState(false);
@@ -74,6 +75,7 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
           const parsed = JSON.parse(savedMeta);
           if (parsed.title) setTreeTitle(parsed.title);
           if (parsed.authorName) setAuthorName(parsed.authorName);
+          if (parsed.contactEmail) setContactEmail(parsed.contactEmail);
           if (parsed.isPinProtected !== undefined) setIsPinProtected(parsed.isPinProtected);
           if (parsed.pinCode) setPinCode(parsed.pinCode);
           if (parsed.hideLivingDates !== undefined) setHideLivingDates(parsed.hideLivingDates);
@@ -102,7 +104,7 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
       id: shareId,
       title: treeTitle.trim() || 'Родинне дерево',
       authorName: authorName.trim() || 'Дослідник родоводу',
-      authorEmail: currentUser?.email || '',
+      authorEmail: contactEmail.trim() || 'domagile@gmail.com',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       rootPersonId: activePersonId || database.rootPersonId || Object.keys(database.persons)[0] || 'p1',
@@ -130,6 +132,7 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
       localStorage.setItem(`rodovid_share_meta_${shareId}`, JSON.stringify({
         title: treeTitle,
         authorName,
+        contactEmail,
         isPinProtected,
         pinCode,
         hideLivingDates,
@@ -228,6 +231,23 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
                   <span>{totalPersons} осіб / {Object.keys(database.families).length} сімей</span>
                 </div>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold mb-1 opacity-80 flex items-center justify-between">
+                <span>Контактна пошта для зв'язку (пошук предків):</span>
+                <span className="text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">Для відвідувачів</span>
+              </label>
+              <input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="domagile@gmail.com"
+                className={`w-full px-3 py-2 rounded-lg border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E] transition-colors font-mono`}
+              />
+              <p className="text-[10px] opacity-65 mt-1">
+                Відвідувачі та незареєстровані гості зможуть написати вам на цю адресу, якщо також досліджують цих предків.
+              </p>
             </div>
           </div>
 

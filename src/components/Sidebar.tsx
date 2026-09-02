@@ -29,7 +29,8 @@ import {
   X,
   ChevronLeft,
   Lock,
-  KeyRound
+  KeyRound,
+  Mail
 } from 'lucide-react';
 import { TreeIcon, FanIcon } from './common/GenealogyIcons';
 import { useUIStore } from '../stores/useUIStore';
@@ -48,6 +49,7 @@ export const Sidebar: React.FC = () => {
   const isSidebarVisible = useUIStore((s) => s.isSidebarVisible);
   const setSidebarVisible = useUIStore((s) => s.setSidebarVisible);
   const openAuthModal = useUIStore((s) => s.openAuthModal);
+  const openContactModal = useUIStore((s) => s.openContactModal);
   const themePalette = useUIStore((s) => s.themePalette);
   const personsCount = useGenealogyStore((s) => s.persons.length);
   
@@ -56,9 +58,10 @@ export const Sidebar: React.FC = () => {
   const isWhitelisted = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
-    whitelist.some(
-      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-    )
+    (currentUser.role === 'admin' ||
+      whitelist.some(
+        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+      ))
   );
 
   const theme = getThemeConfig(themePalette);
@@ -237,6 +240,22 @@ export const Sidebar: React.FC = () => {
             </div>
           )}
         </nav>
+
+        {/* Contact Author Link */}
+        <div className={`px-2 py-1.5 border-t ${theme.sidebarBorder} shrink-0`}>
+          <button
+            id="sidebar-contact-author-btn"
+            onClick={() => openContactModal()}
+            className={`w-full flex items-center ${isCollapsed ? 'md:justify-center px-0' : 'gap-2 px-2'} py-1.5 rounded-lg text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer`}
+            title="Шукаєте спільних предків? Написати автору (domagile@gmail.com)"
+          >
+            <Mail className="w-4 h-4 shrink-0 text-emerald-500" />
+            <div className={`text-left min-w-0 ${isCollapsed ? 'md:hidden' : 'block'}`}>
+              <div className="text-[10px] opacity-70 leading-none">Зв'язок з автором:</div>
+              <div className="text-[11px] font-mono font-semibold truncate text-emerald-700 dark:text-emerald-300">domagile@gmail.com</div>
+            </div>
+          </button>
+        </div>
 
         {/* Footer info & settings */}
         <div className={`p-2.5 border-t ${theme.sidebarBorder} flex items-center ${isCollapsed ? 'md:justify-center' : 'justify-between'} justify-between text-xs shrink-0`}>

@@ -15,7 +15,7 @@ export const isUserWhitelisted = (
   whitelist: WhitelistEntry[] = []
 ): boolean => {
   if (!user) return false;
-  if (user.isWhitelisted) return true;
+  if (user.role === 'admin' || user.isWhitelisted) return true;
   if (!user.email) return false;
   return whitelist.some(
     (w) => w.email.toLowerCase() === user.email.toLowerCase() && w.status === 'active'

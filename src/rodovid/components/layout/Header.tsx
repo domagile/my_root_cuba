@@ -23,7 +23,8 @@ import {
   Lock,
   LogOut,
   Eye,
-  ShieldCheck
+  ShieldCheck,
+  Mail
 } from 'lucide-react';
 import { ViewMode } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
@@ -63,6 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
   const setMobileMenuOpen = useUIStore((s) => s.setMobileMenuOpen);
   const themePalette = useUIStore((s) => s.themePalette);
   const setThemePalette = useUIStore((s) => s.setThemePalette);
+  const openContactModal = useUIStore((s) => s.openContactModal);
   const theme = getThemeConfig(themePalette);
   const isDarkMode = theme.category === 'dark';
 
@@ -303,6 +305,21 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <Moon className="w-3.5 h-3.5 text-indigo-600" />
             )}
+          </button>
+
+          {/* Contact Author Button (domagile@gmail.com) */}
+          <button
+            id="rodovid-header-contact-btn"
+            onClick={() => openContactModal()}
+            className={`p-2 rounded-lg text-xs font-semibold ${
+              isDarkMode
+                ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-500/30'
+                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+            } border transition-colors shrink-0 cursor-pointer shadow-xs flex items-center gap-1.5`}
+            title="Шукаєте спільних предків? Написати автору (domagile@gmail.com)"
+          >
+            <Mail className="w-4 h-4 text-emerald-500" />
+            <span className="hidden sm:inline">Зв'язок</span>
           </button>
 
           {/* Whitelist Login Button for Guests / Read-only users */}
