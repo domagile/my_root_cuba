@@ -13,12 +13,22 @@ const STORAGE_KEY = 'genealogy_auth_security_v1';
 
 // Guaranteed root administrators of the genealogy project
 export const ROOT_ADMIN_EMAILS: string[] = [
+  'domagile@gmail.com',
   'fastagile7@gmail.com',
   'cubatarara400@gmail.com',
   'admin@genealogy.org.ua'
 ];
 
 const INITIAL_WHITELIST: WhitelistEntry[] = [
+  {
+    id: 'w-admin-author',
+    email: 'domagile@gmail.com',
+    name: 'Ольга (domagile) — Автор дослідження',
+    role: 'admin',
+    addedAt: '2026-01-01T00:00:00.000Z',
+    status: 'active',
+    notes: 'Власник проєкту, автор родоводу та головний адміністратор'
+  },
   {
     id: 'w-admin-0',
     email: 'fastagile7@gmail.com',
@@ -128,6 +138,15 @@ export interface AuthState {
   };
 }
 
+// Helper to get formatted name for root administrators
+export const getAdminDisplayName = (email: string, fallbackName?: string): string => {
+  const clean = email.trim().toLowerCase();
+  if (clean === 'domagile@gmail.com') return fallbackName || 'Ольга (domagile) — Автор дослідження';
+  if (clean === 'fastagile7@gmail.com') return fallbackName || 'Головний Адміністратор (fastagile7)';
+  if (clean === 'cubatarara400@gmail.com') return fallbackName || 'Головний Адміністратор (CubaTarara400)';
+  return fallbackName || 'Адміністратор родоводу';
+};
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   whitelist: (() => {
     try {
@@ -137,11 +156,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Ensure all ROOT_ADMIN_EMAILS are always present, active and with admin role
       ROOT_ADMIN_EMAILS.forEach((adminEmail) => {
         const idx = list.findIndex((w) => w.email.toLowerCase() === adminEmail);
+        const adminName = getAdminDisplayName(adminEmail);
         if (idx === -1) {
           list.unshift({
             id: `w-root-${adminEmail.split('@')[0]}`,
             email: adminEmail,
-            name: adminEmail === 'fastagile7@gmail.com' ? 'Головний Адміністратор (fastagile7)' : 'Адміністратор',
+            name: adminName,
             role: 'admin',
             addedAt: '2026-01-01T00:00:00.000Z',
             status: 'active',
@@ -150,6 +170,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         } else {
           list[idx] = {
             ...list[idx],
+            name: list[idx].name || adminName,
             role: 'admin',
             status: 'active'
           };
@@ -211,17 +232,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     // Auto-promote root admin if missing or inactive
     if (isRootAdmin) {
-      if (!match) {
+      if (!match || match.status !== 'active' || match.role !== 'admin') {
         const rootAdminEntry: WhitelistEntry = {
           id: `w-root-${cleanEmail.split('@')[0]}`,
           email: cleanEmail,
-          name: name || 'Головний Адміністратор',
+          name: getAdminDisplayName(cleanEmail, name),
           role: 'admin',
           addedAt: new Date().toISOString(),
           status: 'active',
           notes: 'Підтверджений корінцевий адміністратор'
         };
-        const nextWhitelist = [rootAdminEntry, ...whitelist];
+        const nextWhitelist = [rootAdminEntry, ...whitelist.filter((w) => w.email.toLowerCase() !== cleanEmail)];
         try {
           localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
         } catch {}
@@ -302,17 +323,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     let match = whitelist.find((w) => w.email.toLowerCase() === cleanEmail && w.status === 'active');
     
     // Auto-promote root admin if needed
-    if (isRootAdmin && !match) {
+    if (isRootAdmin && (!match || match.status !== 'active' || match.role !== 'admin')) {
       const rootAdminEntry: WhitelistEntry = {
         id: `w-root-${cleanEmail.split('@')[0]}`,
         email: cleanEmail,
-        name: cleanEmail === 'fastagile7@gmail.com' ? 'Головний Адміністратор (fastagile7)' : 'Адміністратор',
+        name: getAdminDisplayName(cleanEmail),
         role: 'admin',
         addedAt: new Date().toISOString(),
         status: 'active',
         notes: 'Системний адміністратор'
       };
-      const nextWhitelist = [rootAdminEntry, ...whitelist];
+      const nextWhitelist = [rootAdminEntry, ...whitelist.filter((w) => w.email.toLowerCase() !== cleanEmail)];
       try {
         localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
       } catch {}
@@ -366,12 +387,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     };
   },
 
-  quickAdminLogin: (email: string = 'fastagile7@gmail.com') => {
+  quickAdminLogin: (email: string = 'domagile@gmail.com') => {
     const cleanEmail = email.trim().toLowerCase();
     const adminUser: AuthUser = {
       id: `usr-admin-${Date.now()}`,
       email: cleanEmail,
-      name: cleanEmail === 'fastagile7@gmail.com' ? 'Головний Адміністратор (fastagile7)' : 'Адміністратор',
+      name: getAdminDisplayName(cleanEmail),
       role: 'admin',
       isAuthenticated: true,
       isWhitelisted: true,
@@ -394,7 +415,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         status: 'active',
         notes: 'Швидкий системний вхід адміністратора'
       };
-      const nextList = [entry, ...whitelist];
+      const nextList = [entry, ...whitelist.filter((w) => w.email.toLowerCase() !== cleanEmail)];
       try {
         localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextList));
       } catch {}
@@ -744,14 +765,16 @@ export function initCloudAuthSync(): () => void {
         // Always preserve root admins
         ROOT_ADMIN_EMAILS.forEach((adminEmail) => {
           const existing = mergedMap.get(adminEmail);
+          const adminName = getAdminDisplayName(adminEmail);
           if (existing) {
             existing.role = 'admin';
             existing.status = 'active';
+            if (!existing.name) existing.name = adminName;
           } else {
             mergedMap.set(adminEmail, {
               id: `w-root-${adminEmail.split('@')[0]}`,
               email: adminEmail,
-              name: adminEmail === 'fastagile7@gmail.com' ? 'Головний Адміністратор (fastagile7)' : 'Адміністратор',
+              name: adminName,
               role: 'admin',
               addedAt: '2026-01-01T00:00:00.000Z',
               status: 'active',

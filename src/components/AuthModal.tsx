@@ -153,7 +153,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const entry = whitelist.find((w) => w.email.toLowerCase() === target && w.status === 'active');
 
     if (isRoot || entry) {
-      const roleTitle = isRoot ? 'Головний Адміністратор' : entry?.role === 'admin' ? 'Адміністратор' : entry?.role === 'editor' ? 'Редактор' : 'Дослідник';
+      const roleTitle = isRoot ? (target === 'domagile@gmail.com' ? 'Автор дослідження (Головний Адміністратор)' : 'Головний Адміністратор') : entry?.role === 'admin' ? 'Адміністратор' : entry?.role === 'editor' ? 'Редактор' : 'Дослідник';
       setFeedback({
         type: 'success',
         message: `✓ Адресу ${target} підтверджено у Білому списку (Роль: ${roleTitle}). Ви можете увійти через Google або за PIN-кодом (1234).`
@@ -345,7 +345,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 Швидкий вхід адміністратора
               </span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-300 font-mono">
-                fastagile7@gmail.com
+                domagile@gmail.com
               </span>
             </div>
             <p className="text-[11px] opacity-80 leading-relaxed">
@@ -354,11 +354,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="flex flex-wrap gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => handleQuickAdminLogin('fastagile7@gmail.com')}
-                className="flex-1 py-2 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                onClick={() => handleQuickAdminLogin('domagile@gmail.com')}
+                className="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                title="Вхід як Автор дослідження (domagile@gmail.com)"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Увійти як fastagile7@gmail.com</span>
+                <span>Увійти як domagile@gmail.com</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickAdminLogin('fastagile7@gmail.com')}
+                className="py-2 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                title="Вхід як fastagile7@gmail.com"
+              >
+                <span>fastagile7</span>
               </button>
               <button
                 type="button"
@@ -434,7 +443,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     required
                     value={pinEmail}
                     onChange={(e) => setPinEmail(e.target.value)}
-                    placeholder="fastagile7@gmail.com"
+                    placeholder="domagile@gmail.com"
                     className={`w-full py-2 pl-8 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
                   />
                   <Mail className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />

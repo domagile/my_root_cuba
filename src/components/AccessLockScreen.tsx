@@ -35,6 +35,7 @@ export const AccessLockScreen: React.FC = () => {
     loginWithGoogle,
     loginWithEmailAndPin,
     loginWithPin,
+    quickAdminLogin,
     submitAccessRequest,
     checkEmailStatus,
     accessConfig,
@@ -630,6 +631,42 @@ export const AccessLockScreen: React.FC = () => {
               </svg>
               <span>{isSigningInWithFirebase ? 'Авторизація Google...' : 'Увійти в 1 клік через Google'}</span>
             </button>
+
+            {/* Quick Admin Access Bar */}
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-bold text-[#B88E3E]">
+                <span className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Швидкий вхід адміністратора
+                </span>
+                <span className="font-mono text-[10px] text-amber-400">domagile@gmail.com</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = quickAdminLogin('domagile@gmail.com');
+                    setFeedback({ type: 'success', message: `Вітаємо, ${res.name}! Доступ з правами адміністратора надано.` });
+                  }}
+                  className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  title="Вхід як Автор дослідження (domagile@gmail.com)"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Увійти як domagile@gmail.com</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = quickAdminLogin('fastagile7@gmail.com');
+                    setFeedback({ type: 'success', message: `Вітаємо, ${res.name}! Доступ надано.` });
+                  }}
+                  className="py-2 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold transition-all cursor-pointer"
+                  title="Вхід як fastagile7@gmail.com"
+                >
+                  fastagile7
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

@@ -335,11 +335,98 @@ export const deleteNoteDoc = (noteId: string, projectId?: string) =>
   deleteEntityDoc('researchNotes', noteId, projectId);
 
 // Whitelist and Admin Cloud Persistence Helpers
-export const saveWhitelistDoc = (entry: any, projectId: string = DEFAULT_PROJECT_ID) =>
-  saveEntityDoc('whitelist', String(entry.id || entry.email), entry, projectId);
+export const getWhitelistDocId = (emailOrId: string) => {
+  return String(emailOrId).trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+};
 
-export const deleteWhitelistDoc = (entryId: string, projectId: string = DEFAULT_PROJECT_ID) =>
-  deleteEntityDoc('whitelist', String(entryId), projectId);
+export const saveWhitelistDoc = async (entry: any, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> => {
+  try {
+    const db = getDbInstance();
+    if (!db || !entry?.email) return false;
+    const cleanData = JSON.parse(JSON.stringify(entry));
+    cleanData.updatedAt = new Date().toISOString();
+    const docId = getWhitelistDocId(entry.email);
+
+    // 1. Save in project subcollection
+    const docRef = doc(db, 'projects', projectId, 'whitelist', docId);
+    await setDoc(docRef, cleanData, { merge: true });
+
+    // 2. Also save to top-level collection for cross-project admin lookups
+    try {
+      const topRef = doc(db, 'whitelist', docId);
+      await setDoc(topRef, cleanData, { merge: true });
+    } catch {}
+
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/whitelist/${entry?.email}`);
+    return false;
+  }
+};
+
+export const deleteWhitelistDoc = async (entryIdOrEmail: string, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> => {
+  try {
+    const db = getDbInstance();
+    if (!db || !entryIdOrEmail) return false;
+    const docId = getWhitelistDocId(entryIdOrEmail);
+
+    // Delete from project subcollection
+    const docRef = doc(db, 'projects', projectId, 'whitelist', docId);
+    await deleteDoc(docRef).catch(() => {});
+
+    // Also delete by original raw id if different
+    if (entryIdOrEmail !== docId) {
+      const rawRef = doc(db, 'projects', projectId, 'whitelist', String(entryIdOrEmail));
+      await deleteDoc(rawRef).catch(() => {});
+    }
+
+    // Delete from top-level
+    try {
+      const topRef = doc(db, 'whitelist', docId);
+      await deleteDoc(topRef).catch(() => {});
+    } catch {}
+
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/whitelist/${entryIdOrEmail}`);
+    return false;
+  }
+};
+
+export async function fetchAllWhitelistFromCloud(projectId: string = DEFAULT_PROJECT_ID): Promise<any[]> {
+  try {
+    const db = getDbInstance();
+    if (!db) return [];
+    const map = new Map<string, any>();
+
+    // 1. Fetch from project subcollection
+    try {
+      const colRef = collection(db, 'projects', projectId, 'whitelist');
+      const snap = await getDocs(colRef);
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        if (data?.email) map.set(data.email.toLowerCase(), { ...data, id: d.id });
+      });
+    } catch {}
+
+    // 2. Fetch from top-level whitelist as backup
+    try {
+      const topRef = collection(db, 'whitelist');
+      const topSnap = await getDocs(topRef);
+      topSnap.docs.forEach((d) => {
+        const data = d.data();
+        if (data?.email && !map.has(data.email.toLowerCase())) {
+          map.set(data.email.toLowerCase(), { ...data, id: d.id });
+        }
+      });
+    } catch {}
+
+    return Array.from(map.values());
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/whitelist`);
+    return [];
+  }
+}
 
 export function subscribeToWhitelistCloud(
   onUpdate: (entries: any[]) => void,
@@ -371,14 +458,15 @@ export async function saveAccessRequestToCloud(req: any, projectId: string = DEF
     if (!db || !req?.id) return false;
     const cleanData = JSON.parse(JSON.stringify(req));
     cleanData.updatedAt = new Date().toISOString();
+    const docId = String(req.id);
     
     // Save in project accessRequests subcollection
-    const docRef = doc(db, 'projects', projectId, 'accessRequests', String(req.id));
+    const docRef = doc(db, 'projects', projectId, 'accessRequests', docId);
     await setDoc(docRef, cleanData, { merge: true });
     
     // Also save in top-level for easy global admin lookup
     try {
-      const topRef = doc(db, 'accessRequests', String(req.id));
+      const topRef = doc(db, 'accessRequests', docId);
       await setDoc(topRef, cleanData, { merge: true });
     } catch {}
     
@@ -386,6 +474,39 @@ export async function saveAccessRequestToCloud(req: any, projectId: string = DEF
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/accessRequests/${req.id}`);
     return false;
+  }
+}
+
+export async function fetchAllAccessRequestsFromCloud(projectId: string = DEFAULT_PROJECT_ID): Promise<any[]> {
+  try {
+    const db = getDbInstance();
+    if (!db) return [];
+    const map = new Map<string, any>();
+
+    // 1. Project subcollection
+    try {
+      const colRef = collection(db, 'projects', projectId, 'accessRequests');
+      const snap = await getDocs(colRef);
+      snap.docs.forEach((d) => {
+        map.set(d.id, { ...d.data(), id: d.id });
+      });
+    } catch {}
+
+    // 2. Top-level collection
+    try {
+      const topRef = collection(db, 'accessRequests');
+      const snap = await getDocs(topRef);
+      snap.docs.forEach((d) => {
+        if (!map.has(d.id)) {
+          map.set(d.id, { ...d.data(), id: d.id });
+        }
+      });
+    } catch {}
+
+    return Array.from(map.values());
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/accessRequests`);
+    return [];
   }
 }
 

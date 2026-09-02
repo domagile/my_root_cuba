@@ -1255,6 +1255,11 @@ export function calculateFanChart(
     colorMode = options.colorMode === 'lineage' ? 'clans' : (options.colorMode as FanColorMode);
   }
 
+  const includeDescendantsAndSpouses = Boolean(
+    options?.includeDescendantsAndSpouses ??
+    (typeof colorModeOrCustomInner === 'object' ? colorModeOrCustomInner?.includeDescendantsAndSpouses : false)
+  );
+
   const lineageColorMap = getLineageColorMap(database);
 
   // Spacious, clear ring sizing matching user screenshot layout
@@ -1365,6 +1370,184 @@ export function calculateFanChart(
 
   // Add Ancestor tree in top semicircle (PI to 2*PI)
   addAncestorToFan(root, 0, 1, Math.PI, 2 * Math.PI);
+
+  // When "All Relatives" mode is enabled, add Spouses, Siblings, and Descendants in bottom semicircle (0 to PI)
+  if (includeDescendantsAndSpouses) {
+    // Collect Spouses of root
+    const rootFamilies = Object.values(database.families || {}).filter(
+      (f) => f.husbandId === root.id || f.wifeId === root.id
+    );
+    const spouses: Person[] = [];
+    rootFamilies.forEach((f) => {
+      const spId = f.husbandId === root.id ? f.wifeId : f.husbandId;
+      if (spId && database.persons[spId] && !spouses.some((p) => p.id === spId)) {
+        spouses.push(database.persons[spId]);
+      }
+    });
+
+    // Collect Siblings of root (collateral line from parent family)
+    const parentFam = (root.parentFamilyId && database.families[root.parentFamilyId]) ||
+      Object.values(database.families || {}).find((f) => (f.childrenIds || []).includes(root.id));
+    const siblings: Person[] = [];
+    if (parentFam?.childrenIds) {
+      parentFam.childrenIds.forEach((cId) => {
+        if (cId !== root.id && database.persons[cId] && !siblings.some((p) => p.id === cId)) {
+          siblings.push(database.persons[cId]);
+        }
+      });
+    }
+
+    // Collect Children of root
+    const children: Person[] = [];
+    rootFamilies.forEach((f) => {
+      (f.childrenIds || []).forEach((cId) => {
+        if (cId && database.persons[cId] && !children.some((p) => p.id === cId)) {
+          children.push(database.persons[cId]);
+        }
+      });
+    });
+
+    // Collect Grandchildren of root
+    const grandchildren: Person[] = [];
+    children.forEach((ch) => {
+      const chFamilies = Object.values(database.families || {}).filter(
+        (f) => f.husbandId === ch.id || f.wifeId === ch.id
+      );
+      chFamilies.forEach((f) => {
+        (f.childrenIds || []).forEach((gcId) => {
+          if (gcId && database.persons[gcId] && !grandchildren.some((p) => p.id === gcId)) {
+            grandchildren.push(database.persons[gcId]);
+          }
+        });
+      });
+    });
+
+    // Ring 1 (Bottom semicircle, 0 to PI): Spouses and Siblings
+    const ring1Items: { person: Person; side: 'spouse' | 'child'; label: string; ahn: number }[] = [];
+    spouses.forEach((sp, idx) => {
+      const isFem = sp.gender === 'female' || sp.gender === 'F';
+      ring1Items.push({
+        person: sp,
+        side: 'spouse',
+        label: isFem ? 'Дружина' : 'Чоловік',
+        ahn: -10 - idx
+      });
+    });
+    siblings.forEach((sib, idx) => {
+      const isFem = sib.gender === 'female' || sib.gender === 'F';
+      ring1Items.push({
+        person: sib,
+        side: 'child',
+        label: isFem ? 'Сестра' : 'Брат',
+        ahn: -50 - idx
+      });
+    });
+
+    const childrenStartRing = ring1Items.length > 0 ? 2 : 1;
+
+    if (ring1Items.length > 0) {
+      const innerRadius = innerRadiusBase;
+      const outerRadius = innerRadiusBase + ringWidth;
+      const total = ring1Items.length;
+      const slice = Math.PI / total;
+
+      ring1Items.forEach((item, idx) => {
+        const startAngle = idx * slice;
+        const endAngle = (idx + 1) * slice;
+        const rod = getPersonRodName(item.person);
+        const branchColor = getSectorColor(item.ahn, 1, item.person);
+
+        sectors.push({
+          ahnentafelNumber: item.ahn,
+          person: item.person,
+          generation: -1,
+          innerRadius,
+          outerRadius,
+          startAngle,
+          endAngle,
+          fillColor: branchColor,
+          color: branchColor,
+          side: item.side,
+          relationshipLabel: item.label,
+          clanId: rod,
+          clanName: `Рід ${rod}`,
+          clanColor: branchColor,
+          rodName: rod
+        });
+      });
+    }
+
+    // Children Ring
+    if (children.length > 0) {
+      const innerRadius = innerRadiusBase + (childrenStartRing - 1) * ringWidth;
+      const outerRadius = innerRadiusBase + childrenStartRing * ringWidth;
+      const total = children.length;
+      const slice = Math.PI / total;
+
+      children.forEach((child, idx) => {
+        const startAngle = idx * slice;
+        const endAngle = (idx + 1) * slice;
+        const isFem = child.gender === 'female' || child.gender === 'F';
+        const label = isFem ? 'Донька' : 'Син';
+        const rod = getPersonRodName(child);
+        const branchColor = getSectorColor(-100 - idx, 2, child);
+
+        sectors.push({
+          ahnentafelNumber: -100 - idx,
+          person: child,
+          generation: -childrenStartRing,
+          innerRadius,
+          outerRadius,
+          startAngle,
+          endAngle,
+          fillColor: branchColor,
+          color: branchColor,
+          side: 'child',
+          relationshipLabel: label,
+          clanId: rod,
+          clanName: `Рід ${rod}`,
+          clanColor: branchColor,
+          rodName: rod
+        });
+      });
+    }
+
+    // Grandchildren Ring
+    if (grandchildren.length > 0 && (generations === 0 || generations >= childrenStartRing + 1)) {
+      const gcRing = childrenStartRing + 1;
+      const innerRadius = innerRadiusBase + (gcRing - 1) * ringWidth;
+      const outerRadius = innerRadiusBase + gcRing * ringWidth;
+      const total = grandchildren.length;
+      const slice = Math.PI / total;
+
+      grandchildren.forEach((gc, idx) => {
+        const startAngle = idx * slice;
+        const endAngle = (idx + 1) * slice;
+        const isFem = gc.gender === 'female' || gc.gender === 'F';
+        const label = isFem ? 'Онука' : 'Онук';
+        const rod = getPersonRodName(gc);
+        const branchColor = getSectorColor(-200 - idx, 3, gc);
+
+        sectors.push({
+          ahnentafelNumber: -200 - idx,
+          person: gc,
+          generation: -gcRing,
+          innerRadius,
+          outerRadius,
+          startAngle,
+          endAngle,
+          fillColor: branchColor,
+          color: branchColor,
+          side: 'child',
+          relationshipLabel: label,
+          clanId: rod,
+          clanName: `Рід ${rod}`,
+          clanColor: branchColor,
+          rodName: rod
+        });
+      });
+    }
+  }
 
   return sectors;
 }

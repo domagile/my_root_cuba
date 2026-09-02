@@ -717,13 +717,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
   return (
     <div className="flex flex-col h-full w-full bg-[#23272b] overflow-hidden relative select-none">
       {/* Top Toolbar */}
-      <div className="h-14 bg-[#1e2226] border-b border-[#323840] px-4 flex items-center justify-between z-20 shrink-0 print:hidden shadow-md">
-        <div className="flex items-center gap-3">
+      <div className="h-14 bg-[#1e2226] border-b border-[#323840] px-2 sm:px-4 flex items-center justify-between gap-2 z-20 shrink-0 print:hidden shadow-md overflow-x-auto scrollbar-none">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Layout & Mode Switch */}
-          <div className="flex items-center bg-[#15181b] p-0.5 rounded-lg border border-[#2d3238]">
+          <div className="flex items-center bg-[#15181b] p-0.5 rounded-lg border border-[#2d3238] shrink-0">
             <button
               onClick={() => setLayoutType('ancestors')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 text-white shadow-sm cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 text-white shadow-sm cursor-pointer"
               title="Класична вертикальна структура родоводу (FamilySearch style)"
             >
               <TreeIcon className="w-4 h-4 text-emerald-100" />
@@ -733,7 +733,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             {onSwitchToFan && (
               <button
                 onClick={onSwitchToFan}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
                 title="Перемкнути у віялову діаграму (Fan Chart)"
               >
                 <FanIcon className="w-4 h-4 text-amber-400" />
@@ -743,7 +743,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
           </div>
 
           {/* Generations dropdown */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-2.5 py-1.5 rounded-lg shadow-xs">
+          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-2.5 py-1.5 rounded-lg shadow-xs shrink-0">
             <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <span className="text-slate-400 hidden xl:inline">Поколінь:</span>
             <select
@@ -766,12 +766,12 @@ export const TreeView: React.FC<TreeViewProps> = ({
           </div>
 
           {/* Root Person Selector */}
-          <div className="hidden md:flex items-center gap-2">
-            <span className="text-xs text-slate-400">Корінь:</span>
+          <div className="hidden md:flex items-center gap-1.5 shrink-0">
+            <span className="text-xs text-slate-400 hidden lg:inline">Корінь:</span>
             <select
               value={activePersonId}
               onChange={(e) => onChangeRoot(e.target.value)}
-              className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-md px-2.5 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[210px] truncate cursor-pointer shadow-xs"
+              className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-md px-2 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[130px] sm:max-w-[160px] lg:max-w-[210px] truncate cursor-pointer shadow-xs"
             >
               {dropdownPersons.map((p) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
@@ -787,7 +787,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
           {/* Compact Toggle: Direct Line (1 person) vs All Relatives (many people) */}
           <div
-            className="flex items-center bg-[#15181b] border border-[#2d3238] p-0.5 rounded-lg text-xs shadow-xs"
+            className="flex items-center bg-[#15181b] border border-[#2d3238] p-0.5 rounded-lg text-xs shadow-xs shrink-0"
             title="Перемикач: Тільки прямі предки / Всі родичі"
           >
             <button
@@ -796,7 +796,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 setShowSiblings(false);
                 setCollapsedSiblings(new Set());
               }}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                 !showSiblings
                   ? 'bg-amber-600 text-white shadow-xs'
                   : 'text-slate-400 hover:text-slate-200'
@@ -812,7 +812,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 setShowSiblings(true);
                 setCollapsedSiblings(new Set());
               }}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                 showSiblings
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'text-slate-400 hover:text-slate-200'
@@ -826,7 +826,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Export Menu */}
           <div className="relative" ref={exportMenuRef}>
             <button
