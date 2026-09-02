@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Share2, ShieldCheck, Lock, Flame, X } from 'lucide-react';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Share2, Copy, ShieldCheck, Lock, Flame, X } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
@@ -49,6 +49,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
     )
   );
 
+  const isAdmin = Boolean(
+    currentUser &&
+    currentUser.isAuthenticated &&
+    (currentUser.role === 'admin' ||
+      whitelist.some(
+        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.role === 'admin' && w.status === 'active'
+      ))
+  );
+
   const theme = getThemeConfig(themePalette);
 
   const pendingRequestsCount = accessRequests.filter((r) => r.status === 'pending').length;
@@ -58,6 +67,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const [showGedcomModal, setShowGedcomModal] = useState(false);
   const [showCloudPopover, setShowCloudPopover] = useState(false);
   const [cloudActionMsg, setCloudActionMsg] = useState<{ text: string; isError?: boolean } | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [toastNotice, setToastNotice] = useState<string | null>(null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -118,9 +129,43 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
     }
   };
 
+  const handleShareOrCopyUrl = async () => {
+    if (isAdmin) {
+      setShowShareModal(true);
+    } else {
+      // Non-admins: copy direct page URL
+      try {
+        let urlToCopy = window.location.href;
+        if (urlToCopy.includes('ais-dev-')) {
+          urlToCopy = urlToCopy.replace('ais-dev-', 'ais-pre-');
+        }
+        await navigator.clipboard.writeText(urlToCopy);
+        setCopiedUrl(true);
+        setToastNotice('Адресу сторінки родоводу скопійовано в буфер обміну!');
+        setTimeout(() => setCopiedUrl(false), 2500);
+        setTimeout(() => setToastNotice(null), 3500);
+      } catch {
+        const textArea = document.createElement('textarea');
+        let urlToCopy = window.location.href;
+        if (urlToCopy.includes('ais-dev-')) {
+          urlToCopy = urlToCopy.replace('ais-dev-', 'ais-pre-');
+        }
+        textArea.value = urlToCopy;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopiedUrl(true);
+        setToastNotice('Адресу сторінки родоводу скопійовано в буфер обміну!');
+        setTimeout(() => setCopiedUrl(false), 2500);
+        setTimeout(() => setToastNotice(null), 3500);
+      }
+    }
+  };
+
   return (
     <>
-      <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-3 md:px-6 flex items-center justify-between gap-2 md:gap-4 flex-shrink-0 transition-colors duration-300`}>
+      <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-3 md:px-6 flex items-center justify-between gap-2 md:gap-4 flex-shrink-0 transition-colors duration-300 relative`}>
         {/* Left Sidebar Menu Toggle Button */}
         <button
           id="app-sidebar-toggle"
@@ -320,17 +365,31 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             </button>
           )}
 
-          {/* Share Tree Modal Trigger - Icon Only */}
+          {/* Share Tree (Admin only modal) or Copy Address (Others) Button */}
           <button
-            onClick={() => setShowShareModal(true)}
+            onClick={handleShareOrCopyUrl}
             className={`p-2 rounded-xl border font-semibold text-xs transition-colors shrink-0 cursor-pointer ${
-              theme.category === 'dark'
+              copiedUrl
+                ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                : theme.category === 'dark'
                 ? 'bg-amber-900/30 hover:bg-amber-900/50 text-amber-300 border-amber-500/40'
                 : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
             }`}
-            title="Поділитися родоводом"
+            title={
+              isAdmin
+                ? 'Спільний перегляд дерева (Налаштування та публікація онлайн)'
+                : copiedUrl
+                ? 'Адресу сторінки скопійовано!'
+                : 'Скопіювати адресу сторінки (Спільний перегляд дерева доступний тільки адміністраторам)'
+            }
           >
-            <Share2 className="w-4 h-4 text-amber-500" />
+            {copiedUrl ? (
+              <Check className="w-4 h-4 text-white" />
+            ) : isAdmin ? (
+              <Share2 className="w-4 h-4 text-amber-500" />
+            ) : (
+              <Copy className="w-4 h-4 text-amber-500" />
+            )}
           </button>
 
           {/* Add Person Button - Icon Only */}
@@ -464,6 +523,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast Notice */}
+      {toastNotice && (
+        <div className="fixed top-18 right-6 z-50 bg-neutral-900/95 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-white/20 text-xs font-semibold flex items-center gap-2 backdrop-blur-sm animate-in fade-in slide-in-from-top-2">
+          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastNotice}</span>
         </div>
       )}
 

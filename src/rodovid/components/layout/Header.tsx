@@ -18,6 +18,8 @@ import {
   Sun,
   Moon,
   Share2,
+  Copy,
+  Check,
   Lock,
   LogOut,
   Eye,
@@ -69,6 +71,38 @@ export const Header: React.FC<HeaderProps> = ({
       setThemePalette('classic');
     } else {
       setThemePalette('dark');
+    }
+  };
+
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const isAdmin = currentUser?.role === 'admin';
+
+  const handleShareOrCopyUrl = async () => {
+    if (isAdmin && onOpenShareModal) {
+      onOpenShareModal();
+    } else {
+      try {
+        let urlToCopy = window.location.href;
+        if (urlToCopy.includes('ais-dev-')) {
+          urlToCopy = urlToCopy.replace('ais-dev-', 'ais-pre-');
+        }
+        await navigator.clipboard.writeText(urlToCopy);
+        setCopiedUrl(true);
+        setTimeout(() => setCopiedUrl(false), 2500);
+      } catch {
+        const textArea = document.createElement('textarea');
+        let urlToCopy = window.location.href;
+        if (urlToCopy.includes('ais-dev-')) {
+          urlToCopy = urlToCopy.replace('ais-dev-', 'ais-pre-');
+        }
+        textArea.value = urlToCopy;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopiedUrl(true);
+        setTimeout(() => setCopiedUrl(false), 2500);
+      }
     }
   };
 
@@ -297,19 +331,31 @@ export const Header: React.FC<HeaderProps> = ({
                 <Upload className="w-4 h-4 text-emerald-500" />
               </button>
 
-              {onOpenShareModal && (
-                <button
-                  onClick={onOpenShareModal}
-                  className={`p-2 rounded-lg text-xs font-semibold ${
-                    isDarkMode
-                      ? 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 border-amber-500/40'
-                      : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
-                  } border transition-colors shrink-0 cursor-pointer shadow-xs`}
-                  title="Поділитися родоводом"
-                >
+              <button
+                onClick={handleShareOrCopyUrl}
+                className={`p-2 rounded-lg text-xs font-semibold ${
+                  copiedUrl
+                    ? 'bg-emerald-600 text-white border-emerald-500'
+                    : isDarkMode
+                    ? 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 border-amber-500/40'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                } border transition-colors shrink-0 cursor-pointer shadow-xs`}
+                title={
+                  isAdmin
+                    ? 'Спільний перегляд дерева (Налаштування публікації онлайн)'
+                    : copiedUrl
+                    ? 'Адресу сторінки скопійовано!'
+                    : 'Скопіювати адресу сторінки (Спільний перегляд доступний лише адміністратору)'
+                }
+              >
+                {copiedUrl ? (
+                  <Check className="w-4 h-4 text-white" />
+                ) : isAdmin ? (
                   <Share2 className="w-4 h-4 text-amber-500" />
-                </button>
-              )}
+                ) : (
+                  <Copy className="w-4 h-4 text-amber-500" />
+                )}
+              </button>
 
               <button
                 onClick={onOpenAddPersonModal}
