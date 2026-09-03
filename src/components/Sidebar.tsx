@@ -55,6 +55,7 @@ export const Sidebar: React.FC = () => {
   
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
+  const accessRequests = useAuthStore((s) => s.accessRequests);
   const isWhitelisted = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
@@ -63,6 +64,17 @@ export const Sidebar: React.FC = () => {
         (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
       ))
   );
+
+  const isAdmin = Boolean(
+    currentUser &&
+    currentUser.isAuthenticated &&
+    (currentUser.role === 'admin' ||
+      whitelist.some(
+        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.role === 'admin' && w.status === 'active'
+      ))
+  );
+
+  const pendingRequestsCount = accessRequests.filter((r) => r.status === 'pending').length;
 
   const theme = getThemeConfig(themePalette);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -266,11 +278,16 @@ export const Sidebar: React.FC = () => {
           {isWhitelisted ? (
             <button
               onClick={() => handleNavTabClick({ id: 'settings', label: 'Налаштування' })}
-              className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-1.5`}
-              title="Налаштування"
+              className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-1.5 relative`}
+              title={isAdmin && pendingRequestsCount > 0 ? `Налаштування (Є ${pendingRequestsCount} нових заявок)` : 'Налаштування'}
             >
               <Settings className="w-3.5 h-3.5" />
               {(!isCollapsed || isMobileMenuOpen) && <span className="text-[11px]">Налаштування</span>}
+              {isAdmin && pendingRequestsCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-mono text-[9px] font-bold leading-none animate-pulse">
+                  {pendingRequestsCount}
+                </span>
+              )}
             </button>
           ) : (
             <button

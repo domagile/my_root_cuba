@@ -48,15 +48,25 @@ function AppContent() {
 
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
+  const initCloudAuthSync = useAuthStore((s) => s.initCloudAuthSync);
   const theme = getThemeConfig(themePalette);
 
   const isWhitelisted = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
-    whitelist.some(
-      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-    )
+    (currentUser.role === 'admin' ||
+      whitelist.some(
+        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+      ))
   );
+
+  // Realtime Cloud Auth Sync (Whitelist, Access Requests, Security Config across all browsers)
+  useEffect(() => {
+    const unsub = initCloudAuthSync();
+    return () => {
+      unsub();
+    };
+  }, [initCloudAuthSync]);
 
   const {
     isSharedMode,

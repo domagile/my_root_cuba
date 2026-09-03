@@ -332,13 +332,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
           </button>
 
           {/* Pending Requests Badge for Admin */}
-          {currentUser?.role === 'admin' && pendingRequestsCount > 0 && (
+          {(isAdmin || currentUser?.role === 'admin') && pendingRequestsCount > 0 && (
             <button
               onClick={() => setActiveTab('settings')}
-              className="flex items-center gap-1.5 p-2 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse shrink-0 cursor-pointer"
-              title={`Є нові вхідні запити на доступ (${pendingRequestsCount})`}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse shrink-0 cursor-pointer"
+              title={`Є нові вхідні заявки на доступ (${pendingRequestsCount}). Натисніть для перегляду в Налаштуваннях`}
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="w-4 h-4 text-amber-500" />
+              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-full bg-amber-500 text-white leading-tight">
+                {pendingRequestsCount}
+              </span>
             </button>
           )}
 

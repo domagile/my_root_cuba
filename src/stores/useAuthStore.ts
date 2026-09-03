@@ -114,6 +114,11 @@ export interface AuthState {
     message: string;
   };
   loginWithPin: (pin: string) => boolean;
+  quickAdminLogin: (email: string) => {
+    success: boolean;
+    name: string;
+    role: UserRole;
+  };
   logout: () => void;
   addToWhitelist: (email: string, role: UserRole, name?: string, notes?: string) => void;
   removeFromWhitelist: (idOrEmail: string) => void;
@@ -372,6 +377,30 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return false;
   },
 
+  quickAdminLogin: (email: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const { whitelist } = get();
+    const isMaster = isMasterAdminEmail(cleanEmail);
+    const entry = whitelist.find((w) => w.email.toLowerCase() === cleanEmail);
+    const role: UserRole = isMaster ? 'admin' : (entry?.role || 'admin');
+    const name = entry?.name || (cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор і Власник Родоводу)' : cleanEmail.split('@')[0]);
+    const user: AuthUser = {
+      id: `usr-admin-${Date.now()}`,
+      email: cleanEmail,
+      name,
+      role,
+      isAuthenticated: true,
+      isWhitelisted: true,
+      loginMethod: 'google',
+      lastActive: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(user));
+    } catch {}
+    set({ currentUser: user });
+    return { success: true, name, role };
+  },
+
   logout: () => {
     try {
       localStorage.removeItem(`${STORAGE_KEY}_currentUser`);
@@ -620,6 +649,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(nextRequests));
     } catch {}
 
+    const approvedEntry = existingIndex >= 0 ? nextWhitelist[existingIndex] : nextWhitelist[nextWhitelist.length - 1];
+    saveWhitelistEntryToCloud(approvedEntry).catch(() => {});
     saveAccessRequestToCloud(updatedReq).catch(() => {});
     set({ whitelist: nextWhitelist, accessRequests: nextRequests });
   },
@@ -668,28 +699,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initCloudAuthSync: () => {
     // 1. Subscribe to Cloud Whitelist
     const unsubWhitelist = subscribeToWhitelistCloud((cloudList) => {
-      if (cloudList && cloudList.length > 0) {
+      if (cloudList && Array.isArray(cloudList) && cloudList.length > 0) {
         set((state) => {
-          const merged = [...state.whitelist];
+          const map = new Map<string, WhitelistEntry>();
+          // Existing state
+          for (const item of state.whitelist) {
+            if (item?.email) map.set(item.email.toLowerCase(), item);
+          }
+          // Cloud overwrite
           for (const item of cloudList) {
-            const idx = merged.findIndex(
-              (w) => w.id === item.id || w.email.toLowerCase() === item.email?.toLowerCase()
-            );
-            if (idx >= 0) {
-              merged[idx] = { ...merged[idx], ...item };
-            } else {
-              merged.push(item);
-            }
+            if (item?.email) map.set(item.email.toLowerCase(), item);
           }
-          // Ensure master admins remain active admin
+          // Master admins guarantee
           for (const master of INITIAL_WHITELIST) {
-            const idx = merged.findIndex((w) => w.email.toLowerCase() === master.email.toLowerCase());
-            if (idx === -1) {
-              merged.unshift(master);
-            } else if (isMasterAdminEmail(master.email)) {
-              merged[idx] = { ...merged[idx], role: 'admin', status: 'active' };
+            const lowEmail = master.email.toLowerCase();
+            const existing = map.get(lowEmail);
+            if (!existing) {
+              map.set(lowEmail, master);
+            } else if (isMasterAdminEmail(lowEmail)) {
+              map.set(lowEmail, { ...existing, role: 'admin', status: 'active' });
             }
           }
+          const merged = Array.from(map.values());
           try {
             localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(merged));
           } catch {}
@@ -700,17 +731,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     // 2. Subscribe to Cloud Access Requests
     const unsubRequests = subscribeToAccessRequestsCloud((cloudReqs) => {
-      if (cloudReqs && cloudReqs.length > 0) {
+      if (cloudReqs && Array.isArray(cloudReqs)) {
         set((state) => {
-          const merged = [...state.accessRequests];
-          for (const item of cloudReqs) {
-            const idx = merged.findIndex((r) => r.id === item.id);
-            if (idx >= 0) {
-              merged[idx] = { ...merged[idx], ...item };
-            } else {
-              merged.push(item);
-            }
+          const map = new Map<string, AccessRequest>();
+          for (const item of state.accessRequests) {
+            if (item?.id) map.set(item.id, item);
           }
+          for (const item of cloudReqs) {
+            if (item?.id) map.set(item.id, item);
+          }
+          const merged = Array.from(map.values()).sort((a, b) =>
+            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
           try {
             localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(merged));
           } catch {}

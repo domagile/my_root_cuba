@@ -35,7 +35,10 @@ import {
   Church,
   Search,
   ExternalLink,
-  ChevronDown
+  ChevronDown,
+  GitFork,
+  Compass,
+  Mail
 } from 'lucide-react';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
@@ -49,8 +52,10 @@ import {
 } from '../../types';
 import { parseAndNormalizeTags, getTreeHashtagsWithCounts, extractHashtagsFromText } from '../../utils/tagUtils';
 import { detectGenderFromName, isPersonMale, isPersonFemale, parseFullNameComponents } from '../../utils/genderUtils';
+import { ContactAuthorModal } from '../ContactAuthorModal';
 
-interface AddPersonModalProps {
+export interface AddPersonModalProps {
+  personId?: string | null;
   initialPersonToEdit?: Person | null;
   initialRelation?: {
     type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
@@ -58,6 +63,11 @@ interface AddPersonModalProps {
   } | null;
   onClose: () => void;
   onSaveAndOpenProfile?: (personId: string) => void;
+  onChangeRoot?: (personId: string) => void;
+  onOpenKinshipWith?: (personId: string) => void;
+  onDeletePerson?: (personId: string) => void;
+  onSelectPerson?: (personId: string) => void;
+  isReadOnly?: boolean;
 }
 
 type ModalSection =
@@ -71,10 +81,16 @@ type ModalSection =
   | 'custom-fields';
 
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({
+  personId,
   initialPersonToEdit,
   initialRelation,
   onClose,
-  onSaveAndOpenProfile
+  onSaveAndOpenProfile,
+  onChangeRoot,
+  onOpenKinshipWith,
+  onDeletePerson,
+  onSelectPerson,
+  isReadOnly = false
 }) => {
   const { persons, addPerson, updatePerson, themePalette, setSelectedPersonId } = useGenealogy();
   const theme = getThemeConfig(themePalette);
@@ -82,6 +98,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
   const [activeSection, setActiveSection] = useState<ModalSection>('basic');
   const contentAreaRef = useRef<HTMLDivElement>(null);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+
+  // Determine effective person either from prop or personId
+  const effectivePerson = useMemo(() => {
+    if (initialPersonToEdit) return initialPersonToEdit;
+    if (personId) return persons.find((p) => p.id === personId) || null;
+    return null;
+  }, [initialPersonToEdit, personId, persons]);
 
   // Target Person for initialRelation
   const targetPerson = initialRelation
@@ -89,14 +113,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     : null;
 
   // 1. Basic Information
-  const [researchBranch, setResearchBranch] = useState(initialPersonToEdit?.researchBranch || 'Без прив\'язки');
-  const [researchStatus, setResearchStatus] = useState(initialPersonToEdit?.researchStatus || 'hypothetical');
+  const [researchBranch, setResearchBranch] = useState(effectivePerson?.researchBranch || 'Без прив\'язки');
+  const [researchStatus, setResearchStatus] = useState(effectivePerson?.researchStatus || 'hypothetical');
   
-  const initialFirst = initialPersonToEdit?.name?.given || initialPersonToEdit?.firstName || '';
-  const initialLast = initialPersonToEdit?.name?.surname || initialPersonToEdit?.lastName || '';
-  const initialMaiden = initialPersonToEdit?.name?.maidenName || initialPersonToEdit?.maidenName || '';
-  const initialPatronym = initialPersonToEdit?.name?.patronymic || initialPersonToEdit?.patronymic || '';
-  const initialPrefix = initialPersonToEdit?.name?.prefix || initialPersonToEdit?.prefix || '';
+  const initialFirst = effectivePerson?.name?.given || effectivePerson?.firstName || '';
+  const initialLast = effectivePerson?.name?.surname || effectivePerson?.lastName || '';
+  const initialMaiden = effectivePerson?.name?.maidenName || effectivePerson?.maidenName || '';
+  const initialPatronym = effectivePerson?.name?.patronymic || effectivePerson?.patronymic || '';
+  const initialPrefix = effectivePerson?.name?.prefix || effectivePerson?.prefix || '';
 
   const [firstName, setFirstName] = useState(initialFirst);
   const [lastName, setLastName] = useState(initialLast);
@@ -104,15 +128,15 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [patronymic, setPatronymic] = useState(initialPatronym);
   const [prefix, setPrefix] = useState(initialPrefix);
   const [fullNameOverride, setFullNameOverride] = useState('');
-  const [nameVariants, setNameVariants] = useState((initialPersonToEdit?.nameVariants || []).join(', '));
-  const [surnameVariants, setSurnameVariants] = useState((initialPersonToEdit?.surnameVariants || []).join(', '));
+  const [nameVariants, setNameVariants] = useState((effectivePerson?.nameVariants || []).join(', '));
+  const [surnameVariants, setSurnameVariants] = useState((effectivePerson?.surnameVariants || []).join(', '));
 
   // Gender
   const [gender, setGender] = useState<Gender>(() => {
-    if (initialPersonToEdit) {
-      if (isPersonFemale(initialPersonToEdit)) return 'female';
-      if (isPersonMale(initialPersonToEdit)) return 'male';
-      return initialPersonToEdit.gender || 'male';
+    if (effectivePerson) {
+      if (isPersonFemale(effectivePerson)) return 'female';
+      if (isPersonMale(effectivePerson)) return 'male';
+      return effectivePerson.gender || 'male';
     }
     if (initialRelation?.type === 'father') return 'male';
     if (initialRelation?.type === 'mother') return 'female';
@@ -123,36 +147,36 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     return detected || 'male';
   });
   const [genderManuallyChanged, setGenderManuallyChanged] = useState(() => {
-    return Boolean(initialPersonToEdit || initialRelation?.type === 'father' || initialRelation?.type === 'mother' || initialRelation?.type === 'spouse');
+    return Boolean(effectivePerson || initialRelation?.type === 'father' || initialRelation?.type === 'mother' || initialRelation?.type === 'spouse');
   });
 
   // Living status
-  const [isLiving, setIsLiving] = useState<boolean>(initialPersonToEdit?.isLiving ?? false);
+  const [isLiving, setIsLiving] = useState<boolean>(effectivePerson?.isLiving ?? false);
 
   // 3. Parents & Kinship
   const [fatherId, setFatherId] = useState<string>(() => {
-    if (initialPersonToEdit?.fatherId) return initialPersonToEdit.fatherId;
+    if (effectivePerson?.fatherId) return effectivePerson.fatherId;
     if (initialRelation?.type === 'child' && targetPerson && isPersonMale(targetPerson)) return targetPerson.id;
     if (initialRelation?.type === 'sibling' && targetPerson?.fatherId) return targetPerson.fatherId;
     return '';
   });
   const [motherId, setMotherId] = useState<string>(() => {
-    if (initialPersonToEdit?.motherId) return initialPersonToEdit.motherId;
+    if (effectivePerson?.motherId) return effectivePerson.motherId;
     if (initialRelation?.type === 'child' && targetPerson && isPersonFemale(targetPerson)) return targetPerson.id;
     if (initialRelation?.type === 'sibling' && targetPerson?.motherId) return targetPerson.motherId;
     return '';
   });
   const [spouseId, setSpouseId] = useState<string>(() => {
-    if (initialPersonToEdit?.spouseIds && initialPersonToEdit.spouseIds.length > 0) return initialPersonToEdit.spouseIds[0];
+    if (effectivePerson?.spouseIds && effectivePerson.spouseIds.length > 0) return effectivePerson.spouseIds[0];
     if (initialRelation?.type === 'spouse' && targetPerson) return targetPerson.id;
     return '';
   });
 
   // Sibling IDs
-  const [siblingIds, setSiblingIds] = useState<string[]>(initialPersonToEdit?.siblingIds || []);
+  const [siblingIds, setSiblingIds] = useState<string[]>(effectivePerson?.siblingIds || []);
 
   // Godparents list
-  const [godparents, setGodparents] = useState<GodparentItem[]>(initialPersonToEdit?.godparents || []);
+  const [godparents, setGodparents] = useState<GodparentItem[]>(effectivePerson?.godparents || []);
   const [godparentMode, setGodparentMode] = useState<'create_new' | 'select_existing'>('create_new');
   const [newGodparentName, setNewGodparentName] = useState('');
   const [newGodparentRole, setNewGodparentRole] = useState<'godfather' | 'godmother' | 'witness'>('godfather');
@@ -165,38 +189,38 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [godparentFeedbackMsg, setGodparentFeedbackMsg] = useState<{ text: string; type: 'success' | 'info' } | null>(null);
 
   // 4. Dates & Places (Map locations)
-  const [birthDate, setBirthDate] = useState(initialPersonToEdit?.birthDate || '');
-  const [birthPlace, setBirthPlace] = useState(initialPersonToEdit?.birthPlace || '');
+  const [birthDate, setBirthDate] = useState(effectivePerson?.birthDate || '');
+  const [birthPlace, setBirthPlace] = useState(effectivePerson?.birthPlace || '');
   const [birthPlaceHistorical, setBirthPlaceHistorical] = useState('');
 
-  const [marriageDate, setMarriageDate] = useState(initialPersonToEdit?.marriageDate || '');
-  const [marriagePlace, setMarriagePlace] = useState(initialPersonToEdit?.marriagePlace || '');
+  const [marriageDate, setMarriageDate] = useState(effectivePerson?.marriageDate || '');
+  const [marriagePlace, setMarriagePlace] = useState(effectivePerson?.marriagePlace || '');
   const [marriagePlaceHistorical, setMarriagePlaceHistorical] = useState('');
 
-  const [deathDate, setDeathDate] = useState(initialPersonToEdit?.deathDate || '');
-  const [deathPlace, setDeathPlace] = useState(initialPersonToEdit?.deathPlace || '');
+  const [deathDate, setDeathDate] = useState(effectivePerson?.deathDate || '');
+  const [deathPlace, setDeathPlace] = useState(effectivePerson?.deathPlace || '');
   const [deathPlaceHistorical, setDeathPlaceHistorical] = useState('');
-  const [deathReason, setDeathReason] = useState(initialPersonToEdit?.deathReason || '');
+  const [deathReason, setDeathReason] = useState(effectivePerson?.deathReason || '');
 
-  const [residencePlace, setResidencePlace] = useState(initialPersonToEdit?.residencePlace || '');
+  const [residencePlace, setResidencePlace] = useState(effectivePerson?.residencePlace || '');
   const [residencePlaceHistorical, setResidencePlaceHistorical] = useState('');
 
   // 5. Biography, Notes & Social info
-  const [bio, setBio] = useState(initialPersonToEdit?.bio || '');
+  const [bio, setBio] = useState(effectivePerson?.bio || '');
   const [notes, setNotes] = useState(
-    typeof initialPersonToEdit?.notes === 'string' ? initialPersonToEdit.notes : ''
+    typeof effectivePerson?.notes === 'string' ? effectivePerson.notes : ''
   );
   const [estate, setEstate] = useState(
-    initialPersonToEdit?.estateOrSocialStatus || initialPersonToEdit?.estate || ''
+    effectivePerson?.estateOrSocialStatus || effectivePerson?.estate || ''
   );
-  const [occupation, setOccupation] = useState(initialPersonToEdit?.occupation || '');
-  const [confession, setConfession] = useState(initialPersonToEdit?.confession || '');
-  const [militaryRank, setMilitaryRank] = useState(initialPersonToEdit?.militaryRank || '');
-  const [tagsStr, setTagsStr] = useState((initialPersonToEdit?.tags || []).join(', '));
+  const [occupation, setOccupation] = useState(effectivePerson?.occupation || '');
+  const [confession, setConfession] = useState(effectivePerson?.confession || '');
+  const [militaryRank, setMilitaryRank] = useState(effectivePerson?.militaryRank || '');
+  const [tagsStr, setTagsStr] = useState((effectivePerson?.tags || []).join(', '));
 
   // 6. Events & Facts
   const [lifeEvents, setLifeEvents] = useState<PersonLifeEventItem[]>(
-    (initialPersonToEdit?.events as PersonLifeEventItem[]) || []
+    (effectivePerson?.events as PersonLifeEventItem[]) || []
   );
   const [showAddEventForm, setShowAddEventForm] = useState(false);
   const [newEvent, setNewEvent] = useState<PersonLifeEventItem>({
@@ -210,20 +234,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
   // 7. Photos
   const [avatarUrl, setAvatarUrl] = useState(
-    initialPersonToEdit?.avatarUrl || initialPersonToEdit?.avatar || initialPersonToEdit?.photoUrl || ''
+    effectivePerson?.avatarUrl || effectivePerson?.avatar || effectivePerson?.photoUrl || ''
   );
-  const [photosList, setPhotosList] = useState<string[]>(initialPersonToEdit?.photos || []);
+  const [photosList, setPhotosList] = useState<string[]>(effectivePerson?.photos || []);
   const [newPhotoUrlInput, setNewPhotoUrlInput] = useState('');
   const [showPhotoUrlInput, setShowPhotoUrlInput] = useState(false);
 
   // 8. Custom Fields
   const parseInitialCustomFields = (): CustomFieldItem[] => {
-    if (!initialPersonToEdit?.customFields) return [];
-    if (Array.isArray(initialPersonToEdit.customFields)) {
-      return initialPersonToEdit.customFields;
+    if (!effectivePerson?.customFields) return [];
+    if (Array.isArray(effectivePerson.customFields)) {
+      return effectivePerson.customFields;
     }
     // If it was Record<string, string>
-    return Object.entries(initialPersonToEdit.customFields).map(([label, value]) => ({
+    return Object.entries(effectivePerson.customFields).map(([label, value]) => ({
       id: `cf-${Math.random().toString(36).substr(2, 9)}`,
       label,
       value: String(value),
@@ -236,6 +260,63 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<string>('text');
   const [newFieldValue, setNewFieldValue] = useState('');
+
+  // Sync state whenever effectivePerson changes (e.g. clicking another relative or opening by ID)
+  useEffect(() => {
+    if (!effectivePerson) return;
+    setResearchBranch(effectivePerson.researchBranch || 'Без прив\'язки');
+    setResearchStatus(effectivePerson.researchStatus || 'hypothetical');
+    setFirstName(effectivePerson.name?.given || effectivePerson.firstName || '');
+    setLastName(effectivePerson.name?.surname || effectivePerson.lastName || '');
+    setMaidenName(effectivePerson.name?.maidenName || effectivePerson.maidenName || '');
+    setPatronymic(effectivePerson.name?.patronymic || effectivePerson.patronymic || '');
+    setPrefix(effectivePerson.name?.prefix || effectivePerson.prefix || '');
+    setNameVariants((effectivePerson.nameVariants || []).join(', '));
+    setSurnameVariants((effectivePerson.surnameVariants || []).join(', '));
+    setGender(() => {
+      if (isPersonFemale(effectivePerson)) return 'female';
+      if (isPersonMale(effectivePerson)) return 'male';
+      return effectivePerson.gender || 'male';
+    });
+    setIsLiving(effectivePerson.isLiving ?? false);
+    setFatherId(effectivePerson.fatherId || '');
+    setMotherId(effectivePerson.motherId || '');
+    setSpouseId(effectivePerson.spouseIds?.[0] || '');
+    setSiblingIds(effectivePerson.siblingIds || []);
+    setGodparents(effectivePerson.godparents || []);
+    setBirthDate(effectivePerson.birthDate || '');
+    setBirthPlace(effectivePerson.birthPlace || '');
+    setMarriageDate(effectivePerson.marriageDate || '');
+    setMarriagePlace(effectivePerson.marriagePlace || '');
+    setDeathDate(effectivePerson.deathDate || '');
+    setDeathPlace(effectivePerson.deathPlace || '');
+    setDeathReason(effectivePerson.deathReason || '');
+    setResidencePlace(effectivePerson.residencePlace || '');
+    setBio(effectivePerson.bio || '');
+    setNotes(typeof effectivePerson.notes === 'string' ? effectivePerson.notes : '');
+    setEstate(effectivePerson.estateOrSocialStatus || effectivePerson.estate || '');
+    setOccupation(effectivePerson.occupation || '');
+    setConfession(effectivePerson.confession || '');
+    setMilitaryRank(effectivePerson.militaryRank || '');
+    setTagsStr((effectivePerson.tags || []).join(', '));
+    setAvatarUrl(effectivePerson.avatarUrl || effectivePerson.avatar || effectivePerson.photoUrl || '');
+    setPhotosList(effectivePerson.photos || []);
+    setLifeEvents((effectivePerson.events as PersonLifeEventItem[]) || []);
+    if (effectivePerson.customFields) {
+      if (Array.isArray(effectivePerson.customFields)) {
+        setCustomFields(effectivePerson.customFields);
+      } else {
+        setCustomFields(Object.entries(effectivePerson.customFields).map(([label, value]) => ({
+          id: `cf-${Math.random().toString(36).substr(2, 9)}`,
+          label,
+          value: String(value),
+          type: 'text'
+        })));
+      }
+    } else {
+      setCustomFields([]);
+    }
+  }, [effectivePerson?.id]);
 
   // Popular hashtags
   const popularHashtags = useMemo(() => {
@@ -584,10 +665,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
     let savedPersonId: string;
 
-    if (initialPersonToEdit) {
-      savedPersonId = initialPersonToEdit.id;
+    if (effectivePerson) {
+      savedPersonId = effectivePerson.id;
       const updatedPerson: Person = {
-        ...initialPersonToEdit,
+        ...effectivePerson,
         name: nameObj,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
@@ -612,7 +693,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         isLiving,
         fatherId: fatherId || undefined,
         motherId: motherId || undefined,
-        spouseIds: spouseId ? [spouseId] : initialPersonToEdit.spouseIds || [],
+        spouseIds: spouseId ? [spouseId] : effectivePerson.spouseIds || [],
         siblingIds: siblingIds.length > 0 ? siblingIds : undefined,
         godparents: godparents.length > 0 ? godparents : undefined,
         occupation: occupation.trim() || undefined,
@@ -803,7 +884,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   };
 
   const getRelationLabel = () => {
-    if (!initialRelation) return initialPersonToEdit ? 'Редагувати особу' : 'Додати нову особу';
+    if (!initialRelation) {
+      if (effectivePerson) {
+        const pName = `${lastName || effectivePerson.lastName || ''} ${firstName || effectivePerson.firstName || ''}`.trim();
+        return pName ? `Картка особи: ${pName}` : 'Картка особи';
+      }
+      return 'Додати нову особу';
+    }
     const name = targetPerson
       ? `${targetPerson.name?.surname || targetPerson.lastName || ''} ${targetPerson.name?.given || targetPerson.firstName || ''}`.trim()
       : 'особи';
@@ -831,33 +918,95 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         className={`w-full max-w-6xl h-[92vh] flex flex-col rounded-2xl md:rounded-3xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl overflow-hidden transition-all`}
       >
         {/* Top Header Bar */}
-        <div className="px-5 py-3.5 flex items-center justify-between border-b border-black/10 dark:border-white/10 shrink-0 bg-black/5 dark:bg-white/5">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="px-4 sm:px-5 py-3 flex items-center justify-between border-b border-black/10 dark:border-white/10 shrink-0 bg-black/5 dark:bg-white/5 gap-2">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-[#B88E3E]/20 text-[#B88E3E] flex items-center justify-center shrink-0 border border-[#B88E3E]/30 shadow-xs">
-              {initialPersonToEdit ? <User className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
+              {effectivePerson ? <User className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
             </div>
             <div className="min-w-0">
-              <h2 className={`text-base font-bold ${theme.cardTitle} truncate flex items-center gap-2`}>
-                <span>{getRelationLabel()}</span>
-                {initialPersonToEdit && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-medium">
-                    Редагування
+              <h2 className={`text-sm sm:text-base font-bold ${theme.cardTitle} truncate flex items-center gap-2`}>
+                <span className="truncate">{getRelationLabel()}</span>
+                {effectivePerson && (
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0 border ${
+                    isReadOnly 
+                      ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20' 
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                  }`}>
+                    {isReadOnly ? 'Перегляд' : 'Повна картка'}
                   </span>
                 )}
               </h2>
-              <p className={`text-xs ${theme.cardSubtext} truncate`}>
+              <p className={`text-[11px] sm:text-xs ${theme.cardSubtext} truncate hidden sm:block`}>
                 Повноцінна генеалогічна картка особи з родинними зв'язками, датами, подіями та архівом
               </p>
             </div>
           </div>
           
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 cursor-pointer"
-            title="Закрити вікно"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {effectivePerson && onChangeRoot && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChangeRoot(effectivePerson.id);
+                  onClose();
+                }}
+                className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-emerald-600 hover:bg-emerald-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+                title="Показати в родинному дереві"
+              >
+                <GitFork className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="hidden md:inline">В дерево</span>
+              </button>
+            )}
+
+            {effectivePerson && onOpenKinshipWith && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenKinshipWith(effectivePerson.id);
+                  onClose();
+                }}
+                className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-sky-600 hover:bg-sky-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+                title="Розрахувати ступінь спорідненості"
+              >
+                <Compass className="w-3.5 h-3.5 text-sky-500" />
+                <span className="hidden md:inline">Спорідненість</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsContactModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] hover:bg-[#B88E3E]/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+              title="Зв'язатися з автором щодо цієї особи"
+            >
+              <Mail className="w-3.5 h-3.5 text-[#B88E3E]" />
+              <span className="hidden md:inline">Написати автору</span>
+            </button>
+
+            {effectivePerson && onDeletePerson && !isReadOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Ви впевнені, що хочете видалити особу ${computedFullName}?`)) {
+                    onDeletePerson(effectivePerson.id);
+                    onClose();
+                  }
+                }}
+                className="p-1.5 rounded-xl text-neutral-400 hover:text-rose-500 hover:bg-rose-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer"
+                title="Видалити особу з бази даних"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="p-1.5 sm:p-2 rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 cursor-pointer"
+              title="Закрити вікно"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Main Body (2 Columns: Left Sidebar + Scrollable Content) */}
@@ -2556,31 +2705,49 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-black/10 dark:hover:bg-white/10 text-xs font-semibold transition-colors cursor-pointer"
           >
-            Скасувати
+            {isReadOnly ? 'Закрити' : 'Скасувати'}
           </button>
 
           <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => handleSave(false)}
-              className="px-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5 text-[#B88E3E]" />
-              <span>Зберегти</span>
-            </button>
+            {isReadOnly ? (
+              <span className="text-xs text-neutral-400 italic">
+                Режим перегляду картки
+              </span>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleSave(false)}
+                  className="px-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5 text-[#B88E3E]" />
+                  <span>Зберегти</span>
+                </button>
 
-            <button
-              type="button"
-              onClick={() => handleSave(true)}
-              className="px-5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
-            >
-              <Check className="w-4 h-4" />
-              <span>Зберегти й відкрити профіль</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={() => handleSave(true)}
+                  className="px-5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Зберегти й відкрити профіль</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
       </div>
+
+      {/* Contact Author Modal */}
+      {isContactModalOpen && (
+        <ContactAuthorModal
+          isOpen={isContactModalOpen}
+          onClose={() => setIsContactModalOpen(false)}
+          personName={computedFullName}
+          personYears={lifeYearsPreview}
+        />
+      )}
     </div>
   );
 };

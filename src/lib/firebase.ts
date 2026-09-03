@@ -545,6 +545,11 @@ export async function saveWhitelistEntryToCloud(
     cleanData.updatedAt = new Date().toISOString();
     const docRef = doc(db, 'projects', projectId, 'whitelist', String(entry.id));
     await setDoc(docRef, cleanData, { merge: true });
+    // Also save in top-level whitelist for multi-browser and global admin lookup
+    try {
+      const topRef = doc(db, 'whitelist', String(entry.id));
+      await setDoc(topRef, cleanData, { merge: true });
+    } catch {}
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/whitelist/${entry.id}`);
@@ -561,33 +566,14 @@ export async function deleteWhitelistEntryFromCloud(
     if (!db || !entryId) return false;
     const docRef = doc(db, 'projects', projectId, 'whitelist', String(entryId));
     await deleteDoc(docRef);
+    try {
+      const topRef = doc(db, 'whitelist', String(entryId));
+      await deleteDoc(topRef);
+    } catch {}
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/whitelist/${entryId}`);
     return false;
-  }
-}
-
-export function subscribeToWhitelistCloud(
-  onUpdate: (entries: any[]) => void,
-  projectId: string = DEFAULT_PROJECT_ID
-): () => void {
-  try {
-    const db = getDbInstance();
-    if (!db) return () => {};
-    const colRef = collection(db, 'projects', projectId, 'whitelist');
-    return onSnapshot(
-      colRef,
-      (snapshot) => {
-        const list = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
-        onUpdate(list);
-      },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/whitelist`);
-      }
-    );
-  } catch {
-    return () => {};
   }
 }
 
