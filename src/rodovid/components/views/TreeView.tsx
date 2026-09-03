@@ -60,6 +60,22 @@ import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, getPrivacyLifespan, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 
+// Ukrainian generation declension helper
+function getUkrainianGenerationLabel(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 19) {
+    return `${n} поколінь`;
+  }
+  if (mod10 === 1) {
+    return `${n} покоління`;
+  }
+  if (mod10 >= 2 && mod10 <= 4) {
+    return `${n} покоління`;
+  }
+  return `${n} поколінь`;
+}
+
 interface TreeViewProps {
   database: GenealogyDatabase;
   activePersonId: string;
@@ -102,6 +118,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [layoutType, setLayoutType] = useState<TreeLayoutType>('ancestors');
   // Default to 0 = ALL generations
   const [generations, setGenerations] = useState<number>(0);
+
+  // Generation options list without artificial cap
+  const treeGenOptions = useMemo(() => {
+    const maxGenLimit = Math.max(generations, 25);
+    const options: number[] = [];
+    for (let g = 2; g <= maxGenLimit; g++) {
+      options.push(g);
+    }
+    if (generations > 0 && !options.includes(generations)) {
+      options.push(generations);
+      options.sort((a, b) => a - b);
+    }
+    return options;
+  }, [generations]);
   const [scale, setScale] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 80, y: 80 });
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -748,20 +778,35 @@ export const TreeView: React.FC<TreeViewProps> = ({
             <span className="text-slate-400 hidden xl:inline">Поколінь:</span>
             <select
               value={generations}
-              onChange={(e) => setGenerations(Number(e.target.value))}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'custom') {
+                  const customInput = window.prompt(
+                    'Вкажіть бажану кількість поколінь (число від 1 або більше):',
+                    String(generations || 5)
+                  );
+                  if (customInput !== null) {
+                    const parsed = parseInt(customInput.trim(), 10);
+                    if (!isNaN(parsed) && parsed > 0) {
+                      setGenerations(parsed);
+                    }
+                  }
+                } else {
+                  setGenerations(Number(val));
+                }
+              }}
               className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer py-0.5"
               title="Кількість поколінь родоводу"
             >
               <option value={0} className="bg-[#1b1f24] text-white">Всі покоління</option>
-              <option value={2} className="bg-[#1b1f24] text-white">2 покоління</option>
-              <option value={3} className="bg-[#1b1f24] text-white">3 покоління</option>
-              <option value={4} className="bg-[#1b1f24] text-white">4 покоління</option>
-              <option value={5} className="bg-[#1b1f24] text-white">5 поколінь</option>
-              <option value={6} className="bg-[#1b1f24] text-white">6 поколінь</option>
-              <option value={7} className="bg-[#1b1f24] text-white">7 поколінь</option>
-              <option value={8} className="bg-[#1b1f24] text-white">8 поколінь</option>
-              <option value={9} className="bg-[#1b1f24] text-white">9 поколінь</option>
-              <option value={10} className="bg-[#1b1f24] text-white">10 поколінь</option>
+              {treeGenOptions.map((g) => (
+                <option key={g} value={g} className="bg-[#1b1f24] text-white">
+                  {getUkrainianGenerationLabel(g)}
+                </option>
+              ))}
+              <option value="custom" className="bg-[#1b1f24] text-amber-400 font-semibold">
+                + Ввести власну кількість...
+              </option>
             </select>
           </div>
 

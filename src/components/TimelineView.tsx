@@ -510,7 +510,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
   };
 
   return (
-    <div className={`flex-1 p-4 md:p-6 ${theme.appBg} overflow-y-auto space-y-4 transition-colors duration-300 relative`}>
+    <div className={`flex-1 p-4 md:p-6 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-4 transition-colors duration-300 relative`}>
       {/* 1. TOP HEADER & METRICS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-2 border-b border-[#2A2A2A]">
         <div>

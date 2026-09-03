@@ -23,12 +23,14 @@ import { EditFamilyModal } from './components/modals/EditFamilyModal';
 import { EditSourceModal } from './components/modals/EditSourceModal';
 import { GedcomModal } from './components/modals/GedcomModal';
 import { ShareTreeModal } from './components/modals/ShareTreeModal';
+import { GlobalSearchModal } from '../components/GlobalSearchModal';
 import { RelationManagerModal } from '../components/Tree/RelationManagerModal';
 import { AddPersonModal } from '../components/Tree/AddPersonModal';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useUIStore } from '../stores/useUIStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { AuthModal } from '../components/AuthModal';
+import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from '../components/ContactAuthorModal';
 import { getThemeConfig } from '../utils/theme';
 import { Globe, Shield, ArrowLeft, Download, Check, Sparkles, Mail } from 'lucide-react';
 
@@ -78,7 +80,6 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
 
   const [localSelectedPersonId, setLocalSelectedPersonId] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const openContactModal = useUIStore((s) => s.openContactModal);
 
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
@@ -175,6 +176,8 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
   const [editSourceTarget, setEditSourceTarget] = useState<string | null>(null); // 'NEW' or sourceId
   const [isGedcomModalOpen, setIsGedcomModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isGlobalSearchModalOpen, setIsGlobalSearchModalOpen] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(false);
   const [kinshipInitialAId, setKinshipInitialAId] = useState<string | undefined>(undefined);
   const [savedCopySuccess, setSavedCopySuccess] = useState(false);
 
@@ -299,19 +302,30 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
                   Тільки перегляд
                 </span>
               </div>
-              <div className="text-[11px] opacity-90 truncate">
-                Дослідник: <strong>{sharedMeta.authorName || 'Головний дослідник'}</strong> • {persons.length} осіб у родинній схемі
+              <div className="text-[11px] opacity-90 truncate flex items-center gap-2 flex-wrap">
+                <span>Дослідник: <strong>{sharedMeta.authorName || 'Головний дослідник'}</strong> • {persons.length} осіб</span>
+                <span>•</span>
+                <button
+                  type="button"
+                  onClick={() => setShowContactModal(true)}
+                  className="inline-flex items-center gap-1 font-semibold underline hover:text-amber-100 cursor-pointer"
+                  title="Зв'язатися з автором дерева щодо спільних предків"
+                >
+                  <Mail className="w-3 h-3" />
+                  <span>{sharedMeta.authorEmail || AUTHOR_CONTACT_EMAIL}</span>
+                </button>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => openContactModal()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer border border-emerald-400/40"
-              title="Шукаєте спільних предків? Написати автору (domagile@gmail.com)"
+              type="button"
+              onClick={() => setShowContactModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/25 hover:bg-black/40 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+              title={`Написати автору (${sharedMeta.authorEmail || AUTHOR_CONTACT_EMAIL})`}
             >
-              <Mail className="w-3.5 h-3.5" />
+              <Mail className="w-3.5 h-3.5 text-amber-200" />
               <span>Зв'язок з автором</span>
             </button>
 
@@ -346,6 +360,8 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
           onOpenGedcomModal={() => setIsGedcomModalOpen(true)}
           onOpenAddPersonModal={() => setEditPersonTarget('NEW')}
           onOpenShareModal={() => setIsShareModalOpen(true)}
+          onOpenGlobalSearch={() => setIsGlobalSearchModalOpen(true)}
+          onOpenContactAuthor={() => setShowContactModal(true)}
           databaseTitle={title}
           totalPersonsCount={persons.length}
           isReadOnly={isReadOnly}
@@ -391,7 +407,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         )}
 
         {currentView === 'persons' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+          <div className="h-full w-full overflow-y-auto overflow-x-auto">
             <PersonsListView
               database={database}
               isReadOnly={isReadOnly}
@@ -409,7 +425,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         )}
 
         {currentView === 'families' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+          <div className="h-full w-full overflow-y-auto overflow-x-auto">
             <FamiliesListView
               database={database}
               onSelectPerson={(id) => setInspectPersonId(id)}
@@ -425,7 +441,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         )}
 
         {currentView === 'timeline' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+          <div className="h-full w-full overflow-y-auto overflow-x-auto">
             <EventsTimelineView
               database={database}
               onSelectPerson={(id) => setInspectPersonId(id)}
@@ -443,7 +459,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         )}
 
         {currentView === 'sources' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+          <div className="h-full w-full overflow-y-auto overflow-x-auto">
             <SourcesView
               database={database}
               onSelectPerson={(id) => setInspectPersonId(id)}
@@ -455,7 +471,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         )}
 
         {(currentView === 'calculator' || currentView === 'kinship') && (
-          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+          <div className="h-full w-full overflow-y-auto overflow-x-auto">
             <KinshipCalculatorView
               database={database}
               initialPersonAId={kinshipInitialAId || activePersonId}
@@ -465,7 +481,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         )}
 
         {(currentView === 'statistics' || currentView === 'stats') && (
-          <div className="h-full w-full overflow-y-auto overflow-x-hidden">
+          <div className="h-full w-full overflow-y-auto overflow-x-auto">
             <StatisticsView
               database={database}
               onSelectPerson={(id) => setInspectPersonId(id)}
@@ -474,21 +490,25 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         )}
 
         {currentView === 'reports' && (
-          <ReportsView
-            database={database}
-            activePersonId={activePersonId}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-          />
+          <div className="h-full w-full overflow-y-auto overflow-x-auto">
+            <ReportsView
+              database={database}
+              activePersonId={activePersonId}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+            />
+          </div>
         )}
 
         {(currentView === 'conflicts' || currentView === 'audit' || currentView === 'duplicates') && (
-          <ConflictsView
-            persons={persons}
-            families={families}
-            onUpdatePersons={(newPersons) => setPersons(newPersons)}
-            onUpdateFamilies={(newFamilies) => setFamilies(newFamilies)}
-            onSelectPerson={(id) => setInspectPersonId(id)}
-          />
+          <div className="h-full w-full overflow-y-auto overflow-x-auto">
+            <ConflictsView
+              persons={persons}
+              families={families}
+              onUpdatePersons={(newPersons) => setPersons(newPersons)}
+              onUpdateFamilies={(newFamilies) => setFamilies(newFamilies)}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+            />
+          </div>
         )}
       </div>
 
@@ -589,6 +609,21 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         <AuthModal
           isOpen={isAuthModalOpen}
           onClose={() => setIsAuthModalOpen(false)}
+        />
+      )}
+
+      {isGlobalSearchModalOpen && (
+        <GlobalSearchModal
+          isOpen={isGlobalSearchModalOpen}
+          onClose={() => setIsGlobalSearchModalOpen(false)}
+          onInspectPerson={(id) => setInspectPersonId(id)}
+        />
+      )}
+
+      {showContactModal && (
+        <ContactAuthorModal
+          isOpen={showContactModal}
+          onClose={() => setShowContactModal(false)}
         />
       )}
     </div>

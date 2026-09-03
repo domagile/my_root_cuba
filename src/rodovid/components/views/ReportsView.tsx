@@ -87,7 +87,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   return (
-    <div className="h-full w-full overflow-y-auto overflow-x-hidden p-4 sm:p-6 select-text">
+    <div className="h-full w-full overflow-y-auto overflow-x-auto p-4 sm:p-6 select-text">
       <div className={`max-w-5xl mx-auto space-y-6 ${theme.textPrimary}`}>
         {/* Top Header */}
         <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>

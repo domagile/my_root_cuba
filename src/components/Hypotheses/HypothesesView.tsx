@@ -236,7 +236,7 @@ export const HypothesesView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-4 sm:p-6 lg:p-8 ${theme.appBg} overflow-y-auto space-y-6 transition-colors duration-300 min-h-screen`}>
+    <div className={`flex-1 p-4 sm:p-6 lg:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 transition-colors duration-300 min-h-screen`}>
       {/* 1. Header Banner */}
       <div className={`p-6 rounded-3xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4`}>
         <div className="space-y-1">

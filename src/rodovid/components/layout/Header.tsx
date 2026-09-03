@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
+  Search,
   GitFork,
   PieChart,
   Users,
@@ -39,6 +40,8 @@ interface HeaderProps {
   onOpenGedcomModal: () => void;
   onOpenAddPersonModal: () => void;
   onOpenShareModal?: () => void;
+  onOpenGlobalSearch?: () => void;
+  onOpenContactAuthor?: () => void;
   databaseTitle: string;
   totalPersonsCount: number;
   isReadOnly?: boolean;
@@ -53,6 +56,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenGedcomModal,
   onOpenAddPersonModal,
   onOpenShareModal,
+  onOpenGlobalSearch,
+  onOpenContactAuthor,
   totalPersonsCount,
   isReadOnly = false,
   onOpenAuthModal,
@@ -289,6 +294,41 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Zone: Theme Toggle, Auth, GEDCOM, Add Person */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Global Search Button */}
+          {onOpenGlobalSearch && (
+            <button
+              onClick={onOpenGlobalSearch}
+              className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-md text-xs font-medium ${
+                isDarkMode
+                  ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-slate-700'
+                  : 'bg-neutral-100 hover:bg-neutral-200 text-amber-700 border-neutral-300'
+              } border transition-colors flex items-center gap-1.5 cursor-pointer`}
+              title="Глобальний пошук по дереву (імена, місця, замітки) — ⌘K"
+              aria-label="Глобальний пошук"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Пошук</span>
+              <kbd className="hidden md:inline px-1 py-0.2 text-[9px] font-mono rounded bg-black/10 dark:bg-white/10 opacity-70">⌘K</kbd>
+            </button>
+          )}
+
+          {/* Contact Author Button (domagile@gmail.com) */}
+          {onOpenContactAuthor && (
+            <button
+              onClick={onOpenContactAuthor}
+              className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-md text-xs font-medium ${
+                isDarkMode
+                  ? 'bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border-amber-500/40'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+              } border transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs`}
+              title="Зв'язок з автором дерева (domagile@gmail.com) — для пошуку спільних предків"
+              aria-label="Зв'язок з автором"
+            >
+              <Mail className="w-3.5 h-3.5 text-amber-500" />
+              <span className="hidden sm:inline">Автор</span>
+            </button>
+          )}
+
           {/* Night / Day mode toggle */}
           <button
             onClick={toggleThemeMode}

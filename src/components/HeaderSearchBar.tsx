@@ -11,21 +11,30 @@ import {
   ArrowRight, 
   PieChart, 
   FileText,
-  Briefcase
+  Briefcase,
+  Zap,
+  Layers,
+  Maximize2
 } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
-import { Person, ThemePalette } from '../types';
+import { Person } from '../types';
 import { getThemeConfig } from '../utils/theme';
-import { normalizeArchaicUkrainian } from '../utils/ukrainianPhonetics';
+import { 
+  executeGlobalTreeSearch, 
+  SearchCategory, 
+  GlobalSearchResult 
+} from '../utils/globalTreeSearch';
 
 interface HeaderSearchBarProps {
   onOpenAddPerson?: () => void;
   onInspectPerson?: (id: string) => void;
+  onOpenGlobalModal?: () => void;
 }
 
 export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
   onOpenAddPerson,
-  onInspectPerson
+  onInspectPerson,
+  onOpenGlobalModal
 }) => {
   const { 
     persons, 
@@ -42,6 +51,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
 
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+  const [categoryFilter, setCategoryFilter] = useState<SearchCategory>('all');
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -86,7 +96,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
       lifeSpan = `пом. ${dYear}`;
     }
 
-    const place = p.birthPlace || p.deathPlace || '';
+    const place = p.birthPlace || p.deathPlace || p.residencePlace || '';
 
     return {
       fullName,
@@ -103,88 +113,41 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
     };
   };
 
-  // Search Results Filtering & Ranking
-  const searchResults = useMemo(() => {
+  // Search Results using multi-field fuzzy search engine
+  const searchResults: GlobalSearchResult[] = useMemo(() => {
     const query = searchQuery.trim();
     if (!query) {
       // If query is empty and popup is open, show recently selected or root persons
       const activePersons = persons.filter((p) => !p.isDeleted);
       const rootPerson = activePersons.find((p) => p.id === selectedPersonId);
       const topRecents = activePersons.slice(0, 6);
-      if (rootPerson && !topRecents.some((p) => p.id === rootPerson.id)) {
-        return [rootPerson, ...topRecents.slice(0, 5)];
-      }
-      return topRecents;
+      const initialPersons = rootPerson && !topRecents.some((p) => p.id === rootPerson.id)
+        ? [rootPerson, ...topRecents.slice(0, 5)]
+        : topRecents;
+
+      return initialPersons.map((p) => ({
+        person: p,
+        score: 100,
+        bestMatch: {
+          category: 'name',
+          field: 'Ключова особа',
+          matchedText: p.lastName || p.firstName || '',
+          isFuzzy: false,
+          score: 100
+        },
+        allMatches: [],
+        isFuzzy: false,
+        matchedCategories: { name: true, place: false, note: false }
+      }));
     }
 
-    const normalizedQuery = normalizeArchaicUkrainian(query);
-    const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    return executeGlobalTreeSearch(persons, query, categoryFilter, { maxResults: 15 });
+  }, [persons, searchQuery, selectedPersonId, categoryFilter]);
 
-    const scored: Array<{ person: Person; score: number }> = [];
-
-    persons.forEach((person) => {
-      if (person.isDeleted) return;
-
-      const details = getPersonDetails(person);
-      const normalizedFullName = normalizeArchaicUkrainian(details.fullName);
-      const normalizedSurname = normalizeArchaicUkrainian(details.surname);
-      const normalizedGiven = normalizeArchaicUkrainian(details.given);
-      const normalizedPatronymic = normalizeArchaicUkrainian(details.patronymic);
-      const normalizedMaiden = normalizeArchaicUkrainian(details.maiden);
-      const normalizedPlace = normalizeArchaicUkrainian(details.place);
-      const normalizedOccupation = normalizeArchaicUkrainian(details.occupation);
-      const normalizedNotes = normalizeArchaicUkrainian(person.notes || person.bio || '');
-
-      let score = 0;
-
-      // Exact match bonus
-      if (normalizedFullName === normalizedQuery) {
-        score += 100;
-      } else if (normalizedSurname.startsWith(normalizedQuery)) {
-        score += 60;
-      } else if (normalizedGiven.startsWith(normalizedQuery)) {
-        score += 50;
-      } else if (normalizedFullName.includes(normalizedQuery)) {
-        score += 40;
-      }
-
-      // Check all query tokens
-      let allTokensMatch = true;
-      for (const token of queryTokens) {
-        const inName = normalizedFullName.includes(token);
-        const inMaiden = normalizedMaiden.includes(token);
-        const inYear = (details.bYear && details.bYear.toString().includes(token)) || 
-                       (details.dYear && details.dYear.toString().includes(token));
-        const inPlace = normalizedPlace.includes(token);
-        const inOcc = normalizedOccupation.includes(token);
-        const inNotes = normalizedNotes.includes(token);
-
-        if (inName) score += 20;
-        else if (inMaiden) score += 15;
-        else if (inYear) score += 12;
-        else if (inPlace) score += 8;
-        else if (inOcc) score += 6;
-        else if (inNotes) score += 4;
-        else {
-          allTokensMatch = false;
-          break;
-        }
-      }
-
-      if (allTokensMatch && score > 0) {
-        scored.push({ person, score });
-      }
-    });
-
-    // Sort by score descending
-    scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, 10).map((s) => s.person);
-  }, [persons, searchQuery, selectedPersonId]);
-
-  // Reset keyboard selection on search query change
+  // Reset keyboard selection on search query or category filter change
   useEffect(() => {
     setSelectedIndex(-1);
-  }, [searchQuery]);
+  }, [searchQuery, categoryFilter]);
 
   // Handle jump to person in tree
   const handleSelectPersonInTree = (personId: string) => {
@@ -229,9 +192,9 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (selectedIndex >= 0 && selectedIndex < searchResults.length) {
-        handleSelectPersonInTree(searchResults[selectedIndex].id);
+        handleSelectPersonInTree(searchResults[selectedIndex].person.id);
       } else if (searchResults.length > 0) {
-        handleSelectPersonInTree(searchResults[0].id);
+        handleSelectPersonInTree(searchResults[0].person.id);
       }
     } else if (e.key === 'Escape') {
       setIsOpen(false);
@@ -264,47 +227,131 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
           }}
           onFocus={() => setIsOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Пошук особи (ім'я, рік, село)..."
-          className={`w-full pl-9 pr-8 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-xl text-xs md:text-sm ${theme.inputText} placeholder-opacity-60 focus:outline-hidden focus:ring-2 focus:ring-[#B88E3E]/50 focus:border-[#B88E3E] transition-all shadow-xs`}
+          placeholder="Пошук: імена, місця, замітки..."
+          className={`w-full pl-9 pr-14 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-xl text-xs md:text-sm ${theme.inputText} placeholder-opacity-60 focus:outline-hidden focus:ring-2 focus:ring-[#B88E3E]/50 focus:border-[#B88E3E] transition-all shadow-xs`}
         />
-        {searchQuery && (
-          <button
-            onClick={() => {
-              setSearchQuery('');
-              inputRef.current?.focus();
-            }}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
-            title="Очистити пошук"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
+
+        <div className="absolute right-2 flex items-center gap-1">
+          {searchQuery && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                inputRef.current?.focus();
+              }}
+              className="p-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
+              title="Очистити пошук"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {onOpenGlobalModal && (
+            <button
+              type="button"
+              onClick={onOpenGlobalModal}
+              className="hidden sm:flex items-center p-0.5 px-1 rounded-md text-[10px] font-mono opacity-50 hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+              title="Розширений глобальний пошук (⌘K)"
+            >
+              ⌘K
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Live Autocomplete Results Dropdown */}
       {isOpen && (
         <div 
-          className={`absolute left-0 right-0 top-full mt-1.5 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl z-50 overflow-hidden ${theme.cardTitle} animate-in fade-in zoom-in-95 duration-150 sm:w-[380px] md:w-[420px] max-w-[92vw]`}
+          className={`absolute left-0 top-full mt-1.5 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl z-50 overflow-hidden ${theme.cardTitle} animate-in fade-in zoom-in-95 duration-150 w-[320px] sm:w-[420px] md:w-[460px] max-w-[94vw]`}
         >
-          {/* Dropdown Header */}
-          <div className="px-3.5 py-2 border-b border-black/5 dark:border-white/5 flex items-center justify-between text-[11px] bg-black/[0.02] dark:bg-white/[0.02]">
-            <span className="font-semibold opacity-70 flex items-center gap-1.5">
-              <Search className="w-3 h-3 text-[#B88E3E]" />
-              {searchQuery.trim() ? (
-                <span>Знайдено: <strong>{searchResults.length}</strong> осіб</span>
-              ) : (
-                <span>Ключові особи у родинному дереві</span>
-              )}
-            </span>
-            <span className="hidden sm:inline text-[10px] opacity-50 font-mono">
-              ↑↓ навігація • Enter вибрати
-            </span>
+          {/* Dropdown Header with Category Filters */}
+          <div className="p-2.5 border-b border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-semibold opacity-75 flex items-center gap-1.5">
+                <Search className="w-3.5 h-3.5 text-[#B88E3E]" />
+                {searchQuery.trim() ? (
+                  <span>Знайдено: <strong>{searchResults.length}</strong> збігів</span>
+                ) : (
+                  <span>Ключові особи у родинному дереві</span>
+                )}
+              </span>
+
+              <div className="flex items-center gap-1.5">
+                {onOpenGlobalModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOpen(false);
+                      onOpenGlobalModal();
+                    }}
+                    className="text-[10px] font-bold text-[#B88E3E] hover:underline flex items-center gap-0.5 cursor-pointer"
+                    title="Відкрити повнорозмірне вікно пошуку"
+                  >
+                    <Maximize2 className="w-3 h-3" />
+                    <span>Розширений</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Category Switcher Pills */}
+            {searchQuery.trim() && (
+              <div className="flex items-center gap-1 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('all')}
+                  className={`px-2 py-0.5 rounded-lg font-semibold transition-colors cursor-pointer ${
+                    categoryFilter === 'all'
+                      ? 'bg-[#B88E3E] text-white shadow-xs'
+                      : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-70'
+                  }`}
+                >
+                  Всі
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('name')}
+                  className={`px-2 py-0.5 rounded-lg font-semibold transition-colors cursor-pointer flex items-center gap-1 ${
+                    categoryFilter === 'name'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-70'
+                  }`}
+                >
+                  <User className="w-2.5 h-2.5" />
+                  <span>Імена</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('place')}
+                  className={`px-2 py-0.5 rounded-lg font-semibold transition-colors cursor-pointer flex items-center gap-1 ${
+                    categoryFilter === 'place'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-70'
+                  }`}
+                >
+                  <MapPin className="w-2.5 h-2.5" />
+                  <span>Місця</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('note')}
+                  className={`px-2 py-0.5 rounded-lg font-semibold transition-colors cursor-pointer flex items-center gap-1 ${
+                    categoryFilter === 'note'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-70'
+                  }`}
+                >
+                  <FileText className="w-2.5 h-2.5" />
+                  <span>Замітки</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Results List */}
-          <div ref={listRef} className="max-h-[340px] overflow-y-auto divide-y divide-black/5 dark:divide-white/5">
+          <div ref={listRef} className="max-h-[360px] overflow-y-auto divide-y divide-black/5 dark:divide-white/5">
             {searchResults.length > 0 ? (
-              searchResults.map((person, idx) => {
+              searchResults.map((res, idx) => {
+                const person = res.person;
                 const details = getPersonDetails(person);
                 const isSelected = idx === selectedIndex;
                 const isCurrentRoot = person.id === selectedPersonId;
@@ -315,16 +362,16 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
                   <div
                     key={person.id}
                     onClick={() => handleSelectPersonInTree(person.id)}
-                    className={`group p-2.5 sm:px-3 sm:py-2.5 flex items-center justify-between gap-2.5 transition-all cursor-pointer ${
+                    className={`group p-2.5 sm:px-3 sm:py-2.5 flex items-start justify-between gap-2.5 transition-all cursor-pointer ${
                       isSelected 
                         ? 'bg-[#B88E3E]/15 dark:bg-[#B88E3E]/25' 
                         : 'hover:bg-black/5 dark:hover:bg-white/5'
                     }`}
                   >
                     {/* Left: Avatar & Bio */}
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
                       {/* Avatar */}
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border shadow-xs ${
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border shadow-xs mt-0.5 ${
                         person.avatar || person.photoUrl
                           ? 'border-[#B88E3E]/40 overflow-hidden'
                           : isMale
@@ -377,18 +424,43 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
                               <span className="truncate max-w-[130px]">{details.place}</span>
                             </span>
                           )}
-                          {details.occupation && !details.place && (
-                            <span className="hidden sm:flex items-center gap-1 truncate">
-                              <Briefcase className="w-3 h-3 text-indigo-500 shrink-0" />
-                              <span className="truncate max-w-[120px]">{details.occupation}</span>
-                            </span>
-                          )}
                         </div>
+
+                        {/* Search Match Reason Indicator */}
+                        {searchQuery.trim() && res.bestMatch && (
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[10px]">
+                            <span className={`px-1.5 py-0.2 rounded-md font-semibold flex items-center gap-1 ${
+                              res.bestMatch.category === 'name'
+                                ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30'
+                                : res.bestMatch.category === 'place'
+                                ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
+                                : 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30'
+                            }`}>
+                              {res.bestMatch.category === 'place' && <MapPin className="w-2.5 h-2.5" />}
+                              {res.bestMatch.category === 'note' && <FileText className="w-2.5 h-2.5" />}
+                              {res.bestMatch.category === 'name' && <User className="w-2.5 h-2.5" />}
+                              <span>{res.bestMatch.field}</span>
+                            </span>
+
+                            {res.isFuzzy && (
+                              <span className="px-1.5 py-0.2 rounded-md font-semibold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30 flex items-center gap-0.5">
+                                <Zap className="w-2.5 h-2.5 text-sky-500" />
+                                <span>Нечіткий збіг</span>
+                              </span>
+                            )}
+
+                            {res.bestMatch.highlightSnippet && (
+                              <span className="text-[10px] italic opacity-80 truncate max-w-[220px]">
+                                «{res.bestMatch.highlightSnippet}»
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
                     {/* Right: Quick Action Buttons */}
-                    <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100">
+                    <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 mt-0.5">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -436,9 +508,9 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
                   <Search className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="font-bold text-xs sm:text-sm">Осіб за запитом «{searchQuery}» не знайдено</p>
+                  <p className="font-bold text-xs sm:text-sm">Нічого не знайдено за запитом «{searchQuery}»</p>
                   <p className="text-[11px] opacity-70 mt-1">
-                    Спробуйте змінити пошукове слово або додати нову особу до родоводу.
+                    Пошук перевіряє імена, місця та замітки. Спробуйте змінити пошукове слово.
                   </p>
                 </div>
                 {onOpenAddPerson && (
@@ -458,23 +530,35 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
             )}
           </div>
 
-          {/* Footer action: jump to full persons tab */}
-          {searchResults.length > 0 && (
-            <div className="p-2 border-t border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] flex items-center justify-between">
+          {/* Footer action: jump to full persons tab or open modal */}
+          <div className="p-2 border-t border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('persons');
+                setRodovidView('persons');
+                setIsOpen(false);
+              }}
+              className="py-1 px-2.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-[11px] font-bold text-[#B88E3E] flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <span>Реєстр усіх осіб ({persons.length})</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+
+            {onOpenGlobalModal && (
               <button
                 type="button"
                 onClick={() => {
-                  setActiveTab('persons');
-                  setRodovidView('persons');
                   setIsOpen(false);
+                  onOpenGlobalModal();
                 }}
-                className="w-full py-1.5 px-3 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-[11px] font-bold text-[#B88E3E] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                className="py-1 px-2.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-[11px] font-semibold opacity-75 hover:opacity-100 flex items-center gap-1 transition-colors cursor-pointer"
               >
-                <span>Відкрити повний реєстр усіх осіб ({persons.length})</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <span>Всі фільтри та опції</span>
+                <Sparkles className="w-3 h-3 text-amber-500" />
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>

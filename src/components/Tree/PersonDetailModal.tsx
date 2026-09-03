@@ -27,13 +27,18 @@ import {
   Search,
   Check,
   ExternalLink,
-  Church
+  Church,
+  Mail,
+  CheckCircle2,
+  HelpCircle
 } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../../context/GenealogyContext';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { getThemeConfig } from '../../utils/theme';
 import { Person, Source, Family } from '../../types';
+import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from '../ContactAuthorModal';
 import { PersonDocumentsSection } from '../PersonDocumentsSection';
+import { isPersonHypothesis, isPersonConfirmed } from '../../utils/researchStatusUtils';
 
 interface PersonDetailModalProps {
   personId: string;
@@ -85,6 +90,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [bioDraft, setBioDraft] = useState('');
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
 
   // Source Modal
   const [sourceModal, setSourceModal] = useState<{
@@ -279,6 +285,42 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-[#B88E3E]/20 text-[#B88E3E]">
                   {person.gender === 'female' || person.gender === 'F' ? 'Жінка' : 'Чоловік'}
                 </span>
+
+                {/* Статус дослідження: підтверджена особа чи гіпотеза */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!canEdit) {
+                      openAuthModal('Зміна статусу дослідження');
+                      return;
+                    }
+                    const currentHypo = isPersonHypothesis(person);
+                    updatePerson({
+                      ...person,
+                      researchStatus: currentHypo ? 'confirmed' : 'hypothetical',
+                      isHypothesis: !currentHypo,
+                    });
+                  }}
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-md inline-flex items-center gap-1 transition-all border ${
+                    isPersonHypothesis(person)
+                      ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 hover:bg-amber-500/30'
+                      : 'bg-emerald-500/20 text-emerald-500 border-emerald-500/40 hover:bg-emerald-500/30'
+                  } ${canEdit ? 'cursor-pointer hover:scale-105' : 'cursor-default'}`}
+                  title={canEdit ? 'Натисніть для зміни статусу дослідження (Підтверджена особа / Гіпотеза)' : 'Статус дослідження'}
+                >
+                  {isPersonHypothesis(person) ? (
+                    <>
+                      <HelpCircle className="w-3 h-3 text-amber-500" />
+                      <span>Гіпотеза</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                      <span>Підтверджена особа</span>
+                    </>
+                  )}
+                </button>
+
                 {prefix && (
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-500 border border-amber-500/30">
                     {prefix}
@@ -325,6 +367,30 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           </div>
         </div>
 
+        {/* Contact Researcher banner - for relatives searching common ancestors */}
+        <div className="p-3 rounded-2xl bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="p-1.5 rounded-lg bg-amber-500/20 text-[#B88E3E] shrink-0">
+              <Mail className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0">
+              <div className="font-semibold text-neutral-800 dark:text-neutral-200 truncate">
+                Шукаєте спільних предків або маєте відомості про цю особу?
+              </div>
+              <div className="text-[11px] opacity-75 truncate">
+                Зв'яжіться з автором: <span className="font-mono font-bold text-[#B88E3E]">{AUTHOR_CONTACT_EMAIL}</span>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsContactModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-[#B88E3E] hover:bg-[#A37B30] text-white font-bold text-xs shadow-xs transition-colors cursor-pointer shrink-0 text-center"
+          >
+            Написати автору
+          </button>
+        </div>
+
         {/* Biographic Information */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-700/60 space-y-1">
@@ -358,6 +424,73 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
               </div>
             )}
           </div>
+        </div>
+
+        {/* Статус дослідження: підтверджена особа чи гіпотеза */}
+        <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-xl ${
+              isPersonHypothesis(person)
+                ? 'bg-amber-500/15 text-amber-500 border border-amber-500/30'
+                : 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
+            }`}>
+              {isPersonHypothesis(person) ? (
+                <HelpCircle className="w-5 h-5" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5" />
+              )}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">
+                  Статус дослідження:
+                </span>
+                <span className={`font-extrabold text-xs px-2 py-0.5 rounded-md ${
+                  isPersonHypothesis(person)
+                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                    : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                }`}>
+                  {isPersonHypothesis(person) ? 'Гіпотеза' : 'Підтверджена особа'}
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+                {isPersonHypothesis(person)
+                  ? 'Особа розглядається як родова гіпотеза і потребує документального підтвердження в архівах.'
+                  : 'Особа підтверджена родинними джерелами або первинними архівними записами.'}
+              </p>
+            </div>
+          </div>
+
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                const currentHypo = isPersonHypothesis(person);
+                updatePerson({
+                  ...person,
+                  researchStatus: currentHypo ? 'confirmed' : 'hypothetical',
+                  isHypothesis: !currentHypo,
+                });
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold text-xs shrink-0 transition-all cursor-pointer border flex items-center gap-1.5 shadow-xs ${
+                isPersonHypothesis(person)
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
+                  : 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500'
+              }`}
+            >
+              {isPersonHypothesis(person) ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Зробити підтвердженою особою</span>
+                </>
+              ) : (
+                <>
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  <span>Позначити як гіпотезу</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Occupation, Military Rank, Estate, Confession */}
@@ -857,6 +990,16 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Contact Author Modal with prefilled person details */}
+      {isContactModalOpen && (
+        <ContactAuthorModal
+          isOpen={isContactModalOpen}
+          onClose={() => setIsContactModalOpen(false)}
+          personName={[person.lastName, person.firstName, person.patronymic].filter(Boolean).join(' ') || person.id}
+          personYears={[person.birthYear || person.birthDate, person.deathYear || person.deathDate].filter(Boolean).join(' — ')}
+        />
       )}
     </div>
   );

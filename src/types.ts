@@ -105,6 +105,7 @@ export interface Person {
   marriagePlace?: string;
   residencePlace?: string;
   researchStatus?: 'hypothetical' | 'confirmed' | 'in_progress' | 'archival_search' | 'needs_verification' | string;
+  isHypothesis?: boolean;
   researchBranch?: string;
   nameVariants?: string[];
   surnameVariants?: string[];

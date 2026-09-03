@@ -152,7 +152,7 @@ export const DetectiveNotesView: React.FC = () => {
       : 'flex flex-col gap-3 max-w-2xl mx-auto';
 
   return (
-    <div className={`flex-1 flex flex-col h-full min-h-0 overflow-y-auto ${theme.appBg}`}>
+    <div className={`flex-1 flex flex-col h-full min-h-0 overflow-y-auto overflow-x-auto ${theme.appBg}`}>
       {/* Top Header & Search Bar */}
       <div
         className={`sticky top-0 z-20 px-4 sm:px-6 py-3.5 border-b backdrop-blur-md ${theme.headerBg}/95 ${theme.headerBorder} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}

@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { GenealogyProvider, useUIStore } from './context/GenealogyContext';
-import { useAuthStore, initCloudAuthSync } from './stores/useAuthStore';
+import { useAuthStore } from './stores/useAuthStore';
 import { useSharedTreeStore } from './stores/useSharedTreeStore';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -32,9 +32,10 @@ import { TimelineView } from './components/TimelineView';
 import { ExperimentView } from './components/ExperimentView';
 import { SharedPinScreen } from './components/SharedPinScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { ContactModal } from './components/ContactModal';
+import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from './components/ContactAuthorModal';
+import { GuestContactBanner } from './components/GuestContactBanner';
 import { getThemeConfig } from './utils/theme';
-import { RefreshCw, AlertCircle, ArrowLeft, Lock, X } from 'lucide-react';
+import { RefreshCw, AlertCircle, ArrowLeft, Lock, Mail } from 'lucide-react';
 
 function AppContent() {
   const activeTab = useUIStore((s) => s.activeTab);
@@ -44,9 +45,6 @@ function AppContent() {
   const authModalFeature = useUIStore((s) => s.authModalFeature);
   const openAuthModal = useUIStore((s) => s.openAuthModal);
   const closeAuthModal = useUIStore((s) => s.closeAuthModal);
-  const openContactModal = useUIStore((s) => s.openContactModal);
-
-  const [showVisitorBanner, setShowVisitorBanner] = useState(true);
 
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
@@ -55,10 +53,9 @@ function AppContent() {
   const isWhitelisted = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
-    (currentUser.role === 'admin' ||
-      whitelist.some(
-        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-      ))
+    whitelist.some(
+      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+    )
   );
 
   const {
@@ -76,17 +73,11 @@ function AppContent() {
     initFromUrl();
   }, [initFromUrl]);
 
-  useEffect(() => {
-    const unsub = initCloudAuthSync();
-    return () => {
-      unsub();
-    };
-  }, []);
-
   const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
   const [personToEdit, setPersonToEdit] = useState<Person | null>(null);
   const [relationManagerPerson, setRelationManagerPerson] = useState<Person | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(false);
   const [addRelation, setAddRelation] = useState<{
     type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
     targetPersonId: string;
@@ -143,7 +134,6 @@ function AppContent() {
           sharedMeta={sharedTree}
           onExitShared={exitSharedMode}
         />
-        <ContactModal />
       </div>
     );
   }
@@ -189,20 +179,32 @@ function AppContent() {
         </div>
         <h3 className="text-xl font-bold">Розділ «{featureName}» захищено</h3>
         <p className="text-xs opacity-80 leading-relaxed">
-          Цей розділ містить конфіденційні архівні матеріали, чернетки та налаштування, які доступні лише авторизованим дослідникам за Білим списком.
+          Цей розділ містить конфіденційні архівні матеріали, чернетки та налаштування. Для доступу необхідно надіслати запит або увійти.
         </p>
         <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
           <button
             onClick={() => openAuthModal(featureName)}
             className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
           >
-            Увійти за Whitelist
+            Надіслати запит або увійти
           </button>
           <button
             onClick={() => setActiveTab('tree')}
             className="px-4 py-2.5 rounded-xl border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 font-semibold text-xs transition-colors cursor-pointer"
           >
             Повернутися до Дерева
+          </button>
+        </div>
+
+        <div className="pt-3 border-t border-black/10 dark:border-white/10 text-[11px] opacity-80">
+          <span>Шукаєте спільних предків чи маєте запитання? Зв'яжіться з автором: </span>
+          <button
+            type="button"
+            onClick={() => setShowContactModal(true)}
+            className="font-bold text-[#B88E3E] hover:underline font-mono cursor-pointer ml-1 inline-flex items-center gap-1"
+          >
+            <Mail className="w-3 h-3" />
+            <span>{AUTHOR_CONTACT_EMAIL}</span>
           </button>
         </div>
       </div>
@@ -219,46 +221,14 @@ function AppContent() {
         <Header 
           onOpenAddPerson={handleOpenAddModal} 
           onInspectPerson={(id) => setInspectPersonId(id)}
+          onOpenContactModal={() => setShowContactModal(true)}
         />
 
-        {/* Visitor Contact Notice Banner (for open guest access) */}
-        {!isWhitelisted && showVisitorBanner && (
-          <div className="bg-emerald-500/10 dark:bg-emerald-950/40 border-b border-emerald-500/20 px-3 sm:px-5 py-2 text-xs flex items-center justify-between gap-2.5 text-emerald-900 dark:text-emerald-200 shrink-0">
-            <div className="flex items-center gap-2 truncate">
-              <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">🌿 Шукаєте спільних предків?</span>
-              <span className="hidden md:inline opacity-80 truncate">
-                Дерево відкрите для пошуку. Якщо ви маєте спільні корені чи документи — напишіть автору родоводу:
-              </span>
-              <button
-                type="button"
-                onClick={() => openContactModal()}
-                className="font-mono font-bold underline text-emerald-700 dark:text-emerald-300 hover:text-emerald-500 cursor-pointer shrink-0"
-              >
-                domagile@gmail.com
-              </button>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => openContactModal()}
-                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-xs cursor-pointer transition-colors"
-              >
-                Написати автору
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowVisitorBanner(false)}
-                className="p-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 opacity-60 hover:opacity-100 cursor-pointer"
-                title="Сховати підказку"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Guest / Visitor Contact Banner */}
+        <GuestContactBanner onOpenContactModal={() => setShowContactModal(true)} />
 
         {/* Tab Router */}
-        <main className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden">
+        <main className="flex-1 flex flex-col h-full min-h-0 relative overflow-x-auto overflow-y-hidden">
           {activeTab === 'tree' && <RodovidView />}
 
           {activeTab === 'research' && (isWhitelisted ? <ResearchView /> : renderRestrictedGuard('Детективні розкопки'))}
@@ -329,8 +299,13 @@ function AppContent() {
         targetFeatureName={authModalFeature}
       />
 
-      {/* Contact Author Modal */}
-      <ContactModal />
+      {/* Contact Author Modal (domagile@gmail.com) */}
+      {showContactModal && (
+        <ContactAuthorModal
+          isOpen={showContactModal}
+          onClose={() => setShowContactModal(false)}
+        />
+      )}
     </div>
   );
 }

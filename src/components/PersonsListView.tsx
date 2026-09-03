@@ -22,7 +22,8 @@ import {
   AlertTriangle,
   Trash,
   Hash,
-  Tag
+  Tag,
+  Sparkles
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { Person } from '../types';
@@ -30,6 +31,7 @@ import { getThemeConfig } from '../utils/theme';
 import { findRelationshipPath, getSummaryRelationTitle } from './Tree/RelationshipPathModal';
 import { getTreeHashtagsWithCounts } from '../utils/tagUtils';
 import { isPersonMale, isPersonFemale } from '../utils/genderUtils';
+import { isPersonHypothesis, isPersonConfirmed } from '../utils/researchStatusUtils';
 
 interface PersonsListViewProps {
   onInspectPerson?: (id: string) => void;
@@ -45,6 +47,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const { 
     persons, 
     trashPersons,
+    updatePerson,
     deletePerson, 
     deletePersons,
     restorePerson,
@@ -109,7 +112,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     let hypothesis = 0;
 
     persons.forEach((p) => {
-      if ((p as any).isHypothesis || p.notes?.toLowerCase().includes('гіпотеза')) {
+      if (isPersonHypothesis(p)) {
         hypothesis++;
       } else {
         confirmed++;
@@ -151,12 +154,10 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     return sourceList.filter((p) => {
       // Sub-tab Pill Filter for non-trash
       if (tabFilter === 'confirmed') {
-        const isHypothesis = (p as any).isHypothesis || p.notes?.toLowerCase().includes('гіпотеза');
-        if (isHypothesis) return false;
+        if (isPersonHypothesis(p)) return false;
       }
       if (tabFilter === 'hypothesis') {
-        const isHypothesis = (p as any).isHypothesis || p.notes?.toLowerCase().includes('гіпотеза');
-        if (!isHypothesis) return false;
+        if (!isPersonHypothesis(p)) return false;
       }
 
       // Search query
@@ -199,8 +200,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       if (lifeStateFilter === 'deceased' && !p.deathDate) return false;
 
       // Status filter
-      if (statusFilter === 'confirmed' && ((p as any).isHypothesis || p.notes?.toLowerCase().includes('гіпотеза'))) return false;
-      if (statusFilter === 'hypothesis' && !((p as any).isHypothesis || p.notes?.toLowerCase().includes('гіпотеза'))) return false;
+      if (statusFilter === 'confirmed' && isPersonHypothesis(p)) return false;
+      if (statusFilter === 'hypothesis' && !isPersonHypothesis(p)) return false;
 
       return true;
     });
@@ -382,8 +383,42 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     return 'дати не вказані';
   };
 
+  // Toggle research status for a single person
+  const handleToggleResearchStatus = (p: Person) => {
+    const currentIsHypo = isPersonHypothesis(p);
+    const nextStatus = currentIsHypo ? 'confirmed' : 'hypothetical';
+    updatePerson({
+      ...p,
+      researchStatus: nextStatus,
+      isHypothesis: !currentIsHypo,
+    });
+    setToast({
+      message: `Статус дослідження для ${p.lastName || ''} ${p.firstName || ''}: ${!currentIsHypo ? 'Гіпотеза' : 'Підтверджена особа'}`
+    });
+  };
+
+  // Batch set research status
+  const handleBatchSetResearchStatus = (status: 'confirmed' | 'hypothetical') => {
+    const isHypo = status === 'hypothetical';
+    let count = 0;
+    selectedIds.forEach((id) => {
+      const p = persons.find((item) => item.id === id);
+      if (p) {
+        updatePerson({
+          ...p,
+          researchStatus: status,
+          isHypothesis: isHypo,
+        });
+        count++;
+      }
+    });
+    setToast({
+      message: `Статус дослідження змінено для ${count} осіб: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}`
+    });
+  };
+
   return (
-    <div className={`flex-1 p-4 md:p-6 ${theme.appBg} overflow-y-auto space-y-4 transition-colors duration-300 relative`}>
+    <div className={`flex-1 p-4 md:p-6 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-4 transition-colors duration-300 relative`}>
       {/* 1. TOP HEADER & ACTION BUTTONS */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-[#2A2A2A]">
         <div>
@@ -569,14 +604,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
           {/* Status Filter */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase">Статус:</span>
+            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase whitespace-nowrap">Статус дослідження:</span>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
               className="flex-1 px-2 py-1 bg-[#121212] border border-[#333333] rounded-md text-xs text-[#E5E5E5] focus:outline-none focus:border-[#B88E3E] cursor-pointer"
             >
               <option value="all">Усі статуси</option>
-              <option value="confirmed">Підтверджено</option>
+              <option value="confirmed">Підтверджена особа</option>
               <option value="hypothesis">Гіпотеза</option>
             </select>
           </div>
@@ -684,13 +719,33 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               </button>
 
               {isSelectionMode && selectedIds.size > 0 && (
-                <button
-                  onClick={handleBatchDelete}
-                  className="px-3 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 text-xs font-bold text-rose-200 transition-all cursor-pointer flex items-center gap-1.5"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Видалити вибраних ({selectedIds.size})</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => handleBatchSetResearchStatus('confirmed')}
+                    className="px-3 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-xs font-bold text-emerald-200 transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Встановити статус 'Підтверджена особа' для вибраних"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Підтверджена особа ({selectedIds.size})</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleBatchSetResearchStatus('hypothetical')}
+                    className="px-3 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 border border-amber-700/60 text-xs font-bold text-amber-200 transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Встановити статус 'Гіпотеза' для вибраних"
+                  >
+                    <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Гіпотеза ({selectedIds.size})</span>
+                  </button>
+
+                  <button
+                    onClick={handleBatchDelete}
+                    className="px-3 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 text-xs font-bold text-rose-200 transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Видалити вибраних ({selectedIds.size})</span>
+                  </button>
+                </>
               )}
             </>
           ) : (
@@ -801,7 +856,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         /* TABLE VIEW */
         <div className="rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] overflow-hidden shadow-sm">
           <div ref={tableContainerRef} className="overflow-x-auto max-h-[calc(100vh-270px)] overflow-y-auto">
-            <table className="w-full text-left text-xs text-[#E5E5E5] relative border-collapse">
+            <table className="w-full min-w-[900px] text-left text-xs text-[#E5E5E5] relative border-collapse">
               <thead className="bg-[#121212] text-[#B88E3E] uppercase tracking-wider font-bold text-[10px] border-b border-[#2A2A2A] sticky top-0 z-10">
                 <tr>
                   <th className="p-3 w-10 text-center bg-[#121212]">
@@ -819,7 +874,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   </th>
                   <th className="p-3 bg-[#121212]">ОСОБА</th>
                   <th className="p-3 bg-[#121212]">РОКИ ЖИТТЯ</th>
-                  <th className="p-3 bg-[#121212]">СТАТУС</th>
+                  <th className="p-3 bg-[#121212]">СТАТУС ДОСЛІДЖЕННЯ</th>
                   <th className="p-3 bg-[#121212]">КЛЮЧОВИЙ ЗВ'ЯЗОК</th>
                   <th className="p-3 bg-[#121212]">МІСЦЯ</th>
                   <th className="p-3 text-right bg-[#121212]">ДІЇ</th>
@@ -841,7 +896,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   const initials = `${p.lastName?.[0] || ''}${p.firstName?.[0] || ''}`.toUpperCase();
                   const isCentral = centralPerson && p.id === centralPerson.id;
                   const relTitle = relationshipMap.get(p.id) || 'Родич';
-                  const isHypo = (p as any).isHypothesis || p.notes?.toLowerCase().includes('гіпотеза');
+                  const isHypo = isPersonHypothesis(p);
 
                   return (
                     <tr
@@ -940,17 +995,50 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         {formatDates(p)}
                       </td>
 
-                      {/* Status */}
-                      <td className="p-3">
-                        {isHypo ? (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-bold inline-flex items-center gap-1">
-                            <HelpCircle className="w-3 h-3" />
-                            <span>Гіпотеза</span>
-                          </span>
+                      {/* Research Status */}
+                      <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                        {tabFilter !== 'trash' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleResearchStatus(p)}
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer border shadow-xs ${
+                              isHypo
+                                ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40 hover:scale-105'
+                                : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:scale-105'
+                            }`}
+                            title={`Статус дослідження: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}. Натисніть, щоб змінити`}
+                          >
+                            {isHypo ? (
+                              <>
+                                <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Гіпотеза</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Підтверджена особа</span>
+                              </>
+                            )}
+                          </button>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[10px] font-bold inline-flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Підтверджено</span>
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1.5 border ${
+                              isHypo
+                                ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            }`}
+                          >
+                            {isHypo ? (
+                              <>
+                                <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Гіпотеза</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Підтверджена особа</span>
+                              </>
+                            )}
                           </span>
                         )}
                       </td>
@@ -1065,7 +1153,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             const initials = `${p.lastName?.[0] || ''}${p.firstName?.[0] || ''}`.toUpperCase();
             const isCentral = centralPerson && p.id === centralPerson.id;
             const relTitle = relationshipMap.get(p.id) || 'Родич';
-            const isHypo = (p as any).isHypothesis || p.notes?.toLowerCase().includes('гіпотеза');
+            const isHypo = isPersonHypothesis(p);
 
             return (
               <div
@@ -1090,15 +1178,51 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     />
                   )}
 
-                  {isHypo ? (
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[9px] font-bold flex items-center gap-1">
-                      <HelpCircle className="w-3 h-3" />
-                      <span>Гіпотеза</span>
-                    </span>
+                  {tabFilter !== 'trash' ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleResearchStatus(p);
+                      }}
+                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 transition-all cursor-pointer border ${
+                        isHypo
+                          ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40 hover:scale-105'
+                          : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:scale-105'
+                      }`}
+                      title={`Статус дослідження: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}. Натисніть для зміни`}
+                    >
+                      {isHypo ? (
+                        <>
+                          <HelpCircle className="w-3 h-3 text-amber-400" />
+                          <span>Гіпотеза</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          <span>Підтверджена особа</span>
+                        </>
+                      )}
+                    </button>
                   ) : (
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[9px] font-bold flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Підтверджено</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 border ${
+                        isHypo
+                          ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      }`}
+                    >
+                      {isHypo ? (
+                        <>
+                          <HelpCircle className="w-3 h-3 text-amber-400" />
+                          <span>Гіпотеза</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          <span>Підтверджена особа</span>
+                        </>
+                      )}
                     </span>
                   )}
                 </div>

@@ -33,6 +33,22 @@ import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 
+// Ukrainian generation declension helper
+function getUkrainianGenerationLabel(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 19) {
+    return `${n} поколінь`;
+  }
+  if (mod10 === 1) {
+    return `${n} покоління`;
+  }
+  if (mod10 >= 2 && mod10 <= 4) {
+    return `${n} покоління`;
+  }
+  return `${n} поколінь`;
+}
+
 interface FanChartViewProps {
   database: GenealogyDatabase;
   activePersonId: string;
@@ -62,8 +78,6 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   }, [database.persons, isWhitelisted]);
   // Default to 0 = ALL generations
   const [generations, setGenerations] = useState<number>(0);
-  // Toggle: Direct ancestors only (false) vs All relatives (true, includes bottom semicircle with spouses, children, siblings)
-  const [showSiblings, setShowSiblings] = useState<boolean>(true);
   const [hoveredSector, setHoveredSector] = useState<FanChartSector | null>(null);
   const [scale, setScale] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -232,7 +246,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
       const { initialDist, initialScale, initialPan, midPoint } = touchStateRef.current;
       const zoomFactor = currentDist / initialDist;
-      const targetScale = Math.min(Math.max(initialScale * zoomFactor, 0.25), 4.0);
+      const targetScale = Math.min(Math.max(initialScale * zoomFactor, 0.05), 6.0);
 
       const deltaPanX = currentMidX - midPoint.x;
       const deltaPanY = currentMidY - midPoint.y;
@@ -262,7 +276,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-    const newScale = Math.min(Math.max(scale * zoomFactor, 0.25), 4.0);
+    const newScale = Math.min(Math.max(scale * zoomFactor, 0.05), 6.0);
     setScale(newScale);
   };
 
@@ -290,12 +304,23 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     return getMaxAncestorGenerations(database, activePersonId);
   }, [database, activePersonId]);
 
+  // Generation options list without artificial cap
+  const generationOptions = useMemo(() => {
+    const maxGenLimit = Math.max(maxAvailableGens, generations, 25);
+    const options: number[] = [];
+    for (let g = 1; g <= maxGenLimit; g++) {
+      options.push(g);
+    }
+    if (generations > 0 && !options.includes(generations)) {
+      options.push(generations);
+      options.sort((a, b) => a - b);
+    }
+    return options;
+  }, [maxAvailableGens, generations]);
+
   const sectors = useMemo(() => {
-    return calculateFanChart(database, activePersonId, generations, {
-      colorMode,
-      includeDescendantsAndSpouses: showSiblings,
-    });
-  }, [database, activePersonId, generations, colorMode, showSiblings]);
+    return calculateFanChart(database, activePersonId, generations, colorMode);
+  }, [database, activePersonId, generations, colorMode]);
 
   const clans = useMemo(() => {
     return extractFanChartClans(sectors);
@@ -336,19 +361,19 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     const pad = 40;
     const scaleX = (clientWidth - pad * 2) / svgWidth;
     const scaleY = (clientHeight - pad * 2) / svgHeight;
-    const fitScale = Math.min(Math.max(Math.min(scaleX, scaleY), 0.35), 1.6);
+    const fitScale = Math.min(Math.max(Math.min(scaleX, scaleY), 0.05), 1.6);
 
     setScale(Number(fitScale.toFixed(2)));
     setPan({ x: 0, y: 0 });
   }, [svgWidth, svgHeight]);
 
-  // Initial fit on mount & when generations / active person / showSiblings changes
+  // Initial fit on mount & when generations / active person changes
   useEffect(() => {
     const timer = setTimeout(() => {
       handleFitToScreen();
     }, 60);
     return () => clearTimeout(timer);
-  }, [handleFitToScreen, generations, activePersonId, showSiblings]);
+  }, [handleFitToScreen, generations, activePersonId]);
 
   // Function to describe SVG arc path
   function describeArc(
@@ -473,9 +498,9 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     >
       {/* Top Controls */}
       <div
-        className={`h-14 ${theme.headerBg} backdrop-blur border-b ${theme.headerBorder} px-2 sm:px-4 flex items-center justify-between gap-2 z-20 shrink-0 print:hidden overflow-x-auto scrollbar-none`}
+        className={`h-14 ${theme.headerBg} backdrop-blur border-b ${theme.headerBorder} px-4 flex items-center justify-between z-20 shrink-0 print:hidden`}
       >
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+        <div className="flex items-center gap-3">
           {onSwitchToTree && (
             <button
               onClick={onSwitchToTree}
@@ -718,73 +743,61 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
             )}
           </div>
 
-          {/* Generations dropdown (Identical to TreeView) */}
+          {/* Generations dropdown */}
           <div
-            className={`flex items-center gap-1.5 text-xs ${theme.textSecondary} ${theme.surfaceBg} px-2.5 py-1.5 rounded-lg border ${theme.borderSubtle} shadow-xs shrink-0`}
+            className={`flex items-center gap-1.5 text-xs ${theme.textSecondary} ${theme.surfaceBg} px-2.5 py-1.5 rounded-lg border ${theme.borderSubtle} shadow-xs`}
           >
-            <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className={`font-medium hidden xl:inline ${theme.textMuted}`}>Поколінь:</span>
+            <Layers className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <span className={`${theme.textMuted} hidden sm:inline font-medium`}>Поколінь:</span>
             <select
               value={generations}
-              onChange={(e) => setGenerations(Number(e.target.value))}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'custom') {
+                  const customInput = window.prompt(
+                    'Вкажіть бажану кількість поколінь (число від 1 або більше):',
+                    String(generations || (maxAvailableGens > 0 ? maxAvailableGens : 5))
+                  );
+                  if (customInput !== null) {
+                    const parsed = parseInt(customInput.trim(), 10);
+                    if (!isNaN(parsed) && parsed > 0) {
+                      setGenerations(parsed);
+                    }
+                  }
+                } else {
+                  setGenerations(Number(val));
+                }
+              }}
               className={`bg-transparent ${theme.textPrimary} text-xs font-semibold focus:outline-none cursor-pointer py-0.5`}
               title="Кількість поколінь родоводу"
             >
-              <option value={0} className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-neutral-900'}>
+              <option value={0} className={isDark ? 'bg-[#15181b] text-white' : 'bg-white text-neutral-900'}>
                 Всі покоління {maxAvailableGens > 0 ? `(${maxAvailableGens})` : ''}
               </option>
-              {Array.from({ length: 9 }, (_, i) => i + 2).map((g) => (
+              {generationOptions.map((g) => (
                 <option
                   key={g}
                   value={g}
-                  className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-neutral-900'}
+                  className={isDark ? 'bg-[#15181b] text-white' : 'bg-white text-neutral-900'}
                 >
-                  {g} {g <= 4 ? 'покоління' : 'поколінь'}
+                  {getUkrainianGenerationLabel(g)}
                 </option>
               ))}
+              <option
+                value="custom"
+                className={isDark ? 'bg-[#15181b] text-amber-400 font-semibold' : 'bg-white text-amber-700 font-semibold'}
+              >
+                + Ввести власну кількість...
+              </option>
             </select>
           </div>
 
-          {/* Compact Toggle: Direct Line (Прямі) vs All Relatives (Всі) */}
-          <div
-            className={`flex items-center ${theme.surfaceBg} border ${theme.borderSubtle} p-0.5 rounded-lg text-xs shadow-xs shrink-0`}
-            title="Перемикач: Тільки прямі предки / Всі родичі"
-          >
-            <button
-              type="button"
-              onClick={() => setShowSiblings(false)}
-              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                !showSiblings
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : `${theme.textMuted} hover:${theme.textPrimary}`
-              }`}
-              title="Тільки прямі предки (без бічних ліній, братів/сестер і нащадків)"
-            >
-              <User className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Прямі</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowSiblings(true)}
-              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                showSiblings
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : `${theme.textMuted} hover:${theme.textPrimary}`
-              }`}
-              title="Всі родичі (разом із подружжям, дітьми, братами та сестрами)"
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Всі</span>
-            </button>
-          </div>
-
-          {/* Center Person Selector */}
-          <div className="hidden md:flex items-center gap-1.5 shrink-0">
-            <span className={`text-xs ${theme.textMuted} hidden lg:inline`}>Центр:</span>
+          <div className="hidden lg:flex items-center gap-2">
+            <span className={`text-xs ${theme.textMuted}`}>Центр:</span>
             <select
               value={activePersonId}
               onChange={(e) => onChangeRoot(e.target.value)}
-              className={`${theme.surfaceBg} ${theme.textPrimary} text-xs border ${theme.borderSubtle} rounded-md px-2 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[130px] sm:max-w-[160px] lg:max-w-[190px] truncate cursor-pointer shadow-xs`}
+              className={`${theme.surfaceBg} ${theme.textPrimary} text-xs border ${theme.borderSubtle} rounded-md px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[190px] truncate cursor-pointer`}
             >
               {dropdownPersons.map((p) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
@@ -804,7 +817,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
         </div>
 
         {/* Action Controls: Export, Print, Canvas Theme, Zoom */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-2">
           {/* Compact Export Menu (On-demand) */}
           <div className="relative" ref={exportMenuRef}>
             <button
@@ -873,10 +886,10 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
           {/* Zoom Controls (FamilySearch style: Fit, 100%, + / -) */}
           <div
-            className={`flex items-center gap-0.5 sm:gap-1 ${theme.surfaceBg} p-1 rounded-lg border ${theme.borderSubtle} shrink-0`}
+            className={`flex items-center gap-1 ${theme.surfaceBg} p-1 rounded-lg border ${theme.borderSubtle}`}
           >
             <button
-              onClick={() => setScale((s) => Math.max(Number((s * 0.85).toFixed(2)), 0.3))}
+              onClick={() => setScale((s) => Math.max(Number((s * 0.85).toFixed(2)), 0.05))}
               className={`p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
               title="Зменшити (-)"
             >
@@ -885,7 +898,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
             <button
               onClick={handleFitToScreen}
-              className={`px-1.5 sm:px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
                 Math.abs(scale - 1) > 0.08
                   ? `${theme.buttonSecondaryBg} ${theme.textPrimary} border ${theme.borderSubtle}`
                   : `${theme.textMuted} hover:${theme.textPrimary}`
@@ -900,7 +913,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                 setScale(1);
                 setPan({ x: 0, y: 0 });
               }}
-              className={`px-1.5 sm:px-2 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-2 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
                 Math.abs(scale - 1) <= 0.08
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : `${theme.textMuted} hover:${theme.textPrimary}`
@@ -911,14 +924,14 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
             </button>
 
             <button
-              onClick={() => setScale((s) => Math.min(Number((s * 1.15).toFixed(2)), 4.0))}
+              onClick={() => setScale((s) => Math.min(Number((s * 1.15).toFixed(2)), 6.0))}
               className={`p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
               title="Збільшити (+)"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
 
-            <span className={`text-[11px] ${theme.textMuted} font-mono px-1 sm:px-1.5 hidden md:inline min-w-[38px] text-right`}>
+            <span className={`text-[11px] ${theme.textMuted} font-mono px-1.5 hidden sm:inline min-w-[40px] text-right`}>
               {Math.round(scale * 100)}%
             </span>
           </div>

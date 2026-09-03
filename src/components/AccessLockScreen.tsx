@@ -507,7 +507,7 @@ export const AccessLockScreen: React.FC = () => {
                   className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#B88E3E] to-amber-600 hover:from-amber-600 hover:to-[#B88E3E] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg hover:shadow-amber-500/20 transition-all cursor-pointer"
                 >
                   <Send className="w-4 h-4" />
-                  <span>Подати заявку на включення в білий список</span>
+                  <span>Надіслати запит на доступ до архіву</span>
                 </button>
               </form>
             )}

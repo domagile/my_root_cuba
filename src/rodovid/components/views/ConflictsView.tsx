@@ -171,7 +171,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     : { label: 'Потребує уваги', color: 'text-rose-400', barBg: 'bg-rose-500' };
 
   return (
-    <div className="flex flex-col h-full bg-[#121212] text-neutral-200 overflow-y-auto">
+    <div className="flex flex-col h-full bg-[#121212] text-neutral-200 overflow-y-auto overflow-x-auto">
       
       {/* Toast Notification */}
       {notification && (

@@ -4,11 +4,12 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { X, Save, User, Users, Hash, Tag } from 'lucide-react';
+import { X, Save, User, Users, Hash, Tag, CheckCircle2, HelpCircle } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
 import { parseAndNormalizeTags, getTreeHashtagsWithCounts, extractHashtagsFromText } from '../../../utils/tagUtils';
 import { detectGenderFromName, isPersonMale, isPersonFemale } from '../../../utils/genderUtils';
+import { isPersonHypothesis } from '../../../utils/researchStatusUtils';
 
 interface EditPersonModalProps {
   database: GenealogyDatabase;
@@ -38,6 +39,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const [patronymic, setPatronymic] = useState(initialPatronymic);
   const [maidenName, setMaidenName] = useState(initialMaiden);
   const [prefix, setPrefix] = useState(existingPerson?.name?.prefix || existingPerson?.prefix || '');
+  const [researchStatus, setResearchStatus] = useState<'confirmed' | 'hypothetical'>(() => {
+    return isPersonHypothesis(existingPerson) ? 'hypothetical' : 'confirmed';
+  });
   const [gender, setGender] = useState<Gender>(() => {
     if (existingPerson) {
       if (isPersonFemale(existingPerson)) return 'F';
@@ -144,6 +148,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
       patronymic: patronymic.trim() || undefined,
       maidenName: maidenName.trim() || undefined,
       prefix: prefix.trim() || undefined,
+      researchStatus,
+      isHypothesis: researchStatus === 'hypothetical',
       gender,
       isLiving,
       birthDate: birthDate.trim() || undefined,
@@ -356,6 +362,45 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Статус дослідження: підтверджена особа чи гіпотеза */}
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+            <label className="block text-xs font-semibold text-slate-200">
+              Статус дослідження
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setResearchStatus('confirmed')}
+                className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  researchStatus === 'confirmed'
+                    ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300 ring-1 ring-emerald-500/40'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>Підтверджена особа</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setResearchStatus('hypothetical')}
+                className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  researchStatus === 'hypothetical'
+                    ? 'bg-amber-950/80 border-amber-600 text-amber-300 ring-1 ring-amber-500/40'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                }`}
+              >
+                <HelpCircle className="w-4 h-4 text-amber-400" />
+                <span>Гіпотеза</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              {researchStatus === 'hypothetical'
+                ? 'Особа позначена як родова гіпотеза і потребує архівного підтвердження.'
+                : 'Особа підтверджена родинними записами або архівними джерелами.'}
+            </p>
+          </div>
 
           {/* Birth Info */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

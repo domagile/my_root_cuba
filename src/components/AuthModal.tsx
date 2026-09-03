@@ -11,15 +11,14 @@ import {
   Send,
   Users,
   Eye,
-  KeyRound,
-  UserCheck,
-  ExternalLink
+  TreeDeciduous
 } from 'lucide-react';
-import { useAuthStore, ROOT_ADMIN_EMAILS } from '../stores/useAuthStore';
+import { useAuthStore, isMasterAdminEmail } from '../stores/useAuthStore';
 import { useUIStore } from '../stores/useUIStore';
 import { getThemeConfig } from '../utils/theme';
 import { UserRole } from '../types';
 import { signInWithGoogle } from '../lib/firebase';
+import { AUTHOR_CONTACT_EMAIL } from './ContactAuthorModal';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -33,29 +32,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   targetFeatureName
 }) => {
   const themePalette = useUIStore((s) => s.themePalette);
-  const openContactModal = useUIStore((s) => s.openContactModal);
   const theme = getThemeConfig(themePalette);
+  const isDark = theme.category === 'dark';
 
   const {
     loginWithGoogle,
-    loginWithEmailAndPin,
-    quickAdminLogin,
     submitAccessRequest,
     whitelist,
-    currentUser,
-    logout
+    currentUser
   } = useAuthStore();
 
-  const [tab, setTab] = useState<'google' | 'email_pin' | 'request'>('google');
-  
-  // Whitelist Checker state
-  const [emailInput, setEmailInput] = useState('fastagile7@gmail.com');
+  const [tab, setTab] = useState<'login' | 'request' | 'contact'>('login');
+  const [emailInput, setEmailInput] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
-
-  // Email & PIN state
-  const [pinEmail, setPinEmail] = useState('fastagile7@gmail.com');
-  const [pinCode, setPinCode] = useState('1234');
-  const [isPinLoading, setIsPinLoading] = useState(false);
 
   // Request Access State
   const [reqName, setReqName] = useState('');
@@ -78,66 +67,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (user && user.email) {
         const res = loginWithGoogle(user.email, user.displayName || undefined, user.photoURL || undefined);
         if (res.success) {
-          setFeedback({ type: 'success', message: res.message || `Вітаємо, ${user.displayName || user.email}! Доступ підтверджено.` });
+          setFeedback({ type: 'success', message: `Вітаємо, ${user.displayName || user.email}! Доступ підтверджено.` });
           setTimeout(() => {
             onClose();
-          }, 800);
+          }, 700);
         } else {
           setFeedback({ 
             type: 'error', 
-            message: res.message || `Пошта ${user.email} не знайдена у Білому списку (Whitelist).` 
+            message: `Для пошти ${user.email} ще не надано доступу до редагування. Будь ласка, заповніть форму нижче, щоб надіслати запит на доступ.` 
           });
           setReqEmail(user.email);
           if (user.displayName) setReqName(user.displayName);
           setTab('request');
         }
       } else if (error) {
-        setFeedback({ 
-          type: 'error', 
-          message: `${error}. Якщо спливаюче вікно блокується браузером, скористайтеся вкладкою «Вхід за Email та PIN» або швидким входом адміністратора нижче.` 
-        });
+        setFeedback({ type: 'error', message: error });
       }
     } catch (err: any) {
-      setFeedback({ 
-        type: 'error', 
-        message: err?.message || 'Помилка авторизації Google. Скористайтеся входом за Email/PIN.' 
-      });
+      setFeedback({ type: 'error', message: err?.message || 'Помилка авторизації Google' });
     } finally {
       setIsGoogleLoading(false);
     }
-  };
-
-  const handleEmailPinSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsPinLoading(true);
-    setFeedback(null);
-    try {
-      const res = loginWithEmailAndPin(pinEmail, pinCode);
-      if (res.success) {
-        setFeedback({ type: 'success', message: res.message });
-        setTimeout(() => {
-          onClose();
-        }, 700);
-      } else {
-        setFeedback({ type: 'error', message: res.message });
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.message || 'Помилка авторизації' });
-    } finally {
-      setIsPinLoading(false);
-    }
-  };
-
-  const handleQuickAdminLogin = (email: string = 'fastagile7@gmail.com') => {
-    setFeedback(null);
-    const user = quickAdminLogin(email);
-    setFeedback({
-      type: 'success',
-      message: `Успішний вхід як Головний Адміністратор (${user.email})! Повний доступ до родоводу та налаштувань активовано.`
-    });
-    setTimeout(() => {
-      onClose();
-    }, 700);
   };
 
   const handleCheckEmailInWhitelist = (e: React.FormEvent) => {
@@ -148,21 +98,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const isRoot = ROOT_ADMIN_EMAILS.includes(target);
     const { whitelist } = useAuthStore.getState();
     const entry = whitelist.find((w) => w.email.toLowerCase() === target && w.status === 'active');
 
-    if (isRoot || entry) {
-      const roleTitle = isRoot ? (target === 'domagile@gmail.com' ? 'Автор дослідження (Головний Адміністратор)' : 'Головний Адміністратор') : entry?.role === 'admin' ? 'Адміністратор' : entry?.role === 'editor' ? 'Редактор' : 'Дослідник';
+    if (entry) {
+      const roleTitle = entry.role === 'admin' ? 'Адміністратор' : entry.role === 'editor' ? 'Редактор' : 'Дослідник';
       setFeedback({
-        type: 'success',
-        message: `✓ Адресу ${target} підтверджено у Білому списку (Роль: ${roleTitle}). Ви можете увійти через Google або за PIN-кодом (1234).`
+        type: 'info',
+        message: `Для адреси ${target} надано доступ (Рівень: ${roleTitle}). Натисніть кнопку «Увійти через Google» нижче, використовуючи цей акаунт.`
       });
-      setPinEmail(target);
     } else {
       setFeedback({
         type: 'error',
-        message: `Адреси ${target} немає в активному Білому списку. Заповніть форму запиту, щоб адміністратор надав вам доступ.`
+        message: `Для адреси ${target} ще не надано доступу. Заповніть форму нижче, щоб надіслати запит на доступ.`
       });
       setReqEmail(target);
       setTab('request');
@@ -208,12 +156,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
             <div>
               <h3 className={`font-bold text-base ${theme.cardTitle}`}>
-                {currentUser?.isAuthenticated ? 'Обліковий запис дослідника' : 'Вхід та доступ до родоводу'}
+                {tab === 'login' 
+                  ? 'Вхід для редагування' 
+                  : tab === 'request'
+                  ? 'Запит на доступ до редагування'
+                  : "Зв'язок з автором дерева"}
               </h3>
               <p className="text-xs opacity-75">
-                {targetFeatureName
-                  ? `Розділ «${targetFeatureName}» доступний авторизованим дослідникам`
-                  : 'Керування доступом та правами редагування родовідного архіву'}
+                {tab === 'contact'
+                  ? `Пошук спільних предків та запитання: ${AUTHOR_CONTACT_EMAIL}`
+                  : targetFeatureName
+                  ? `Для доступу до розділу «${targetFeatureName}» надішліть запит або увійдіть`
+                  : 'Для внесення змін або редагування потрібно надіслати запит на доступ'}
               </p>
             </div>
           </div>
@@ -225,81 +179,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
-        {/* Current Active Session Info (if already logged in) */}
-        {currentUser?.isAuthenticated && (
-          <div className="px-5 py-3 bg-emerald-500/10 border-b border-emerald-500/20 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs">
-              <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <div>
-                <span className="font-bold text-emerald-800 dark:text-emerald-300">Ви увійшли як: </span>
-                <span className="font-mono text-emerald-700 dark:text-emerald-400">{currentUser.email}</span>
-                <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold uppercase">
-                  {currentUser.role}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                logout();
-                setFeedback({ type: 'info', message: 'Ви вийшли з облікового запису.' });
-              }}
-              className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 text-[11px] font-semibold transition-colors cursor-pointer"
-            >
-              Вийти
-            </button>
-          </div>
-        )}
-
         {/* Public Notice Banner */}
-        <div className="px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span>
-              <strong>Публічний режим:</strong> Дерево відкрите для читання усім.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              onClose();
-              openContactModal();
-            }}
-            className="flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-300 hover:underline shrink-0 cursor-pointer"
-            title="Шукаєте спільних предків? Напишіть автору"
-          >
-            <Mail className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>Шукаєте предків? domagile@gmail.com</span>
-          </button>
+        <div className="px-5 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+          <Eye className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <span>
+            <strong>Відкритий перегляд:</strong> Дерево можна вільно переглядати. Щоб вносити зміни або редагувати, надішліть запит на доступ.
+          </span>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-black/5 dark:border-white/10 px-5 pt-3 gap-3 shrink-0 overflow-x-auto">
+        <div className="flex border-b border-black/5 dark:border-white/10 px-5 pt-3 gap-3 sm:gap-4 shrink-0 overflow-x-auto">
           <button
             onClick={() => {
-              setTab('google');
+              setTab('login');
               setFeedback(null);
             }}
-            className={`pb-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
-              tab === 'google'
+            className={`pb-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+              tab === 'login'
                 ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
                 : 'border-transparent opacity-60 hover:opacity-100'
             }`}
           >
-            <span>Google Вхід</span>
-          </button>
-          <button
-            onClick={() => {
-              setTab('email_pin');
-              setFeedback(null);
-            }}
-            className={`pb-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
-              tab === 'email_pin'
-                ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
-                : 'border-transparent opacity-60 hover:opacity-100'
-            }`}
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>Email + PIN / Пароль</span>
+            Google Вхід
           </button>
           <button
             onClick={() => {
@@ -313,6 +214,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             }`}
           >
             Подати запит на доступ
+          </button>
+          <button
+            onClick={() => {
+              setTab('contact');
+              setFeedback(null);
+            }}
+            className={`pb-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+              tab === 'contact'
+                ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+                : 'border-transparent opacity-60 hover:opacity-100'
+            }`}
+          >
+            <Mail className="w-3.5 h-3.5" />
+            <span>Зв'язок з автором</span>
           </button>
         </div>
 
@@ -337,53 +252,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {/* Quick Admin Access Box */}
-          <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-amber-500" />
-                Швидкий вхід адміністратора
-              </span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-300 font-mono">
-                domagile@gmail.com
-              </span>
-            </div>
-            <p className="text-[11px] opacity-80 leading-relaxed">
-              Якщо ви власник або адміністратор цього архіву, натисніть для миттєвого входу з повними правами:
-            </p>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => handleQuickAdminLogin('domagile@gmail.com')}
-                className="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                title="Вхід як Автор дослідження (domagile@gmail.com)"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Увійти як domagile@gmail.com</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickAdminLogin('fastagile7@gmail.com')}
-                className="py-2 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                title="Вхід як fastagile7@gmail.com"
-              >
-                <span>fastagile7</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickAdminLogin('CubaTarara400@gmail.com')}
-                className="py-2 px-3 rounded-lg bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-xs font-semibold transition-all cursor-pointer"
-                title="Вхід як CubaTarara400@gmail.com"
-              >
-                CubaTarara400
-              </button>
-            </div>
-          </div>
-
-          {tab === 'google' ? (
+          {tab === 'login' ? (
             <div className="space-y-4">
               <div className="text-xs opacity-80 leading-relaxed">
-                Авторизуйтеся через Google, якщо ваш обліковий запис внесено до Білого списку або є адміністратором:
+                Якщо вам уже надано доступ до редагування, увійдіть за допомогою вашого Google-акаунту:
               </div>
 
               {/* Real Google Button */}
@@ -402,10 +274,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <span>{isGoogleLoading ? 'Перевірка Google акаунту...' : 'Увійти через Google'}</span>
               </button>
 
-              {/* Email Whitelist Checker */}
+              {/* Email Checker */}
               <div className="pt-3 border-t border-black/5 dark:border-white/10 space-y-2">
                 <div className="text-[11px] opacity-70">
-                  Бажаєте перевірити, чи ваша пошта є у Білому списку?
+                  Бажаєте перевірити, чи має ваша пошта дозвіл на редагування?
                 </div>
                 <form onSubmit={handleCheckEmailInWhitelist} className="flex gap-2">
                   <div className="relative flex-1">
@@ -427,58 +299,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </form>
               </div>
             </div>
-          ) : tab === 'email_pin' ? (
-            <form onSubmit={handleEmailPinSubmit} className="space-y-3.5">
-              <div className="text-xs opacity-80 leading-relaxed">
-                Введіть вашу електронну пошту та системний PIN-код роду (за замовчуванням <strong>1234</strong> або <strong>admin</strong>):
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold mb-1 opacity-80">
-                  Електронна пошта: *
-                </label>
-                <div className="relative">
-                  <input
-                    type="email"
-                    required
-                    value={pinEmail}
-                    onChange={(e) => setPinEmail(e.target.value)}
-                    placeholder="domagile@gmail.com"
-                    className={`w-full py-2 pl-8 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
-                  />
-                  <Mail className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold mb-1 opacity-80">
-                  PIN-код роду або пароль: *
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    value={pinCode}
-                    onChange={(e) => setPinCode(e.target.value)}
-                    placeholder="1234"
-                    className={`w-full py-2 pl-8 pr-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner font-mono`}
-                  />
-                  <Lock className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
-                </div>
-                <div className="text-[10px] opacity-60 mt-1">
-                  Стандартний код: 1234 (або admin для швидкого входу)
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isPinLoading}
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                <span>{isPinLoading ? 'Вхід...' : 'Увійти за Email та PIN'}</span>
-              </button>
-            </form>
           ) : (
             <form onSubmit={handleSendRequest} className="space-y-3.5">
               {requestSent ? (
@@ -530,21 +350,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                   <div>
                     <label className="block text-xs font-semibold mb-1 opacity-80">
-                      Бажана роль:
-                    </label>
-                    <select
-                      value={reqRole}
-                      onChange={(e) => setReqRole(e.target.value as UserRole)}
-                      className={`w-full py-2 px-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner`}
-                    >
-                      <option value="editor">Редактор (внесення осіб, дат та зв'язків)</option>
-                      <option value="researcher">Дослідник (архівні джерела та коментарі)</option>
-                      <option value="viewer">Переглядач (повний перегляд без редагування)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold mb-1 opacity-80">
                       Коментар для адміністратора:
                     </label>
                     <textarea
@@ -568,9 +373,60 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               )}
             </form>
           )}
+
+          {/* Contact Author Tab */}
+          {tab === 'contact' && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className={`p-4 rounded-xl border ${theme.cardBorder} ${theme.surfaceBg} space-y-3`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-[#B88E3E] flex items-center justify-center shrink-0">
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold opacity-70">Електронна адреса автора родоводу:</div>
+                    <a
+                      href={`mailto:${AUTHOR_CONTACT_EMAIL}`}
+                      className="font-mono font-bold text-sm text-[#B88E3E] hover:underline"
+                    >
+                      {AUTHOR_CONTACT_EMAIL}
+                    </a>
+                  </div>
+                </div>
+
+                <p className="text-xs opacity-80 leading-relaxed">
+                  Ви можете звернутися безпосередньо до автора проєкту з будь-яких питань:
+                </p>
+
+                <ul className="text-xs space-y-1.5 opacity-85 list-disc list-inside">
+                  <li>Пошук спільних предків або родинних ліній</li>
+                  <li>Уточнення біографічних відомостей, дат або місць</li>
+                  <li>Передача архівних фотографій, документів або спогадів</li>
+                  <li>Запит на отримання доступу для редагування даних</li>
+                </ul>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+                <a
+                  href={`mailto:${AUTHOR_CONTACT_EMAIL}?subject=${encodeURIComponent('Родовід: Питання та спільні предки')}`}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer text-center"
+                >
+                  <Mail className="w-4 h-4" />
+                  <span>Написати листа</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => setTab('request')}
+                  className="py-2.5 px-4 rounded-xl border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                  <span>Форма запиту на доступ</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
-

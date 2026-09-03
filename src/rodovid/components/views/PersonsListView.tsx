@@ -18,7 +18,9 @@ import {
   Lock,
   Hash,
   Tag,
-  X
+  X,
+  CheckCircle2,
+  HelpCircle
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
@@ -29,6 +31,7 @@ import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 import { getTreeHashtagsWithCounts, formatHashtag } from '../../../utils/tagUtils';
 import { isPersonMale, isPersonFemale, normalizeGender } from '../../utils/genderUtils';
+import { isPersonHypothesis, isPersonConfirmed } from '../../../utils/researchStatusUtils';
 
 interface PersonsListViewProps {
   database: GenealogyDatabase;
@@ -71,6 +74,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [genderFilter, setGenderFilter] = useState<'ALL' | Gender>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'LIVING' | 'DECEASED'>('ALL');
+  const [researchStatusFilter, setResearchStatusFilter] = useState<'ALL' | 'CONFIRMED' | 'HYPOTHESIS'>('ALL');
   const [tagFilter, setTagFilter] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'surname' | 'birth' | 'events' | 'citations' | 'tag' | 'tagCount'>('surname');
   const [sortAsc, setSortAsc] = useState(true);
@@ -116,15 +120,21 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         (statusFilter === 'LIVING' && p.isLiving) ||
         (statusFilter === 'DECEASED' && !p.isLiving);
 
+      // Research status filter (Підтверджена особа / Гіпотеза)
+      const matchesResearchStatus =
+        researchStatusFilter === 'ALL' ||
+        (researchStatusFilter === 'CONFIRMED' && isPersonConfirmed(p)) ||
+        (researchStatusFilter === 'HYPOTHESIS' && isPersonHypothesis(p));
+
       // Tag filter
       const cleanFilterTag = tagFilter !== 'ALL' ? tagFilter.toLowerCase().replace(/^#+/, '') : null;
       const matchesTag =
         !cleanFilterTag ||
         (p.tags || []).some((t) => t.toLowerCase().replace(/^#+/, '') === cleanFilterTag);
 
-      return matchesSearch && matchesGender && matchesStatus && matchesTag;
+      return matchesSearch && matchesGender && matchesStatus && matchesResearchStatus && matchesTag;
     });
-  }, [database.persons, searchTerm, genderFilter, statusFilter, tagFilter]);
+  }, [database.persons, searchTerm, genderFilter, statusFilter, researchStatusFilter, tagFilter]);
 
   const sortedPersons = useMemo(() => {
     return [...personsList].sort((a, b) => {
@@ -176,7 +186,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
 
         {/* Filters and Search row */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 pt-2 border-t ${theme.borderSubtle}`}>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-2.5 pt-2 border-t ${theme.borderSubtle}`}>
           {/* Search Input */}
           <div className="lg:col-span-2 relative">
             <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
@@ -194,7 +204,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             <select
               value={tagFilter}
               onChange={(e) => setTagFilter(e.target.value)}
-              className={`w-full px-3 py-2 ${theme.inputBg} border ${
+              className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
                 tagFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
               } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
             >
@@ -207,12 +217,27 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </select>
           </div>
 
+          {/* Research Status Filter */}
+          <div>
+            <select
+              value={researchStatusFilter}
+              onChange={(e) => setResearchStatusFilter(e.target.value as any)}
+              className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
+                researchStatusFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
+              } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+            >
+              <option value="ALL">Статус: Всі</option>
+              <option value="CONFIRMED">Підтверджена особа</option>
+              <option value="HYPOTHESIS">Гіпотеза</option>
+            </select>
+          </div>
+
           {/* Gender Filter */}
           <div>
             <select
               value={genderFilter}
               onChange={(e) => setGenderFilter(e.target.value as any)}
-              className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+              className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
             >
               <option value="ALL">Будь-яка стать</option>
               <option value="M">Чоловіча стать</option>
@@ -226,9 +251,9 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
-              className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+              className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
             >
-              <option value="ALL">Будь-який статус</option>
+              <option value="ALL">Будь-який стан</option>
               <option value="LIVING">Нині живі</option>
               <option value="DECEASED">Померлі</option>
             </select>
@@ -336,6 +361,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               setSearchTerm('');
               setGenderFilter('ALL');
               setStatusFilter('ALL');
+              setResearchStatusFilter('ALL');
               setTagFilter('ALL');
             }}
             className={`px-3.5 py-1.5 ${theme.surfaceBg} hover:brightness-110 ${theme.textPrimary} border ${theme.borderSubtle} rounded-lg text-xs font-medium transition-colors cursor-pointer`}
@@ -346,12 +372,13 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       ) : viewMode === 'table' ? (
         <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl overflow-hidden shadow-xs`}>
           <div className="overflow-x-auto">
-            <table className={`w-full text-left text-xs ${theme.textSecondary}`}>
+            <table className={`w-full min-w-[900px] text-left text-xs ${theme.textSecondary}`}>
               <thead className={`${theme.surfaceBg} ${theme.textMuted} font-semibold border-b ${theme.borderSubtle} uppercase tracking-wider text-[10px]`}>
                 <tr>
                   <th className="py-3 px-4">ПІБ / Особа</th>
                   <th className="py-3 px-4">Стать</th>
                   <th className="py-3 px-4">Роки життя</th>
+                  <th className="py-3 px-4">Статус дослідження</th>
                   <th className="py-3 px-4">Місце народження</th>
                   <th className="py-3 px-4">Професія / Статус</th>
                   <th className="py-3 px-4 text-center">Подій</th>
@@ -477,6 +504,22 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
                       <td className={`py-3 px-4 font-mono ${theme.textPrimary}`}>
                         {isMasked ? '🔒 Скрито' : `${p.birthYear || '?'} — ${p.isLiving ? 'живий' : p.deathYear || '?'}`}
+                      </td>
+
+                      <td className="py-3 px-4">
+                        {isMasked ? (
+                          <span className={theme.textMuted}>—</span>
+                        ) : isPersonHypothesis(p) ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                            <HelpCircle className="w-3 h-3" />
+                            <span>Гіпотеза</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Підтверджена особа</span>
+                          </span>
+                        )}
                       </td>
 
                       <td className={`py-3 px-4 ${theme.textMuted} max-w-[160px] truncate`}>
@@ -629,6 +672,22 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                           {isMasked ? '🔒 Скрито (Жива особа)' : `${p.birthYear || '?'} — ${p.isLiving ? 'живий' : p.deathYear || '?'}`}
                         </span>
                       </div>
+
+                      {!isMasked && (
+                        <div className="mt-2 flex items-center gap-1.5">
+                          {isPersonHypothesis(p) ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                              <HelpCircle className="w-3 h-3" />
+                              <span>Гіпотеза</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Підтверджена особа</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 

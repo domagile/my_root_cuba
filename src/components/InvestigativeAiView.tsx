@@ -420,7 +420,7 @@ export const InvestigativeAiView: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 p-4 md:p-6 lg:p-8 bg-[#0F0F0F] text-[#E5E5E5] overflow-y-auto space-y-6 transition-colors duration-300">
+    <div className="flex-1 p-4 md:p-6 lg:p-8 bg-[#0F0F0F] text-[#E5E5E5] overflow-y-auto overflow-x-auto space-y-6 transition-colors duration-300">
       
       {/* 1. TOP BANNER */}
       <div className="p-5 rounded-xl bg-[#1A1A1A] border border-[#2A2A2A] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">

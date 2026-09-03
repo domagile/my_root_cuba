@@ -533,6 +533,106 @@ export function subscribeToAccessRequestsCloud(
   }
 }
 
+// Whitelist Cloud Persistence Helpers
+export async function saveWhitelistEntryToCloud(
+  entry: any,
+  projectId: string = DEFAULT_PROJECT_ID
+): Promise<boolean> {
+  try {
+    const db = getDbInstance();
+    if (!db || !entry?.id) return false;
+    const cleanData = JSON.parse(JSON.stringify(entry));
+    cleanData.updatedAt = new Date().toISOString();
+    const docRef = doc(db, 'projects', projectId, 'whitelist', String(entry.id));
+    await setDoc(docRef, cleanData, { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/whitelist/${entry.id}`);
+    return false;
+  }
+}
+
+export async function deleteWhitelistEntryFromCloud(
+  entryId: string,
+  projectId: string = DEFAULT_PROJECT_ID
+): Promise<boolean> {
+  try {
+    const db = getDbInstance();
+    if (!db || !entryId) return false;
+    const docRef = doc(db, 'projects', projectId, 'whitelist', String(entryId));
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/whitelist/${entryId}`);
+    return false;
+  }
+}
+
+export function subscribeToWhitelistCloud(
+  onUpdate: (entries: any[]) => void,
+  projectId: string = DEFAULT_PROJECT_ID
+): () => void {
+  try {
+    const db = getDbInstance();
+    if (!db) return () => {};
+    const colRef = collection(db, 'projects', projectId, 'whitelist');
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
+        onUpdate(list);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/whitelist`);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
+export async function saveAccessConfigToCloud(
+  config: any,
+  projectId: string = DEFAULT_PROJECT_ID
+): Promise<boolean> {
+  try {
+    const db = getDbInstance();
+    if (!db) return false;
+    const cleanData = JSON.parse(JSON.stringify(config));
+    cleanData.updatedAt = new Date().toISOString();
+    const docRef = doc(db, 'projects', projectId, 'accessConfig', 'global');
+    await setDoc(docRef, cleanData, { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/accessConfig/global`);
+    return false;
+  }
+}
+
+export function subscribeToAccessConfigCloud(
+  onUpdate: (config: any) => void,
+  projectId: string = DEFAULT_PROJECT_ID
+): () => void {
+  try {
+    const db = getDbInstance();
+    if (!db) return () => {};
+    const docRef = doc(db, 'projects', projectId, 'accessConfig', 'global');
+    return onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          onUpdate(snapshot.data());
+        }
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, `projects/${projectId}/accessConfig/global`);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
 /**
  * Batch write items into a subcollection in chunks of 450 items
  * (Firestore limits batch writes to max 500 ops per batch)

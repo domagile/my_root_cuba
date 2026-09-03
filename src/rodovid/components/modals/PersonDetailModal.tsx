@@ -36,7 +36,8 @@ import {
   Users,
   Sparkles,
   TreePine,
-  Church
+  Church,
+  Mail
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Family, Source } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
@@ -47,6 +48,7 @@ import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../u
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 import { PersonDocumentsSection } from '../../../components/PersonDocumentsSection';
+import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from '../../../components/ContactAuthorModal';
 
 interface PersonDetailModalProps {
   database?: GenealogyDatabase;
@@ -118,6 +120,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   // Inline Bio Editor
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [bioDraft, setBioDraft] = useState('');
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
 
   // Event Modal State
   const [eventModal, setEventModal] = useState<{
@@ -1070,6 +1073,30 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           </div>
         ) : (
           <div className={`p-5 sm:p-6 space-y-6 overflow-y-auto flex-1 ${theme.textPrimary} scrollbar-thin`}>
+          {/* Contact Researcher banner - for relatives searching common ancestors */}
+          <div className="p-3.5 rounded-2xl bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-1.5 rounded-xl bg-amber-500/20 text-[#B88E3E] shrink-0">
+                <Mail className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                  Шукаєте спільних предків або маєте відомості про цю особу?
+                </div>
+                <div className="text-[11px] opacity-80 truncate">
+                  Зв'яжіться з автором: <span className="font-mono font-bold text-[#B88E3E]">{AUTHOR_CONTACT_EMAIL}</span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsContactModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-[#B88E3E] hover:bg-[#A37B30] text-white font-bold text-xs shadow-xs transition-colors cursor-pointer shrink-0 text-center"
+            >
+              Написати автору
+            </button>
+          </div>
+
           {/* SECTION 1: Status & Attributes */}
           <div className={`p-3.5 ${theme.surfaceBg} rounded-2xl border ${theme.borderSubtle} space-y-3`}>
             <div className="flex items-center justify-between">
@@ -2849,6 +2876,16 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           }}
           onClose={() => setIsConfirmDeleteOpen(false)}
           isPermanent={true}
+        />
+      )}
+
+      {/* Contact Author Modal */}
+      {isContactModalOpen && (
+        <ContactAuthorModal
+          isOpen={isContactModalOpen}
+          onClose={() => setIsContactModalOpen(false)}
+          personName={person ? getFullName(person) : undefined}
+          personYears={person ? [person.birthYear || person.birthDate, person.deathYear || person.deathDate].filter(Boolean).join(' — ') : undefined}
         />
       )}
     </div>

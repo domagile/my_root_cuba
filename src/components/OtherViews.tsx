@@ -139,7 +139,7 @@ export const DocumentsView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
       <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border-b ${theme.cardBorder} pb-4 gap-4`}>
         <div>
           <h2 className={`text-xl font-bold ${theme.cardTitle} flex items-center gap-2`}>
@@ -476,7 +476,7 @@ export const RequestsView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
       <div className={`flex items-center justify-between border-b ${theme.cardBorder} pb-4`}>
         <div>
           <h2 className={`text-xl font-bold ${theme.cardTitle} flex items-center gap-2`}>
@@ -715,7 +715,7 @@ export const YearMatrixView: React.FC = () => {
   const coveragePercent = totalEntries > 0 ? Math.round((checkedCount / totalEntries) * 100) : 0;
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
       {/* Header */}
       <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border-b ${theme.cardBorder} pb-4 gap-4`}>
         <div>
@@ -1146,7 +1146,7 @@ export const TasksView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
       <div className={`flex items-center justify-between border-b ${theme.cardBorder} pb-4`}>
         <div>
           <h2 className={`text-xl font-bold ${theme.cardTitle} flex items-center gap-2`}>
@@ -1363,7 +1363,7 @@ export const FindingsView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
       <div className={`flex items-center justify-between border-b ${theme.cardBorder} pb-4`}>
         <div>
           <h2 className={`text-xl font-bold ${theme.cardTitle} flex items-center gap-2`}>

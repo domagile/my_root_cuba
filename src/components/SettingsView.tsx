@@ -246,7 +246,7 @@ export const SettingsView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 sm:p-8 overflow-y-auto ${theme.appBg} transition-colors duration-300 space-y-8`}>
+    <div className={`flex-1 p-6 sm:p-8 overflow-y-auto overflow-x-auto ${theme.appBg} transition-colors duration-300 space-y-8`}>
       {/* Header Banner */}
       <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4`}>
         <div className="flex items-center gap-4">

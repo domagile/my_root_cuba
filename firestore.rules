@@ -87,6 +87,18 @@ service cloud.firestore {
         allow write: if true;
       }
 
+      // Whitelist subcollection
+      match /whitelist/{entryId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Access config subcollection
+      match /accessConfig/{configId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
       // Matrix entries subcollection
       match /matrixEntries/{entryId} {
         allow read: if true;

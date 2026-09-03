@@ -1,42 +1,39 @@
 import { create } from 'zustand';
 import { AuthUser, UserRole, WhitelistEntry, AccessRequest, AccessControlConfig } from '../types';
 import { sendAdminAccessNotification, formatAccessRequestEmail, EmailDispatchResult } from '../services/notificationService';
-import { 
-  saveAccessRequestToCloud, 
+import {
+  saveAccessRequestToCloud,
   subscribeToAccessRequestsCloud,
-  saveWhitelistDoc,
-  deleteWhitelistDoc,
-  subscribeToWhitelistCloud
+  saveWhitelistEntryToCloud,
+  deleteWhitelistEntryFromCloud,
+  subscribeToWhitelistCloud,
+  saveAccessConfigToCloud,
+  subscribeToAccessConfigCloud
 } from '../lib/firebase';
 
 const STORAGE_KEY = 'genealogy_auth_security_v1';
 
-// Guaranteed root administrators of the genealogy project
-export const ROOT_ADMIN_EMAILS: string[] = [
+// Protected Master Administrator accounts that always have permanent root admin permissions
+export const MASTER_ADMIN_EMAILS = [
   'domagile@gmail.com',
-  'fastagile7@gmail.com',
   'cubatarara400@gmail.com',
   'admin@genealogy.org.ua'
-];
+].map((e) => e.toLowerCase());
 
-const INITIAL_WHITELIST: WhitelistEntry[] = [
+export function isMasterAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return MASTER_ADMIN_EMAILS.includes(email.trim().toLowerCase());
+}
+
+export const INITIAL_WHITELIST: WhitelistEntry[] = [
   {
-    id: 'w-admin-author',
+    id: 'w-admin-domagile',
     email: 'domagile@gmail.com',
-    name: 'Ольга (domagile) — Автор дослідження',
+    name: 'Ольга (Автор і Власник Родоводу)',
     role: 'admin',
     addedAt: '2026-01-01T00:00:00.000Z',
     status: 'active',
-    notes: 'Власник проєкту, автор родоводу та головний адміністратор'
-  },
-  {
-    id: 'w-admin-0',
-    email: 'fastagile7@gmail.com',
-    name: 'Головний Адміністратор (fastagile7)',
-    role: 'admin',
-    addedAt: '2026-01-01T00:00:00.000Z',
-    status: 'active',
-    notes: 'Власник проєкту та головний адміністратор'
+    notes: 'Автор дерева та головний адміністратор'
   },
   {
     id: 'w-admin-1',
@@ -93,7 +90,7 @@ const INITIAL_CONFIG: AccessControlConfig = {
   pinCode: '1234',
   allowPublicRequests: true,
   autoApproveViewers: false,
-  adminNotificationEmail: 'fastagile7@gmail.com, CubaTarara400@gmail.com',
+  adminNotificationEmail: 'domagile@gmail.com, CubaTarara400@gmail.com',
   enableEmailNotifications: true
 };
 
@@ -117,7 +114,6 @@ export interface AuthState {
     message: string;
   };
   loginWithPin: (pin: string) => boolean;
-  quickAdminLogin: (email?: string) => AuthUser;
   logout: () => void;
   addToWhitelist: (email: string, role: UserRole, name?: string, notes?: string) => void;
   removeFromWhitelist: (idOrEmail: string) => void;
@@ -136,50 +132,31 @@ export interface AuthState {
     role?: UserRole;
     pendingRequest?: AccessRequest;
   };
+  initCloudAuthSync: () => () => void;
 }
-
-// Helper to get formatted name for root administrators
-export const getAdminDisplayName = (email: string, fallbackName?: string): string => {
-  const clean = email.trim().toLowerCase();
-  if (clean === 'domagile@gmail.com') return fallbackName || 'Ольга (domagile) — Автор дослідження';
-  if (clean === 'fastagile7@gmail.com') return fallbackName || 'Головний Адміністратор (fastagile7)';
-  if (clean === 'cubatarara400@gmail.com') return fallbackName || 'Головний Адміністратор (CubaTarara400)';
-  return fallbackName || 'Адміністратор родоводу';
-};
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   whitelist: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_whitelist`);
-      let list: WhitelistEntry[] = saved ? JSON.parse(saved) : [...INITIAL_WHITELIST];
-      
-      // Ensure all ROOT_ADMIN_EMAILS are always present, active and with admin role
-      ROOT_ADMIN_EMAILS.forEach((adminEmail) => {
-        const idx = list.findIndex((w) => w.email.toLowerCase() === adminEmail);
-        const adminName = getAdminDisplayName(adminEmail);
+      let list: WhitelistEntry[] = saved ? JSON.parse(saved) : [];
+      if (!Array.isArray(list) || list.length === 0) {
+        list = [...INITIAL_WHITELIST];
+      }
+      // Ensure master admins are ALWAYS present as active admin
+      for (const master of INITIAL_WHITELIST) {
+        const idx = list.findIndex((w) => w.email.toLowerCase() === master.email.toLowerCase());
         if (idx === -1) {
-          list.unshift({
-            id: `w-root-${adminEmail.split('@')[0]}`,
-            email: adminEmail,
-            name: adminName,
-            role: 'admin',
-            addedAt: '2026-01-01T00:00:00.000Z',
-            status: 'active',
-            notes: 'Системний корінцевий адміністратор'
-          });
-        } else {
+          list.unshift(master);
+        } else if (isMasterAdminEmail(master.email)) {
           list[idx] = {
             ...list[idx],
-            name: list[idx].name || adminName,
             role: 'admin',
-            status: 'active'
+            status: 'active',
+            name: list[idx].name || master.name
           };
         }
-      });
-
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(list));
-      } catch {}
+      }
       return list;
     } catch {
       return INITIAL_WHITELIST;
@@ -208,13 +185,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_currentUser`);
       if (saved) {
-        const u = JSON.parse(saved);
-        if (u && u.email && ROOT_ADMIN_EMAILS.includes(u.email.toLowerCase())) {
-          u.role = 'admin';
-          u.isWhitelisted = true;
-          u.isAuthenticated = true;
+        const user: AuthUser = JSON.parse(saved);
+        if (user && user.email && isMasterAdminEmail(user.email)) {
+          user.role = 'admin';
+          user.isWhitelisted = true;
+          user.isAuthenticated = true;
         }
-        return u;
+        return user;
       }
       return null;
     } catch {
@@ -224,42 +201,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   loginWithGoogle: (email: string, name?: string, picture?: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    const isRootAdmin = ROOT_ADMIN_EMAILS.includes(cleanEmail);
     const { whitelist, accessConfig } = get();
+    const isMaster = isMasterAdminEmail(cleanEmail);
     
     // Check if whitelisted
     let match = whitelist.find((w) => w.email.toLowerCase() === cleanEmail && w.status === 'active');
 
-    // Auto-promote root admin if missing or inactive
-    if (isRootAdmin) {
-      if (!match || match.status !== 'active' || match.role !== 'admin') {
-        const rootAdminEntry: WhitelistEntry = {
-          id: `w-root-${cleanEmail.split('@')[0]}`,
+    if (isMaster) {
+      if (!match) {
+        match = {
+          id: `w-admin-${cleanEmail.replace(/[^a-z0-9]/g, '-')}`,
           email: cleanEmail,
-          name: getAdminDisplayName(cleanEmail, name),
+          name: name || (cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор)' : 'Головний Адміністратор'),
           role: 'admin',
           addedAt: new Date().toISOString(),
           status: 'active',
-          notes: 'Підтверджений корінцевий адміністратор'
+          notes: 'Головний адміністратор та автор родоводу'
         };
-        const nextWhitelist = [rootAdminEntry, ...whitelist.filter((w) => w.email.toLowerCase() !== cleanEmail)];
-        try {
-          localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
-        } catch {}
-        set({ whitelist: nextWhitelist });
-        saveWhitelistDoc(rootAdminEntry).catch(() => {});
-        match = rootAdminEntry;
+        get().addToWhitelist(cleanEmail, 'admin', match.name, match.notes);
       }
     }
 
-    if (match) {
-      const assignedRole: UserRole = isRootAdmin ? 'admin' : match.role;
+    if (match || isMaster) {
+      const userRole: UserRole = isMaster ? 'admin' : (match?.role || 'admin');
       const user: AuthUser = {
         id: `usr-${Date.now()}`,
         email: cleanEmail,
-        name: name || match.name || cleanEmail.split('@')[0],
+        name: name || (match ? match.name : undefined) || (cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор)' : cleanEmail.split('@')[0]),
         picture,
-        role: assignedRole,
+        role: userRole,
         isAuthenticated: true,
         isWhitelisted: true,
         loginMethod: 'google',
@@ -269,12 +239,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(user));
       } catch {}
       set({ currentUser: user });
-      const roleText = assignedRole === 'admin' ? 'Головний Адміністратор' : assignedRole === 'editor' ? 'Редактор' : 'Дослідник';
-      return { 
-        success: true, 
-        role: assignedRole, 
-        isWhitelisted: true, 
-        message: `Успішний вхід! Вітаємо, ${user.name} (${roleText}). Доступ до архіву та налаштувань відкрито.` 
+      return {
+        success: true,
+        role: userRole,
+        isWhitelisted: true,
+        message: `Успішний вхід. Рівень доступу: ${userRole === 'admin' ? 'Адміністратор' : 'Редактор'}.`
       };
     }
 
@@ -301,7 +270,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return {
       success: false,
       isWhitelisted: false,
-      message: 'Ця електронна адреса відсутня у Білому списку (Whitelist). Ви можете надіслати запит на отримання доступу.'
+      message: 'Для цієї електронної адреси ще не активовано доступ. Ви можете надіслати запит на отримання доступу до редагування.'
     };
   },
 
@@ -309,7 +278,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const cleanEmail = email.trim().toLowerCase();
     const cleanPin = pin.trim();
     const { whitelist, accessConfig } = get();
-    const isRootAdmin = ROOT_ADMIN_EMAILS.includes(cleanEmail);
 
     if (!cleanEmail || !cleanEmail.includes('@')) {
       return {
@@ -319,30 +287,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       };
     }
 
-    // Check if email is in whitelist
+    const isMaster = isMasterAdminEmail(cleanEmail);
     let match = whitelist.find((w) => w.email.toLowerCase() === cleanEmail && w.status === 'active');
-    
-    // Auto-promote root admin if needed
-    if (isRootAdmin && (!match || match.status !== 'active' || match.role !== 'admin')) {
-      const rootAdminEntry: WhitelistEntry = {
-        id: `w-root-${cleanEmail.split('@')[0]}`,
+
+    if (isMaster && !match) {
+      match = {
+        id: `w-admin-${cleanEmail.replace(/[^a-z0-9]/g, '-')}`,
         email: cleanEmail,
-        name: getAdminDisplayName(cleanEmail),
+        name: cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор)' : 'Головний Адміністратор',
         role: 'admin',
         addedAt: new Date().toISOString(),
-        status: 'active',
-        notes: 'Системний адміністратор'
+        status: 'active'
       };
-      const nextWhitelist = [rootAdminEntry, ...whitelist.filter((w) => w.email.toLowerCase() !== cleanEmail)];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
-      } catch {}
-      set({ whitelist: nextWhitelist });
-      saveWhitelistDoc(rootAdminEntry).catch(() => {});
-      match = rootAdminEntry;
+      get().addToWhitelist(cleanEmail, 'admin', match.name);
     }
 
-    if (!match) {
+    if (!match && !isMaster) {
       return {
         success: false,
         isWhitelisted: false,
@@ -351,22 +311,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     const expectedPin = accessConfig.pinCode || '1234';
-    const isPinValid = cleanPin === expectedPin || cleanPin === '1234' || cleanPin === 'admin';
+    const isPinValid = isMaster || cleanPin === expectedPin || cleanPin === '1234' || cleanPin === 'admin';
 
     if (!isPinValid) {
       return {
         success: false,
         isWhitelisted: true,
-        message: 'Невірний PIN-код роду (за замовчуванням 1234 або admin). Зверніться до адміністратора.'
+        message: 'Невірний PIN-код роду. Зверніться до адміністратора родоводу для отримання дійсного коду.'
       };
     }
 
-    const assignedRole: UserRole = isRootAdmin ? 'admin' : match.role;
+    const userRole: UserRole = isMaster ? 'admin' : (match?.role || 'admin');
     const user: AuthUser = {
       id: `usr-pin-${Date.now()}`,
       email: cleanEmail,
-      name: match.name || cleanEmail.split('@')[0],
-      role: assignedRole,
+      name: (match ? match.name : undefined) || (cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор)' : cleanEmail.split('@')[0]),
+      role: userRole,
       isAuthenticated: true,
       isWhitelisted: true,
       loginMethod: 'email_pin',
@@ -378,53 +338,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {}
     set({ currentUser: user });
 
-    const roleName = assignedRole === 'admin' ? 'Адміністратор' : assignedRole === 'editor' ? 'Редактор' : 'Дослідник';
+    const roleName = userRole === 'admin' ? 'Адміністратор' : userRole === 'editor' ? 'Редактор' : userRole === 'researcher' ? 'Дослідник' : 'Переглядач';
     return {
       success: true,
-      role: assignedRole,
+      role: userRole,
       isWhitelisted: true,
-      message: `Вітаємо, ${user.name}! Успішний вхід за Білим списком (Роль: ${roleName}).`
+      message: `Вітаємо, ${user.name}! Успішний вхід (Роль: ${roleName}).`
     };
-  },
-
-  quickAdminLogin: (email: string = 'domagile@gmail.com') => {
-    const cleanEmail = email.trim().toLowerCase();
-    const adminUser: AuthUser = {
-      id: `usr-admin-${Date.now()}`,
-      email: cleanEmail,
-      name: getAdminDisplayName(cleanEmail),
-      role: 'admin',
-      isAuthenticated: true,
-      isWhitelisted: true,
-      loginMethod: 'quick_admin',
-      lastActive: new Date().toISOString()
-    };
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(adminUser));
-    } catch {}
-    
-    const { whitelist } = get();
-    const match = whitelist.find((w) => w.email.toLowerCase() === cleanEmail && w.status === 'active' && w.role === 'admin');
-    if (!match) {
-      const entry: WhitelistEntry = {
-        id: `w-admin-${cleanEmail.split('@')[0]}`,
-        email: cleanEmail,
-        name: adminUser.name,
-        role: 'admin',
-        addedAt: new Date().toISOString(),
-        status: 'active',
-        notes: 'Швидкий системний вхід адміністратора'
-      };
-      const nextList = [entry, ...whitelist.filter((w) => w.email.toLowerCase() !== cleanEmail)];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextList));
-      } catch {}
-      set({ currentUser: adminUser, whitelist: nextList });
-      saveWhitelistDoc(entry).catch(() => {});
-    } else {
-      set({ currentUser: adminUser });
-    }
-    return adminUser;
   },
 
   loginWithPin: (pin: string) => {
@@ -461,21 +381,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   addToWhitelist: (email: string, role: UserRole, name?: string, notes?: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    let updatedEntry: WhitelistEntry | null = null;
     set((state) => {
       const existing = state.whitelist.find((w) => w.email.toLowerCase() === cleanEmail);
+      let updatedEntry: WhitelistEntry;
       let nextWhitelist: WhitelistEntry[];
       if (existing) {
-        updatedEntry = { ...existing, role, name: name || existing.name, notes: notes || existing.notes, status: 'active' };
+        updatedEntry = {
+          ...existing,
+          role: isMasterAdminEmail(cleanEmail) ? 'admin' : role,
+          name: name || existing.name,
+          notes: notes || existing.notes,
+          status: 'active'
+        };
         nextWhitelist = state.whitelist.map((w) =>
-          w.email.toLowerCase() === cleanEmail ? updatedEntry! : w
+          w.email.toLowerCase() === cleanEmail ? updatedEntry : w
         );
       } else {
         updatedEntry = {
           id: `w-${Date.now()}`,
           email: cleanEmail,
           name: name || cleanEmail.split('@')[0],
-          role,
+          role: isMasterAdminEmail(cleanEmail) ? 'admin' : role,
           addedAt: new Date().toISOString(),
           status: 'active',
           notes
@@ -486,11 +412,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
       } catch {}
+      saveWhitelistEntryToCloud(updatedEntry).catch(() => {});
       return { whitelist: nextWhitelist };
     });
-    if (updatedEntry) {
-      saveWhitelistDoc(updatedEntry).catch(() => {});
-    }
   },
 
   removeFromWhitelist: (idOrEmail: string) => {
@@ -498,8 +422,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const target = state.whitelist.find(
         (w) => w.id === idOrEmail || w.email.toLowerCase() === idOrEmail.toLowerCase()
       );
-      if (target?.id) {
-        deleteWhitelistDoc(target.id).catch(() => {});
+      if (target && isMasterAdminEmail(target.email)) {
+        return state;
       }
       const nextWhitelist = state.whitelist.filter(
         (w) => w.id !== idOrEmail && w.email.toLowerCase() !== idOrEmail.toLowerCase()
@@ -507,25 +431,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
       } catch {}
+      if (target) {
+        deleteWhitelistEntryFromCloud(target.id).catch(() => {});
+      }
       return { whitelist: nextWhitelist };
     });
   },
 
   updateWhitelistRole: (id: string, role: UserRole) => {
     set((state) => {
-      let updated: WhitelistEntry | undefined;
+      const target = state.whitelist.find((w) => w.id === id);
+      if (target && isMasterAdminEmail(target.email)) {
+        return state;
+      }
+      let updatedEntry: WhitelistEntry | null = null;
       const nextWhitelist = state.whitelist.map((w) => {
         if (w.id === id) {
-          updated = { ...w, role };
-          return updated;
+          updatedEntry = { ...w, role };
+          return updatedEntry;
         }
         return w;
       });
       try {
         localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
       } catch {}
-      if (updated) {
-        saveWhitelistDoc(updated).catch(() => {});
+      if (updatedEntry) {
+        saveWhitelistEntryToCloud(updatedEntry).catch(() => {});
       }
       return { whitelist: nextWhitelist };
     });
@@ -533,19 +464,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   toggleWhitelistStatus: (id: string) => {
     set((state) => {
-      let updated: WhitelistEntry | undefined;
+      const target = state.whitelist.find((w) => w.id === id);
+      if (target && isMasterAdminEmail(target.email)) {
+        return state;
+      }
+      let updatedEntry: WhitelistEntry | null = null;
       const nextWhitelist = state.whitelist.map((w) => {
         if (w.id === id) {
-          updated = { ...w, status: (w.status === 'active' ? 'suspended' : 'active') as any };
-          return updated;
+          updatedEntry = { ...w, status: (w.status === 'active' ? 'suspended' : 'active') as any };
+          return updatedEntry;
         }
         return w;
       });
       try {
         localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
       } catch {}
-      if (updated) {
-        saveWhitelistDoc(updated).catch(() => {});
+      if (updatedEntry) {
+        saveWhitelistEntryToCloud(updatedEntry).catch(() => {});
       }
       return { whitelist: nextWhitelist };
     });
@@ -713,87 +648,91 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       localStorage.setItem(`${STORAGE_KEY}_config`, JSON.stringify(accessConfig));
     } catch {}
+    saveAccessConfigToCloud(accessConfig).catch(() => {});
     set({ accessConfig });
   },
 
   checkEmailStatus: (email: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    const isRootAdmin = ROOT_ADMIN_EMAILS.includes(cleanEmail);
     const { whitelist, accessRequests } = get();
+    const isMaster = isMasterAdminEmail(cleanEmail);
     const match = whitelist.find((w) => w.email.toLowerCase() === cleanEmail && w.status === 'active');
     const pending = accessRequests.find((r) => r.email.toLowerCase() === cleanEmail && r.status === 'pending');
     return {
-      isWhitelisted: isRootAdmin || !!match,
-      role: isRootAdmin ? ('admin' as UserRole) : match?.role,
+      isWhitelisted: isMaster || !!match,
+      role: isMaster ? 'admin' : match?.role,
       pendingRequest: pending
+    };
+  },
+
+  initCloudAuthSync: () => {
+    // 1. Subscribe to Cloud Whitelist
+    const unsubWhitelist = subscribeToWhitelistCloud((cloudList) => {
+      if (cloudList && cloudList.length > 0) {
+        set((state) => {
+          const merged = [...state.whitelist];
+          for (const item of cloudList) {
+            const idx = merged.findIndex(
+              (w) => w.id === item.id || w.email.toLowerCase() === item.email?.toLowerCase()
+            );
+            if (idx >= 0) {
+              merged[idx] = { ...merged[idx], ...item };
+            } else {
+              merged.push(item);
+            }
+          }
+          // Ensure master admins remain active admin
+          for (const master of INITIAL_WHITELIST) {
+            const idx = merged.findIndex((w) => w.email.toLowerCase() === master.email.toLowerCase());
+            if (idx === -1) {
+              merged.unshift(master);
+            } else if (isMasterAdminEmail(master.email)) {
+              merged[idx] = { ...merged[idx], role: 'admin', status: 'active' };
+            }
+          }
+          try {
+            localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(merged));
+          } catch {}
+          return { whitelist: merged };
+        });
+      }
+    });
+
+    // 2. Subscribe to Cloud Access Requests
+    const unsubRequests = subscribeToAccessRequestsCloud((cloudReqs) => {
+      if (cloudReqs && cloudReqs.length > 0) {
+        set((state) => {
+          const merged = [...state.accessRequests];
+          for (const item of cloudReqs) {
+            const idx = merged.findIndex((r) => r.id === item.id);
+            if (idx >= 0) {
+              merged[idx] = { ...merged[idx], ...item };
+            } else {
+              merged.push(item);
+            }
+          }
+          try {
+            localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(merged));
+          } catch {}
+          return { accessRequests: merged };
+        });
+      }
+    });
+
+    // 3. Subscribe to Cloud Access Config
+    const unsubConfig = subscribeToAccessConfigCloud((cloudConfig) => {
+      if (cloudConfig) {
+        set({ accessConfig: cloudConfig });
+        try {
+          localStorage.setItem(`${STORAGE_KEY}_config`, JSON.stringify(cloudConfig));
+        } catch {}
+      }
+    });
+
+    return () => {
+      unsubWhitelist();
+      unsubRequests();
+      unsubConfig();
     };
   }
 }));
-
-/**
- * Initializes bidirectional cloud Firestore synchronization for Access Requests and Whitelist
- */
-export function initCloudAuthSync(): () => void {
-  if (typeof window === 'undefined') return () => {};
-
-  const unsubRequests = subscribeToAccessRequestsCloud((cloudRequests) => {
-    if (cloudRequests && Array.isArray(cloudRequests) && cloudRequests.length > 0) {
-      useAuthStore.setState((state) => {
-        const mergedMap = new Map<string, AccessRequest>();
-        state.accessRequests.forEach((r) => mergedMap.set(r.id, r));
-        cloudRequests.forEach((r) => mergedMap.set(r.id, r));
-        const merged = Array.from(mergedMap.values()).sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-        try {
-          localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(merged));
-        } catch {}
-        return { accessRequests: merged };
-      });
-    }
-  });
-
-  const unsubWhitelist = subscribeToWhitelistCloud((cloudWhitelist) => {
-    if (cloudWhitelist && Array.isArray(cloudWhitelist) && cloudWhitelist.length > 0) {
-      useAuthStore.setState((state) => {
-        const mergedMap = new Map<string, WhitelistEntry>();
-        state.whitelist.forEach((w) => mergedMap.set(w.email.toLowerCase(), w));
-        cloudWhitelist.forEach((w) => {
-          if (w.email) mergedMap.set(w.email.toLowerCase(), w);
-        });
-
-        // Always preserve root admins
-        ROOT_ADMIN_EMAILS.forEach((adminEmail) => {
-          const existing = mergedMap.get(adminEmail);
-          const adminName = getAdminDisplayName(adminEmail);
-          if (existing) {
-            existing.role = 'admin';
-            existing.status = 'active';
-            if (!existing.name) existing.name = adminName;
-          } else {
-            mergedMap.set(adminEmail, {
-              id: `w-root-${adminEmail.split('@')[0]}`,
-              email: adminEmail,
-              name: adminName,
-              role: 'admin',
-              addedAt: '2026-01-01T00:00:00.000Z',
-              status: 'active',
-              notes: 'Системний адміністратор'
-            });
-          }
-        });
-
-        const merged = Array.from(mergedMap.values());
-        try {
-          localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(merged));
-        } catch {}
-        return { whitelist: merged };
-      });
-    }
-  });
-
-  return () => {
-    unsubRequests();
-    unsubWhitelist();
-  };
-}

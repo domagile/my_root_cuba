@@ -8,7 +8,7 @@ export const ExperimentView: React.FC = () => {
   const theme = getThemeConfig(themePalette);
 
   return (
-    <div className={`flex-1 p-6 overflow-y-auto ${theme.appBg}`}>
+    <div className={`flex-1 p-6 overflow-y-auto overflow-x-auto ${theme.appBg}`}>
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center gap-3">

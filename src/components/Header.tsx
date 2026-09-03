@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Share2, Copy, ShieldCheck, Lock, Flame, X, Mail } from 'lucide-react';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Lock, Flame, X } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
@@ -7,13 +7,15 @@ import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { ShareTreeModal } from '../rodovid/components/modals/ShareTreeModal';
 import { GedcomModal } from '../rodovid/components/modals/GedcomModal';
 import { HeaderSearchBar } from './HeaderSearchBar';
+import { GlobalSearchModal } from './GlobalSearchModal';
 
 interface HeaderProps {
   onOpenAddPerson: () => void;
   onInspectPerson?: (id: string) => void;
+  onOpenContactModal?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson, onOpenContactModal }) => {
   const { 
     searchQuery, 
     setSearchQuery, 
@@ -38,17 +40,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const isSidebarVisible = useUIStore((s) => s.isSidebarVisible);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const openAuthModal = useUIStore((s) => s.openAuthModal);
-  const openContactModal = useUIStore((s) => s.openContactModal);
   const setRodovidView = useUIStore((s) => s.setRodovidView);
 
   const { currentUser, whitelist, accessRequests, logout } = useAuthStore();
   const isWhitelisted = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
-    (currentUser.role === 'admin' ||
-      whitelist.some(
-        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-      ))
+    whitelist.some(
+      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
+    )
   );
 
   const isAdmin = Boolean(
@@ -67,12 +67,31 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showGedcomModal, setShowGedcomModal] = useState(false);
+  const [showGlobalSearchModal, setShowGlobalSearchModal] = useState(false);
   const [showCloudPopover, setShowCloudPopover] = useState(false);
   const [cloudActionMsg, setCloudActionMsg] = useState<{ text: string; isError?: boolean } | null>(null);
-  const [copiedUrl, setCopiedUrl] = useState(false);
   const [toastNotice, setToastNotice] = useState<string | null>(null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Global keyboard shortcut for search (Cmd+K / Ctrl+K / slash)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Check if user is typing in an input/textarea
+      const target = e.target as HTMLElement;
+      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowGlobalSearchModal(true);
+      } else if (e.key === '/' && !isInput) {
+        e.preventDefault();
+        setShowGlobalSearchModal(true);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   // Close cloud popover on click outside or escape key
   useEffect(() => {
@@ -131,40 +150,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
     }
   };
 
-  const handleShareOrCopyUrl = async () => {
-    if (isAdmin) {
-      setShowShareModal(true);
-    } else {
-      // Non-admins: copy direct page URL
-      try {
-        let urlToCopy = window.location.href;
-        if (urlToCopy.includes('ais-dev-')) {
-          urlToCopy = urlToCopy.replace('ais-dev-', 'ais-pre-');
-        }
-        await navigator.clipboard.writeText(urlToCopy);
-        setCopiedUrl(true);
-        setToastNotice('Адресу сторінки родоводу скопійовано в буфер обміну!');
-        setTimeout(() => setCopiedUrl(false), 2500);
-        setTimeout(() => setToastNotice(null), 3500);
-      } catch {
-        const textArea = document.createElement('textarea');
-        let urlToCopy = window.location.href;
-        if (urlToCopy.includes('ais-dev-')) {
-          urlToCopy = urlToCopy.replace('ais-dev-', 'ais-pre-');
-        }
-        textArea.value = urlToCopy;
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        setCopiedUrl(true);
-        setToastNotice('Адресу сторінки родоводу скопійовано в буфер обміну!');
-        setTimeout(() => setCopiedUrl(false), 2500);
-        setTimeout(() => setToastNotice(null), 3500);
-      }
-    }
-  };
-
   return (
     <>
       <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-3 md:px-6 flex items-center justify-between gap-2 md:gap-4 flex-shrink-0 transition-colors duration-300 relative`}>
@@ -183,6 +168,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
         <HeaderSearchBar 
           onOpenAddPerson={isWhitelisted ? onOpenAddPerson : () => openAuthModal('Додавання особи')}
           onInspectPerson={onInspectPerson}
+          onOpenGlobalModal={() => setShowGlobalSearchModal(true)}
         />
 
         {/* Quick Cloud Sync Status Flame Icon Button */}
@@ -356,65 +342,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             </button>
           )}
 
-          {/* Whitelist Login Button when not authenticated */}
-          {!isWhitelisted && (
-            <button
-              onClick={() => openAuthModal()}
-              className="p-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 border border-amber-500/40 text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
-              title="Увійти за поштою або Google для редагування"
-            >
-              <ShieldCheck className="w-4 h-4 text-amber-500" />
-            </button>
-          )}
-
-          {/* Contact Author Button (domagile@gmail.com) */}
-          <button
-            id="header-contact-author-btn"
-            onClick={() => openContactModal()}
-            className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs font-semibold transition-all shrink-0 cursor-pointer shadow-xs ${
-              theme.category === 'dark'
-                ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-500/30'
-                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
-            }`}
-            title="Шукаєте спільних предків? Написати автору дослідження (domagile@gmail.com)"
-          >
-            <Mail className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span className="hidden sm:inline">Зв'язок з автором</span>
-          </button>
-
-          {/* Share Tree (Admin only modal) or Copy Address (Others) Button */}
-          <button
-            onClick={handleShareOrCopyUrl}
-            className={`p-2 rounded-xl border font-semibold text-xs transition-colors shrink-0 cursor-pointer ${
-              copiedUrl
-                ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
-                : theme.category === 'dark'
-                ? 'bg-amber-900/30 hover:bg-amber-900/50 text-amber-300 border-amber-500/40'
-                : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
-            }`}
-            title={
-              isAdmin
-                ? 'Спільний перегляд дерева (Налаштування та публікація онлайн)'
-                : copiedUrl
-                ? 'Адресу сторінки скопійовано!'
-                : 'Скопіювати адресу сторінки (Спільний перегляд дерева доступний тільки адміністраторам)'
-            }
-          >
-            {copiedUrl ? (
-              <Check className="w-4 h-4 text-white" />
-            ) : isAdmin ? (
-              <Share2 className="w-4 h-4 text-amber-500" />
-            ) : (
-              <Copy className="w-4 h-4 text-amber-500" />
-            )}
-          </button>
-
           {/* Add Person Button - Icon Only */}
           <button
             onClick={isWhitelisted ? onOpenAddPerson : () => openAuthModal('Додавання особи')}
             id="add-person-btn"
             className={`p-2 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-xl text-xs transition-colors shadow-sm shrink-0 cursor-pointer ${!isWhitelisted ? 'opacity-90' : ''}`}
-            title={!isWhitelisted ? 'Редагування доступне після входу за Whitelist' : 'Додати особу'}
+            title={!isWhitelisted ? 'Для редагування надішліть запит на доступ або увійдіть' : 'Додати особу'}
           >
             {isWhitelisted ? <UserPlus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
           </button>
@@ -568,6 +501,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             loadGenealogyDatabase(newDb);
             setShowGedcomModal(false);
           }}
+        />
+      )}
+
+      {showGlobalSearchModal && (
+        <GlobalSearchModal
+          isOpen={showGlobalSearchModal}
+          onClose={() => setShowGlobalSearchModal(false)}
+          onInspectPerson={onInspectPerson}
         />
       )}
     </>
