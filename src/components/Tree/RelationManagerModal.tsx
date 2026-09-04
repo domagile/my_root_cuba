@@ -21,13 +21,13 @@ import {
 } from 'lucide-react';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
-import { Person } from '../../types';
+import { Person, GodparentItem } from '../../types';
 
-interface RelationManagerModalProps {
+export interface RelationManagerModalProps {
   targetPerson: Person;
   onClose: () => void;
   onOpenAddModalWithRelation: (
-    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling',
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness',
     targetPersonId: string
   ) => void;
 }
@@ -42,8 +42,10 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
 
   // Tab navigation: 'create' | 'attach' | 'existing'
   const [activeTab, setActiveTab] = useState<'create' | 'attach' | 'existing'>('create');
-  // Selector mode for attaching existing person: 'parent' | 'spouse' | 'child' | 'sibling'
-  const [attachingType, setAttachingType] = useState<'parent' | 'spouse' | 'child' | 'sibling'>('parent');
+  // Selector mode for attaching existing person:
+  const [attachingType, setAttachingType] = useState<
+    'parent' | 'spouse' | 'child' | 'sibling' | 'godparent' | 'godchild' | 'witness'
+  >('parent');
   const [searchQuery, setSearchQuery] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
@@ -107,17 +109,110 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
     return list;
   }, [liveTargetPerson, persons]);
 
-  const totalLinkedCount = (linkedFather ? 1 : 0) + (linkedMother ? 1 : 0) + linkedSpouses.length + linkedChildren.length;
+  // Godparents (Хрещені батьки / Куми)
+  const linkedGodparents = useMemo(() => {
+    const list: { gpId?: string; personId?: string; name: string; role?: string; notes?: string; person?: Person }[] = [];
+    const directGps = liveTargetPerson.godparents || [];
+    directGps.forEach((gp) => {
+      if (gp.role === 'witness') return;
+      const p = gp.personId ? persons.find((item) => item.id === gp.personId) : undefined;
+      list.push({
+        gpId: gp.id,
+        personId: gp.personId,
+        name: p ? getPersonName(p) : gp.name,
+        role: gp.role,
+        notes: gp.notes,
+        person: p
+      });
+    });
+    (liveTargetPerson.godparentIds || []).forEach((id) => {
+      if (!list.some((item) => item.personId === id)) {
+        const p = persons.find((item) => item.id === id);
+        if (p) {
+          list.push({
+            personId: id,
+            name: getPersonName(p),
+            role: p.gender === 'female' || p.gender === 'F' ? 'godmother' : 'godfather',
+            person: p
+          });
+        }
+      }
+    });
+    return list;
+  }, [liveTargetPerson, persons]);
+
+  // Godchildren (Хрещеники)
+  const linkedGodchildren = useMemo(() => {
+    const list: Person[] = [];
+    (liveTargetPerson.godchildrenIds || []).forEach((id) => {
+      const p = persons.find((item) => item.id === id);
+      if (p && !list.some((item) => item.id === p.id)) list.push(p);
+    });
+    persons.forEach((p) => {
+      if (p.godparents?.some((gp) => gp.personId === liveTargetPerson.id && gp.role !== 'witness')) {
+        if (!list.some((item) => item.id === p.id)) list.push(p);
+      }
+      if (p.godparentIds?.includes(liveTargetPerson.id)) {
+        if (!list.some((item) => item.id === p.id)) list.push(p);
+      }
+    });
+    return list;
+  }, [liveTargetPerson, persons]);
+
+  // Witnesses / Sponsors (Свідки та поручителі)
+  const linkedWitnesses = useMemo(() => {
+    const list: { gpId?: string; personId?: string; name: string; role?: string; notes?: string; person?: Person }[] = [];
+    const directGps = liveTargetPerson.godparents || [];
+    directGps.forEach((gp) => {
+      if (gp.role === 'witness') {
+        const p = gp.personId ? persons.find((item) => item.id === gp.personId) : undefined;
+        list.push({
+          gpId: gp.id,
+          personId: gp.personId,
+          name: p ? getPersonName(p) : gp.name,
+          role: 'witness',
+          notes: gp.notes,
+          person: p
+        });
+      }
+    });
+    return list;
+  }, [liveTargetPerson, persons]);
+
+  const totalLinkedCount =
+    (linkedFather ? 1 : 0) +
+    (linkedMother ? 1 : 0) +
+    linkedSpouses.length +
+    linkedChildren.length +
+    linkedGodparents.length +
+    linkedGodchildren.length +
+    linkedWitnesses.length;
 
   // Candidates for attaching
   const candidatePersons = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return persons.filter((p) => {
       if (p.id === liveTargetPerson.id) return false;
-      // Filter out already linked relatives
-      if (p.id === liveTargetPerson.fatherId || p.id === liveTargetPerson.motherId) return false;
-      if (liveTargetPerson.spouseIds?.includes(p.id) || p.spouseIds?.includes(liveTargetPerson.id)) return false;
-      if (liveTargetPerson.childrenIds?.includes(p.id) || p.fatherId === liveTargetPerson.id || p.motherId === liveTargetPerson.id) return false;
+
+      // Filter out already linked relatives according to selected attachingType
+      if (attachingType === 'parent' && (p.id === liveTargetPerson.fatherId || p.id === liveTargetPerson.motherId)) {
+        return false;
+      }
+      if (attachingType === 'spouse' && (liveTargetPerson.spouseIds?.includes(p.id) || p.spouseIds?.includes(liveTargetPerson.id))) {
+        return false;
+      }
+      if (attachingType === 'child' && (liveTargetPerson.childrenIds?.includes(p.id) || p.fatherId === liveTargetPerson.id || p.motherId === liveTargetPerson.id)) {
+        return false;
+      }
+      if (attachingType === 'godparent' && (liveTargetPerson.godparents?.some((gp) => gp.personId === p.id && gp.role !== 'witness') || liveTargetPerson.godparentIds?.includes(p.id))) {
+        return false;
+      }
+      if (attachingType === 'godchild' && (liveTargetPerson.godchildrenIds?.includes(p.id) || p.godparents?.some((gp) => gp.personId === liveTargetPerson.id && gp.role !== 'witness'))) {
+        return false;
+      }
+      if (attachingType === 'witness' && (liveTargetPerson.godparents?.some((gp) => gp.personId === p.id && gp.role === 'witness'))) {
+        return false;
+      }
 
       if (!q) return true;
       const fullName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.toLowerCase();
@@ -125,7 +220,7 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
       const place = (p.birthPlace || '').toLowerCase();
       return fullName.includes(q) || birth.includes(q) || place.includes(q);
     }).slice(0, 15);
-  }, [liveTargetPerson, persons, searchQuery]);
+  }, [liveTargetPerson, persons, searchQuery, attachingType]);
 
   const showFeedback = (msg: string) => {
     setFeedbackMsg(msg);
@@ -192,6 +287,80 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
       updatePerson(updatedTarget);
       updatePerson(updatedSelected);
       showFeedback(`Приєднано спільних батьків для брата/сестри`);
+    } else if (attachingType === 'godparent') {
+      const isFemale = selectedPerson.gender === 'female' || selectedPerson.gender === 'F';
+      const role = isFemale ? 'godmother' : 'godfather';
+      const roleLabel = isFemale ? 'хрещену матір' : 'хрещеного батька';
+      const existingGps = liveTargetPerson.godparents || [];
+      const newGp: GodparentItem = {
+        id: crypto.randomUUID(),
+        personId: selectedPerson.id,
+        name: getPersonName(selectedPerson),
+        role,
+        notes: isFemale ? 'Хрещена мати' : 'Хрещений батько'
+      };
+      const updatedGodparents = [...existingGps.filter((g) => g.personId !== selectedPerson.id), newGp];
+      const updatedGodparentIds = Array.from(new Set([...(liveTargetPerson.godparentIds || []), selectedPerson.id]));
+
+      updatePerson({
+        ...liveTargetPerson,
+        godparents: updatedGodparents,
+        godparentIds: updatedGodparentIds
+      });
+
+      const updatedGodchildren = Array.from(new Set([...(selectedPerson.godchildrenIds || []), liveTargetPerson.id]));
+      updatePerson({
+        ...selectedPerson,
+        godchildrenIds: updatedGodchildren
+      });
+
+      showFeedback(`Приєднано ${roleLabel}: ${getPersonName(selectedPerson)}`);
+    } else if (attachingType === 'godchild') {
+      const isFemale = liveTargetPerson.gender === 'female' || liveTargetPerson.gender === 'F';
+      const role = isFemale ? 'godmother' : 'godfather';
+      const existingCandGps = selectedPerson.godparents || [];
+      const newGp: GodparentItem = {
+        id: crypto.randomUUID(),
+        personId: liveTargetPerson.id,
+        name: getPersonName(liveTargetPerson),
+        role,
+        notes: isFemale ? 'Хрещена мати' : 'Хрещений батько'
+      };
+      const updatedCandGodparents = [...existingCandGps.filter((g) => g.personId !== liveTargetPerson.id), newGp];
+      const updatedCandGodparentIds = Array.from(new Set([...(selectedPerson.godparentIds || []), liveTargetPerson.id]));
+
+      updatePerson({
+        ...selectedPerson,
+        godparents: updatedCandGodparents,
+        godparentIds: updatedCandGodparentIds
+      });
+
+      const updatedGodchildren = Array.from(new Set([...(liveTargetPerson.godchildrenIds || []), selectedPerson.id]));
+      updatePerson({
+        ...liveTargetPerson,
+        godchildrenIds: updatedGodchildren
+      });
+
+      showFeedback(`Приєднано хрещеника: ${getPersonName(selectedPerson)}`);
+    } else if (attachingType === 'witness') {
+      const existingGps = liveTargetPerson.godparents || [];
+      const newGp: GodparentItem = {
+        id: crypto.randomUUID(),
+        personId: selectedPerson.id,
+        name: getPersonName(selectedPerson),
+        role: 'witness',
+        notes: 'Свідок / поручитель'
+      };
+      const updatedGodparents = [...existingGps.filter((g) => g.personId !== selectedPerson.id), newGp];
+      const updatedGodparentIds = Array.from(new Set([...(liveTargetPerson.godparentIds || []), selectedPerson.id]));
+
+      updatePerson({
+        ...liveTargetPerson,
+        godparents: updatedGodparents,
+        godparentIds: updatedGodparentIds
+      });
+
+      showFeedback(`Приєднано свідка / поручителя: ${getPersonName(selectedPerson)}`);
     }
   };
 
@@ -237,6 +406,63 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
     if (updatedChild.motherId === liveTargetPerson.id) updatedChild.motherId = undefined;
     updatePerson(updatedChild);
     showFeedback(`Від'єднано зв'язок з дитиною: ${getPersonName(child)}`);
+  };
+
+  const handleUnlinkGodparent = (personId?: string, gpId?: string) => {
+    const updatedGodparents = (liveTargetPerson.godparents || []).filter(
+      (gp) => (personId && gp.personId === personId) ? false : (gpId && gp.id === gpId) ? false : true
+    );
+    const updatedGodparentIds = (liveTargetPerson.godparentIds || []).filter((id) => id !== personId);
+    updatePerson({
+      ...liveTargetPerson,
+      godparents: updatedGodparents,
+      godparentIds: updatedGodparentIds
+    });
+
+    if (personId) {
+      const gpPerson = persons.find((p) => p.id === personId);
+      if (gpPerson) {
+        updatePerson({
+          ...gpPerson,
+          godchildrenIds: (gpPerson.godchildrenIds || []).filter((id) => id !== liveTargetPerson.id)
+        });
+      }
+      showFeedback(`Від'єднано зв'язок з хрещеним: ${gpPerson ? getPersonName(gpPerson) : ''}`);
+    } else {
+      showFeedback(`Видалено запис хрещеного`);
+    }
+  };
+
+  const handleUnlinkGodchild = (childPersonId: string) => {
+    const updatedGodchildren = (liveTargetPerson.godchildrenIds || []).filter((id) => id !== childPersonId);
+    updatePerson({
+      ...liveTargetPerson,
+      godchildrenIds: updatedGodchildren
+    });
+
+    const childPerson = persons.find((p) => p.id === childPersonId);
+    if (childPerson) {
+      updatePerson({
+        ...childPerson,
+        godparents: (childPerson.godparents || []).filter((gp) => gp.personId !== liveTargetPerson.id),
+        godparentIds: (childPerson.godparentIds || []).filter((id) => id !== liveTargetPerson.id)
+      });
+    }
+    showFeedback(`Від'єднано зв'язок з хрещеником: ${childPerson ? getPersonName(childPerson) : ''}`);
+  };
+
+  const handleUnlinkWitness = (personId?: string, gpId?: string) => {
+    const updatedGodparents = (liveTargetPerson.godparents || []).filter(
+      (gp) => (personId && gp.personId === personId) ? false : (gpId && gp.id === gpId) ? false : true
+    );
+    const updatedGodparentIds = (liveTargetPerson.godparentIds || []).filter((id) => id !== personId);
+    updatePerson({
+      ...liveTargetPerson,
+      godparents: updatedGodparents,
+      godparentIds: updatedGodparentIds
+    });
+    const wPerson = personId ? persons.find((p) => p.id === personId) : undefined;
+    showFeedback(`Від'єднано свідка / поручителя: ${wPerson ? getPersonName(wPerson) : ''}`);
   };
 
   return (
@@ -423,6 +649,36 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                     + Без уточнення статі
                   </p>
                 </button>
+
+                <button
+                  onClick={() => onOpenAddModalWithRelation('godparent', liveTargetPerson.id)}
+                  className="p-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50/60 dark:bg-slate-800/60 hover:border-amber-500 dark:hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-slate-800 transition-all text-left group cursor-pointer shadow-2xs"
+                >
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <Heart className="w-3 h-3 text-amber-500 shrink-0" />
+                    <span className="font-bold text-xs text-neutral-900 dark:text-neutral-100 group-hover:text-amber-700 dark:group-hover:text-amber-300">
+                      Хрещений / Хрещена
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate">
+                    + Хрещені батьки (куми)
+                  </p>
+                </button>
+
+                <button
+                  onClick={() => onOpenAddModalWithRelation('witness', liveTargetPerson.id)}
+                  className="p-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50/60 dark:bg-slate-800/60 hover:border-purple-500 dark:hover:border-purple-500 hover:bg-purple-50/50 dark:hover:bg-slate-800 transition-all text-left group cursor-pointer shadow-2xs"
+                >
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <User className="w-3 h-3 text-purple-500 shrink-0" />
+                    <span className="font-bold text-xs text-neutral-900 dark:text-neutral-100 group-hover:text-purple-700 dark:group-hover:text-purple-300">
+                      Свідок / Поручитель
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate">
+                    + Весілля або хрещення
+                  </p>
+                </button>
               </div>
             </div>
           )}
@@ -437,7 +693,10 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                   { id: 'parent', label: 'Батько / Мати' },
                   { id: 'spouse', label: 'Партнер' },
                   { id: 'child', label: 'Дитина' },
-                  { id: 'sibling', label: 'Брат/Сестра' }
+                  { id: 'sibling', label: 'Брат/Сестра' },
+                  { id: 'godparent', label: 'Хрещений' },
+                  { id: 'godchild', label: 'Хрещеник' },
+                  { id: 'witness', label: 'Свідок' }
                 ].map((type) => (
                   <button
                     key={type.id}
@@ -589,7 +848,98 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                       </div>
                       <button
                         onClick={() => handleUnlinkChild(ch)}
-                        className="px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg flex items-center gap-1 transition-colors"
+                        className="px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Від'єднати"
+                      >
+                        <Unlink className="w-3 h-3" />
+                        <span>Від'єднати</span>
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Хрещені батьки (Куми) */}
+                  {linkedGodparents.map((gp, idx) => (
+                    <div key={gp.gpId || gp.personId || `gp-${idx}`} className="p-2.5 rounded-xl border border-amber-200/80 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 flex items-center justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                            {gp.role === 'godmother' ? 'Хрещена мати:' : 'Хрещений батько:'}
+                          </span>
+                          <span className="text-[10px] px-1 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-medium">
+                            {gp.person ? 'У дереві' : 'Тільки імʼя'}
+                          </span>
+                        </div>
+                        <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate block mt-0.5">
+                          {gp.name}
+                        </span>
+                        {gp.notes && (
+                          <span className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate block">
+                            {gp.notes}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleUnlinkGodparent(gp.personId, gp.gpId)}
+                        className="px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Від'єднати"
+                      >
+                        <Unlink className="w-3 h-3" />
+                        <span>Від'єднати</span>
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Хрещеники */}
+                  {linkedGodchildren.map((ch) => (
+                    <div key={`gchild-${ch.id}`} className="p-2.5 rounded-xl border border-amber-200/60 dark:border-amber-900/30 bg-amber-50/20 dark:bg-amber-950/10 flex items-center justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                            Хрещеник (похресник):
+                          </span>
+                          <span className="text-[10px] px-1 rounded bg-amber-100/70 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium">
+                            {ch.gender === 'female' || ch.gender === 'F' ? 'Хрещениця' : 'Хрещеник'}
+                          </span>
+                        </div>
+                        <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate block mt-0.5">
+                          {getPersonName(ch)}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleUnlinkGodchild(ch.id)}
+                        className="px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Від'єднати"
+                      >
+                        <Unlink className="w-3 h-3" />
+                        <span>Від'єднати</span>
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Свідки / поручителі */}
+                  {linkedWitnesses.map((w, idx) => (
+                    <div key={w.gpId || w.personId || `w-${idx}`} className="p-2.5 rounded-xl border border-purple-200/80 dark:border-purple-900/40 bg-purple-50/40 dark:bg-purple-950/20 flex items-center justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-purple-700 dark:text-purple-400">
+                            Свідок / Поручитель:
+                          </span>
+                          <span className="text-[10px] px-1 rounded bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 font-medium">
+                            {w.person ? 'У дереві' : 'Тільки імʼя'}
+                          </span>
+                        </div>
+                        <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate block mt-0.5">
+                          {w.name}
+                        </span>
+                        {w.notes && (
+                          <span className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate block">
+                            {w.notes}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleUnlinkWitness(w.personId, w.gpId)}
+                        className="px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
                         title="Від'єднати"
                       >
                         <Unlink className="w-3 h-3" />

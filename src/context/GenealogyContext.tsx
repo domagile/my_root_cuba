@@ -23,6 +23,10 @@ import { useUIStore } from '../stores/useUIStore';
 import { useGenealogyStore, normalizePerson, INITIAL_PERSONS } from '../stores/useGenealogyStore';
 import { useResearchStore, INITIAL_METRICS, INITIAL_DOCUMENTS, INITIAL_TASKS, INITIAL_FINDINGS, INITIAL_HYPOTHESES, INITIAL_REQUESTS, INITIAL_MATRIX } from '../stores/useResearchStore';
 import { useCloudSyncStore, CloudSyncStatus } from '../stores/useCloudSyncStore';
+import { useAuthStore } from '../stores/useAuthStore';
+import { findRootPersonId } from '../rodovid/utils/relationship';
+import { getSavedUserTreeState } from '../utils/userTreeState';
+import { isUserWhitelisted } from '../rodovid/utils/privacy';
 
 export { useUIStore } from '../stores/useUIStore';
 export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore';
@@ -263,6 +267,36 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const setLastSyncTime = useCloudSyncStore((s) => s.setLastSyncTime);
   const setIsManualPushing = useCloudSyncStore((s) => s.setIsManualPushing);
   const setIsManualPulling = useCloudSyncStore((s) => s.setIsManualPulling);
+
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const prevUserEmailRef = React.useRef<string | null>(null);
+
+  // Synchronize tree focus based on user authorization state:
+  // - Authorized returning user: restore saved tree focus person
+  // - Guest / Unauthenticated: default focus to root person
+  useEffect(() => {
+    const isAuth = isUserWhitelisted(currentUser, whitelist);
+    const userEmail = currentUser?.email?.trim().toLowerCase() || null;
+
+    if (prevUserEmailRef.current !== userEmail) {
+      prevUserEmailRef.current = userEmail;
+
+      if (isAuth && userEmail) {
+        const saved = getSavedUserTreeState(userEmail);
+        if (saved?.selectedPersonId && persons.some((p) => p.id === saved.selectedPersonId)) {
+          setSelectedPersonId(saved.selectedPersonId);
+        } else {
+          const rootId = findRootPersonId(persons);
+          setSelectedPersonId(rootId);
+        }
+      } else if (!currentUser || !currentUser.isAuthenticated) {
+        // Guest or logged out: reset tree focus to root person
+        const rootId = findRootPersonId(persons);
+        setSelectedPersonId(rootId);
+      }
+    }
+  }, [currentUser, whitelist, persons, setSelectedPersonId]);
 
   // Firestore Sync Listener
   useEffect(() => {

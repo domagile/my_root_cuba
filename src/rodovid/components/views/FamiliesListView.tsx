@@ -19,6 +19,8 @@ import { getPrivacySafePerson, isPersonLiving, isUserWhitelisted } from '../../u
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 import { isPersonMale } from '../../utils/genderUtils';
+import { getPersonRodName } from '../../utils/treeLayout';
+import { areSurnamesEquivalent, arePlacesEquivalent, normalizeUkrainianPlace, formatClanName } from '../../../utils/ukrainianPhonetics';
 
 interface FamiliesListViewProps {
   database: GenealogyDatabase;
@@ -50,14 +52,28 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
 
   const familiesList = useMemo(() => {
     return (Object.values(database.families) as Family[]).filter((f) => {
+      const q = searchTerm.toLowerCase().trim();
+      if (!q) return true;
+
       const husband = f.husbandId ? database.persons[f.husbandId] : null;
       const wife = f.wifeId ? database.persons[f.wifeId] : null;
-      const husbName = getFullName(husband || undefined).toLowerCase();
-      const wifeName = getFullName(wife || undefined).toLowerCase();
-      const place = (f.marriagePlace || '').toLowerCase();
-      const q = searchTerm.toLowerCase().trim();
+      const husbName = getFullName(husband || undefined);
+      const wifeName = getFullName(wife || undefined);
+      const husbSurname = husband?.name?.surname || husband?.lastName || '';
+      const wifeSurname = wife?.name?.surname || wife?.lastName || wife?.name?.maidenName || wife?.maidenName || '';
+      const place = f.marriagePlace || '';
 
-      return !q || husbName.includes(q) || wifeName.includes(q) || place.includes(q);
+      // Direct full name substring match
+      if (husbName.toLowerCase().includes(q) || wifeName.toLowerCase().includes(q)) return true;
+
+      // Gender-normalized surname equivalence (e.g. searching "Пірковський" finds family where wife is "Пірковська")
+      if (areSurnamesEquivalent(q, husbSurname) || areSurnamesEquivalent(q, wifeSurname)) return true;
+
+      // Place normalized match (e.g. searching "Базилівка" matches "с. Базилівка")
+      if (place.toLowerCase().includes(q) || arePlacesEquivalent(q, place)) return true;
+      if (normalizeUkrainianPlace(place).toLowerCase().includes(normalizeUkrainianPlace(q).toLowerCase())) return true;
+
+      return false;
     });
   }, [database.families, database.persons, searchTerm]);
 
@@ -115,19 +131,28 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
             const husband = fam.husbandId ? database.persons[fam.husbandId] : null;
             const wife = fam.wifeId ? database.persons[fam.wifeId] : null;
 
+            const rodPerson = husband || wife;
+            const rodName = rodPerson ? getPersonRodName(rodPerson) : '';
+            const clanTitle = rodName && rodName !== 'Рід' ? formatClanName(rodName) : '';
+
             return (
               <div
                 key={fam.id}
                 className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-5 shadow-xs space-y-4 hover:border-emerald-500/60 transition-colors`}
               >
                 <div className={`flex items-center justify-between border-b ${theme.borderSubtle} pb-3`}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-xs font-mono font-semibold px-2 py-0.5 ${isDark ? 'bg-slate-800 text-emerald-400' : 'bg-emerald-100 text-emerald-800'} rounded`}>
                       {fam.id}
                     </span>
                     <span className={`text-xs ${theme.textMuted}`}>
                       {fam.relationshipType === 'Married' ? 'Зареєстрований шлюб' : 'Союз'}
                     </span>
+                    {clanTitle && (
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                        {clanTitle}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1">

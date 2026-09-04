@@ -89,7 +89,7 @@ function AppContent() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
   const [addRelation, setAddRelation] = useState<{
-    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness';
     targetPersonId: string;
   } | null>(null);
 
@@ -159,7 +159,7 @@ function AppContent() {
   };
 
   const handleOpenAddModalWithRelation = (
-    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling',
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness',
     targetPersonId: string
   ) => {
     if (!isWhitelisted) {

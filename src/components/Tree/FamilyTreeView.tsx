@@ -25,6 +25,7 @@ import { getThemeConfig } from '../../utils/theme';
 import { Person } from '../../types';
 import { RelationManagerModal } from './RelationManagerModal';
 import { AddPersonModal } from './AddPersonModal';
+import { comparePersonsByAge } from '../../rodovid/utils/treeLayout';
 
 export const FamilyTreeView: React.FC = () => {
   const { persons, selectedPersonId, setSelectedPersonId, themePalette } = useGenealogy();
@@ -39,7 +40,7 @@ export const FamilyTreeView: React.FC = () => {
 
   const [relationTargetPerson, setRelationTargetPerson] = useState<Person | null>(null);
   const [addRelationData, setAddRelationData] = useState<{
-    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness';
     targetPersonId: string;
   } | null>(null);
 
@@ -51,12 +52,16 @@ export const FamilyTreeView: React.FC = () => {
 
     const parents = persons.filter((p) => p.id === activePerson.fatherId || p.id === activePerson.motherId);
     const spouses = persons.filter((p) => activePerson.spouseIds?.includes(p.id) || p.spouseIds?.includes(activePerson.id));
-    const children = persons.filter((p) => p.fatherId === activePerson.id || p.motherId === activePerson.id || activePerson.childrenIds?.includes(p.id));
-    const siblings = persons.filter((p) => 
-      p.id !== activePerson.id && 
-      ((activePerson.fatherId && p.fatherId === activePerson.fatherId) || 
-       (activePerson.motherId && p.motherId === activePerson.motherId))
-    );
+    const children = persons
+      .filter((p) => p.fatherId === activePerson.id || p.motherId === activePerson.id || activePerson.childrenIds?.includes(p.id))
+      .sort((a, b) => comparePersonsByAge(a, b));
+    const siblings = persons
+      .filter((p) => 
+        p.id !== activePerson.id && 
+        ((activePerson.fatherId && p.fatherId === activePerson.fatherId) || 
+         (activePerson.motherId && p.motherId === activePerson.motherId))
+      )
+      .sort((a, b) => comparePersonsByAge(a, b));
 
     return { parents, spouses, children, siblings };
   }, [activePerson, persons]);

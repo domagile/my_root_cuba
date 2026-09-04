@@ -54,11 +54,13 @@ import {
   CLASSIC_CARD_WIDTH,
   CLASSIC_CARD_HEIGHT
 } from '../../utils/treeLayout';
-import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
+import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId } from '../../utils/relationship';
+import { getSavedUserTreeState, saveUserTreeState } from '../../../utils/userTreeState';
 import { useUIStore } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, getPrivacyLifespan, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
+import { PersonReportModal } from '../../../components/common/PersonReportModal';
 
 // Ukrainian generation declension helper
 function getUkrainianGenerationLabel(n: number): string {
@@ -103,21 +105,40 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const whitelist = useAuthStore((s) => s.whitelist);
   const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
 
+  const rootPersonId = useMemo(
+    () => database.rootPersonId || findRootPersonId(database.persons),
+    [database]
+  );
+
+  const initialUserState = useMemo(() => {
+    if (isWhitelisted && currentUser?.email) {
+      return getSavedUserTreeState(currentUser.email);
+    }
+    return null;
+  }, [isWhitelisted, currentUser?.email]);
+
   const dropdownPersons = useMemo(() => {
     const rawList = Object.values(database.persons || {}) as Person[];
-    if (isWhitelisted) {
-      return sortPersonsBySurnameAndBirthDesc(rawList);
+    const list = isWhitelisted ? rawList : rawList.map((p) => getPrivacySafePerson(p, false));
+    const sorted = sortPersonsBySurnameAndBirthDesc(list);
+    const rootP = sorted.find((p) => p.id === rootPersonId);
+    if (rootP) {
+      return [rootP, ...sorted.filter((p) => p.id !== rootPersonId)];
     }
-    const safeList = rawList.map((p) => getPrivacySafePerson(p, false));
-    return sortPersonsBySurnameAndBirthDesc(safeList);
-  }, [database.persons, isWhitelisted]);
+    return sorted;
+  }, [database.persons, isWhitelisted, rootPersonId]);
 
   const canvasTheme = useUIStore((s) => s.treeCanvasTheme);
   const setCanvasTheme = useUIStore((s) => s.setTreeCanvasTheme);
 
   const [layoutType, setLayoutType] = useState<TreeLayoutType>('ancestors');
-  // Default to 0 = ALL generations
-  const [generations, setGenerations] = useState<number>(0);
+  // Default to 0 = ALL generations (or restore saved user preference)
+  const [generations, setGenerations] = useState<number>(() => {
+    if (typeof initialUserState?.generations === 'number') {
+      return initialUserState.generations;
+    }
+    return 0;
+  });
 
   // Generation options list without artificial cap
   const treeGenOptions = useMemo(() => {
@@ -132,8 +153,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }
     return options;
   }, [generations]);
-  const [scale, setScale] = useState<number>(1);
-  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 80, y: 80 });
+
+  const [scale, setScale] = useState<number>(() => {
+    if (initialUserState?.scale && typeof initialUserState.scale === 'number') {
+      return initialUserState.scale;
+    }
+    return 0.95;
+  });
+  const [pan, setPan] = useState<{ x: number; y: number }>(() => {
+    if (initialUserState?.pan && typeof initialUserState.pan.x === 'number') {
+      return initialUserState.pan;
+    }
+    return { x: 80, y: 80 };
+  });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [showMinimap, setShowMinimap] = useState<boolean>(true);
@@ -185,6 +217,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [collapsedSiblings, setCollapsedSiblings] = useState<Set<string>>(new Set());
   const [collapsedChildren, setCollapsedChildren] = useState<Set<string>>(new Set());
   const [hoveredPersonId, setHoveredPersonId] = useState<string | null>(null);
+  const [reportPersonId, setReportPersonId] = useState<string | null>(null);
 
   // Anchor tracking: preserve viewport screen position on the person card being expanded/collapsed
   const anchorRef = useRef<{ personId: string; screenX: number; screenY: number } | null>(null);
@@ -246,44 +279,57 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setAnchorForPerson(personId);
     const p = database.persons[personId];
     if (!p) return;
-    const fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    const mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    let fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    let mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
 
-    const relatedIds = [personId];
+    if (!fId && !mId && database.families) {
+      const matchingFam = Object.values(database.families).find(fam => 
+        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
+      );
+      if (matchingFam) {
+        fId = matchingFam.husbandId;
+        mId = matchingFam.wifeId;
+      }
+    }
+
+    const siblingIds = new Set<string>();
     if (p.siblingIds) {
-      p.siblingIds.forEach(id => relatedIds.push(id));
+      p.siblingIds.forEach(id => {
+        if (id !== personId) siblingIds.add(id);
+      });
     }
     Object.values(database.persons).forEach((cand: any) => {
+      if (cand.id === personId) return;
       const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
       const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-      if ((fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(personId))) {
-        relatedIds.push(cand.id);
+      if ((fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(personId)) || (p.siblingIds && p.siblingIds.includes(cand.id))) {
+        siblingIds.add(cand.id);
       }
     });
 
-    if (!showSiblings) {
-      // User was in Direct mode and clicked "+1" to see siblings of this specific person
-      setShowSiblings(true);
-      const allOther = new Set<string>();
-      Object.keys(database.persons).forEach(id => {
-        if (!relatedIds.includes(id)) {
-          allOther.add(id);
-        }
-      });
-      setCollapsedSiblings(allOther);
-      return;
-    }
-
     setCollapsedSiblings((prev) => {
       const next = new Set(prev);
-      const shouldCollapse = isCurrentlyCollapsed !== undefined ? !isCurrentlyCollapsed : !next.has(personId);
-      relatedIds.forEach((id) => {
-        if (shouldCollapse) {
-          next.add(id);
-        } else {
-          next.delete(id);
+      const isCollapsed = isCurrentlyCollapsed !== undefined
+        ? isCurrentlyCollapsed
+        : (next.has(personId) || Array.from(siblingIds).some(id => next.has(id)));
+      const shouldCollapse = !isCollapsed;
+
+      if (shouldCollapse) {
+        // Collapse: add personId and all their collateral siblings to collapsed set
+        next.add(personId);
+        siblingIds.forEach((sId) => {
+          next.add(sId);
+        });
+      } else {
+        // Expand: remove personId and all their siblings from collapsed set
+        next.delete(personId);
+        siblingIds.forEach((sId) => {
+          next.delete(sId);
+        });
+        if (!showSiblings) {
+          setShowSiblings(true);
         }
-      });
+      }
       return next;
     });
   }, [setAnchorForPerson, database.persons, database.families, showSiblings]);
@@ -444,18 +490,44 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setScale(fitScale);
   }, [layout.nodes, containerDimensions, treeBounds]);
 
-  const centerOnActive = useCallback(() => {
-    const activeNode = layout.nodes.find(n => n.person.id === activePersonId) || layout.nodes[0];
-    if (!activeNode) return;
-    const cw = containerDimensions.width || 1200;
-    const ch = containerDimensions.height || 800;
-    const nodeCenterX = activeNode.x + (activeNode.width || CLASSIC_CARD_WIDTH) / 2;
-    const nodeCenterY = activeNode.y + (activeNode.height || CLASSIC_CARD_HEIGHT) / 2;
+  // Focus camera directly and smoothly onto a specific person card (defaulting to active / root person)
+  const focusOnPerson = useCallback((personId?: string, preferredScale?: number) => {
+    const targetId = personId || activePersonId;
+    const targetNode = layout.nodes.find(n => n.person.id === targetId) || layout.nodes[0];
+    if (!targetNode) {
+      centerTree();
+      return;
+    }
+    const container = containerRef.current;
+    const cw = container ? container.clientWidth : (containerDimensions.width || 1200);
+    const ch = container ? container.clientHeight : (containerDimensions.height || 800);
+
+    const targetScale = preferredScale ?? (scale < 0.6 || scale > 1.3 ? 0.95 : scale);
+    const nodeCenterX = targetNode.x + (targetNode.width || CLASSIC_CARD_WIDTH) / 2;
+    const nodeCenterY = targetNode.y + (targetNode.height || CLASSIC_CARD_HEIGHT) / 2;
+
     setPan({
-      x: Math.round(cw / 2 - nodeCenterX * scale),
-      y: Math.round(ch / 2 - nodeCenterY * scale)
+      x: Math.round(cw / 2 - nodeCenterX * targetScale),
+      y: Math.round(ch / 2 - nodeCenterY * targetScale)
     });
-  }, [layout.nodes, activePersonId, containerDimensions, scale]);
+    if (preferredScale !== undefined || targetScale !== scale) {
+      setScale(targetScale);
+    }
+  }, [layout.nodes, activePersonId, containerDimensions, scale, centerTree]);
+
+  const centerOnActive = useCallback(() => {
+    focusOnPerson(activePersonId);
+  }, [focusOnPerson, activePersonId]);
+
+  // Quick Action: Return focus directly to the root person
+  const handleFocusRootPerson = useCallback(() => {
+    if (activePersonId !== rootPersonId) {
+      onChangeRoot(rootPersonId);
+    }
+    setTimeout(() => {
+      focusOnPerson(rootPersonId, 0.95);
+    }, 40);
+  }, [activePersonId, rootPersonId, onChangeRoot, focusOnPerson]);
 
   const scrollStep = useCallback((direction: 'left' | 'right') => {
     const step = 380;
@@ -479,22 +551,56 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }
   }, [layout, scale]);
 
-  // Center tree ONLY on initial mount or when active root person / layoutType changes
+  // Center tree on root person by default, or restore previous state if returning authorized user
   const isInitialMount = useRef<boolean>(true);
   const prevRootId = useRef<string>(activePersonId);
   const prevLayoutType = useRef<TreeLayoutType>(layoutType);
 
   useEffect(() => {
-    if (isInitialMount.current || prevRootId.current !== activePersonId || prevLayoutType.current !== layoutType) {
+    if (isInitialMount.current) {
       isInitialMount.current = false;
       prevRootId.current = activePersonId;
       prevLayoutType.current = layoutType;
+
       const timer = setTimeout(() => {
-        centerTree();
+        if (isWhitelisted && currentUser?.email) {
+          const saved = getSavedUserTreeState(currentUser.email);
+          if (saved?.pan && typeof saved.scale === 'number') {
+            setPan(saved.pan);
+            setScale(saved.scale);
+            return;
+          }
+        }
+        // Default focus: center squarely on the root person (or active person)
+        focusOnPerson(activePersonId, 0.95);
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+
+    if (prevRootId.current !== activePersonId || prevLayoutType.current !== layoutType) {
+      prevRootId.current = activePersonId;
+      prevLayoutType.current = layoutType;
+      const timer = setTimeout(() => {
+        focusOnPerson(activePersonId);
       }, 40);
       return () => clearTimeout(timer);
     }
-  }, [activePersonId, layoutType, centerTree]);
+  }, [activePersonId, layoutType, isWhitelisted, currentUser?.email, focusOnPerson]);
+
+  // Auto-save user tree viewport and active state for authorized users
+  useEffect(() => {
+    if (!isWhitelisted || !currentUser?.email) return;
+    const timer = setTimeout(() => {
+      saveUserTreeState(currentUser.email, {
+        pan,
+        scale,
+        selectedPersonId: activePersonId,
+        generations,
+        showSiblings
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [pan, scale, activePersonId, generations, showSiblings, isWhitelisted, currentUser?.email]);
 
   const touchStateRef = useRef<{
     initialDist: number;
@@ -821,16 +927,32 @@ export const TreeView: React.FC<TreeViewProps> = ({
               {dropdownPersons.map((p) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
                 const isMasked = !isWhitelisted && isLiving;
+                const isRoot = p.id === rootPersonId;
                 return (
                   <option key={p.id} value={p.id}>
-                    {isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}
+                    {isRoot ? '👑 ' : ''}{isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}{isRoot ? ' (Корінь)' : ''}
                   </option>
                 );
               })}
             </select>
+
+            {/* Quick Button: Return / Focus to Root Person */}
+            <button
+              type="button"
+              onClick={handleFocusRootPerson}
+              className={`flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium border transition-all cursor-pointer shadow-xs ${
+                activePersonId === rootPersonId
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60 hover:bg-emerald-900/80'
+                  : 'bg-[#15181b] text-amber-300 hover:text-white hover:bg-amber-950/60 border-amber-600/50'
+              }`}
+              title="Сфокусувати на корінній особі родоводу"
+            >
+              <Sparkles className={`w-3 h-3 ${activePersonId === rootPersonId ? 'text-emerald-400' : 'text-amber-400'}`} />
+              <span className="hidden xl:inline">До кореня</span>
+            </button>
           </div>
 
-          {/* Compact Toggle: Direct Line (1 person) vs All Relatives (many people) */}
+          {/* Sibling Toggle: Direct Line (1 person) vs All Relatives (many people) */}
           <div
             className="flex items-center bg-[#15181b] border border-[#2d3238] p-0.5 rounded-lg text-xs shadow-xs shrink-0"
             title="Перемикач: Тільки прямі предки / Всі родичі"
@@ -868,10 +990,45 @@ export const TreeView: React.FC<TreeViewProps> = ({
               <span className="hidden sm:inline">Всі</span>
             </button>
           </div>
+
+          {/* Dedicated Siblings Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowSiblings((prev) => {
+                const next = !prev;
+                if (!next) {
+                  setCollapsedSiblings(new Set());
+                }
+                return next;
+              });
+            }}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs ${
+              showSiblings
+                ? 'bg-sky-950/70 text-sky-300 border-sky-700/60 hover:bg-sky-900/80'
+                : 'bg-amber-950/70 text-amber-300 border-amber-700/60 hover:bg-amber-900/80'
+            }`}
+            title={showSiblings ? "Сховати всіх братів та сестер у дереві" : "Показати братів та сестер у дереві"}
+          >
+            <Users className="w-3.5 h-3.5 text-sky-400" />
+            <span className="hidden md:inline">Брати/сестри:</span>
+            <span className="font-semibold">{showSiblings ? 'Показані' : 'Сховані'}</span>
+          </button>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Quick Person Report Export */}
+          <button
+            type="button"
+            onClick={() => setReportPersonId(activePersonId)}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-[#2d3238] bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer shadow-xs"
+            title="Згенерувати короткий звіт про особу (PDF / TXT)"
+          >
+            <FileText className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">Звіт (PDF/TXT)</span>
+          </button>
+
           {/* Export Menu */}
           <div className="relative" ref={exportMenuRef}>
             <button
@@ -1196,6 +1353,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             const p = isMasked ? getPrivacySafePerson(rawPerson, false) : rawPerson;
 
             const isRoot = p.id === activePersonId;
+            const isTreeRoot = p.id === rootPersonId;
             const isMale = p.gender === 'male' || p.gender === 'M';
             const isFemale = p.gender === 'female' || p.gender === 'F';
             const isLightCanvas = canvasTheme === 'parchment' || canvasTheme === 'light';
@@ -1219,7 +1377,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   }}
                   onMouseEnter={() => setHoveredPersonId(p.id)}
                   onMouseLeave={() => setHoveredPersonId(null)}
-                  className={`group rounded-xl border p-2.5 shadow-lg transition-all cursor-pointer flex flex-col justify-center text-center ${
+                  className={`group rounded-xl border p-2.5 shadow-lg transition-all cursor-pointer flex flex-col justify-center text-center relative ${
                     isLightCanvas
                       ? 'bg-white border-[#d4c8b5] text-neutral-900 shadow-md'
                       : 'bg-[#22262a] border-[#363c44] text-white'
@@ -1229,6 +1387,14 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     onSelectPerson(p.id);
                   }}
                 >
+                  {isTreeRoot && (
+                    <span
+                      className="absolute -top-1.5 -right-1.5 z-10 w-4 h-4 rounded-full bg-amber-500 text-stone-950 font-bold text-[9px] flex items-center justify-center shadow-md border border-amber-300"
+                      title="Коренева особа родоводу"
+                    >
+                      👑
+                    </span>
+                  )}
                   <div className={`w-8 h-8 mx-auto mb-1.5 rounded-full flex items-center justify-center ${
                     isMasked
                       ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-700/60'
@@ -1271,6 +1437,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   onSelectPerson(p.id);
                 }}
               >
+                {/* Root Person Indicator Badge */}
+                {isTreeRoot && (
+                  <span
+                    className="absolute -top-2.5 left-3 z-10 px-2 py-0.5 rounded-full bg-amber-500 text-stone-950 font-bold text-[10px] flex items-center gap-1 shadow-md border border-amber-300 ring-1 ring-amber-400/50 select-none"
+                    title="Коренева особа родоводу"
+                  >
+                    <span>👑</span>
+                    <span>Корінь</span>
+                  </span>
+                )}
+
                 {/* Top-Left: Sibling line toggle (Розкрити / закрити лінію братів і сестер) */}
                 {node.hasSiblings && (
                   <button
@@ -1446,17 +1623,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     </div>
                   ) : (
                     <>
-                      {/* Citations / Documents Badge */}
-                      <div
-                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors ${
+                      {/* Report (PDF / TXT) & Citations Badge */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReportPersonId(p.id);
+                        }}
+                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
                           isLightCanvas
-                            ? 'bg-sky-50 text-sky-800 border-sky-300'
-                            : 'bg-[#0e7490]/30 text-[#38bdf8] border-[#0e7490]/50'
+                            ? 'bg-sky-50 hover:bg-emerald-600 text-sky-800 hover:text-white border-sky-300'
+                            : 'bg-[#0e7490]/30 hover:bg-emerald-700/80 text-[#38bdf8] hover:text-white border-[#0e7490]/50'
                         }`}
-                        title={`Джерела та архівні записи: ${p.citations?.length || (p.sourceIds?.length || 1)}`}
+                        title="Згенерувати короткий звіт про особу (PDF / TXT)"
                       >
                         <FileText className="w-3 h-3" />
-                      </div>
+                      </button>
 
                       {/* Sibling Toggle Badge */}
                       {node.hasSiblings && (
@@ -1468,7 +1650,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           }}
                           className={`h-5 px-1.5 rounded-md flex items-center gap-1 text-[10px] font-medium border transition-colors cursor-pointer ${
                             node.isSiblingsCollapsed
-                              ? 'bg-sky-600 text-white border-sky-400 hover:bg-sky-500'
+                              ? 'bg-amber-600 text-white border-amber-400 hover:bg-amber-500'
                               : isLightCanvas
                               ? 'bg-stone-100 hover:bg-sky-100 text-stone-800 border-stone-300'
                               : 'bg-[#334155]/60 hover:bg-sky-900 text-slate-300 border-slate-600/50'
@@ -1479,7 +1661,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                               : `Сховати братів/сестер (${node.siblingsCount})`
                           }
                         >
-                          <Users className="w-3 h-3 text-sky-500" />
+                          <Users className="w-3 h-3" />
                           <span>{node.isSiblingsCollapsed ? `+${node.siblingsCount}` : `${node.siblingsCount}`}</span>
                         </button>
                       )}
@@ -1844,6 +2026,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
           />
         )}
       </div>
+
+      {/* Person Report Modal (PDF / TXT generator) */}
+      {reportPersonId && (
+        <PersonReportModal
+          personId={reportPersonId}
+          database={database}
+          onClose={() => setReportPersonId(null)}
+          onSelectPerson={(id) => {
+            onSelectPerson(id);
+            setReportPersonId(null);
+          }}
+        />
+      )}
     </div>
   );
 };

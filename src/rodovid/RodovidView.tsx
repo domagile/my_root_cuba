@@ -32,6 +32,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { AuthModal } from '../components/AuthModal';
 import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from '../components/ContactAuthorModal';
 import { getThemeConfig } from '../utils/theme';
+import { findRootPersonId } from './utils/relationship';
 import { Globe, Shield, ArrowLeft, Download, Check, Sparkles, Mail } from 'lucide-react';
 
 interface RodovidViewProps {
@@ -147,28 +148,27 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
         lastModified: new Date().toISOString(),
         author: 'Дослідник'
       },
-      rootPersonId: selectedPersonId || Object.keys(personsMap)[0] || 'p1',
+      rootPersonId: customDatabase?.rootPersonId || findRootPersonId(personsMap),
       persons: personsMap,
       families: families || {},
       sources: sources || {},
       events: events || {},
       lastModified: new Date().toISOString()
     };
-  }, [customDatabase, persons, families, sources, events, selectedPersonId]);
+  }, [customDatabase, persons, families, sources, events]);
 
   const activePersonId = useMemo(() => {
     if (selectedPersonId && database.persons[selectedPersonId]) {
       return selectedPersonId;
     }
-    const firstPerson = Object.values(database.persons)[0];
-    return firstPerson?.id || selectedPersonId || 'p1';
-  }, [selectedPersonId, database.persons]);
+    return database.rootPersonId || findRootPersonId(database.persons);
+  }, [selectedPersonId, database.persons, database.rootPersonId]);
 
   // Modals state
   const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
   const [relationManagerPersonId, setRelationManagerPersonId] = useState<string | null>(null);
   const [addRelation, setAddRelation] = useState<{
-    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness';
     targetPersonId: string;
   } | null>(null);
   const [editPersonTarget, setEditPersonTarget] = useState<string | null>(null); // 'NEW' or personId

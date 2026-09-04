@@ -38,7 +38,9 @@ import {
   ChevronDown,
   GitFork,
   Compass,
-  Mail
+  Mail,
+  GitMerge,
+  AlertTriangle
 } from 'lucide-react';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
@@ -53,12 +55,15 @@ import {
 import { parseAndNormalizeTags, getTreeHashtagsWithCounts, extractHashtagsFromText } from '../../utils/tagUtils';
 import { detectGenderFromName, isPersonMale, isPersonFemale, parseFullNameComponents } from '../../utils/genderUtils';
 import { ContactAuthorModal } from '../ContactAuthorModal';
+import { findDuplicatesForPerson, PersonDuplicateMatch } from '../../utils/duplicateDetector';
+import { MergePersonsByIdModal } from '../modals/MergePersonsByIdModal';
+import { PersonReportModal } from '../common/PersonReportModal';
 
 export interface AddPersonModalProps {
   personId?: string | null;
   initialPersonToEdit?: Person | null;
   initialRelation?: {
-    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling';
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness';
     targetPersonId: string;
   } | null;
   onClose: () => void;
@@ -92,13 +97,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   onSelectPerson,
   isReadOnly = false
 }) => {
-  const { persons, addPerson, updatePerson, themePalette, setSelectedPersonId } = useGenealogy();
+  const { persons, addPerson, updatePerson, themePalette, setSelectedPersonId, getGenealogyDatabase, families, sources, events } = useGenealogy();
   const theme = getThemeConfig(themePalette);
   const isDark = themePalette.includes('dark');
 
   const [activeSection, setActiveSection] = useState<ModalSection>('basic');
   const contentAreaRef = useRef<HTMLDivElement>(null);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
 
   // Determine effective person either from prop or personId
   const effectivePerson = useMemo(() => {
@@ -260,6 +266,150 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<string>('text');
   const [newFieldValue, setNewFieldValue] = useState('');
+
+  // Duplicate check and Merge by ID state
+  const [dismissedDuplicateIds, setDismissedDuplicateIds] = useState<string[]>([]);
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState<boolean>(false);
+  const [mergeModalPair, setMergeModalPair] = useState<{ idA?: string; idB?: string } | null>(null);
+  const [duplicateWarningDismissedForSave, setDuplicateWarningDismissedForSave] = useState<boolean>(false);
+  const [showDuplicateSaveDialog, setShowDuplicateSaveDialog] = useState<boolean>(false);
+
+  const draftPersonForDuplicates = useMemo<Person>(() => {
+    return {
+      id: effectivePerson?.id || '__draft_person__',
+      name: {
+        given: firstName.trim(),
+        surname: lastName.trim(),
+        patronymic: patronymic.trim() || undefined,
+        maidenName: maidenName.trim() || undefined
+      },
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      patronymic: patronymic.trim() || undefined,
+      maidenName: maidenName.trim() || undefined,
+      gender,
+      birthDate: birthDate.trim() || undefined,
+      birthPlace: birthPlace.trim() || undefined,
+      deathDate: deathDate.trim() || undefined,
+      deathPlace: deathPlace.trim() || undefined,
+      fatherId: fatherId || undefined,
+      motherId: motherId || undefined,
+      spouseIds: spouseId ? [spouseId] : undefined
+    };
+  }, [effectivePerson, firstName, lastName, patronymic, maidenName, gender, birthDate, birthPlace, deathDate, deathPlace, fatherId, motherId, spouseId]);
+
+  const potentialDuplicates = useMemo<PersonDuplicateMatch[]>(() => {
+    if (firstName.trim().length < 2 && lastName.trim().length < 2) return [];
+    const matches = findDuplicatesForPerson(
+      draftPersonForDuplicates,
+      persons,
+      effectivePerson?.id,
+      48
+    );
+    return matches.filter((m) => !dismissedDuplicateIds.includes(m.person.id));
+  }, [draftPersonForDuplicates, persons, effectivePerson, dismissedDuplicateIds, firstName, lastName]);
+
+  const handleUseExistingPerson = (existingPerson: Person) => {
+    if (initialRelation) {
+      const target = persons.find((p) => p.id === initialRelation.targetPersonId);
+      if (target) {
+        if (initialRelation.type === 'father') {
+          updatePerson({ ...target, fatherId: existingPerson.id });
+          updatePerson({
+            ...existingPerson,
+            childrenIds: Array.from(new Set([...(existingPerson.childrenIds || []), target.id]))
+          });
+        } else if (initialRelation.type === 'mother') {
+          updatePerson({ ...target, motherId: existingPerson.id });
+          updatePerson({
+            ...existingPerson,
+            childrenIds: Array.from(new Set([...(existingPerson.childrenIds || []), target.id]))
+          });
+        } else if (initialRelation.type === 'spouse') {
+          updatePerson({
+            ...target,
+            spouseIds: Array.from(new Set([...(target.spouseIds || []), existingPerson.id]))
+          });
+          updatePerson({
+            ...existingPerson,
+            spouseIds: Array.from(new Set([...(existingPerson.spouseIds || []), target.id]))
+          });
+        } else if (initialRelation.type === 'child') {
+          const isMale = target.gender === 'male' || target.gender === 'M';
+          updatePerson({
+            ...existingPerson,
+            fatherId: isMale ? target.id : existingPerson.fatherId,
+            motherId: !isMale ? target.id : existingPerson.motherId
+          });
+          updatePerson({
+            ...target,
+            childrenIds: Array.from(new Set([...(target.childrenIds || []), existingPerson.id]))
+          });
+        } else if (initialRelation.type === 'sibling') {
+          const tf = target.fatherId;
+          const tm = target.motherId;
+          if (tf || tm) {
+            updatePerson({
+              ...existingPerson,
+              fatherId: tf || existingPerson.fatherId,
+              motherId: tm || existingPerson.motherId
+            });
+            if (tf) {
+              const f = persons.find((p) => p.id === tf);
+              if (f) {
+                updatePerson({ ...f, childrenIds: Array.from(new Set([...(f.childrenIds || []), existingPerson.id])) });
+              }
+            }
+            if (tm) {
+              const m = persons.find((p) => p.id === tm);
+              if (m) {
+                updatePerson({ ...m, childrenIds: Array.from(new Set([...(m.childrenIds || []), existingPerson.id])) });
+              }
+            }
+          }
+        } else if (initialRelation.type === 'godparent') {
+          const isFemale = existingPerson.gender === 'female' || existingPerson.gender === 'F';
+          const existingGps = target.godparents || [];
+          updatePerson({
+            ...target,
+            godparents: [
+              ...existingGps,
+              {
+                id: crypto.randomUUID(),
+                personId: existingPerson.id,
+                name: `${existingPerson.name?.surname || existingPerson.lastName || ''} ${existingPerson.name?.given || existingPerson.firstName || ''}`.trim(),
+                role: isFemale ? 'godmother' : 'godfather'
+              }
+            ],
+            godparentIds: Array.from(new Set([...(target.godparentIds || []), existingPerson.id]))
+          });
+          updatePerson({
+            ...existingPerson,
+            godchildrenIds: Array.from(new Set([...(existingPerson.godchildrenIds || []), target.id]))
+          });
+        } else if (initialRelation.type === 'witness') {
+          const existingGps = target.godparents || [];
+          updatePerson({
+            ...target,
+            godparents: [
+              ...existingGps,
+              {
+                id: crypto.randomUUID(),
+                personId: existingPerson.id,
+                name: `${existingPerson.name?.surname || existingPerson.lastName || ''} ${existingPerson.name?.given || existingPerson.firstName || ''}`.trim(),
+                role: 'witness'
+              }
+            ],
+            godparentIds: Array.from(new Set([...(target.godparentIds || []), existingPerson.id]))
+          });
+        }
+      }
+    }
+    if (onSelectPerson) {
+      onSelectPerson(existingPerson.id);
+    }
+    onClose();
+  };
 
   // Sync state whenever effectivePerson changes (e.g. clicking another relative or opening by ID)
   useEffect(() => {
@@ -627,6 +777,16 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       return;
     }
 
+    // Duplicate check for new persons: warn if high confidence matches exist
+    if (
+      !effectivePerson &&
+      potentialDuplicates.some((d) => d.confidence >= 65) &&
+      !duplicateWarningDismissedForSave
+    ) {
+      setShowDuplicateSaveDialog(true);
+      return;
+    }
+
     const birthYearMatch = birthDate.match(/\b(1\d{3}|20\d{2})\b/);
     const birthYear = birthYearMatch ? parseInt(birthYearMatch[1], 10) : undefined;
 
@@ -815,6 +975,37 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 });
               }
             }
+          } else if (initialRelation.type === 'godparent') {
+            const isFemale = gender === 'female' || gender === 'F';
+            const role = isFemale ? 'godmother' : 'godfather';
+            const existingGps = target.godparents || [];
+            const newGp: GodparentItem = {
+              id: crypto.randomUUID(),
+              personId: savedPersonId,
+              name: `${lastName || ''} ${firstName || ''}`.trim() || 'Хрещений',
+              role,
+              notes: isFemale ? 'Хрещена мати' : 'Хрещений батько'
+            };
+            updatePerson({
+              ...target,
+              godparents: [...existingGps, newGp],
+              godparentIds: Array.from(new Set([...(target.godparentIds || []), savedPersonId]))
+            });
+            newPerson.godchildrenIds = Array.from(new Set([...(newPerson.godchildrenIds || []), target.id]));
+          } else if (initialRelation.type === 'witness') {
+            const existingGps = target.godparents || [];
+            const newGp: GodparentItem = {
+              id: crypto.randomUUID(),
+              personId: savedPersonId,
+              name: `${lastName || ''} ${firstName || ''}`.trim() || 'Свідок',
+              role: 'witness',
+              notes: 'Свідок / поручитель'
+            };
+            updatePerson({
+              ...target,
+              godparents: [...existingGps, newGp],
+              godparentIds: Array.from(new Set([...(target.godparentIds || []), savedPersonId]))
+            });
           }
         }
       }
@@ -907,6 +1098,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         return `Додати брата/сестру для: ${name}`;
       case 'parent':
         return `Додати батька чи матір для: ${name}`;
+      case 'godparent':
+        return `Додати хрещеного/хрещену для: ${name}`;
+      case 'witness':
+        return `Додати свідка/поручителя для: ${name}`;
       default:
         return `Додати родича для: ${name}`;
     }
@@ -973,6 +1168,18 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               </button>
             )}
 
+            {effectivePerson && (
+              <button
+                type="button"
+                onClick={() => setIsReportModalOpen(true)}
+                className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-amber-600 hover:bg-amber-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+                title="Сформувати текстовий звіт про особу або експортувати в PDF"
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-500" />
+                <span className="hidden md:inline">Звіт (PDF/TXT)</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setIsContactModalOpen(true)}
@@ -982,6 +1189,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               <Mail className="w-3.5 h-3.5 text-[#B88E3E]" />
               <span className="hidden md:inline">Написати автору</span>
             </button>
+
+            {effectivePerson && !isReadOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMergeModalPair({ idA: effectivePerson.id, idB: '' });
+                  setIsMergeModalOpen(true);
+                }}
+                className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-amber-600 hover:bg-amber-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+                title="Обʼєднати з іншою особою по ID"
+              >
+                <GitMerge className="w-3.5 h-3.5 text-amber-500" />
+                <span className="hidden md:inline">Обʼєднати по ID</span>
+              </button>
+            )}
 
             {effectivePerson && onDeletePerson && !isReadOnly && (
               <button
@@ -1116,6 +1338,23 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 );
               })}
             </div>
+
+            {effectivePerson && (
+              <div className="mt-3 pt-3 border-t border-black/10 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setIsReportModalOpen(true)}
+                  className="w-full px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 transition-all cursor-pointer shadow-xs"
+                  title="Сформувати текстовий звіт про особу або експортувати в PDF"
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <span>Звіт про особу (PDF/TXT)</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Right Scrollable Content Area */}
@@ -1123,7 +1362,126 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             ref={contentAreaRef}
             className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin"
           >
-            
+            {/* Live Duplicate Prevention Banner */}
+            {potentialDuplicates.length > 0 && (
+              <div className="p-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 shadow-xs animate-in fade-in duration-200 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-amber-950 dark:text-amber-200">
+                        Виявлено схожу особу в базі (можливий дублікат)
+                      </h4>
+                      <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80">
+                        {potentialDuplicates.length === 1
+                          ? 'Знайдено 1 профіль зі схожими ПІБ, датами або звʼязками'
+                          : `Знайдено ${potentialDuplicates.length} профілів зі схожими даними`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-200 shrink-0">
+                    Перевірка дублікатів
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {potentialDuplicates.slice(0, 3).map((match) => {
+                    const matchPerson = match.person;
+                    const matchName = `${matchPerson.name?.surname || matchPerson.lastName || ''} ${matchPerson.name?.given || matchPerson.firstName || ''} ${matchPerson.name?.patronymic || matchPerson.patronymic || ''}`.trim() || 'Без імені';
+                    const father = persons.find((p) => p.id === matchPerson.fatherId);
+                    const mother = persons.find((p) => p.id === matchPerson.motherId);
+
+                    return (
+                      <div
+                        key={matchPerson.id}
+                        className="p-3 rounded-xl bg-white/80 dark:bg-slate-850/90 border border-amber-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-neutral-900 dark:text-neutral-100 truncate">
+                              {matchName}
+                            </span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
+                              ID: {matchPerson.id}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              match.confidence >= 75
+                                ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                                : 'bg-amber-500/20 text-amber-800 dark:text-amber-300'
+                            }`}>
+                              {match.confidence}% схожість
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] text-neutral-500 flex flex-wrap items-center gap-x-2">
+                            {(matchPerson.birthDate || matchPerson.birthYear) && (
+                              <span>Нар: {matchPerson.birthDate || matchPerson.birthYear}</span>
+                            )}
+                            {(matchPerson.deathDate || matchPerson.deathYear) && (
+                              <span>См: {matchPerson.deathDate || matchPerson.deathYear}</span>
+                            )}
+                            {matchPerson.birthPlace && <span>Місце: {matchPerson.birthPlace}</span>}
+                            {(father || mother) && (
+                              <span>
+                                Батьки: {father ? (father.name?.surname || father.lastName || father.firstName) : ''}
+                                {father && mother ? ', ' : ''}
+                                {mother ? (mother.name?.surname || mother.lastName || mother.firstName) : ''}
+                              </span>
+                            )}
+                          </div>
+
+                          {match.reasons.length > 0 && (
+                            <div className="text-[10px] text-amber-700 dark:text-amber-400">
+                              Причина збігу: {match.reasons.join(', ')}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() => handleUseExistingPerson(matchPerson)}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-all cursor-pointer flex items-center gap-1"
+                            title="Використати цей існуючий профіль, щоб не створювати дублікат"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{initialRelation ? 'Приєднати цю особу' : 'Відкрити профіль'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMergeModalPair({
+                                idA: effectivePerson?.id || matchPerson.id,
+                                idB: effectivePerson ? matchPerson.id : ''
+                              });
+                              setIsMergeModalOpen(true);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 border border-neutral-300 dark:border-neutral-700 transition-colors cursor-pointer flex items-center gap-1"
+                            title="Обʼєднати з цією особою по ID"
+                          >
+                            <GitMerge className="w-3.5 h-3.5 text-amber-500" />
+                            <span>Злити по ID</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setDismissedDuplicateIds((prev) => [...prev, matchPerson.id])}
+                            className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                            title="Ігнорувати / Це інша особа"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* SECTION 1: Основне */}
             <div id="sec-basic" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
               <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
@@ -2747,6 +3105,117 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           personName={computedFullName}
           personYears={lifeYearsPreview}
         />
+      )}
+
+      {/* Person Report Modal */}
+      {isReportModalOpen && effectivePerson && (
+        <PersonReportModal
+          personId={effectivePerson.id}
+          database={
+            getGenealogyDatabase
+              ? getGenealogyDatabase()
+              : {
+                  persons: persons.reduce((acc, p) => ({ ...acc, [p.id]: p }), {}),
+                  families: families || {},
+                  sources: sources || {},
+                  events: events || {}
+                }
+          }
+          onClose={() => setIsReportModalOpen(false)}
+          onSelectPerson={(id) => {
+            if (onSelectPerson) onSelectPerson(id);
+          }}
+        />
+      )}
+
+      {/* Merge Persons By ID Modal */}
+      {isMergeModalOpen && (
+        <MergePersonsByIdModal
+          isOpen={isMergeModalOpen}
+          onClose={() => {
+            setIsMergeModalOpen(false);
+            setMergeModalPair(null);
+          }}
+          initialPersonAId={mergeModalPair?.idA}
+          initialPersonBId={mergeModalPair?.idB}
+          onMergeSuccess={(master) => {
+            if (onSelectPerson) onSelectPerson(master.id);
+            onClose();
+          }}
+        />
+      )}
+
+      {/* Duplicate Save Confirmation Dialog */}
+      {showDuplicateSaveDialog && (
+        <div className="fixed inset-0 z-60 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 border border-amber-500/40 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-neutral-900 dark:text-white">
+                  Виявлено схожу особу в базі
+                </h3>
+                <p className="text-xs text-neutral-600 dark:text-neutral-300">
+                  У вашому родинному дереві вже є особа зі схожими даними. Щоб запобігти створенню дублікатів, перевірте знайдений запис:
+                </p>
+              </div>
+            </div>
+
+            <div className="max-h-48 overflow-y-auto space-y-2 border border-neutral-200 dark:border-neutral-800 rounded-xl p-2 bg-neutral-50 dark:bg-neutral-950">
+              {potentialDuplicates.slice(0, 3).map((match) => {
+                const mp = match.person;
+                const mpName = `${mp.name?.surname || mp.lastName || ''} ${mp.name?.given || mp.firstName || ''} ${mp.name?.patronymic || mp.patronymic || ''}`.trim() || 'Без імені';
+                return (
+                  <div key={mp.id} className="p-2.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 text-xs">
+                    <div>
+                      <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+                        <span>{mpName}</span>
+                        <span className="text-[10px] font-mono text-neutral-400">ID: {mp.id}</span>
+                      </div>
+                      <div className="text-[11px] text-neutral-500">
+                        {mp.birthDate || mp.birthYear ? `Нар: ${mp.birthDate || mp.birthYear}` : ''}
+                        {mp.birthPlace ? `, ${mp.birthPlace}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDuplicateSaveDialog(false);
+                        handleUseExistingPerson(mp);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shrink-0 cursor-pointer"
+                    >
+                      {initialRelation ? 'Приєднати' : 'Відкрити'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setShowDuplicateSaveDialog(false)}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-neutral-600 dark:text-neutral-400 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
+              >
+                Повернутися до редагування
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDuplicateWarningDismissedForSave(true);
+                  setShowDuplicateSaveDialog(false);
+                  setTimeout(() => handleSave(false), 50);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+              >
+                Все одно створити окремо
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

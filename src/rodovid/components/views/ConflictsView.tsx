@@ -36,6 +36,7 @@ import { runTreeDataHealthAudit, autoFixTreeConflict } from '../../../utils/tree
 import { detectDuplicatePersons } from '../../../utils/duplicateDetector';
 import { SmartMergeModal } from '../modals/SmartMergeModal';
 import { PersonDetailModal } from '../../../components/Tree/PersonDetailModal';
+import { MergePersonsByIdModal } from '../../../components/modals/MergePersonsByIdModal';
 
 interface ConflictsViewProps {
   persons: Person[];
@@ -66,6 +67,9 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
 
   // Active Modals state
   const [activeMergePair, setActiveMergePair] = useState<DuplicatePair | null>(null);
+  const [isMergeByIdOpen, setIsMergeByIdOpen] = useState(false);
+  const [initialMergeIdA, setInitialMergeIdA] = useState<string | undefined>(undefined);
+  const [initialMergeIdB, setInitialMergeIdB] = useState<string | undefined>(undefined);
   const [inspectingPersonId, setInspectingPersonId] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
 
@@ -493,6 +497,32 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
         {activeSubTab === 'duplicates' && (
           <div className="space-y-6">
             
+            {/* Header info & Manual merge by ID trigger */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-neutral-900/60 border border-neutral-800">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <GitMerge className="w-4 h-4 text-amber-500" />
+                  Виявлення та обʼєднання дублікатів
+                </h3>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  Автоматичний пошук схожих осіб за фонетикою та можливість ручного об'єднання будь-яких двох профілів за їхніми ID.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setInitialMergeIdA(undefined);
+                  setInitialMergeIdB(undefined);
+                  setIsMergeByIdOpen(true);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-neutral-950 shadow-md transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+              >
+                <GitMerge className="w-4 h-4" />
+                <span>Обʼєднати особи по ID</span>
+              </button>
+            </div>
+
             {/* Filter & Search for Duplicates */}
             <div className="p-4 rounded-2xl bg-neutral-900/80 border border-neutral-800 flex flex-col md:flex-row items-center justify-between gap-4">
               
@@ -573,13 +603,28 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                           </span>
                         </div>
 
-                        <button
-                          onClick={() => setActiveMergePair(pair)}
-                          className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B88E3E] hover:bg-[#a37c33] text-neutral-950 transition-all flex items-center gap-1.5 shadow-md shadow-[#B88E3E]/20 cursor-pointer self-start sm:self-auto"
-                        >
-                          <GitMerge className="w-4 h-4" />
-                          <span>Обʼєднати персон (Smart Merge)</span>
-                        </button>
+                        <div className="flex items-center gap-2 self-start sm:self-auto">
+                          <button
+                            onClick={() => {
+                              setInitialMergeIdA(pair.personA.id);
+                              setInitialMergeIdB(pair.personB.id);
+                              setIsMergeByIdOpen(true);
+                            }}
+                            className="px-3 py-2 rounded-xl text-xs font-semibold bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-all flex items-center gap-1.5 cursor-pointer"
+                            title="Злити по ID"
+                          >
+                            <GitMerge className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Злити по ID</span>
+                          </button>
+
+                          <button
+                            onClick={() => setActiveMergePair(pair)}
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B88E3E] hover:bg-[#a37c33] text-neutral-950 transition-all flex items-center gap-1.5 shadow-md shadow-[#B88E3E]/20 cursor-pointer"
+                          >
+                            <GitMerge className="w-4 h-4" />
+                            <span>Майстер злиття</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Side by side comparison cards */}
@@ -713,6 +758,23 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
           onClose={() => setInspectingPersonId(null)}
           onEdit={() => {}}
           onOpenAddRelation={() => {}}
+        />
+      )}
+
+      {/* Merge Persons by ID Modal */}
+      {isMergeByIdOpen && (
+        <MergePersonsByIdModal
+          isOpen={isMergeByIdOpen}
+          onClose={() => {
+            setIsMergeByIdOpen(false);
+            setInitialMergeIdA(undefined);
+            setInitialMergeIdB(undefined);
+          }}
+          initialPersonAId={initialMergeIdA}
+          initialPersonBId={initialMergeIdB}
+          onMergeSuccess={(master) => {
+            showNotification(`Особи успішно об'єднані в профіль «${master.name?.surname || master.lastName || ''} ${master.name?.given || master.firstName || ''}»!`);
+          }}
         />
       )}
 

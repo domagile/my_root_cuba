@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig } from '../types';
 import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
 import { savePersonDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc } from '../lib/firebase';
+import { findRootPersonId } from '../rodovid/utils/relationship';
+import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
+import { isUserWhitelisted } from '../rodovid/utils/privacy';
+import { useAuthStore } from './useAuthStore';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
 
@@ -168,16 +172,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   selectedPersonId: (() => {
     try {
-      const saved = localStorage.getItem(`${STORAGE_KEY}_selectedPersonId`);
-      if (saved) return saved;
       const personsSaved = localStorage.getItem(`${STORAGE_KEY}_persons`);
-      if (personsSaved) {
-        const parsed = JSON.parse(personsSaved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed[0].id;
-        }
-      }
-      return 'p_bom_olga';
+      const personsList: Person[] = personsSaved ? JSON.parse(personsSaved) : INITIAL_PERSONS;
+      return resolveInitialPersonId(personsList);
     } catch {
       return 'p_bom_olga';
     }
@@ -206,10 +203,17 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   setSelectedPersonId: (selectedPersonId) => {
     try {
-      if (selectedPersonId) {
+      const { currentUser, whitelist } = useAuthStore.getState();
+      const isAuth = isUserWhitelisted(currentUser, whitelist);
+
+      if (isAuth && currentUser?.email && selectedPersonId) {
+        // Persist to the authorized user's state
+        saveUserTreeState(currentUser.email, { selectedPersonId });
+      }
+
+      // Also keep fallback key for backward compatibility when authorized
+      if (isAuth && selectedPersonId) {
         localStorage.setItem(`${STORAGE_KEY}_selectedPersonId`, selectedPersonId);
-      } else {
-        localStorage.removeItem(`${STORAGE_KEY}_selectedPersonId`);
       }
     } catch {}
     set({ selectedPersonId });
@@ -487,7 +491,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         lastModified: new Date().toISOString(),
         author: 'Дослідник'
       },
-      rootPersonId: selectedPersonId || persons[0]?.id || 'p1',
+      rootPersonId: findRootPersonId(persons, selectedPersonId || undefined),
       persons: personsRecord,
       families,
       sources,

@@ -115,6 +115,20 @@ export function executeSmartPersonMerge(
     }
   });
 
+  // Combine Godparents & Godchildren
+  const godparentsMap = new Map<string, any>();
+  [...(personA.godparents || []), ...(personB.godparents || [])].forEach((gp, idx) => {
+    const key = gp.personId ? `pid_${gp.personId}` : `${gp.name}_${gp.role || 'gp'}_${idx}`;
+    if (!godparentsMap.has(key)) {
+      godparentsMap.set(key, gp);
+    }
+  });
+  const mergedGodparents = Array.from(godparentsMap.values()).filter(gp => gp.personId !== masterId && gp.personId !== duplicateId);
+  const mergedGodparentIds = Array.from(new Set([...(personA.godparentIds || []), ...(personB.godparentIds || [])]))
+    .filter(id => id !== masterId && id !== duplicateId);
+  const mergedGodchildrenIds = Array.from(new Set([...(personA.godchildrenIds || []), ...(personB.godchildrenIds || [])]))
+    .filter(id => id !== masterId && id !== duplicateId);
+
   // Parents resolution: if master is missing father/mother, inherit from duplicate
   let fatherId = master.fatherId || (duplicate.fatherId !== masterId ? duplicate.fatherId : undefined);
   let motherId = master.motherId || (duplicate.motherId !== masterId ? duplicate.motherId : undefined);
@@ -159,6 +173,9 @@ export function executeSmartPersonMerge(
     motherId,
     spouseIds: Array.from(spousesSet),
     childrenIds: Array.from(childrenSet),
+    godparents: mergedGodparents.length > 0 ? mergedGodparents : undefined,
+    godparentIds: mergedGodparentIds.length > 0 ? mergedGodparentIds : undefined,
+    godchildrenIds: mergedGodchildrenIds.length > 0 ? mergedGodchildrenIds : undefined,
     sourceIds: mergedSourceIds,
     citations: mergedCitations,
     events: mergedEvents
@@ -185,6 +202,9 @@ export function executeSmartPersonMerge(
     let newMotherId = p.motherId;
     let newSpouseIds = p.spouseIds ? [...p.spouseIds] : undefined;
     let newChildrenIds = p.childrenIds ? [...p.childrenIds] : undefined;
+    let newGodparents = p.godparents ? [...p.godparents] : undefined;
+    let newGodparentIds = p.godparentIds ? [...p.godparentIds] : undefined;
+    let newGodchildrenIds = p.godchildrenIds ? [...p.godchildrenIds] : undefined;
 
     // Rewrite father
     if (newFatherId === duplicateId) {
@@ -216,13 +236,34 @@ export function executeSmartPersonMerge(
       modified = true;
     }
 
+    // Rewrite godparents
+    if (newGodparents && newGodparents.some(gp => gp.personId === duplicateId)) {
+      newGodparents = newGodparents.map(gp => gp.personId === duplicateId ? { ...gp, personId: masterId } : gp);
+      modified = true;
+    }
+
+    // Rewrite godparentIds
+    if (newGodparentIds && newGodparentIds.includes(duplicateId)) {
+      newGodparentIds = Array.from(new Set(newGodparentIds.map(id => id === duplicateId ? masterId : id))).filter(id => id !== p.id);
+      modified = true;
+    }
+
+    // Rewrite godchildrenIds
+    if (newGodchildrenIds && newGodchildrenIds.includes(duplicateId)) {
+      newGodchildrenIds = Array.from(new Set(newGodchildrenIds.map(id => id === duplicateId ? masterId : id))).filter(id => id !== p.id);
+      modified = true;
+    }
+
     if (modified) {
       updatedPersons.push({
         ...p,
         fatherId: newFatherId,
         motherId: newMotherId,
         spouseIds: newSpouseIds,
-        childrenIds: newChildrenIds
+        childrenIds: newChildrenIds,
+        godparents: newGodparents,
+        godparentIds: newGodparentIds,
+        godchildrenIds: newGodchildrenIds
       });
     } else {
       updatedPersons.push(p);

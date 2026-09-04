@@ -20,7 +20,8 @@ import {
   Tag,
   X,
   CheckCircle2,
-  HelpCircle
+  HelpCircle,
+  FileText
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
@@ -29,6 +30,7 @@ import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
+import { PersonReportModal } from '../../../components/common/PersonReportModal';
 import { getTreeHashtagsWithCounts, formatHashtag } from '../../../utils/tagUtils';
 import { isPersonMale, isPersonFemale, normalizeGender } from '../../utils/genderUtils';
 import { isPersonHypothesis, isPersonConfirmed } from '../../../utils/researchStatusUtils';
@@ -80,6 +82,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [sortAsc, setSortAsc] = useState(true);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [personToDelete, setPersonToDelete] = useState<Person | null>(null);
+  const [reportPersonId, setReportPersonId] = useState<string | null>(null);
 
   // Extract all tree hashtags with counts
   const availableHashtags = useMemo(() => {
@@ -568,6 +571,13 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                           >
                             <Compass className="w-3.5 h-3.5" />
                           </button>
+                          <button
+                            onClick={() => setReportPersonId(p.id)}
+                            className={`p-1.5 ${theme.textMuted} hover:text-sky-400 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+                            title="Згенерувати короткий звіт (PDF / TXT)"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                          </button>
                           {canEdit && !isMasked && (
                             <>
                               <button
@@ -749,6 +759,13 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     >
                       <Compass className="w-3.5 h-3.5" />
                     </button>
+                    <button
+                      onClick={() => setReportPersonId(p.id)}
+                      className={`p-1.5 ${theme.textMuted} hover:text-sky-400 hover:bg-neutral-500/10 rounded cursor-pointer`}
+                      title="Згенерувати короткий звіт (PDF / TXT)"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                    </button>
                     {canEdit && !isMasked && (
                       <button
                         onClick={() => onEditPerson(p.id)}
@@ -781,6 +798,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           }}
           onClose={() => setPersonToDelete(null)}
           isPermanent={true}
+        />
+      )}
+
+      {/* Person Report Modal */}
+      {reportPersonId && (
+        <PersonReportModal
+          personId={reportPersonId}
+          database={database}
+          onClose={() => setReportPersonId(null)}
+          onSelectPerson={(id) => {
+            onSelectPerson(id);
+            setReportPersonId(null);
+          }}
         />
       )}
     </div>

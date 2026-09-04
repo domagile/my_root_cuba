@@ -4,11 +4,11 @@
  */
 
 import React, { useMemo } from 'react';
-import { BarChart3, Users, Heart, Calendar, Trophy, PieChart } from 'lucide-react';
+import { BarChart3, Users, Heart, Calendar, Trophy, PieChart, MapPin } from 'lucide-react';
 import { GenealogyDatabase, Person, Family } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
-import { normalizeUkrainianSurnameGender } from '../../../utils/ukrainianPhonetics';
+import { normalizeUkrainianSurnameGender, normalizeUkrainianPlace } from '../../../utils/ukrainianPhonetics';
 import { isPersonMale, isPersonFemale } from '../../utils/genderUtils';
 
 interface StatisticsViewProps {
@@ -54,17 +54,35 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
 
     const averageLifespan = deceasedWithAgeCount > 0 ? Math.round(totalLifespan / deceasedWithAgeCount) : 0;
 
-    // Surnames distribution with gender normalization (e.g. Шевченко, Ковальський/Ковальська -> Ковальський)
+    // Surnames distribution with gender normalization (e.g. Пірковський / Пірковська -> Пірковський)
     const surnameMap: Record<string, number> = {};
+    const placeMap: Record<string, number> = {};
+
     persons.forEach((p) => {
-      const rawSurname = p.lastName?.trim();
+      // Surnames
+      const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
       if (rawSurname) {
         const canonicalSurname = normalizeUkrainianSurnameGender(rawSurname);
-        surnameMap[canonicalSurname] = (surnameMap[canonicalSurname] || 0) + 1;
+        if (canonicalSurname) {
+          surnameMap[canonicalSurname] = (surnameMap[canonicalSurname] || 0) + 1;
+        }
       }
+
+      // Settlements / Villages
+      const rawPlaces = [p.birthPlace, p.deathPlace, p.residencePlace].filter(Boolean) as string[];
+      rawPlaces.forEach((raw) => {
+        const canonicalPlace = normalizeUkrainianPlace(raw);
+        if (canonicalPlace && canonicalPlace !== '-' && canonicalPlace !== '?' && canonicalPlace.length >= 2) {
+          placeMap[canonicalPlace] = (placeMap[canonicalPlace] || 0) + 1;
+        }
+      });
     });
 
     const topSurnames = Object.entries(surnameMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+
+    const topPlaces = Object.entries(placeMap)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8);
 
@@ -75,7 +93,8 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
       totalFamilies: families.length,
       averageLifespan,
       longestLived,
-      topSurnames
+      topSurnames,
+      topPlaces
     };
   }, [persons, families]);
 
@@ -148,24 +167,62 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
         </div>
       </div>
 
-      {/* Top Surnames */}
-      <div className={`p-6 rounded-xl ${theme.cardBg} border ${theme.cardBorder} space-y-4 shadow-xs`}>
-        <h3 className={`text-xs font-bold ${theme.textSecondary} flex items-center gap-2 uppercase tracking-wider`}>
-          <PieChart className="w-4 h-4 text-amber-500" />
-          <span>Найпоширеніші прізвища родоводу</span>
-        </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {stats.topSurnames.map(([surname, count]) => (
-            <div
-              key={surname}
-              className={`p-3 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} flex items-center justify-between`}
-            >
-              <span className={`font-semibold text-xs ${theme.textPrimary} truncate`}>{surname}</span>
-              <span className={`font-mono text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-amber-950/60 text-amber-400' : 'bg-amber-100 text-amber-800'} font-bold`}>
-                {count}
-              </span>
+      {/* Demographics: Top Surnames & Top Settlements */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Top Surnames */}
+        <div className={`p-6 rounded-xl ${theme.cardBg} border ${theme.cardBorder} space-y-4 shadow-xs`}>
+          <div className="flex items-center justify-between">
+            <h3 className={`text-xs font-bold ${theme.textSecondary} flex items-center gap-2 uppercase tracking-wider`}>
+              <PieChart className="w-4 h-4 text-amber-500" />
+              <span>Найпоширеніші роди / прізвища</span>
+            </h3>
+            <span className={`text-[11px] ${theme.textMuted}`}>канонізовані за родами</span>
+          </div>
+          {stats.topSurnames.length === 0 ? (
+            <p className={`text-xs ${theme.textMuted} italic py-4 text-center`}>Немає даних про прізвища</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-2 gap-3">
+              {stats.topSurnames.map(([surname, count]) => (
+                <div
+                  key={surname}
+                  className={`p-3 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} flex items-center justify-between`}
+                >
+                  <span className={`font-semibold text-xs ${theme.textPrimary} truncate`} title={surname}>{surname}</span>
+                  <span className={`font-mono text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-amber-950/60 text-amber-400' : 'bg-amber-100 text-amber-800'} font-bold shrink-0 ml-2`}>
+                    {count}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+        </div>
+
+        {/* Top Settlements / Villages */}
+        <div className={`p-6 rounded-xl ${theme.cardBg} border ${theme.cardBorder} space-y-4 shadow-xs`}>
+          <div className="flex items-center justify-between">
+            <h3 className={`text-xs font-bold ${theme.textSecondary} flex items-center gap-2 uppercase tracking-wider`}>
+              <MapPin className="w-4 h-4 text-emerald-500" />
+              <span>Найпоширеніші населені пункти</span>
+            </h3>
+            <span className={`text-[11px] ${theme.textMuted}`}>селища та міста</span>
+          </div>
+          {stats.topPlaces.length === 0 ? (
+            <p className={`text-xs ${theme.textMuted} italic py-4 text-center`}>Немає даних про населені пункти</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-2 gap-3">
+              {stats.topPlaces.map(([place, count]) => (
+                <div
+                  key={place}
+                  className={`p-3 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} flex items-center justify-between`}
+                >
+                  <span className={`font-semibold text-xs ${theme.textPrimary} truncate`} title={place}>{place}</span>
+                  <span className={`font-mono text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-emerald-950/60 text-emerald-400' : 'bg-emerald-100 text-emerald-800'} font-bold shrink-0 ml-2`}>
+                    {count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

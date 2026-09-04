@@ -316,3 +316,57 @@ export function calculateKinship(
     ]
   };
 }
+
+/**
+ * Determines the true root person (коренева особа) in the database.
+ * Priority:
+ * 1. Person with explicit isRoot flag
+ * 2. Person with generation === 0 (standard root in Familio / genealogy charts)
+ * 3. Person whose notes or bio specify "коренева особа" / "корінь"
+ * 4. Known default root in Familio data ('p_bom_olga')
+ * 5. fallbackRootId if valid
+ * 6. First person in list
+ */
+export function findRootPerson(
+  persons: Person[] | Record<string, Person>,
+  fallbackRootId?: string
+): Person | undefined {
+  const list: Person[] = Array.isArray(persons) ? persons : Object.values(persons || {});
+  if (list.length === 0) return undefined;
+
+  // 1. Explicit isRoot flag
+  const isRootPerson = list.find((p) => (p as any).isRoot === true);
+  if (isRootPerson) return isRootPerson;
+
+  // 2. Generation === 0
+  const genZero = list.find((p) => p.generation === 0);
+  if (genZero) return genZero;
+
+  // 3. Notes or bio containing 'коренева особа' or 'корінь'
+  const rootByNotes = list.find((p) => 
+    (p.notes && /корен(ев|н)[а-я\s]*особ/i.test(p.notes)) ||
+    (p.bio && /корен(ев|н)[а-я\s]*особ/i.test(p.bio))
+  );
+  if (rootByNotes) return rootByNotes;
+
+  // 4. Default person ID in familio data
+  const defaultBom = list.find((p) => p.id === 'p_bom_olga');
+  if (defaultBom) return defaultBom;
+
+  // 5. fallbackRootId if valid
+  if (fallbackRootId) {
+    const fallback = list.find((p) => p.id === fallbackRootId);
+    if (fallback) return fallback;
+  }
+
+  // 6. First person
+  return list[0];
+}
+
+export function findRootPersonId(
+  persons: Person[] | Record<string, Person>,
+  fallbackRootId?: string
+): string {
+  const root = findRootPerson(persons, fallbackRootId);
+  return root?.id || fallbackRootId || 'p_bom_olga';
+}

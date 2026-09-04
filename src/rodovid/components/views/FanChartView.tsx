@@ -31,6 +31,7 @@ import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relat
 import { useUIStore } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
+import { areSurnamesEquivalent } from '../../../utils/ukrainianPhonetics';
 import { getThemeConfig } from '../../../utils/theme';
 
 // Ukrainian generation declension helper
@@ -995,7 +996,9 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               const isHovered = hoveredSector?.ahnentafelNumber === sec.ahnentafelNumber;
 
               const isClanActive =
-                !activeFocusClanId || sec.clanId === activeFocusClanId;
+                !activeFocusClanId ||
+                sec.clanId === activeFocusClanId ||
+                areSurnamesEquivalent(sec.clanId || '', activeFocusClanId);
 
               const angleDeg = (midAngle * 180) / Math.PI;
 
