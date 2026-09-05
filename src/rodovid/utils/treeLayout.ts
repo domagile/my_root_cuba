@@ -4,7 +4,7 @@
  */
 
 import { GenealogyDatabase, Person } from '../types/genealogy';
-import { normalizeUkrainianSurnameGender, formatClanName } from '../../utils/ukrainianPhonetics';
+import { normalizeUkrainianSurnameGender, formatClanName, areSurnamesEquivalent } from '../../utils/ukrainianPhonetics';
 
 export interface TreeNodeLayout {
   id: string;
@@ -1358,25 +1358,32 @@ export function getPersonRodName(person?: Person | null): string {
 export function getLineageColorMap(database: GenealogyDatabase): Record<string, string> {
   const map: Record<string, string> = {};
   let colorIdx = 0;
+  const canonicalList: string[] = [];
 
   // Prioritize root and direct ancestors
-  const seen = new Set<string>();
   Object.values(database.persons).forEach((p) => {
     const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
     if (!rawSurname) return;
-    const canonical = normalizeUkrainianSurnameGender(rawSurname);
+    const canonical = normalizeUkrainianSurnameGender(rawSurname) || rawSurname;
     if (canonical && canonical !== 'Рід') {
       const canonicalKey = canonical.toLowerCase();
+
+      // Check if an equivalent canonical surname already has an assigned color
+      const existingCanonical = canonicalList.find(
+        (c) => c.toLowerCase() === canonicalKey || areSurnamesEquivalent(canonical, c)
+      );
+
       let color: string;
-      if (!seen.has(canonicalKey)) {
-        seen.add(canonicalKey);
+      if (!existingCanonical) {
+        canonicalList.push(canonical);
         color = LINEAGE_PALETTE[colorIdx % LINEAGE_PALETTE.length];
         colorIdx++;
-        map[canonicalKey] = color;
-        map[canonical] = color;
       } else {
-        color = map[canonicalKey];
+        color = map[existingCanonical.toLowerCase()] || map[existingCanonical] || LINEAGE_PALETTE[0];
       }
+
+      map[canonicalKey] = color;
+      map[canonical] = color;
       // Also map original raw forms (e.g. female ending "пірковська" maps to the same color as "пірковський")
       map[rawSurname.toLowerCase()] = color;
       map[rawSurname] = color;
@@ -1386,8 +1393,38 @@ export function getLineageColorMap(database: GenealogyDatabase): Record<string, 
   return map;
 }
 
+/**
+ * Resolves the clan/lineage color for a specific person, matching the fan chart clan colors
+ */
+export function getPersonClanColor(person?: Person | null, colorMap?: Record<string, string>): string {
+  if (!person) return '#64748b';
+  const rawSurname = (person.name?.surname || person.lastName || person.name?.maidenName || person.maidenName || '').trim();
+  if (!rawSurname) return '#64748b';
+  const canonical = normalizeUkrainianSurnameGender(rawSurname) || rawSurname;
+  const rod = getPersonRodName(person);
+
+  if (colorMap) {
+    const color =
+      colorMap[canonical.toLowerCase()] ||
+      colorMap[canonical] ||
+      colorMap[rod.toLowerCase()] ||
+      colorMap[rod] ||
+      colorMap[rawSurname.toLowerCase()] ||
+      colorMap[rawSurname];
+    if (color) return color;
+  }
+
+  // Fallback to stable hash index from LINEAGE_PALETTE
+  let hash = 0;
+  for (let i = 0; i < canonical.length; i++) {
+    hash = (hash << 5) - hash + canonical.charCodeAt(i);
+    hash |= 0;
+  }
+  return LINEAGE_PALETTE[Math.abs(hash) % LINEAGE_PALETTE.length];
+}
+
 export function extractFanChartClans(sectors: FanChartSector[]): FanChartClan[] {
-  const clanMap = new Map<string, FanChartClan>();
+  const clans: FanChartClan[] = [];
 
   sectors.forEach((sec) => {
     if (!sec.person) return;
@@ -1397,25 +1434,33 @@ export function extractFanChartClans(sectors: FanChartSector[]): FanChartClan[] 
     const clanName = formatClanName(canonical);
     const clanColor = sec.clanColor || sec.fillColor || sec.color || '#2563eb';
 
-    const key = clanId.toLowerCase();
-    if (!clanMap.has(key)) {
-      clanMap.set(key, {
+    // Check if an existing clan matches by canonical ID, raw rod name, or phonetic/gender equivalence
+    let matchedClan = clans.find(
+      (c) =>
+        c.id.toLowerCase() === clanId.toLowerCase() ||
+        areSurnamesEquivalent(clanId, c.id) ||
+        areSurnamesEquivalent(rawRod, c.id) ||
+        areSurnamesEquivalent(clanName, c.name)
+    );
+
+    if (!matchedClan) {
+      matchedClan = {
         id: clanId,
         name: clanName,
         color: clanColor,
         count: 0,
         persons: []
-      });
+      };
+      clans.push(matchedClan);
     }
 
-    const item = clanMap.get(key)!;
-    item.count += 1;
-    if (!item.persons.some((p) => p.id === sec.person.id)) {
-      item.persons.push(sec.person);
+    matchedClan.count += 1;
+    if (!matchedClan.persons.some((p) => p.id === sec.person.id)) {
+      matchedClan.persons.push(sec.person);
     }
   });
 
-  return Array.from(clanMap.values()).sort((a, b) => b.count - a.count);
+  return clans.sort((a, b) => b.count - a.count);
 }
 
 export interface FanChartOptions {
@@ -1550,7 +1595,8 @@ export function calculateFanChart(
     const outerRadius = innerRadiusBase + gen * ringWidth;
     const branchColor = getSectorColor(ahnentafel, gen, person);
     const rod = getPersonRodName(person);
-    const clanName = formatClanName(rod);
+    const canonicalRod = normalizeUkrainianSurnameGender(rod) || rod;
+    const clanName = formatClanName(canonicalRod);
 
     sectors.push({
       ahnentafelNumber: ahnentafel,
@@ -1563,10 +1609,10 @@ export function calculateFanChart(
       fillColor: branchColor,
       color: branchColor,
       side: 'ancestor',
-      clanId: rod,
+      clanId: canonicalRod,
       clanName,
       clanColor: branchColor,
-      rodName: rod
+      rodName: canonicalRod
     });
 
     const midAngle = (startAngle + endAngle) / 2;
@@ -1668,6 +1714,7 @@ export function calculateFanChart(
         const startAngle = idx * slice;
         const endAngle = (idx + 1) * slice;
         const rod = getPersonRodName(item.person);
+        const canonicalRod = normalizeUkrainianSurnameGender(rod) || rod;
         const branchColor = getSectorColor(item.ahn, 1, item.person);
 
         sectors.push({
@@ -1682,10 +1729,10 @@ export function calculateFanChart(
           color: branchColor,
           side: item.side,
           relationshipLabel: item.label,
-          clanId: rod,
-          clanName: formatClanName(rod),
+          clanId: canonicalRod,
+          clanName: formatClanName(canonicalRod),
           clanColor: branchColor,
-          rodName: rod
+          rodName: canonicalRod
         });
       });
     }
@@ -1703,6 +1750,7 @@ export function calculateFanChart(
         const isFem = child.gender === 'female' || child.gender === 'F';
         const label = isFem ? 'Донька' : 'Син';
         const rod = getPersonRodName(child);
+        const canonicalRod = normalizeUkrainianSurnameGender(rod) || rod;
         const branchColor = getSectorColor(-100 - idx, 2, child);
 
         sectors.push({
@@ -1717,10 +1765,10 @@ export function calculateFanChart(
           color: branchColor,
           side: 'child',
           relationshipLabel: label,
-          clanId: rod,
-          clanName: formatClanName(rod),
+          clanId: canonicalRod,
+          clanName: formatClanName(canonicalRod),
           clanColor: branchColor,
-          rodName: rod
+          rodName: canonicalRod
         });
       });
     }
@@ -1739,6 +1787,7 @@ export function calculateFanChart(
         const isFem = gc.gender === 'female' || gc.gender === 'F';
         const label = isFem ? 'Онука' : 'Онук';
         const rod = getPersonRodName(gc);
+        const canonicalRod = normalizeUkrainianSurnameGender(rod) || rod;
         const branchColor = getSectorColor(-200 - idx, 3, gc);
 
         sectors.push({
@@ -1753,10 +1802,10 @@ export function calculateFanChart(
           color: branchColor,
           side: 'child',
           relationshipLabel: label,
-          clanId: rod,
-          clanName: formatClanName(rod),
+          clanId: canonicalRod,
+          clanName: formatClanName(canonicalRod),
           clanColor: branchColor,
-          rodName: rod
+          rodName: canonicalRod
         });
       });
     }

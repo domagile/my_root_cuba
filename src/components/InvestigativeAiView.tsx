@@ -773,8 +773,8 @@ export const InvestigativeAiView: React.FC = () => {
                   </div>
 
                   {/* Excel Rows Preview Table */}
-                  <div className="max-h-48 overflow-y-auto border border-[#2A2A2A] rounded-lg">
-                    <table className="w-full text-left text-xs text-[#E5E5E5]">
+                  <div className="max-h-48 overflow-y-auto overflow-x-auto border border-[#2A2A2A] rounded-lg">
+                    <table className="w-full min-w-[540px] text-left text-xs text-[#E5E5E5]">
                       <thead className="bg-[#121212] text-[#B88E3E] text-[10px] font-bold uppercase sticky top-0">
                         <tr>
                           <th className="p-2">#</th>

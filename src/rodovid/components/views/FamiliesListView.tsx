@@ -20,7 +20,7 @@ import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 import { isPersonMale } from '../../utils/genderUtils';
 import { getPersonRodName } from '../../utils/treeLayout';
-import { areSurnamesEquivalent, arePlacesEquivalent, normalizeUkrainianPlace, formatClanName } from '../../../utils/ukrainianPhonetics';
+import { areSurnamesEquivalent, arePlacesEquivalent, normalizeUkrainianPlace, formatClanName, normalizeUkrainianSurnameGender } from '../../../utils/ukrainianPhonetics';
 
 interface FamiliesListViewProps {
   database: GenealogyDatabase;
@@ -51,7 +51,7 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
   const [familyToDelete, setFamilyToDelete] = useState<{ id: string; label: string } | null>(null);
 
   const familiesList = useMemo(() => {
-    return (Object.values(database.families) as Family[]).filter((f) => {
+    const list = (Object.values(database.families) as Family[]).filter((f) => {
       const q = searchTerm.toLowerCase().trim();
       if (!q) return true;
 
@@ -60,20 +60,49 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
       const husbName = getFullName(husband || undefined);
       const wifeName = getFullName(wife || undefined);
       const husbSurname = husband?.name?.surname || husband?.lastName || '';
-      const wifeSurname = wife?.name?.surname || wife?.lastName || wife?.name?.maidenName || wife?.maidenName || '';
+      const wifeSurname = wife?.name?.surname || wife?.lastName || '';
+      const wifeMaiden = wife?.name?.maidenName || wife?.maidenName || '';
       const place = f.marriagePlace || '';
 
       // Direct full name substring match
       if (husbName.toLowerCase().includes(q) || wifeName.toLowerCase().includes(q)) return true;
 
-      // Gender-normalized surname equivalence (e.g. searching "Пірковський" finds family where wife is "Пірковська")
-      if (areSurnamesEquivalent(q, husbSurname) || areSurnamesEquivalent(q, wifeSurname)) return true;
+      // Gender-normalized surname equivalence
+      const surnamesToCheck = [husbSurname, wifeSurname, wifeMaiden].filter(Boolean);
+      (f.childrenIds || []).forEach((cId) => {
+        const ch = database.persons[cId];
+        if (ch) {
+          const chSurname = ch.name?.surname || ch.lastName || '';
+          if (chSurname) surnamesToCheck.push(chSurname);
+        }
+      });
+
+      const qTokens = q.split(/\s+/).filter(Boolean);
+      for (const s of surnamesToCheck) {
+        if (areSurnamesEquivalent(q, s)) return true;
+        for (const token of qTokens) {
+          if (areSurnamesEquivalent(token, s)) return true;
+        }
+      }
 
       // Place normalized match (e.g. searching "Базилівка" matches "с. Базилівка")
       if (place.toLowerCase().includes(q) || arePlacesEquivalent(q, place)) return true;
       if (normalizeUkrainianPlace(place).toLowerCase().includes(normalizeUkrainianPlace(q).toLowerCase())) return true;
 
       return false;
+    });
+
+    // Group and sort families by canonical clan surname
+    return list.sort((a, b) => {
+      const pA = a.husbandId ? database.persons[a.husbandId] : a.wifeId ? database.persons[a.wifeId] : null;
+      const pB = b.husbandId ? database.persons[b.husbandId] : b.wifeId ? database.persons[b.wifeId] : null;
+      const surA = pA?.name?.surname || pA?.lastName || '';
+      const surB = pB?.name?.surname || pB?.lastName || '';
+      const normA = normalizeUkrainianSurnameGender(surA) || surA;
+      const normB = normalizeUkrainianSurnameGender(surB) || surB;
+      const cmp = normA.localeCompare(normB, 'uk', { sensitivity: 'base' });
+      if (cmp !== 0) return cmp;
+      return (a.marriageDate || '').localeCompare(b.marriageDate || '');
     });
   }, [database.families, database.persons, searchTerm]);
 
@@ -133,7 +162,8 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
 
             const rodPerson = husband || wife;
             const rodName = rodPerson ? getPersonRodName(rodPerson) : '';
-            const clanTitle = rodName && rodName !== 'Рід' ? formatClanName(rodName) : '';
+            const canonicalRod = normalizeUkrainianSurnameGender(rodName) || rodName;
+            const clanTitle = canonicalRod && canonicalRod !== 'Рід' ? formatClanName(canonicalRod) : '';
 
             return (
               <div

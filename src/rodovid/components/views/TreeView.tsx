@@ -37,7 +37,9 @@ import {
   Moon,
   Check,
   Shield,
-  Lock
+  Lock,
+  Pencil,
+  SlidersHorizontal
 } from 'lucide-react';
 import {
   GenealogyDatabase,
@@ -52,7 +54,10 @@ import {
   getGenealogyCode,
   formatLifespan,
   CLASSIC_CARD_WIDTH,
-  CLASSIC_CARD_HEIGHT
+  CLASSIC_CARD_HEIGHT,
+  getLineageColorMap,
+  getPersonClanColor,
+  getPersonRodName
 } from '../../utils/treeLayout';
 import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId } from '../../utils/relationship';
 import { getSavedUserTreeState, saveUserTreeState } from '../../../utils/userTreeState';
@@ -61,6 +66,11 @@ import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, getPrivacyLifespan, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { PersonReportModal } from '../../../components/common/PersonReportModal';
+import {
+  normalizeUkrainianSurnameGender,
+  formatClanName,
+  areSurnamesEquivalent
+} from '../../../utils/ukrainianPhonetics';
 
 // Ukrainian generation declension helper
 function getUkrainianGenerationLabel(n: number): string {
@@ -140,19 +150,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return 0;
   });
 
-  // Generation options list without artificial cap
+  // Generation options list up to 7, plus custom if selected
   const treeGenOptions = useMemo(() => {
-    const maxGenLimit = Math.max(generations, 25);
-    const options: number[] = [];
-    for (let g = 2; g <= maxGenLimit; g++) {
-      options.push(g);
+    const base = [2, 3, 4, 5, 6, 7];
+    if (generations > 0 && !base.includes(generations)) {
+      return [...base, generations].sort((a, b) => a - b);
     }
-    if (generations > 0 && !options.includes(generations)) {
-      options.push(generations);
-      options.sort((a, b) => a - b);
-    }
-    return options;
+    return base;
   }, [generations]);
+
+  const [isCustomGenOpen, setIsCustomGenOpen] = useState<boolean>(false);
+  const [customGenInput, setCustomGenInput] = useState<string>('');
 
   const [scale, setScale] = useState<number>(() => {
     if (initialUserState?.scale && typeof initialUserState.scale === 'number') {
@@ -168,11 +176,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
   });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [showMinimap, setShowMinimap] = useState<boolean>(true);
+  const [showMinimap, setShowMinimap] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 640) {
+      return false;
+    }
+    return true;
+  });
+  const [isMobileOptionsOpen, setIsMobileOptionsOpen] = useState<boolean>(false);
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
+  const [showClanBorders, setShowClanBorders] = useState<boolean>(true);
+  const [isClanLegendOpen, setIsClanLegendOpen] = useState<boolean>(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
+  const clanLegendRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -181,6 +198,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
       }
       if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
         setIsThemeMenuOpen(false);
+      }
+      if (clanLegendRef.current && !clanLegendRef.current.contains(event.target as Node)) {
+        setIsClanLegendOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -243,6 +263,33 @@ export const TreeView: React.FC<TreeViewProps> = ({
     collapsedSiblings,
     collapsedChildren
   ]);
+
+  // Lineage / Clan color mapping (identic to Fan Chart)
+  const lineageColorMap = useMemo(() => getLineageColorMap(database), [database]);
+
+  // Active clans in currently displayed tree
+  const treeClans = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; color: string; count: number }>();
+    layout.nodes.forEach((n) => {
+      const rawRod = getPersonRodName(n.person);
+      const rawSurname = (n.person.name?.surname || n.person.lastName || n.person.name?.maidenName || n.person.maidenName || '').trim();
+      if (!rawSurname || rawSurname === 'Рід') return;
+      const canonical = normalizeUkrainianSurnameGender(rawSurname) || rawRod;
+      const clanId = canonical;
+      const clanName = formatClanName(canonical);
+      const color = getPersonClanColor(n.person, lineageColorMap);
+
+      const existing = Array.from(map.values()).find(
+        (c) => c.id.toLowerCase() === clanId.toLowerCase() || areSurnamesEquivalent(clanId, c.id)
+      );
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(clanId, { id: clanId, name: clanName, color, count: 1 });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [layout.nodes, lineageColorMap]);
 
   const setAnchorForPerson = useCallback((personId: string) => {
     const node = layout.nodes.find((n) => n.person.id === personId);
@@ -817,8 +864,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
       const avatarBg = isMale ? '#0c4a6e' : isFemale ? '#701a4f' : '#334155';
       const avatarStroke = isMale ? '#0284c7' : isFemale ? '#e11d48' : '#64748b';
       const isRoot = p.id === activePersonId;
-      const cardBorder = isRoot ? (isFemale ? '#f43f5e' : '#38bdf8') : '#393f47';
-      const borderWidth = isRoot ? '2.5' : '1.5';
+      const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
+      const hasSurname = Boolean(rawSurname && rawSurname !== 'Рід');
+      const clanColor = hasSurname ? getPersonClanColor(p, lineageColorMap) : '#393f47';
+      const cardBorder = (showClanBorders && hasSurname)
+        ? clanColor
+        : (isRoot ? (isFemale ? '#f43f5e' : '#38bdf8') : '#393f47');
+      const borderWidth = (showClanBorders && hasSurname) ? '2' : (isRoot ? '2.5' : '1.5');
 
       const firstName = escapeXml(p.name?.given || p.firstName || '');
       const lastName = escapeXml(p.name?.surname || p.lastName || '');
@@ -853,67 +905,114 @@ export const TreeView: React.FC<TreeViewProps> = ({
   return (
     <div className="flex flex-col h-full w-full bg-[#23272b] overflow-hidden relative select-none">
       {/* Top Toolbar */}
-      <div className="h-14 bg-[#1e2226] border-b border-[#323840] px-2 sm:px-4 flex items-center justify-between gap-2 z-20 shrink-0 print:hidden shadow-md overflow-x-auto scrollbar-none">
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+      <div className="h-14 bg-[#1e2226] border-b border-[#323840] px-2 sm:px-3 md:px-4 flex items-center justify-between gap-1.5 sm:gap-2 md:gap-3 z-20 shrink-0 print:hidden shadow-md overflow-x-auto scrollbar-none w-full max-w-full">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Layout & Mode Switch */}
           <div className="flex items-center bg-[#15181b] p-0.5 rounded-lg border border-[#2d3238] shrink-0">
             <button
               onClick={() => setLayoutType('ancestors')}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 text-white shadow-sm cursor-pointer"
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 text-white shadow-sm cursor-pointer"
               title="Класична вертикальна структура родоводу (FamilySearch style)"
             >
               <TreeIcon className="w-4 h-4 text-emerald-100" />
-              <span>Дерево</span>
+              <span className="hidden sm:inline">Дерево</span>
             </button>
 
             {onSwitchToFan && (
               <button
                 onClick={onSwitchToFan}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
                 title="Перемкнути у віялову діаграму (Fan Chart)"
               >
                 <FanIcon className="w-4 h-4 text-amber-400" />
-                <span>Віяло</span>
+                <span className="hidden sm:inline">Віяло</span>
               </button>
             )}
           </div>
 
           {/* Generations dropdown */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-2.5 py-1.5 rounded-lg shadow-xs shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-2 sm:px-2.5 py-1.5 rounded-lg shadow-xs shrink-0">
             <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <span className="text-slate-400 hidden xl:inline">Поколінь:</span>
-            <select
-              value={generations}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === 'custom') {
-                  const customInput = window.prompt(
-                    'Вкажіть бажану кількість поколінь (число від 1 або більше):',
-                    String(generations || 5)
-                  );
-                  if (customInput !== null) {
-                    const parsed = parseInt(customInput.trim(), 10);
-                    if (!isNaN(parsed) && parsed > 0) {
-                      setGenerations(parsed);
-                    }
+
+            {isCustomGenOpen ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const parsed = parseInt(customGenInput.trim(), 10);
+                  if (!isNaN(parsed) && parsed > 0) {
+                    setGenerations(parsed);
                   }
-                } else {
-                  setGenerations(Number(val));
-                }
-              }}
-              className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer py-0.5"
-              title="Кількість поколінь родоводу"
-            >
-              <option value={0} className="bg-[#1b1f24] text-white">Всі покоління</option>
-              {treeGenOptions.map((g) => (
-                <option key={g} value={g} className="bg-[#1b1f24] text-white">
-                  {getUkrainianGenerationLabel(g)}
-                </option>
-              ))}
-              <option value="custom" className="bg-[#1b1f24] text-amber-400 font-semibold">
-                + Ввести власну кількість...
-              </option>
-            </select>
+                  setIsCustomGenOpen(false);
+                }}
+                className="flex items-center gap-1"
+              >
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  autoFocus
+                  value={customGenInput}
+                  onChange={(e) => setCustomGenInput(e.target.value)}
+                  placeholder="№"
+                  className="w-10 px-1 py-0.5 text-xs bg-[#22262a] border border-amber-500/70 rounded text-amber-300 text-center font-bold focus:outline-none"
+                  title="Введіть бажану кількість поколінь"
+                />
+                <button
+                  type="submit"
+                  className="px-1.5 py-0.5 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded cursor-pointer transition-colors"
+                  title="Застосувати"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomGenOpen(false)}
+                  className="px-1 py-0.5 text-[11px] text-slate-400 hover:text-white rounded cursor-pointer transition-colors"
+                  title="Скасувати"
+                >
+                  ✕
+                </button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-1">
+                <select
+                  value={generations}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'custom') {
+                      setCustomGenInput(String(generations || 5));
+                      setIsCustomGenOpen(true);
+                    } else {
+                      setGenerations(Number(val));
+                    }
+                  }}
+                  className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer py-0.5 max-w-[105px] sm:max-w-[115px]"
+                  title="Кількість поколінь родоводу"
+                >
+                  <option value={0} className="bg-[#1b1f24] text-white">Всі покоління</option>
+                  {treeGenOptions.map((g) => (
+                    <option key={g} value={g} className="bg-[#1b1f24] text-white">
+                      {getUkrainianGenerationLabel(g)}
+                    </option>
+                  ))}
+                  <option value="custom" className="bg-[#1b1f24] text-amber-400 font-semibold">
+                    + покоління
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomGenInput(String(generations || 5));
+                    setIsCustomGenOpen(true);
+                  }}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-[#23282e] hover:bg-amber-600/80 text-amber-300 hover:text-white font-bold text-xs border border-[#383e46] transition-colors cursor-pointer shrink-0"
+                  title="Ввести своє значення поколінь (+)"
+                >
+                  +
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Root Person Selector */}
@@ -952,46 +1051,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             </button>
           </div>
 
-          {/* Sibling Toggle: Direct Line (1 person) vs All Relatives (many people) */}
-          <div
-            className="flex items-center bg-[#15181b] border border-[#2d3238] p-0.5 rounded-lg text-xs shadow-xs shrink-0"
-            title="Перемикач: Тільки прямі предки / Всі родичі"
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setShowSiblings(false);
-                setCollapsedSiblings(new Set());
-              }}
-              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                !showSiblings
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Тільки прямі предки (без братів та сестер)"
-            >
-              <User className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Прямі</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowSiblings(true);
-                setCollapsedSiblings(new Set());
-              }}
-              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                showSiblings
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Всі родичі (разом із братами та сестрами)"
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Всі</span>
-            </button>
-          </div>
-
-          {/* Dedicated Siblings Toggle Button */}
+          {/* Sibling Toggle: Consolidated, responsive button */}
           <button
             type="button"
             onClick={() => {
@@ -1003,38 +1063,152 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 return next;
               });
             }}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs ${
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs shrink-0 ${
               showSiblings
                 ? 'bg-sky-950/70 text-sky-300 border-sky-700/60 hover:bg-sky-900/80'
                 : 'bg-amber-950/70 text-amber-300 border-amber-700/60 hover:bg-amber-900/80'
             }`}
-            title={showSiblings ? "Сховати всіх братів та сестер у дереві" : "Показати братів та сестер у дереві"}
+            title={showSiblings ? "Сховати всіх братів та сестер (тільки прямі предки)" : "Показати братів та сестер (всі родичі)"}
           >
-            <Users className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden md:inline">Брати/сестри:</span>
-            <span className="font-semibold">{showSiblings ? 'Показані' : 'Сховані'}</span>
+            <Users className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span className="hidden sm:inline">{showSiblings ? 'Всі родичі' : 'Тільки прямі'}</span>
+            <span className="sm:hidden">{showSiblings ? 'Всі' : 'Прямі'}</span>
           </button>
+
+          {/* Clan Outline / Rod Borders Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowClanBorders((prev) => !prev)}
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs shrink-0 ${
+              showClanBorders
+                ? 'bg-amber-950/70 text-amber-300 border-amber-600/70 hover:bg-amber-900/80 ring-1 ring-amber-500/30'
+                : 'bg-[#15181b] text-slate-400 hover:text-slate-200 border-[#2d3238]'
+            }`}
+            title={showClanBorders ? "Вимкнути контури карток за родами" : "Увімкнути контури карток за родами (кольори роду як у віялі)"}
+          >
+            <span
+              className="w-2.5 h-2.5 rounded-full shrink-0 border border-white/20"
+              style={{
+                background: showClanBorders
+                  ? 'linear-gradient(135deg, #059669 0%, #0284c7 50%, #d97706 100%)'
+                  : '#64748b'
+              }}
+            />
+            <span className="hidden xl:inline">Контури родів</span>
+          </button>
+
+          {/* Clan Legend Popover */}
+          {showClanBorders && treeClans.length > 0 && (
+            <div className="relative" ref={clanLegendRef}>
+              <button
+                type="button"
+                onClick={() => setIsClanLegendOpen((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs shrink-0 ${
+                  isClanLegendOpen
+                    ? 'bg-slate-700 text-white border-slate-600'
+                    : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
+                }`}
+                title="Показати колірну легенду родів родоводу"
+              >
+                <PieChart className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden md:inline">Роди:</span>
+                <span className="font-mono font-bold text-amber-300 text-[11px]">{treeClans.length}</span>
+              </button>
+
+              {isClanLegendOpen && (
+                <div className="absolute left-0 top-full mt-2 w-72 max-h-80 overflow-y-auto bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between border-b border-[#2d3238] pb-1.5 mb-2">
+                    <span className="text-xs font-bold text-amber-400">Роди у цьому дереві</span>
+                    <span className="text-[10px] text-slate-400">{treeClans.length} родів</span>
+                  </div>
+                  <div className="space-y-1">
+                    {treeClans.map((clan) => (
+                      <div
+                        key={clan.id}
+                        className="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-[#252a30] text-xs transition-colors"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-3.5 h-3.5 rounded-full shrink-0 border border-white/20 shadow-xs"
+                            style={{ backgroundColor: clan.color }}
+                          />
+                          <span className="font-medium text-slate-200 truncate">{clan.name}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 shrink-0 ml-2 font-mono">
+                          {clan.count} {clan.count === 1 ? 'особа' : clan.count < 5 ? 'особи' : 'осіб'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+                title="Легенда родів на поточному дереві (кольори контурів)"
+              >
+                <div className="flex -space-x-1 overflow-hidden">
+                  {treeClans.slice(0, 3).map((c) => (
+                    <span
+                      key={c.id}
+                      className="inline-block w-2.5 h-2.5 rounded-full ring-1 ring-[#1b1f24]"
+                      style={{ backgroundColor: c.color }}
+                    />
+                  ))}
+                </div>
+                <span className="text-[11px] font-bold text-amber-300">{treeClans.length}</span>
+              </button>
+
+              {isClanLegendOpen && (
+                <div className="absolute left-0 top-full mt-2 w-72 max-h-80 overflow-y-auto bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-[#2d3238]">
+                    <span className="text-[11px] font-bold text-slate-300">Роди на дереві (кольори контурів)</span>
+                    <span className="text-[10px] text-slate-400 font-medium">{treeClans.length} {treeClans.length === 1 ? 'рід' : treeClans.length < 5 ? 'роди' : 'родів'}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {treeClans.map((clan) => (
+                      <div
+                        key={clan.id}
+                        className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#22272e] hover:bg-[#2a3038] text-xs transition-colors"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-3.5 h-3.5 rounded-full shrink-0 border border-white/20 shadow-xs"
+                            style={{ backgroundColor: clan.color }}
+                          />
+                          <span className="font-medium text-slate-200 truncate">{clan.name}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 shrink-0 ml-2 font-mono">
+                          {clan.count} {clan.count === 1 ? 'особа' : clan.count < 5 ? 'особи' : 'осіб'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {/* Quick Person Report Export */}
           <button
             type="button"
             onClick={() => setReportPersonId(activePersonId)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-[#2d3238] bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer shadow-xs"
+            className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-[#2d3238] bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer shadow-xs shrink-0"
             title="Згенерувати короткий звіт про особу (PDF / TXT)"
           >
             <FileText className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="hidden sm:inline">Звіт (PDF/TXT)</span>
+            <span className="hidden xl:inline">Звіт (PDF/TXT)</span>
           </button>
 
           {/* Export Menu */}
-          <div className="relative" ref={exportMenuRef}>
+          <div className="relative shrink-0" ref={exportMenuRef}>
             <button
               type="button"
               onClick={() => setIsExportOpen((prev) => !prev)}
-              className={`p-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
+              className={`p-1.5 sm:p-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
                 isExportOpen
                   ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
                   : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
@@ -1080,11 +1254,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
           </div>
 
           {/* Canvas Theme Selector Dropdown */}
-          <div className="relative" ref={themeMenuRef}>
+          <div className="relative shrink-0 hidden md:block" ref={themeMenuRef}>
             <button
               type="button"
               onClick={() => setIsThemeMenuOpen((prev) => !prev)}
-              className={`p-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
+              className={`p-1.5 sm:p-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
                 isThemeMenuOpen
                   ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
                   : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
@@ -1183,8 +1357,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
             )}
           </div>
 
-          {/* Zoom Controls */}
-          <div className="flex items-center gap-1 bg-[#15181b] border border-[#2d3238] p-1 rounded-lg">
+          {/* Zoom Controls (Desktop) */}
+          <div className="hidden lg:flex items-center gap-1 bg-[#15181b] border border-[#2d3238] p-1 rounded-lg shrink-0">
             <button
               onClick={() => zoomAroundCenter(1.18)}
               className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
@@ -1218,6 +1392,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
               {Math.round(scale * 100)}%
             </button>
           </div>
+
+          {/* All Options Modal Trigger (Mobile & Tablet) */}
+          <button
+            type="button"
+            onClick={() => setIsMobileOptionsOpen(true)}
+            className="flex lg:hidden items-center gap-1.5 px-2 sm:px-2.5 py-1.5 bg-[#252a30] hover:bg-[#303640] text-amber-400 border border-[#3e4652] rounded-lg text-xs font-semibold shadow-xs cursor-pointer shrink-0"
+            title="Відкрити всі налаштування та функції дерева"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span className="hidden xs:inline">Опції</span>
+          </button>
         </div>
       </div>
 
@@ -1363,6 +1548,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
             const lifespanStr = isMasked ? '🔒 Скрито (Жива особа)' : formatLifespan(p);
             const fsCode = isMasked ? '🔒 ЗАХИЩЕНО' : getGenealogyCode(p);
 
+            // Clan / Rod color resolution matching Fan Chart
+            const rawRod = getPersonRodName(p);
+            const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
+            const hasSurname = Boolean(rawSurname && rawSurname !== 'Рід');
+            const canonicalRod = normalizeUkrainianSurnameGender(rawSurname) || rawRod;
+            const clanColor = (showClanBorders && hasSurname)
+              ? getPersonClanColor(p, lineageColorMap)
+              : (isLightCanvas ? '#d8cfbe' : '#383e46');
+            const clanTitle = hasSurname ? formatClanName(canonicalRod) : '';
+            const isCardHovered = hoveredPersonId === p.id;
+
             // LOD distant zoom
             if (isLowDetail) {
               return (
@@ -1373,19 +1569,25 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     left: `${node.x}px`,
                     top: `${node.y}px`,
                     width: `${node.width}px`,
-                    height: `${node.height}px`
+                    height: `${node.height}px`,
+                    borderColor: clanColor,
+                    borderWidth: showClanBorders && hasSurname ? '2px' : '1px',
+                    borderStyle: 'solid'
                   }}
                   onMouseEnter={() => setHoveredPersonId(p.id)}
                   onMouseLeave={() => setHoveredPersonId(null)}
-                  className={`group rounded-xl border p-2.5 shadow-lg transition-all cursor-pointer flex flex-col justify-center text-center relative ${
+                  className={`group rounded-xl p-2.5 shadow-lg transition-all cursor-pointer flex flex-col justify-center text-center relative ${
                     isLightCanvas
-                      ? 'bg-white border-[#d4c8b5] text-neutral-900 shadow-md'
-                      : 'bg-[#22262a] border-[#363c44] text-white'
-                  } ${isRoot ? 'ring-2 ring-rose-500 border-rose-500 shadow-xl' : ''}`}
+                      ? 'bg-white text-neutral-900 shadow-md hover:border-emerald-600'
+                      : 'bg-[#22262a] text-white hover:border-slate-400'
+                  } ${isRoot ? 'ring-2 ring-rose-500 shadow-xl' : ''}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onSelectPerson(p.id);
+                    if (p.id !== activePersonId) {
+                      onChangeRoot(p.id);
+                    }
                   }}
+                  title={clanTitle ? `${getFullName(p)} • ${clanTitle} • Натисніть для фокусу` : (p.id === activePersonId ? 'Поточна особа' : 'Зробити фокусом дерева')}
                 >
                   {isTreeRoot && (
                     <span
@@ -1394,6 +1596,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     >
                       👑
                     </span>
+                  )}
+                  {!isMasked && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectPerson(p.id);
+                      }}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-md bg-slate-700/80 hover:bg-sky-600 text-white flex items-center justify-center transition-colors shadow-xs cursor-pointer"
+                      title="Картка особи (редагування)"
+                    >
+                      <Pencil className="w-2.5 h-2.5" />
+                    </button>
                   )}
                   <div className={`w-8 h-8 mx-auto mb-1.5 rounded-full flex items-center justify-center ${
                     isMasked
@@ -1417,25 +1632,34 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   left: `${node.x}px`,
                   top: `${node.y}px`,
                   width: `${node.width}px`,
-                  height: `${node.height}px`
+                  height: `${node.height}px`,
+                  borderColor: clanColor,
+                  borderWidth: showClanBorders && hasSurname ? '2px' : '1px',
+                  borderStyle: 'solid',
+                  boxShadow: (showClanBorders && isCardHovered && hasSurname)
+                    ? `0 14px 28px -4px ${clanColor}50, 0 4px 10px -3px ${clanColor}25`
+                    : undefined
                 }}
                 onMouseEnter={() => setHoveredPersonId(p.id)}
                 onMouseLeave={() => setHoveredPersonId(null)}
-                className={`group rounded-xl border transition-all cursor-pointer flex flex-col justify-between p-3 select-none relative shadow-xl ${
+                className={`group rounded-xl transition-all cursor-pointer flex flex-col justify-between p-3 select-none relative shadow-xl ${
                   isLightCanvas
-                    ? 'bg-white border-[#d8cfbe] text-neutral-900 hover:border-emerald-600 shadow-md hover:shadow-lg'
-                    : 'bg-[#22262a] border-[#383e46] text-white hover:border-slate-400 shadow-black/40'
+                    ? 'bg-white text-neutral-900 shadow-md hover:shadow-lg'
+                    : 'bg-[#22262a] text-white shadow-black/40'
                 } ${
                   isRoot
                     ? isFemale
-                      ? 'ring-2 ring-rose-500/90 border-rose-500 shadow-rose-950/50 shadow-2xl'
-                      : 'ring-2 ring-sky-500/90 border-sky-500 shadow-sky-950/50 shadow-2xl'
+                      ? 'ring-2 ring-rose-500/90 ring-offset-2 ring-offset-[#22262a] shadow-rose-950/50 shadow-2xl'
+                      : 'ring-2 ring-sky-500/90 ring-offset-2 ring-offset-[#22262a] shadow-sky-950/50 shadow-2xl'
                     : ''
                 }`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSelectPerson(p.id);
+                  if (p.id !== activePersonId) {
+                    onChangeRoot(p.id);
+                  }
                 }}
+                title={clanTitle ? `${getFullName(p)} • ${clanTitle} • Натисніть для фокусу` : (p.id === activePersonId ? 'Поточна особа' : 'Зробити фокусом дерева')}
               >
                 {/* Root Person Indicator Badge */}
                 {isTreeRoot && (
@@ -1623,21 +1847,21 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     </div>
                   ) : (
                     <>
-                      {/* Report (PDF / TXT) & Citations Badge */}
+                      {/* Person Card / Edit Badge (Pencil icon to open/edit person card) */}
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setReportPersonId(p.id);
+                          onSelectPerson(p.id);
                         }}
                         className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
                           isLightCanvas
-                            ? 'bg-sky-50 hover:bg-emerald-600 text-sky-800 hover:text-white border-sky-300'
-                            : 'bg-[#0e7490]/30 hover:bg-emerald-700/80 text-[#38bdf8] hover:text-white border-[#0e7490]/50'
+                            ? 'bg-sky-50 hover:bg-sky-600 text-sky-800 hover:text-white border-sky-300'
+                            : 'bg-[#0e7490]/30 hover:bg-sky-600 text-[#38bdf8] hover:text-white border-[#0e7490]/50'
                         }`}
-                        title="Згенерувати короткий звіт про особу (PDF / TXT)"
+                        title="Картка особи (редагування)"
                       >
-                        <FileText className="w-3 h-3" />
+                        <Pencil className="w-3 h-3" />
                       </button>
 
                       {/* Sibling Toggle Badge */}

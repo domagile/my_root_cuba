@@ -8,7 +8,7 @@ import { BarChart3, Users, Heart, Calendar, Trophy, PieChart, MapPin } from 'luc
 import { GenealogyDatabase, Person, Family } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
-import { normalizeUkrainianSurnameGender, normalizeUkrainianPlace } from '../../../utils/ukrainianPhonetics';
+import { normalizeUkrainianSurnameGender, normalizeUkrainianPlace, areSurnamesEquivalent } from '../../../utils/ukrainianPhonetics';
 import { isPersonMale, isPersonFemale } from '../../utils/genderUtils';
 
 interface StatisticsViewProps {
@@ -62,9 +62,13 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
       // Surnames
       const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
       if (rawSurname) {
-        const canonicalSurname = normalizeUkrainianSurnameGender(rawSurname);
+        const canonicalSurname = normalizeUkrainianSurnameGender(rawSurname) || rawSurname;
         if (canonicalSurname) {
-          surnameMap[canonicalSurname] = (surnameMap[canonicalSurname] || 0) + 1;
+          const existingKey = Object.keys(surnameMap).find(
+            (k) => k.toLowerCase() === canonicalSurname.toLowerCase() || areSurnamesEquivalent(k, canonicalSurname)
+          );
+          const keyToUse = existingKey || canonicalSurname;
+          surnameMap[keyToUse] = (surnameMap[keyToUse] || 0) + 1;
         }
       }
 

@@ -5,7 +5,7 @@
  * Interactive Data Health & Conflict Audit and Duplicate Person Detector View
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -29,11 +29,17 @@ import {
   Calendar,
   MapPin,
   Heart,
-  FileText
+  FileText,
+  Zap,
+  EyeOff,
+  Check,
+  X,
+  Layers
 } from 'lucide-react';
 import { Person, Family, TreeConflict, DuplicatePair } from '../../../types';
 import { runTreeDataHealthAudit, autoFixTreeConflict } from '../../../utils/treeAudit';
 import { detectDuplicatePersons } from '../../../utils/duplicateDetector';
+import { quickMergePersons, batchMergeSafeDuplicates } from '../../../utils/personMerge';
 import { SmartMergeModal } from '../modals/SmartMergeModal';
 import { PersonDetailModal } from '../../../components/Tree/PersonDetailModal';
 import { MergePersonsByIdModal } from '../../../components/modals/MergePersonsByIdModal';
@@ -41,6 +47,7 @@ import { MergePersonsByIdModal } from '../../../components/modals/MergePersonsBy
 interface ConflictsViewProps {
   persons: Person[];
   families: Record<string, Family>;
+  initialSubTab?: 'health' | 'duplicates';
   onUpdatePersons: (persons: Person[]) => void;
   onUpdateFamilies?: (families: Record<string, Family>) => void;
   onSelectPerson?: (id: string) => void;
@@ -49,21 +56,42 @@ interface ConflictsViewProps {
 export const ConflictsView: React.FC<ConflictsViewProps> = ({
   persons,
   families,
+  initialSubTab = 'health',
   onUpdatePersons,
   onUpdateFamilies,
   onSelectPerson
 }) => {
   // Navigation tabs within this view
-  const [activeSubTab, setActiveSubTab] = useState<'health' | 'duplicates'>('health');
+  const [activeSubTab, setActiveSubTab] = useState<'health' | 'duplicates'>(initialSubTab);
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
 
   // Search & Filters for Data Health Audit
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSeverity, setSelectedSeverity] = useState<'all' | 'critical' | 'warning' | 'gap'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
-  // Duplicate Detector Filters
+  // Duplicate Detector Filters & State
   const [duplicateSearchQuery, setDuplicateSearchQuery] = useState('');
   const [minConfidenceFilter, setMinConfidenceFilter] = useState<number>(50);
+  const [duplicateCriteriaFilter, setDuplicateCriteriaFilter] = useState<'all' | 'parents' | 'pib' | 'birth'>('all');
+  const [isScanningDuplicates, setIsScanningDuplicates] = useState(false);
+  const [showIgnoredPairs, setShowIgnoredPairs] = useState(false);
+  const [isBatchConfirmOpen, setIsBatchConfirmOpen] = useState(false);
+
+  // Ignored pairs persistence
+  const [ignoredPairIds, setIgnoredPairIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('rodovid_ignored_duplicate_pairs');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Active Modals state
   const [activeMergePair, setActiveMergePair] = useState<DuplicatePair | null>(null);
@@ -78,6 +106,24 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // Toggle ignore pair
+  const handleToggleIgnorePair = (pairId: string) => {
+    let next: string[];
+    if (ignoredPairIds.includes(pairId)) {
+      next = ignoredPairIds.filter(id => id !== pairId);
+      showNotification('Пару відновлено для перевірки.');
+    } else {
+      next = [...ignoredPairIds, pairId];
+      showNotification('Пару позначено як різних осіб та приховано.');
+    }
+    setIgnoredPairIds(next);
+    try {
+      localStorage.setItem('rodovid_ignored_duplicate_pairs', JSON.stringify(next));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Run Realtime Audits
   const auditReport = useMemo(() => {
     return runTreeDataHealthAudit(persons, families);
@@ -86,6 +132,58 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
   const duplicatePairs = useMemo(() => {
     return detectDuplicatePersons(persons);
   }, [persons]);
+
+  // Duplicate pairs statistics
+  const duplicateStats = useMemo(() => {
+    const total = duplicatePairs.length;
+    const exact = duplicatePairs.filter(p => p.confidence >= 85).length;
+    const probable = duplicatePairs.filter(p => p.confidence >= 70 && p.confidence < 85).length;
+    const withParents = duplicatePairs.filter(p => p.criteria?.parentsMatch && p.criteria.parentsMatch !== 'none').length;
+    const ignored = duplicatePairs.filter(p => ignoredPairIds.includes(p.id)).length;
+    return { total, exact, probable, withParents, ignored };
+  }, [duplicatePairs, ignoredPairIds]);
+
+  // Safe pairs for batch merge (confidence >= 85% and not ignored)
+  const safeBatchPairs = useMemo(() => {
+    return duplicatePairs.filter(p => p.confidence >= 85 && !ignoredPairIds.includes(p.id));
+  }, [duplicatePairs, ignoredPairIds]);
+
+  // Quick 1-click merge
+  const handleQuickMerge = (pair: DuplicatePair) => {
+    const res = quickMergePersons(pair.personA, pair.personB, persons, families);
+    onUpdatePersons(res.updatedPersons);
+    if (onUpdateFamilies) {
+      onUpdateFamilies(res.updatedFamilies);
+    }
+    const nameStr = res.masterPerson.name?.given
+      ? `${res.masterPerson.name.surname || ''} ${res.masterPerson.name.given}`.trim()
+      : res.masterPerson.id;
+    showNotification(`Швидке злиття виконано успішно! Особи об'єднано у профіль «${nameStr}».`);
+  };
+
+  // Batch merge safe duplicates
+  const handleExecuteBatchMerge = () => {
+    if (safeBatchPairs.length === 0) {
+      showNotification('Немає безпечних дублікатів (>85%) для пакетного злиття.');
+      return;
+    }
+    const res = batchMergeSafeDuplicates(safeBatchPairs, persons, families, 85);
+    onUpdatePersons(res.updatedPersons);
+    if (onUpdateFamilies) {
+      onUpdateFamilies(res.updatedFamilies);
+    }
+    setIsBatchConfirmOpen(false);
+    showNotification(`Автоматично об'єднано ${res.mergedCount} дублікатів у базі даних!`);
+  };
+
+  // Trigger manual rescan with visual indicator
+  const handleTriggerRescan = () => {
+    setIsScanningDuplicates(true);
+    setTimeout(() => {
+      setIsScanningDuplicates(false);
+      showNotification(`Перевірку бази завершено! Проаналізовано ${persons.length} осіб.`);
+    }, 600);
+  };
 
   // Filtered conflicts
   const filteredConflicts = useMemo(() => {
@@ -114,7 +212,23 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
   // Filtered duplicates
   const filteredDuplicates = useMemo(() => {
     return duplicatePairs.filter(pair => {
+      const isIgnored = ignoredPairIds.includes(pair.id);
+      if (showIgnoredPairs) {
+        if (!isIgnored) return false;
+      } else {
+        if (isIgnored) return false;
+      }
+
       if (pair.confidence < minConfidenceFilter) return false;
+
+      if (duplicateCriteriaFilter === 'parents') {
+        if (!pair.criteria?.parentsMatch || pair.criteria.parentsMatch === 'none') return false;
+      } else if (duplicateCriteriaFilter === 'pib') {
+        if (pair.criteria?.pibMatch !== 'exact') return false;
+      } else if (duplicateCriteriaFilter === 'birth') {
+        if (pair.criteria?.birthMatch !== 'exact') return false;
+      }
+
       if (duplicateSearchQuery.trim()) {
         const q = duplicateSearchQuery.toLowerCase().trim();
         const nameA = `${pair.personA.name?.surname || pair.personA.lastName || ''} ${pair.personA.name?.given || pair.personA.firstName || ''}`.toLowerCase();
@@ -123,7 +237,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
       }
       return true;
     });
-  }, [duplicatePairs, minConfidenceFilter, duplicateSearchQuery]);
+  }, [duplicatePairs, minConfidenceFilter, duplicateSearchQuery, ignoredPairIds, showIgnoredPairs, duplicateCriteriaFilter]);
 
   // Auto fix single conflict
   const handleAutoFix = (conflict: TreeConflict) => {
@@ -204,7 +318,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
           </div>
 
           {/* Sub-tab switcher */}
-          <div className="flex items-center gap-2 p-1.5 bg-neutral-950/80 border border-neutral-800 rounded-xl">
+          <div className="flex flex-wrap items-center gap-2 p-1.5 bg-neutral-950/80 border border-neutral-800 rounded-xl">
             <button
               onClick={() => setActiveSubTab('health')}
               className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer ${
@@ -497,66 +611,194 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
         {activeSubTab === 'duplicates' && (
           <div className="space-y-6">
             
-            {/* Header info & Manual merge by ID trigger */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-neutral-900/60 border border-neutral-800">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <GitMerge className="w-4 h-4 text-amber-500" />
-                  Виявлення та обʼєднання дублікатів
-                </h3>
-                <p className="text-xs text-neutral-400 mt-0.5">
-                  Автоматичний пошук схожих осіб за фонетикою та можливість ручного об'єднання будь-яких двох профілів за їхніми ID.
-                </p>
+            {/* Header info & Top Actions */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 rounded-2xl bg-neutral-900/70 border border-neutral-800">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                    <GitMerge className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h3 className="text-base font-bold text-white">
+                      Автоматичний інструмент перевірки та об'єднання дублікатів
+                    </h3>
+                    <p className="text-xs text-neutral-400">
+                      Порівняння ПІБ (фонетика та варіанти), дат народження та батьків (батько, мати, по батькові).
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setInitialMergeIdA(undefined);
-                  setInitialMergeIdB(undefined);
-                  setIsMergeByIdOpen(true);
-                }}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-neutral-950 shadow-md transition-all flex items-center gap-2 shrink-0 cursor-pointer"
-              >
-                <GitMerge className="w-4 h-4" />
-                <span>Обʼєднати особи по ID</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* Rescan button */}
+                <button
+                  type="button"
+                  onClick={handleTriggerRescan}
+                  disabled={isScanningDuplicates}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  title="Запустити повторний аналіз усієї бази осіб"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isScanningDuplicates ? 'animate-spin' : ''}`} />
+                  <span>{isScanningDuplicates ? 'Сканування...' : 'Пересканувати базу'}</span>
+                </button>
+
+                {/* Batch merge button */}
+                <button
+                  type="button"
+                  onClick={() => setIsBatchConfirmOpen(true)}
+                  disabled={safeBatchPairs.length === 0}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Швидко об'єднати всі пари з надійністю понад 85%"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>Авто-злиття безпечних ({safeBatchPairs.length})</span>
+                </button>
+
+                {/* Merge by ID button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInitialMergeIdA(undefined);
+                    setInitialMergeIdB(undefined);
+                    setIsMergeByIdOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-neutral-950 shadow-md transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+                >
+                  <GitMerge className="w-4 h-4" />
+                  <span>Злити по ID</span>
+                </button>
+              </div>
             </div>
 
-            {/* Filter & Search for Duplicates */}
-            <div className="p-4 rounded-2xl bg-neutral-900/80 border border-neutral-800 flex flex-col md:flex-row items-center justify-between gap-4">
+            {/* Stats Overview Tiles */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <div className="p-3.5 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <span className="text-[11px] text-neutral-400 font-medium">Осіб у базі</span>
+                <p className="text-xl font-extrabold text-white mt-0.5">{persons.length}</p>
+                <span className="text-[10px] text-neutral-500">проаналізовано</span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <span className="text-[11px] text-neutral-400 font-medium">Знайдено пар</span>
+                <p className="text-xl font-extrabold text-amber-400 mt-0.5">{duplicateStats.total}</p>
+                <span className="text-[10px] text-neutral-500">потенційних збігів</span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <span className="text-[11px] text-neutral-400 font-medium">Безпечні (&gt;85%)</span>
+                <p className="text-xl font-extrabold text-emerald-400 mt-0.5">{duplicateStats.exact}</p>
+                <span className="text-[10px] text-neutral-500">готові до 1-клік злиття</span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <span className="text-[11px] text-neutral-400 font-medium">Збіг батьків</span>
+                <p className="text-xl font-extrabold text-sky-400 mt-0.5">{duplicateStats.withParents}</p>
+                <span className="text-[10px] text-neutral-500">підтверджено сім'ю</span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <span className="text-[11px] text-neutral-400 font-medium">Приховані пари</span>
+                <p className="text-xl font-extrabold text-neutral-400 mt-0.5">{duplicateStats.ignored}</p>
+                <span className="text-[10px] text-neutral-500">позначені як різні</span>
+              </div>
+            </div>
+
+            {/* Filter & Search Bar for Duplicates */}
+            <div className="p-4 rounded-2xl bg-neutral-900/80 border border-neutral-800 flex flex-col gap-3">
               
-              <div className="relative flex-1 w-full md:w-auto">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
-                <input
-                  type="text"
-                  value={duplicateSearchQuery}
-                  onChange={(e) => setDuplicateSearchQuery(e.target.value)}
-                  placeholder="Пошук серед дублікатів за імʼям чи прізвищем..."
-                  className="w-full pl-9 pr-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-hidden focus:border-[#B88E3E]"
-                />
+              <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+                <div className="relative flex-1 w-full">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+                  <input
+                    type="text"
+                    value={duplicateSearchQuery}
+                    onChange={(e) => setDuplicateSearchQuery(e.target.value)}
+                    placeholder="Пошук серед дублікатів за імʼям, прізвищем або по батькові..."
+                    className="w-full pl-9 pr-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-hidden focus:border-[#B88E3E]"
+                  />
+                </div>
+
+                {/* Confidence threshold tabs */}
+                <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto shrink-0">
+                  <span className="text-xs text-neutral-400 font-medium whitespace-nowrap mr-1">Поріг:</span>
+                  {[
+                    { val: 50, label: 'Всі (>50%)' },
+                    { val: 70, label: 'Висока (>70%)' },
+                    { val: 85, label: 'Майже точні (>85%)' }
+                  ].map(item => (
+                    <button
+                      key={item.val}
+                      onClick={() => setMinConfidenceFilter(item.val)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                        minConfidenceFilter === item.val
+                          ? 'bg-[#B88E3E]/20 text-[#B88E3E] border border-[#B88E3E]/40 font-semibold'
+                          : 'bg-neutral-950 text-neutral-400 border border-neutral-800 hover:text-white'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Confidence filter */}
-              <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto">
-                <span className="text-xs text-neutral-400 font-medium whitespace-nowrap">Поріг схожості:</span>
-                {[
-                  { val: 50, label: 'Всі (>50%)' },
-                  { val: 70, label: 'Висока (>70%)' },
-                  { val: 85, label: 'Майже точні (>85%)' }
-                ].map(item => (
+              {/* Criteria Pills Filter Row */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-neutral-800/60">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-neutral-400 font-medium mr-1 flex items-center gap-1">
+                    <Filter className="w-3 h-3 text-neutral-500" />
+                    Критерій:
+                  </span>
                   <button
-                    key={item.val}
-                    onClick={() => setMinConfidenceFilter(item.val)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                      minConfidenceFilter === item.val
-                        ? 'bg-[#B88E3E]/20 text-[#B88E3E] border border-[#B88E3E]/40 font-semibold'
+                    onClick={() => setDuplicateCriteriaFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                      duplicateCriteriaFilter === 'all'
+                        ? 'bg-neutral-700 text-white font-semibold'
                         : 'bg-neutral-950 text-neutral-400 border border-neutral-800 hover:text-white'
                     }`}
                   >
-                    {item.label}
+                    Всі критерії
                   </button>
-                ))}
+                  <button
+                    onClick={() => setDuplicateCriteriaFilter('parents')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                      duplicateCriteriaFilter === 'parents'
+                        ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold'
+                        : 'bg-neutral-950 text-neutral-400 border border-neutral-800 hover:text-white'
+                    }`}
+                  >
+                    👨‍👩‍👧 Зі збігом батьків ({duplicateStats.withParents})
+                  </button>
+                  <button
+                    onClick={() => setDuplicateCriteriaFilter('pib')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                      duplicateCriteriaFilter === 'pib'
+                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 font-semibold'
+                        : 'bg-neutral-950 text-neutral-400 border border-neutral-800 hover:text-white'
+                    }`}
+                  >
+                    👤 100% збіг ПІБ
+                  </button>
+                  <button
+                    onClick={() => setDuplicateCriteriaFilter('birth')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                      duplicateCriteriaFilter === 'birth'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold'
+                        : 'bg-neutral-950 text-neutral-400 border border-neutral-800 hover:text-white'
+                    }`}
+                  >
+                    📅 Точна дата народження
+                  </button>
+                </div>
+
+                {/* Show Ignored toggle */}
+                <button
+                  type="button"
+                  onClick={() => setShowIgnoredPairs(!showIgnoredPairs)}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    showIgnoredPairs
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'bg-neutral-950 text-neutral-400 border border-neutral-800 hover:text-neutral-200'
+                  }`}
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span>{showIgnoredPairs ? 'Показати активні' : `Приховані пари (${duplicateStats.ignored})`}</span>
+                </button>
               </div>
 
             </div>
@@ -568,27 +810,50 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                   <CheckCircle2 className="w-6 h-6" />
                 </div>
                 <h3 className="text-base font-bold text-white">
-                  Потенційних дублікатів не знайдено!
+                  {showIgnoredPairs
+                    ? 'Список прихованих дублікатів порожній'
+                    : 'Потенційних дублікатів за обраними критеріями не знайдено!'}
                 </h3>
                 <p className="text-xs text-neutral-400 mt-1 max-w-md mx-auto">
-                  У вашому родовому дереві всі записи є унікальними за фонетичним, хронологічним та родинним аналізом.
+                  {showIgnoredPairs
+                    ? 'Ви ще не позначали пари як «не дублікат».'
+                    : 'Усі записи у дереві є унікальними за обраним рівнем фільтрації.'}
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
                 {filteredDuplicates.map(pair => {
-                  const { personA, personB, confidence, reasons } = pair;
-                  const nameA = `${personA.name?.surname || personA.lastName || ''} ${personA.name?.given || personA.firstName || ''}`.trim() || personA.id;
-                  const nameB = `${personB.name?.surname || personB.lastName || ''} ${personB.name?.given || personB.firstName || ''}`.trim() || personB.id;
+                  const { personA, personB, confidence, reasons, criteria } = pair;
+                  const isPairIgnored = ignoredPairIds.includes(pair.id);
+
+                  const nameA = `${personA.name?.surname || personA.lastName || ''} ${personA.name?.given || personA.firstName || ''} ${personA.name?.patronymic || personA.patronymic || ''}`.trim() || personA.id;
+                  const nameB = `${personB.name?.surname || personB.lastName || ''} ${personB.name?.given || personB.firstName || ''} ${personB.name?.patronymic || personB.patronymic || ''}`.trim() || personB.id;
+
+                  // Resolve parent names
+                  const fatherA = personA.fatherId ? persons.find(p => p.id === personA.fatherId) : null;
+                  const fatherB = personB.fatherId ? persons.find(p => p.id === personB.fatherId) : null;
+                  const motherA = personA.motherId ? persons.find(p => p.id === personA.motherId) : null;
+                  const motherB = personB.motherId ? persons.find(p => p.id === personB.motherId) : null;
+
+                  const fatherAName = fatherA ? `${fatherA.name?.surname || fatherA.lastName || ''} ${fatherA.name?.given || fatherA.firstName || ''}`.trim() : 'Не вказано';
+                  const fatherBName = fatherB ? `${fatherB.name?.surname || fatherB.lastName || ''} ${fatherB.name?.given || fatherB.firstName || ''}`.trim() : 'Не вказано';
+                  const motherAName = motherA ? `${motherA.name?.surname || motherA.lastName || ''} ${motherA.name?.given || motherA.firstName || ''}`.trim() : 'Не вказано';
+                  const motherBName = motherB ? `${motherB.name?.surname || motherB.lastName || ''} ${motherB.name?.given || motherB.firstName || ''}`.trim() : 'Не вказано';
 
                   return (
                     <div
                       key={pair.id}
-                      className="p-5 rounded-2xl bg-neutral-900/70 border border-neutral-800 hover:border-neutral-700 transition-all space-y-4 shadow-sm"
+                      className={`p-5 rounded-2xl bg-neutral-900/70 border transition-all space-y-4 shadow-sm ${
+                        confidence >= 85
+                          ? 'border-emerald-900/50 hover:border-emerald-700/70'
+                          : confidence >= 70
+                          ? 'border-amber-900/50 hover:border-amber-700/70'
+                          : 'border-neutral-800 hover:border-neutral-700'
+                      }`}
                     >
-                      {/* Top Bar with score & reasons */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-800/80 pb-3">
-                        <div className="flex items-center gap-2.5">
+                      {/* Top Bar with score, status & all 4 actions */}
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-neutral-800/80 pb-3">
+                        <div className="flex flex-wrap items-center gap-2.5">
                           <span className={`px-2.5 py-1 rounded-lg text-xs font-extrabold uppercase ${
                             confidence >= 85
                               ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
@@ -601,31 +866,137 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                           <span className="text-xs font-semibold text-white">
                             {confidence >= 85 ? 'Майже точний дублікат' : confidence >= 70 ? 'Висока ймовірність' : 'Можливий дублікат'}
                           </span>
+                          {isPairIgnored && (
+                            <span className="px-2 py-0.5 rounded-md bg-neutral-800 text-neutral-400 text-[10px] font-mono">
+                              Приховано
+                            </span>
+                          )}
                         </div>
 
-                        <div className="flex items-center gap-2 self-start sm:self-auto">
+                        {/* Action buttons */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* 1-Click Quick Merge */}
                           <button
+                            type="button"
+                            onClick={() => handleQuickMerge(pair)}
+                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                            title="Автоматично об'єднати записи за одне натискання (більш повний профіль стане головним)"
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                            <span>Швидке злиття</span>
+                          </button>
+
+                          {/* Full Interactive Smart Merge Wizard */}
+                          <button
+                            type="button"
+                            onClick={() => setActiveMergePair(pair)}
+                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#B88E3E] hover:bg-[#a37c33] text-neutral-950 transition-all flex items-center gap-1.5 shadow-md shadow-[#B88E3E]/20 cursor-pointer"
+                            title="Відкрити майстер з можливістю покрокового вибору кожного поля та батьків"
+                          >
+                            <GitMerge className="w-3.5 h-3.5" />
+                            <span>Майстер злиття</span>
+                          </button>
+
+                          {/* Manual Merge By ID */}
+                          <button
+                            type="button"
                             onClick={() => {
                               setInitialMergeIdA(pair.personA.id);
                               setInitialMergeIdB(pair.personB.id);
                               setIsMergeByIdOpen(true);
                             }}
-                            className="px-3 py-2 rounded-xl text-xs font-semibold bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-all flex items-center gap-1.5 cursor-pointer"
-                            title="Злити по ID"
+                            className="px-3 py-1.5 rounded-xl text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-all flex items-center gap-1 cursor-pointer"
+                            title="Злити через діалог по ID"
                           >
-                            <GitMerge className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Злити по ID</span>
+                            <span>По ID</span>
                           </button>
 
+                          {/* Toggle Ignore */}
                           <button
-                            onClick={() => setActiveMergePair(pair)}
-                            className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B88E3E] hover:bg-[#a37c33] text-neutral-950 transition-all flex items-center gap-1.5 shadow-md shadow-[#B88E3E]/20 cursor-pointer"
+                            type="button"
+                            onClick={() => handleToggleIgnorePair(pair.id)}
+                            className="p-1.5 rounded-xl text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 border border-neutral-800 transition-colors cursor-pointer"
+                            title={isPairIgnored ? 'Відновити в список дублікатів' : 'Позначити як різні особи (ігнорувати)'}
                           >
-                            <GitMerge className="w-4 h-4" />
-                            <span>Майстер злиття</span>
+                            <EyeOff className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
+
+                      {/* 3 Verification Pillars Section (PIB, Birth, Parents) */}
+                      {criteria && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 p-3 rounded-xl bg-neutral-950/70 border border-neutral-800/80 text-xs">
+                          
+                          {/* Pillar 1: PIB */}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-neutral-400 font-medium flex items-center gap-1">
+                                <span>👤</span>
+                                <span>ПІБ</span>
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                criteria.pibMatch === 'exact'
+                                  ? 'bg-emerald-500/20 text-emerald-400'
+                                  : criteria.pibMatch === 'partial'
+                                  ? 'bg-purple-500/20 text-purple-400'
+                                  : 'bg-amber-500/20 text-amber-400'
+                              }`}>
+                                {criteria.pibMatch === 'exact' ? '100% збіг' : `${criteria.pibScore}% схожість`}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-neutral-300 leading-tight">
+                              {criteria.pibDetails}
+                            </p>
+                          </div>
+
+                          {/* Pillar 2: Birth */}
+                          <div className="space-y-1 border-t md:border-t-0 md:border-l border-neutral-800 pt-2 md:pt-0 md:pl-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-neutral-400 font-medium flex items-center gap-1">
+                                <span>📅</span>
+                                <span>Народження</span>
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                criteria.birthMatch === 'exact'
+                                  ? 'bg-emerald-500/20 text-emerald-400'
+                                  : criteria.birthMatch === 'close'
+                                  ? 'bg-amber-500/20 text-amber-400'
+                                  : 'bg-neutral-800 text-neutral-400'
+                              }`}>
+                                {criteria.birthMatch === 'exact' ? 'Точний рік' : criteria.birthMatch === 'close' ? 'Близький рік' : 'Невідомо'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-neutral-300 leading-tight">
+                              {criteria.birthDetails}
+                            </p>
+                          </div>
+
+                          {/* Pillar 3: Parents */}
+                          <div className="space-y-1 border-t md:border-t-0 md:border-l border-neutral-800 pt-2 md:pt-0 md:pl-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-neutral-400 font-medium flex items-center gap-1">
+                                <span>👨‍👩‍👧</span>
+                                <span>Батьки</span>
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                criteria.parentsMatch === 'both'
+                                  ? 'bg-emerald-500/20 text-emerald-400'
+                                  : criteria.parentsMatch === 'father' || criteria.parentsMatch === 'mother'
+                                  ? 'bg-sky-500/20 text-sky-400'
+                                  : criteria.parentsMatch === 'patronymic'
+                                  ? 'bg-indigo-500/20 text-indigo-400'
+                                  : 'bg-neutral-800 text-neutral-400'
+                              }`}>
+                                {criteria.parentsMatch === 'both' ? 'Обоє батьків' : criteria.parentsMatch === 'father' ? 'Батько збігається' : criteria.parentsMatch === 'mother' ? 'Мати збігається' : criteria.parentsMatch === 'patronymic' ? 'По батькові' : 'Не збігаються'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-neutral-300 leading-tight truncate" title={criteria.parentsDetails}>
+                              {criteria.parentsDetails}
+                            </p>
+                          </div>
+
+                        </div>
+                      )}
 
                       {/* Side by side comparison cards */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -643,15 +1014,16 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                               </div>
                             </div>
                             <button
+                              type="button"
                               onClick={() => setInspectingPersonId(personA.id)}
-                              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-                              title="Переглянути картку"
+                              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+                              title="Переглянути картку особи A"
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
                             </button>
                           </div>
 
-                          <div className="text-xs text-neutral-400 space-y-1 pt-1">
+                          <div className="text-xs text-neutral-400 space-y-1.5 pt-1">
                             <div className="flex items-center gap-2">
                               <Calendar className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
                               <span>
@@ -664,8 +1036,25 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                                 <span className="truncate">{personA.birthPlace}</span>
                               </div>
                             )}
+
+                            {/* Parents of A */}
+                            <div className="pt-1 border-t border-neutral-800/80 space-y-0.5 text-[11px]">
+                              <div className="flex items-center justify-between">
+                                <span className="text-neutral-500">Батько:</span>
+                                <span className="text-neutral-300 font-medium truncate max-w-[170px]" title={fatherAName}>
+                                  {fatherAName}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-neutral-500">Мати:</span>
+                                <span className="text-neutral-300 font-medium truncate max-w-[170px]" title={motherAName}>
+                                  {motherAName}
+                                </span>
+                              </div>
+                            </div>
+
                             {(personA.childrenIds?.length || 0) > 0 && (
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 pt-0.5">
                                 <Users className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
                                 <span>Дітей: {personA.childrenIds?.length}</span>
                               </div>
@@ -686,15 +1075,16 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                               </div>
                             </div>
                             <button
+                              type="button"
                               onClick={() => setInspectingPersonId(personB.id)}
-                              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-                              title="Переглянути картку"
+                              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+                              title="Переглянути картку особи B"
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
                             </button>
                           </div>
 
-                          <div className="text-xs text-neutral-400 space-y-1 pt-1">
+                          <div className="text-xs text-neutral-400 space-y-1.5 pt-1">
                             <div className="flex items-center gap-2">
                               <Calendar className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
                               <span>
@@ -707,8 +1097,25 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                                 <span className="truncate">{personB.birthPlace}</span>
                               </div>
                             )}
+
+                            {/* Parents of B */}
+                            <div className="pt-1 border-t border-neutral-800/80 space-y-0.5 text-[11px]">
+                              <div className="flex items-center justify-between">
+                                <span className="text-neutral-500">Батько:</span>
+                                <span className="text-neutral-300 font-medium truncate max-w-[170px]" title={fatherBName}>
+                                  {fatherBName}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-neutral-500">Мати:</span>
+                                <span className="text-neutral-300 font-medium truncate max-w-[170px]" title={motherBName}>
+                                  {motherBName}
+                                </span>
+                              </div>
+                            </div>
+
                             {(personB.childrenIds?.length || 0) > 0 && (
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 pt-0.5">
                                 <Users className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
                                 <span>Дітей: {personB.childrenIds?.length}</span>
                               </div>
@@ -738,6 +1145,72 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
         )}
 
       </div>
+
+      {/* Batch Merge Confirmation Modal */}
+      {isBatchConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-2xl bg-neutral-900 border border-neutral-800 shadow-2xl p-6 space-y-5 text-white">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Автоматичне об'єднання {safeBatchPairs.length} пар дублікатів</h3>
+                  <p className="text-xs text-neutral-400">Поріг схожості &gt;85% (висока надійність)</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBatchConfirmOpen(false)}
+                className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs text-neutral-300">
+              <p>
+                Для кожної пари алгоритм автоматично обере найповніший запис за головний профіль, перенесе всі родинні звʼязки (батьків, подружжя, дітей), події та джерела.
+              </p>
+              <div className="max-h-48 overflow-y-auto space-y-1.5 p-3 rounded-xl bg-neutral-950/80 border border-neutral-800">
+                {safeBatchPairs.map(p => {
+                  const nA = `${p.personA.name?.surname || p.personA.lastName || ''} ${p.personA.name?.given || p.personA.firstName || ''}`.trim() || p.personA.id;
+                  const nB = `${p.personB.name?.surname || p.personB.lastName || ''} ${p.personB.name?.given || p.personB.firstName || ''}`.trim() || p.personB.id;
+                  return (
+                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1 border-b border-neutral-900 last:border-0">
+                      <span className="font-medium text-white truncate max-w-[280px]">
+                        {nA} ⟷ {nB}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+                        {p.confidence}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsBatchConfirmOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition-colors cursor-pointer"
+              >
+                Скасувати
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteBatchMerge}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition-colors flex items-center gap-2 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Підтвердити об'єднання ({safeBatchPairs.length})</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Smart Merge Modal */}
       {activeMergePair && (

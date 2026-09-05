@@ -856,7 +856,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         /* TABLE VIEW */
         <div className="rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] overflow-hidden shadow-sm">
           <div ref={tableContainerRef} className="overflow-x-auto max-h-[calc(100vh-270px)] overflow-y-auto">
-            <table className="w-full min-w-[900px] text-left text-xs text-[#E5E5E5] relative border-collapse">
+            <table className="w-full min-w-[650px] text-left text-xs text-[#E5E5E5] relative border-collapse">
               <thead className="bg-[#121212] text-[#B88E3E] uppercase tracking-wider font-bold text-[10px] border-b border-[#2A2A2A] sticky top-0 z-10">
                 <tr>
                   <th className="p-3 w-10 text-center bg-[#121212]">

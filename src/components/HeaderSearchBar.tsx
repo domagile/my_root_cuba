@@ -213,10 +213,10 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
   }, [selectedIndex]);
 
   return (
-    <div ref={containerRef} className="relative flex-1 max-w-[240px] sm:max-w-xs md:max-w-sm">
+    <div ref={containerRef} className="relative flex-1 min-w-[60px] max-w-[130px] xs:max-w-[170px] sm:max-w-xs md:max-w-sm">
       {/* Search Input Box */}
       <div className="relative flex items-center">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-60 text-amber-500 shrink-0 pointer-events-none" />
+        <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4 absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 opacity-60 text-amber-500 shrink-0 pointer-events-none" />
         <input
           ref={inputRef}
           type="text"
@@ -227,8 +227,8 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
           }}
           onFocus={() => setIsOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Пошук: імена, місця, замітки..."
-          className={`w-full pl-9 pr-14 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-xl text-xs md:text-sm ${theme.inputText} placeholder-opacity-60 focus:outline-hidden focus:ring-2 focus:ring-[#B88E3E]/50 focus:border-[#B88E3E] transition-all shadow-xs`}
+          placeholder="Пошук..."
+          className={`w-full pl-7 sm:pl-9 pr-6 sm:pr-14 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-xl text-xs md:text-sm ${theme.inputText} placeholder-opacity-60 focus:outline-hidden focus:ring-2 focus:ring-[#B88E3E]/50 focus:border-[#B88E3E] transition-all shadow-xs`}
         />
 
         <div className="absolute right-2 flex items-center gap-1">

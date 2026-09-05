@@ -21,7 +21,8 @@ import {
   X,
   CheckCircle2,
   HelpCircle,
-  FileText
+  FileText,
+  GitMerge
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
@@ -34,6 +35,7 @@ import { PersonReportModal } from '../../../components/common/PersonReportModal'
 import { getTreeHashtagsWithCounts, formatHashtag } from '../../../utils/tagUtils';
 import { isPersonMale, isPersonFemale, normalizeGender } from '../../utils/genderUtils';
 import { isPersonHypothesis, isPersonConfirmed } from '../../../utils/researchStatusUtils';
+import { normalizeUkrainianSurnameGender, areSurnamesEquivalent } from '../../../utils/ukrainianPhonetics';
 
 interface PersonsListViewProps {
   database: GenealogyDatabase;
@@ -93,15 +95,24 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     return (Object.values(database.persons) as Person[]).filter((p) => {
       // Search
       const fullName = getFullName(p).toLowerCase();
+      const sur = (p.name?.surname || p.lastName || '').toLowerCase();
+      const maiden = (p.name?.maidenName || p.maidenName || '').toLowerCase();
       const occu = (p.occupation || '').toLowerCase();
       const place = (p.birthPlace || p.deathPlace || '').toLowerCase();
       const tags = (p.tags || []).join(' ').toLowerCase();
       const q = searchTerm.toLowerCase().trim();
 
       const searchTag = q.startsWith('#') ? q.slice(1).trim() : q;
+      const qTokens = q.split(/\s+/).filter(Boolean);
+      const matchesSurnameEquiv =
+        (sur && areSurnamesEquivalent(q, sur)) ||
+        (maiden && areSurnamesEquivalent(q, maiden)) ||
+        qTokens.some((token) => (sur && areSurnamesEquivalent(token, sur)) || (maiden && areSurnamesEquivalent(token, maiden)));
+
       const matchesSearch =
         !q ||
         fullName.includes(q) ||
+        matchesSurnameEquiv ||
         occu.includes(q) ||
         place.includes(q) ||
         tags.includes(q) ||
@@ -143,9 +154,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     return [...personsList].sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'surname') {
-        const nameA = `${a.name?.surname || a.lastName || ''} ${a.name?.given || a.firstName || ''}`;
-        const nameB = `${b.name?.surname || b.lastName || ''} ${b.name?.given || b.firstName || ''}`;
-        comparison = nameA.localeCompare(nameB, 'uk');
+        const surA = (a.name?.surname || a.lastName || a.name?.maidenName || a.maidenName || '').trim();
+        const surB = (b.name?.surname || b.lastName || b.name?.maidenName || b.maidenName || '').trim();
+        const normA = normalizeUkrainianSurnameGender(surA) || surA;
+        const normB = normalizeUkrainianSurnameGender(surB) || surB;
+        comparison = normA.localeCompare(normB, 'uk', { sensitivity: 'base' });
+        if (comparison === 0) {
+          comparison = surA.localeCompare(surB, 'uk', { sensitivity: 'base' });
+        }
+        if (comparison === 0) {
+          const givA = (a.name?.given || a.firstName || '').trim();
+          const givB = (b.name?.given || b.firstName || '').trim();
+          comparison = givA.localeCompare(givB, 'uk', { sensitivity: 'base' });
+        }
       } else if (sortBy === 'birth') {
         const yA = Number(a.birthYear) || 0;
         const yB = Number(b.birthYear) || 0;
@@ -186,6 +207,15 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               Всього знайдено {sortedPersons.length} з {Object.keys(database.persons).length} записів
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => useUIStore.getState().setRodovidView('duplicates')}
+            className="self-start sm:self-auto px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 transition-colors flex items-center gap-1.5 cursor-pointer"
+            title="Перевірити дублікати та об'єднати повтори"
+          >
+            <GitMerge className="w-3.5 h-3.5" />
+            <span>Перевірити дублікати</span>
+          </button>
         </div>
 
         {/* Filters and Search row */}
@@ -375,7 +405,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       ) : viewMode === 'table' ? (
         <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl overflow-hidden shadow-xs`}>
           <div className="overflow-x-auto">
-            <table className={`w-full min-w-[900px] text-left text-xs ${theme.textSecondary}`}>
+            <table className={`w-full min-w-[680px] text-left text-xs ${theme.textSecondary}`}>
               <thead className={`${theme.surfaceBg} ${theme.textMuted} font-semibold border-b ${theme.borderSubtle} uppercase tracking-wider text-[10px]`}>
                 <tr>
                   <th className="py-3 px-4">ПІБ / Особа</th>

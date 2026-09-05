@@ -129,9 +129,28 @@ export function executeSmartPersonMerge(
   const mergedGodchildrenIds = Array.from(new Set([...(personA.godchildrenIds || []), ...(personB.godchildrenIds || [])]))
     .filter(id => id !== masterId && id !== duplicateId);
 
-  // Parents resolution: if master is missing father/mother, inherit from duplicate
-  let fatherId = master.fatherId || (duplicate.fatherId !== masterId ? duplicate.fatherId : undefined);
-  let motherId = master.motherId || (duplicate.motherId !== masterId ? duplicate.motherId : undefined);
+  // Parents resolution: if selection provided, use it; otherwise inherit from duplicate
+  let fatherId: string | undefined;
+  if (selection.father === 'B') {
+    fatherId = personB.fatherId || personA.fatherId;
+  } else if (selection.father === 'A') {
+    fatherId = personA.fatherId || personB.fatherId;
+  } else if (selection.father === 'none') {
+    fatherId = undefined;
+  } else {
+    fatherId = master.fatherId || (duplicate.fatherId !== masterId ? duplicate.fatherId : undefined);
+  }
+
+  let motherId: string | undefined;
+  if (selection.mother === 'B') {
+    motherId = personB.motherId || personA.motherId;
+  } else if (selection.mother === 'A') {
+    motherId = personA.motherId || personB.motherId;
+  } else if (selection.mother === 'none') {
+    motherId = undefined;
+  } else {
+    motherId = master.motherId || (duplicate.motherId !== masterId ? duplicate.motherId : undefined);
+  }
 
   // Avoid circular parent
   if (fatherId === masterId || fatherId === duplicateId) fatherId = undefined;
@@ -307,3 +326,125 @@ export function executeSmartPersonMerge(
     }
   };
 }
+
+/**
+ * Automatically merges two persons into one with automated field selection.
+ * Chooses the richer record as master, populates missing fields, and merges all relationships.
+ */
+export function quickMergePersons(
+  personA: Person,
+  personB: Person,
+  allPersons: Person[],
+  allFamilies: Record<string, Family> = {}
+): MergeResult {
+  // Score completeness of personA vs personB
+  const scorePerson = (p: Person): number => {
+    let score = 0;
+    if (p.name?.surname || p.lastName) score += 2;
+    if (p.name?.given || p.firstName) score += 2;
+    if (p.name?.patronymic || p.patronymic) score += 2;
+    if (p.birthDate || p.birthYear) score += 4;
+    if (p.birthPlace) score += 3;
+    if (p.deathDate || p.deathYear) score += 3;
+    if (p.deathPlace) score += 2;
+    if (p.fatherId) score += 5;
+    if (p.motherId) score += 5;
+    if (p.bio && p.bio.length > 10) score += 4;
+    if (p.notes && p.notes.length > 5) score += 3;
+    if (p.citations && p.citations.length > 0) score += 4;
+    if (p.events && p.events.length > 0) score += 3;
+    if (p.avatar || p.photoUrl || p.avatarUrl) score += 5;
+    return score;
+  };
+
+  const scoreA = scorePerson(personA);
+  const scoreB = scorePerson(personB);
+  const masterTarget: 'A' | 'B' = scoreA >= scoreB ? 'A' : 'B';
+
+  const getChoice = (valA: any, valB: any): 'A' | 'B' => {
+    if (valA && !valB) return 'A';
+    if (!valA && valB) return 'B';
+    return scoreA >= scoreB ? 'A' : 'B';
+  };
+
+  const selection: MergeFieldSelection = {
+    given: getChoice(personA.name?.given || personA.firstName, personB.name?.given || personB.firstName),
+    surname: getChoice(personA.name?.surname || personA.lastName, personB.name?.surname || personB.lastName),
+    patronymic: getChoice(personA.name?.patronymic || personA.patronymic, personB.name?.patronymic || personB.patronymic),
+    maidenName: getChoice(personA.name?.maidenName || personA.maidenName, personB.name?.maidenName || personB.maidenName),
+    gender: personA.gender ? 'A' : 'B',
+    birthDate: getChoice(personA.birthDate || personA.birthYear, personB.birthDate || personB.birthYear),
+    birthPlace: getChoice(personA.birthPlace, personB.birthPlace),
+    deathDate: getChoice(personA.deathDate || personA.deathYear, personB.deathDate || personB.deathYear),
+    deathPlace: getChoice(personA.deathPlace, personB.deathPlace),
+    isLiving: personA.isLiving !== undefined ? 'A' : 'B',
+    occupation: getChoice(personA.occupation, personB.occupation),
+    estateOrSocialStatus: getChoice(personA.estateOrSocialStatus || personA.estate, personB.estateOrSocialStatus || personB.estate),
+    militaryRank: getChoice(personA.militaryRank, personB.militaryRank),
+    confession: getChoice(personA.confession, personB.confession),
+    avatar: personA.avatar || personA.photoUrl ? 'A' : personB.avatar || personB.photoUrl ? 'B' : 'none',
+    father: getChoice(personA.fatherId, personB.fatherId),
+    mother: getChoice(personA.motherId, personB.motherId),
+    combineBio: true,
+    combineNotes: true,
+    combineSources: true,
+    combineEvents: true,
+    combineRelations: true,
+  };
+
+  return executeSmartPersonMerge(personA, personB, selection, allPersons, allFamilies, masterTarget);
+}
+
+/**
+ * Batch merges safe, high-confidence duplicate pairs
+ */
+export function batchMergeSafeDuplicates(
+  pairs: Array<{ personA: Person; personB: Person; confidence: number }>,
+  allPersons: Person[],
+  allFamilies: Record<string, Family> = {},
+  minConfidence = 85
+): {
+  mergedCount: number;
+  updatedPersons: Person[];
+  updatedFamilies: Record<string, Family>;
+  mergedNames: string[];
+} {
+  let currentPersons = [...allPersons];
+  let currentFamilies = { ...allFamilies };
+  let mergedCount = 0;
+  const mergedNames: string[] = [];
+  const processedPersonIds = new Set<string>();
+
+  for (const pair of pairs) {
+    if (pair.confidence < minConfidence) continue;
+
+    // Check if either person was already merged in this batch
+    if (processedPersonIds.has(pair.personA.id) || processedPersonIds.has(pair.personB.id)) {
+      continue;
+    }
+
+    // Lookup freshest state of persons from currentPersons
+    const freshA = currentPersons.find(p => p.id === pair.personA.id);
+    const freshB = currentPersons.find(p => p.id === pair.personB.id);
+    if (!freshA || !freshB) continue;
+
+    const res = quickMergePersons(freshA, freshB, currentPersons, currentFamilies);
+    currentPersons = res.updatedPersons;
+    currentFamilies = res.updatedFamilies;
+    processedPersonIds.add(pair.personA.id);
+    processedPersonIds.add(pair.personB.id);
+    mergedCount++;
+    const nameStr = res.masterPerson.name?.given
+      ? `${res.masterPerson.name.surname || ''} ${res.masterPerson.name.given}`
+      : res.masterPerson.id;
+    mergedNames.push(nameStr.trim());
+  }
+
+  return {
+    mergedCount,
+    updatedPersons: currentPersons,
+    updatedFamilies: currentFamilies,
+    mergedNames
+  };
+}
+

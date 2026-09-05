@@ -955,7 +955,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
         /* MODE 2: CHRONICLE TABLE */
         <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl overflow-hidden shadow-md">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full min-w-[650px] text-left text-xs">
               <thead className="bg-[#121212] text-[#8C8C8C] uppercase font-bold text-[10px] tracking-wider border-b border-[#2A2A2A]">
                 <tr>
                   <th className="px-4 py-3">Рік / Дата</th>

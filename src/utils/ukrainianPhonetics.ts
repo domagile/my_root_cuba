@@ -43,7 +43,8 @@ export function normalizeUkrainianSurnameGender(surname: string): string {
     return `${base}${suffix}`;
   }
 
-  // 1c. Metric book / imperial forms -скій / -цкій / -зкій, -ская / -цкая / -зкая
+  // 1c. Metric book / imperial forms without soft sign or archaic:
+  // -скій / -цкій / -зкій, -ская / -цкая / -зкая, -ский / -цкий / -зкий
   if (lower.endsWith('ская') && lower.length > 4) {
     return `${trimmed.slice(0, -4)}ський`;
   }
@@ -62,8 +63,23 @@ export function normalizeUkrainianSurnameGender(surname: string): string {
   if (lower.endsWith('зкій') && lower.length > 4) {
     return `${trimmed.slice(0, -4)}зький`;
   }
+  if (lower.endsWith('ский') && lower.length > 4) {
+    return `${trimmed.slice(0, -4)}ський`;
+  }
+  if (lower.endsWith('цкий') && lower.length > 4) {
+    return `${trimmed.slice(0, -4)}цький`;
+  }
+  if (lower.endsWith('зкий') && lower.length > 4) {
+    return `${trimmed.slice(0, -4)}зький`;
+  }
 
-  // 1d. Other adjectival endings -ая / -яя -> -ий / -ій
+  // 1d. Russian / metric masculine adjectival -ый -> -ий
+  if (lower.endsWith('ый') && lower.length > 3) {
+    const base = trimmed.slice(0, -2);
+    return `${base}ий`;
+  }
+
+  // 1e. Other adjectival feminine endings -ая / -яя -> -ий / -ій
   if (lower.endsWith('ая') && lower.length > 3) {
     const base = trimmed.slice(0, -2);
     return `${base}ий`;
@@ -73,29 +89,29 @@ export function normalizeUkrainianSurnameGender(surname: string): string {
     return `${base}ій`;
   }
 
-  // 1e. General Ukrainian adjectival surnames:
-  // -на (Болотна -> Болотний, Зелена -> Зелений, Чорна -> Чорний, Красна -> Красний)
-  // -ла (Біла -> Білий, Тепла -> Теплий)
-  // -та (Багата -> Багатий)
-  // -да (Руда -> Рудий)
+  // 1f. General Ukrainian feminine adjectival surnames ending in -а / -я:
+  // -на (Болотна -> Болотний, Зелена -> Зелений, Чорна -> Чорний, Красна -> Красний, Піддубна -> Піддубний, Зарічна -> Зарічний)
+  // -ла (Біла -> Білий, Тепла -> Теплий, Кругла -> Круглий, Світла -> Світлий)
+  // -та (Багата -> Багатий, Свята -> Святий, Товста -> Товстий, Проста -> Простий)
+  // -да (Руда -> Рудий, Молода -> Молодий)
   // -га (Довга -> Довгий)
-  // -ка (Велика -> Великий, Глуха -> Глухий)
-  // Note: only if preceded by consonant
+  // -ка (Велика -> Великий)
+  // -ха (Глуха -> Глухий, Суха -> Сухий)
+  // -ра (Сіра -> Сірий, Стара -> Старий, Добра -> Добрий, Мудра -> Мудрий, Щира -> Щирий, Гостра -> Гострий, Хвора -> Хворий)
+  // -ва (Польова -> Польовий, Лісова -> Лісовий, Чергова -> Черговий)
+  // -ба (Ряба -> Рябий, Люба -> Любий)
+  // Soft: -ня / -ля / -ря (Синя -> Синій, Верхня -> Верхній, Нижня -> Нижній)
   const adjectivalRegex = /([бвгґджзклмнпрстфхцчшщ])([ая])$/i;
   const adjMatch = lower.match(adjectivalRegex);
-  if (adjMatch && lower.length > 4) {
+  if (adjMatch && lower.length > 3) {
     // Exclude patronymic endings like -ова / -єва / -іна / -ина which are handled in step 2
     if (!lower.endsWith('ова') && !lower.endsWith('єва') && !lower.endsWith('ева') && !lower.endsWith('іна') && !lower.endsWith('ина')) {
       const consonant = adjMatch[1];
       const ending = adjMatch[2];
-      // Hard consonant + а -> -ий, soft/йот + я -> -ій
       const base = trimmed.slice(0, -1);
-      const isVelar = /[гґкх]/i.test(consonant);
       if (ending === 'я') {
         return `${base}ій`;
-      } else if (isVelar) {
-        return `${base}ий`;
-      } else if (/[бвдзлмнрст]/i.test(consonant) && (lower.endsWith('тна') || lower.endsWith('лна') || lower.endsWith('дна') || lower.endsWith('рна') || lower.endsWith('лена') || lower.endsWith('лота') || lower.endsWith('біла') || lower.endsWith('руда') || lower.endsWith('чорна'))) {
+      } else {
         return `${base}ий`;
       }
     }
@@ -158,6 +174,9 @@ export function formatClanName(surname: string): string {
   if (lower.endsWith('ий') && lower.length > 3) {
     return `Рід ${clean.slice(0, -2)}их`;
   }
+  if (lower.endsWith('ій') && lower.length > 3) {
+    return `Рід ${clean.slice(0, -2)}іх`;
+  }
 
   // -енко -> -енків
   if (lower.endsWith('енко') && lower.length > 4) {
@@ -188,8 +207,8 @@ export function formatClanName(surname: string): string {
  */
 export function areSurnamesEquivalent(surnameA: string, surnameB: string): boolean {
   if (!surnameA || !surnameB) return false;
-  const cleanA = surnameA.replace(/^Рід\s+/i, '').trim();
-  const cleanB = surnameB.replace(/^Рід\s+/i, '').trim();
+  const cleanA = surnameA.replace(/^(?:Рід|рід|Сім'я|сім'я)\s+/i, '').trim();
+  const cleanB = surnameB.replace(/^(?:Рід|рід|Сім'я|сім'я)\s+/i, '').trim();
   if (!cleanA || !cleanB) return false;
   if (cleanA.toLowerCase() === cleanB.toLowerCase()) return true;
 
@@ -198,14 +217,19 @@ export function areSurnamesEquivalent(surnameA: string, surnameB: string): boole
   if (normA && normB && normA.toLowerCase() === normB.toLowerCase()) return true;
 
   // Check archaic Cyrillic normalization
-  const archA = normalizeArchaicUkrainian(normA);
-  const archB = normalizeArchaicUkrainian(normB);
+  const archA = normalizeArchaicUkrainian(normA || cleanA).toLowerCase();
+  const archB = normalizeArchaicUkrainian(normB || cleanB).toLowerCase();
   if (archA && archB && archA === archB) return true;
 
   // Check phonetic metric book equivalence: interchange 'и' and 'і' (e.g. Пирковський / Пірковський)
-  const phonA = archA.replace(/и/g, 'і');
-  const phonB = archB.replace(/и/g, 'і');
+  const phonA = archA.replace(/и/g, 'і').replace(/е/g, 'є').replace(/ё/g, 'е').replace(/[ъь]$/, '');
+  const phonB = archB.replace(/и/g, 'і').replace(/е/g, 'є').replace(/ё/g, 'е').replace(/[ъь]$/, '');
   if (phonA && phonB && phonA === phonB) return true;
+
+  // Also check surname root stems
+  const rootA = extractUkrainianSurnameRoot(cleanA);
+  const rootB = extractUkrainianSurnameRoot(cleanB);
+  if (rootA && rootB && rootA.length >= 4 && rootA === rootB) return true;
 
   return false;
 }

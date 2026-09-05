@@ -25,7 +25,8 @@ import {
   LogOut,
   Eye,
   ShieldCheck,
-  Mail
+  Mail,
+  GitMerge
 } from 'lucide-react';
 import { ViewMode } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
@@ -135,7 +136,8 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'kinship', label: 'Спорідненість', icon: Compass },
     { id: 'stats', label: 'Статистика', icon: BarChart3 },
     { id: 'reports', label: 'Звіти', icon: FileText },
-    { id: 'conflicts', label: 'Аудит', icon: ShieldAlert }
+    { id: 'conflicts', label: 'Аудит', icon: ShieldAlert },
+    { id: 'duplicates', label: 'Дублікати', icon: GitMerge }
   ];
 
   // If in read-only / guest mode, restrict navigation ONLY to Tree and Fan!

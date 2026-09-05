@@ -504,6 +504,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
             <ConflictsView
               persons={persons}
               families={families}
+              initialSubTab={currentView === 'duplicates' ? 'duplicates' : 'health'}
               onUpdatePersons={(newPersons) => setPersons(newPersons)}
               onUpdateFamilies={(newFamilies) => setFamilies(newFamilies)}
               onSelectPerson={(id) => setInspectPersonId(id)}

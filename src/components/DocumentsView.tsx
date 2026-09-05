@@ -359,7 +359,7 @@ export const DocumentsView: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 bg-[#121212] text-[#E5E5E5] p-6 md:p-8 overflow-y-auto space-y-6 font-sans">
+    <div className="flex-1 bg-[#121212] text-[#E5E5E5] p-4 sm:p-6 md:p-8 overflow-y-auto space-y-6 font-sans">
       {/* 1. Header Section */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#262626] pb-5">
         <div>
@@ -369,7 +369,7 @@ export const DocumentsView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={handleExportExcel}
             className="px-4 py-2 bg-[#262626] hover:bg-[#333333] text-[#E5E5E5] border border-[#404040] font-semibold rounded-xl text-xs flex items-center gap-2 transition-all shadow-xs"
@@ -563,7 +563,7 @@ export const DocumentsView: React.FC = () => {
       {/* 3. Table Container & Top Pagination */}
       <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl overflow-hidden shadow-xl">
         {/* Pagination Bar Top */}
-        <div className="px-5 py-3 border-b border-[#2A2A2A] flex items-center justify-between text-xs text-[#8C8C8C]">
+        <div className="px-5 py-3 border-b border-[#2A2A2A] flex flex-wrap items-center justify-between gap-3 text-xs text-[#8C8C8C]">
           <span>
             Показано {totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, totalItems)} з {totalItems}
           </span>
@@ -610,7 +610,7 @@ export const DocumentsView: React.FC = () => {
 
         {/* Documents Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+          <table className="w-full min-w-[760px] text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-[#2A2A2A] bg-[#141414]">
                 <th className="py-3 px-4 text-[10px] font-bold uppercase tracking-wider text-[#8C8C8C]">РЕЧОВИЙ ДОКАЗ</th>

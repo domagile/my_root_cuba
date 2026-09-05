@@ -4,6 +4,7 @@
  */
 
 import { Person, GenealogyDatabase } from '../types/genealogy';
+import { normalizeUkrainianSurnameGender } from '../../utils/ukrainianPhonetics';
 
 export function getFullName(person?: Person | null): string {
   if (!person) return 'Невідома особа';
@@ -33,10 +34,16 @@ export function getPersonBirthYearNum(p?: Person | null): number {
 
 export function sortPersonsBySurnameAndBirthDesc(persons: Person[]): Person[] {
   return [...persons].sort((a, b) => {
-    const surnameA = (a.name?.surname || a.lastName || '').trim();
-    const surnameB = (b.name?.surname || b.lastName || '').trim();
-    const surnameCmp = surnameA.localeCompare(surnameB, 'uk', { sensitivity: 'base' });
+    const surnameA = (a.name?.surname || a.lastName || a.name?.maidenName || a.maidenName || '').trim();
+    const surnameB = (b.name?.surname || b.lastName || b.name?.maidenName || b.maidenName || '').trim();
+    const normA = normalizeUkrainianSurnameGender(surnameA) || surnameA;
+    const normB = normalizeUkrainianSurnameGender(surnameB) || surnameB;
+    const surnameCmp = normA.localeCompare(normB, 'uk', { sensitivity: 'base' });
     if (surnameCmp !== 0) return surnameCmp;
+
+    // Secondary compare on raw surname
+    const rawCmp = surnameA.localeCompare(surnameB, 'uk', { sensitivity: 'base' });
+    if (rawCmp !== 0) return rawCmp;
 
     // By birth year descending (youngest / most recently born on top)
     const yearA = getPersonBirthYearNum(a);

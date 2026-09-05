@@ -139,7 +139,7 @@ export const DocumentsView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+    <div className={`flex-1 p-4 sm:p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
       <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border-b ${theme.cardBorder} pb-4 gap-4`}>
         <div>
           <h2 className={`text-xl font-bold ${theme.cardTitle} flex items-center gap-2`}>
@@ -151,7 +151,7 @@ export const DocumentsView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {googleDriveEmail ? (
             <div className="flex items-center gap-2">
               <button 
@@ -476,8 +476,8 @@ export const RequestsView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
-      <div className={`flex items-center justify-between border-b ${theme.cardBorder} pb-4`}>
+    <div className={`flex-1 p-4 sm:p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+      <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border-b ${theme.cardBorder} pb-4 gap-4`}>
         <div>
           <h2 className={`text-xl font-bold ${theme.cardTitle} flex items-center gap-2`}>
             <Inbox className="w-6 h-6 text-[#B88E3E]" />
@@ -715,7 +715,7 @@ export const YearMatrixView: React.FC = () => {
   const coveragePercent = totalEntries > 0 ? Math.round((checkedCount / totalEntries) * 100) : 0;
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+    <div className={`flex-1 p-4 sm:p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
       {/* Header */}
       <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border-b ${theme.cardBorder} pb-4 gap-4`}>
         <div>
@@ -728,7 +728,7 @@ export const YearMatrixView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button 
             onClick={() => setIsRangeModalOpen(true)}
             className="px-3.5 py-2 bg-[#133A31] hover:bg-[#1C4E43] text-[#E2C382] border border-[#1F5448] font-semibold rounded-xl text-xs flex items-center gap-1.5"
@@ -799,7 +799,7 @@ export const YearMatrixView: React.FC = () => {
       )}
 
       {/* Filters */}
-      <div className="flex items-center gap-4 bg-[#0A2621] p-3 rounded-2xl border border-[#18453B] text-xs">
+      <div className="flex flex-wrap items-center gap-3 bg-[#0A2621] p-3 rounded-2xl border border-[#18453B] text-xs">
         <span className="flex items-center gap-1 text-[#8BAAA1] font-mono">
           <Filter className="w-3.5 h-3.5 text-[#E2C382]" /> Фільтр:
         </span>
@@ -835,7 +835,7 @@ export const YearMatrixView: React.FC = () => {
 
       {/* Visual Timeline Cards / Matrix Table */}
       <div className="bg-[#0A2621] border border-[#18453B] rounded-2xl p-4 overflow-x-auto">
-        <table className="w-full text-left text-xs text-[#C8DCD5]">
+        <table className="w-full min-w-[640px] text-left text-xs text-[#C8DCD5]">
           <thead className="bg-[#08201B] text-[#E2C382] uppercase font-mono text-[10px]">
             <tr>
               <th className="p-3">Рік</th>
@@ -1146,8 +1146,8 @@ export const TasksView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
-      <div className={`flex items-center justify-between border-b ${theme.cardBorder} pb-4`}>
+    <div className={`flex-1 p-4 sm:p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+      <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border-b ${theme.cardBorder} pb-4 gap-4`}>
         <div>
           <h2 className={`text-xl font-bold ${theme.cardTitle} flex items-center gap-2`}>
             <CheckSquare className="w-6 h-6 text-[#B88E3E]" />
@@ -1363,8 +1363,8 @@ export const FindingsView: React.FC = () => {
   };
 
   return (
-    <div className={`flex-1 p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
-      <div className={`flex items-center justify-between border-b ${theme.cardBorder} pb-4`}>
+    <div className={`flex-1 p-4 sm:p-6 md:p-8 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-6 ${theme.cardTitle} transition-colors duration-300`}>
+      <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border-b ${theme.cardBorder} pb-4 gap-4`}>
         <div>
           <h2 className={`text-xl font-bold ${theme.cardTitle} flex items-center gap-2`}>
             <Bookmark className="w-6 h-6 text-[#B88E3E]" />

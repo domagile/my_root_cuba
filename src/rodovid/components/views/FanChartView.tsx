@@ -79,6 +79,8 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   }, [database.persons, isWhitelisted]);
   // Default to 0 = ALL generations
   const [generations, setGenerations] = useState<number>(0);
+  const [isCustomGenOpen, setIsCustomGenOpen] = useState<boolean>(false);
+  const [customGenInput, setCustomGenInput] = useState<string>('');
   const [hoveredSector, setHoveredSector] = useState<FanChartSector | null>(null);
   const [scale, setScale] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -305,19 +307,14 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     return getMaxAncestorGenerations(database, activePersonId);
   }, [database, activePersonId]);
 
-  // Generation options list without artificial cap
+  // Generation options list up to 7, plus custom if selected
   const generationOptions = useMemo(() => {
-    const maxGenLimit = Math.max(maxAvailableGens, generations, 25);
-    const options: number[] = [];
-    for (let g = 1; g <= maxGenLimit; g++) {
-      options.push(g);
+    const base = [1, 2, 3, 4, 5, 6, 7];
+    if (generations > 0 && !base.includes(generations)) {
+      return [...base, generations].sort((a, b) => a - b);
     }
-    if (generations > 0 && !options.includes(generations)) {
-      options.push(generations);
-      options.sort((a, b) => a - b);
-    }
-    return options;
-  }, [maxAvailableGens, generations]);
+    return base;
+  }, [generations]);
 
   const sectors = useMemo(() => {
     return calculateFanChart(database, activePersonId, generations, colorMode);
@@ -745,52 +742,108 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
           </div>
 
           {/* Generations dropdown */}
+          {/* Generations dropdown */}
           <div
             className={`flex items-center gap-1.5 text-xs ${theme.textSecondary} ${theme.surfaceBg} px-2.5 py-1.5 rounded-lg border ${theme.borderSubtle} shadow-xs`}
           >
             <Layers className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
             <span className={`${theme.textMuted} hidden sm:inline font-medium`}>Поколінь:</span>
-            <select
-              value={generations}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === 'custom') {
-                  const customInput = window.prompt(
-                    'Вкажіть бажану кількість поколінь (число від 1 або більше):',
-                    String(generations || (maxAvailableGens > 0 ? maxAvailableGens : 5))
-                  );
-                  if (customInput !== null) {
-                    const parsed = parseInt(customInput.trim(), 10);
-                    if (!isNaN(parsed) && parsed > 0) {
-                      setGenerations(parsed);
-                    }
+
+            {isCustomGenOpen ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const parsed = parseInt(customGenInput.trim(), 10);
+                  if (!isNaN(parsed) && parsed > 0) {
+                    setGenerations(parsed);
                   }
-                } else {
-                  setGenerations(Number(val));
-                }
-              }}
-              className={`bg-transparent ${theme.textPrimary} text-xs font-semibold focus:outline-none cursor-pointer py-0.5`}
-              title="Кількість поколінь родоводу"
-            >
-              <option value={0} className={isDark ? 'bg-[#15181b] text-white' : 'bg-white text-neutral-900'}>
-                Всі покоління {maxAvailableGens > 0 ? `(${maxAvailableGens})` : ''}
-              </option>
-              {generationOptions.map((g) => (
-                <option
-                  key={g}
-                  value={g}
-                  className={isDark ? 'bg-[#15181b] text-white' : 'bg-white text-neutral-900'}
-                >
-                  {getUkrainianGenerationLabel(g)}
-                </option>
-              ))}
-              <option
-                value="custom"
-                className={isDark ? 'bg-[#15181b] text-amber-400 font-semibold' : 'bg-white text-amber-700 font-semibold'}
+                  setIsCustomGenOpen(false);
+                }}
+                className="flex items-center gap-1"
               >
-                + Ввести власну кількість...
-              </option>
-            </select>
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  autoFocus
+                  value={customGenInput}
+                  onChange={(e) => setCustomGenInput(e.target.value)}
+                  placeholder="№"
+                  className={`w-10 px-1 py-0.5 text-xs rounded border border-amber-500/70 font-bold text-center focus:outline-none ${
+                    isDark ? 'bg-[#22262a] text-amber-300' : 'bg-amber-50 text-amber-800'
+                  }`}
+                  title="Введіть бажану кількість поколінь"
+                />
+                <button
+                  type="submit"
+                  className="px-1.5 py-0.5 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded cursor-pointer transition-colors"
+                  title="Застосувати"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomGenOpen(false)}
+                  className={`px-1 py-0.5 text-[11px] rounded cursor-pointer transition-colors ${
+                    isDark ? 'text-slate-400 hover:text-white' : 'text-neutral-500 hover:text-neutral-900'
+                  }`}
+                  title="Скасувати"
+                >
+                  ✕
+                </button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-1">
+                <select
+                  value={generations}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'custom') {
+                      setCustomGenInput(String(generations || (maxAvailableGens > 0 ? maxAvailableGens : 5)));
+                      setIsCustomGenOpen(true);
+                    } else {
+                      setGenerations(Number(val));
+                    }
+                  }}
+                  className={`bg-transparent ${theme.textPrimary} text-xs font-semibold focus:outline-none cursor-pointer py-0.5 max-w-[115px]`}
+                  title="Кількість поколінь родоводу"
+                >
+                  <option value={0} className={isDark ? 'bg-[#15181b] text-white' : 'bg-white text-neutral-900'}>
+                    Всі покоління
+                  </option>
+                  {generationOptions.map((g) => (
+                    <option
+                      key={g}
+                      value={g}
+                      className={isDark ? 'bg-[#15181b] text-white' : 'bg-white text-neutral-900'}
+                    >
+                      {getUkrainianGenerationLabel(g)}
+                    </option>
+                  ))}
+                  <option
+                    value="custom"
+                    className={isDark ? 'bg-[#15181b] text-amber-400 font-semibold' : 'bg-white text-amber-700 font-semibold'}
+                  >
+                    + покоління
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomGenInput(String(generations || (maxAvailableGens > 0 ? maxAvailableGens : 5)));
+                    setIsCustomGenOpen(true);
+                  }}
+                  className={`w-5 h-5 flex items-center justify-center rounded font-bold text-xs border transition-colors cursor-pointer shrink-0 ${
+                    isDark
+                      ? 'bg-[#23282e] hover:bg-amber-600/80 text-amber-300 hover:text-white border-[#383e46]'
+                      : 'bg-amber-50 hover:bg-amber-500 hover:text-white text-amber-800 border-amber-200'
+                  }`}
+                  title="Ввести своє значення поколінь (+)"
+                >
+                  +
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="hidden lg:flex items-center gap-2">
@@ -998,7 +1051,9 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               const isClanActive =
                 !activeFocusClanId ||
                 sec.clanId === activeFocusClanId ||
-                areSurnamesEquivalent(sec.clanId || '', activeFocusClanId);
+                areSurnamesEquivalent(sec.clanId || '', activeFocusClanId) ||
+                areSurnamesEquivalent(sec.rodName || '', activeFocusClanId) ||
+                (sec.person && areSurnamesEquivalent(sec.person.name?.surname || sec.person.lastName || sec.person.name?.maidenName || sec.person.maidenName || '', activeFocusClanId));
 
               const angleDeg = (midAngle * 180) / Math.PI;
 

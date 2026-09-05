@@ -79,6 +79,18 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
   const nameA = `${personA.name?.surname || personA.lastName || ''} ${personA.name?.given || personA.firstName || ''}`.trim() || personA.id;
   const nameB = `${personB.name?.surname || personB.lastName || ''} ${personB.name?.given || personB.firstName || ''}`.trim() || personB.id;
 
+  const fatherA = allPersons.find(p => p.id === personA.fatherId);
+  const fatherB = allPersons.find(p => p.id === personB.fatherId);
+  const fatherNameA = fatherA ? `${fatherA.name?.surname || fatherA.lastName || ''} ${fatherA.name?.given || fatherA.firstName || ''}`.trim() : (personA.fatherId || null);
+  const fatherNameB = fatherB ? `${fatherB.name?.surname || fatherB.lastName || ''} ${fatherB.name?.given || fatherB.firstName || ''}`.trim() : (personB.fatherId || null);
+
+  const motherA = allPersons.find(p => p.id === personA.motherId);
+  const motherB = allPersons.find(p => p.id === personB.motherId);
+  const motherNameA = motherA ? `${motherA.name?.surname || motherA.lastName || ''} ${motherA.name?.given || motherA.firstName || ''}`.trim() : (personA.motherId || null);
+  const motherNameB = motherB ? `${motherB.name?.surname || motherB.lastName || ''} ${motherB.name?.given || motherB.firstName || ''}`.trim() : (personB.motherId || null);
+
+  const criteria = pair.criteria;
+
   const handleExecuteMerge = () => {
     setIsSubmitting(true);
     try {
@@ -206,6 +218,57 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
           </div>
         )}
 
+        {/* 3 Core Verification Pillars Badges */}
+        {criteria && (
+          <div className="px-4 py-2.5 bg-neutral-950/60 border-b border-neutral-800 grid grid-cols-1 md:grid-cols-3 gap-2 shrink-0">
+            {/* 1. PIB */}
+            <div className="p-2 rounded-lg bg-neutral-900/90 border border-neutral-800 flex items-center gap-2">
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                criteria.pibMatch === 'exact'
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+              }`}>
+                ПІБ {criteria.pibScore}%
+              </span>
+              <span className="text-xs text-neutral-300 truncate" title={criteria.pibDetails}>
+                {criteria.pibDetails}
+              </span>
+            </div>
+
+            {/* 2. Birth Date */}
+            <div className="p-2 rounded-lg bg-neutral-900/90 border border-neutral-800 flex items-center gap-2">
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                criteria.birthMatch === 'exact'
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  : criteria.birthMatch === 'close'
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
+              }`}>
+                Народження
+              </span>
+              <span className="text-xs text-neutral-300 truncate" title={criteria.birthDetails}>
+                {criteria.birthDetails}
+              </span>
+            </div>
+
+            {/* 3. Parents */}
+            <div className="p-2 rounded-lg bg-neutral-900/90 border border-neutral-800 flex items-center gap-2">
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                criteria.parentsMatch === 'both'
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  : criteria.parentsMatch === 'father' || criteria.parentsMatch === 'mother' || criteria.parentsMatch === 'patronymic'
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
+              }`}>
+                Батьки
+              </span>
+              <span className="text-xs text-neutral-300 truncate" title={criteria.parentsDetails}>
+                {criteria.parentsDetails}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Master Selector Bar */}
         <div className="p-4 bg-neutral-900/60 border-b border-neutral-800 flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
           <div className="text-xs text-neutral-300 font-medium">
@@ -330,6 +393,24 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
               valA={personA.confession}
               valB={personB.confession}
             />
+            {(fatherNameA || fatherNameB) && (
+              <FieldRow
+                label="Батько"
+                fieldKey="father"
+                valA={fatherNameA}
+                valB={fatherNameB}
+                icon={Users}
+              />
+            )}
+            {(motherNameA || motherNameB) && (
+              <FieldRow
+                label="Мати"
+                fieldKey="mother"
+                valA={motherNameA}
+                valB={motherNameB}
+                icon={Users}
+              />
+            )}
           </div>
 
           {/* Aggregation & Combination Toggles */}

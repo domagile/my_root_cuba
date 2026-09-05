@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Lock, Flame, X } from 'lucide-react';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Lock, Flame, X, MoreVertical } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { ThemePalette } from '../types';
@@ -69,10 +69,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const [showGedcomModal, setShowGedcomModal] = useState(false);
   const [showGlobalSearchModal, setShowGlobalSearchModal] = useState(false);
   const [showCloudPopover, setShowCloudPopover] = useState(false);
+  const [showMobileMore, setShowMobileMore] = useState(false);
   const [cloudActionMsg, setCloudActionMsg] = useState<{ text: string; isError?: boolean } | null>(null);
   const [toastNotice, setToastNotice] = useState<string | null>(null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
+  const mobileMoreRef = useRef<HTMLDivElement>(null);
 
   // Global keyboard shortcut for search (Cmd+K / Ctrl+K / slash)
   useEffect(() => {
@@ -152,15 +154,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
   return (
     <>
-      <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-3 md:px-6 flex items-center justify-between gap-2 md:gap-4 flex-shrink-0 transition-colors duration-300 relative`}>
+      <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-2 sm:px-4 md:px-6 flex items-center justify-between gap-1.5 sm:gap-2.5 md:gap-4 flex-shrink-0 transition-colors duration-300 relative w-full max-w-full overflow-hidden`}>
         {/* Left Sidebar Menu Toggle Button */}
         <button
           id="app-sidebar-toggle"
           onClick={toggleSidebar}
-          className="p-2 rounded-xl text-[#B88E3E] hover:bg-black/10 dark:hover:bg-white/10 transition-colors shrink-0 cursor-pointer flex items-center gap-1.5"
+          className="p-1.5 sm:p-2 rounded-xl text-[#B88E3E] hover:bg-black/10 dark:hover:bg-white/10 transition-colors shrink-0 cursor-pointer flex items-center gap-1"
           title={isSidebarVisible ? "Сховати бічну панель" : "Відкрити бічну панель"}
         >
-          <Menu className="w-5 h-5" />
+          <Menu className="w-4 h-4 sm:w-5 sm:h-5" />
           <span className="hidden sm:inline text-xs font-semibold">Меню</span>
         </button>
 
@@ -299,29 +301,29 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-1.5 md:gap-2">
+        <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
           {/* Quick Dark / Light Mode Toggle */}
           <button
             onClick={toggleDarkLight}
-            className="p-2 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 text-[#B88E3E] transition-colors shrink-0 cursor-pointer"
+            className="p-1.5 sm:p-2 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 text-[#B88E3E] transition-colors shrink-0 cursor-pointer"
             title={theme.category === 'dark' ? 'Увімкнути світлу тему' : 'Увімкнути темну тему'}
           >
             {theme.category === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
           </button>
 
-          {/* Theme Palette Toggle Button */}
+          {/* Theme Palette Toggle Button (Desktop/Tablet) */}
           <button
             onClick={() => setShowThemeModal(true)}
-            className="p-2 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 text-[#B88E3E] transition-colors shrink-0 cursor-pointer"
+            className="hidden sm:flex p-1.5 sm:p-2 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 text-[#B88E3E] transition-colors shrink-0 cursor-pointer"
             title="Палітра кольорових тем оформлення"
           >
             <Palette className="w-4 h-4" />
           </button>
 
-          {/* GEDCOM / Database Import & Export Button */}
+          {/* GEDCOM / Database Import & Export Button (Desktop/Tablet) */}
           <button
             onClick={isWhitelisted ? () => setShowGedcomModal(true) : () => openAuthModal('Імпорт / Експорт GEDCOM')}
-            className={`p-2 rounded-xl transition-colors shrink-0 cursor-pointer ${
+            className={`hidden sm:flex p-1.5 sm:p-2 rounded-xl transition-colors shrink-0 cursor-pointer ${
               theme.category === 'dark'
                 ? 'hover:bg-white/10 text-emerald-400'
                 : 'hover:bg-black/10 text-emerald-600'
@@ -331,15 +333,61 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             <Upload className="w-4 h-4" />
           </button>
 
+          {/* Mobile Secondary Actions More Menu (Only on small screens < sm) */}
+          <div className="relative sm:hidden" ref={mobileMoreRef}>
+            <button
+              onClick={() => setShowMobileMore(!showMobileMore)}
+              className="p-1.5 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 text-[#B88E3E] transition-colors shrink-0 cursor-pointer"
+              title="Додаткові дії"
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
+            {showMobileMore && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setShowMobileMore(false)} 
+                />
+                <div className={`absolute top-full right-0 mt-2 w-48 rounded-xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-1.5 z-50 space-y-1 ${theme.cardTitle}`}>
+                  <button
+                    onClick={() => {
+                      setShowMobileMore(false);
+                      setShowThemeModal(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer text-left"
+                  >
+                    <Palette className="w-3.5 h-3.5 text-[#B88E3E]" />
+                    <span>Палітра тем</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileMore(false);
+                      if (isWhitelisted) {
+                        setShowGedcomModal(true);
+                      } else {
+                        openAuthModal('Імпорт / Експорт GEDCOM');
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer text-left"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>GEDCOM імпорт/експорт</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
           {/* Pending Requests Badge for Admin */}
           {(isAdmin || currentUser?.role === 'admin') && pendingRequestsCount > 0 && (
             <button
               onClick={() => setActiveTab('settings')}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse shrink-0 cursor-pointer"
+              className="flex items-center gap-1 px-2 py-1 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse shrink-0 cursor-pointer"
               title={`Є нові вхідні заявки на доступ (${pendingRequestsCount}). Натисніть для перегляду в Налаштуваннях`}
             >
-              <Bell className="w-4 h-4 text-amber-500" />
-              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-full bg-amber-500 text-white leading-tight">
+              <Bell className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-[10px] font-mono px-1 py-0.2 rounded-full bg-amber-500 text-white leading-tight">
                 {pendingRequestsCount}
               </span>
             </button>
@@ -349,7 +397,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
           <button
             onClick={isWhitelisted ? onOpenAddPerson : () => openAuthModal('Додавання особи')}
             id="add-person-btn"
-            className={`p-2 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-xl text-xs transition-colors shadow-sm shrink-0 cursor-pointer ${!isWhitelisted ? 'opacity-90' : ''}`}
+            className={`p-1.5 sm:p-2 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-xl text-xs transition-colors shadow-sm shrink-0 cursor-pointer ${!isWhitelisted ? 'opacity-90' : ''}`}
             title={!isWhitelisted ? 'Для редагування надішліть запит на доступ або увійдіть' : 'Додати особу'}
           >
             {isWhitelisted ? <UserPlus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
@@ -359,7 +407,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
           {isWhitelisted && (
             <button
               onClick={() => logout()}
-              className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors shrink-0 cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs transition-colors shrink-0 cursor-pointer"
               title="Вийти з облікового запису / Заблокувати сесію"
             >
               <LogOut className="w-4 h-4" />

@@ -15,7 +15,8 @@ import {
   normalizeArchaicUkrainian, 
   calculateLevenshteinDistance, 
   getLevenshteinSimilarity,
-  extractUkrainianSurnameRoot
+  extractUkrainianSurnameRoot,
+  areSurnamesEquivalent
 } from './ukrainianPhonetics';
 
 export type SearchCategory = 'all' | 'name' | 'place' | 'note';
@@ -237,8 +238,8 @@ export function matchTokenFuzzy(
       let tokenFuzzyType: any = undefined;
 
       for (const tWord of targetWords) {
-        // Direct word equality
-        if (tWord === qToken) {
+        // Direct word equality or surname equivalence (e.g. "Пірковський" vs "Пірковська")
+        if (tWord === qToken || areSurnamesEquivalent(tWord, qToken)) {
           tokenMatched = true;
           tokenBestScore = Math.max(tokenBestScore, 95);
           break;

@@ -422,6 +422,22 @@ export interface TreeConflict {
   metadata?: Record<string, any>;
 }
 
+export interface DuplicatePairCriteria {
+  pibMatch: 'exact' | 'partial' | 'mismatch';
+  pibDetails: string;
+  pibScore: number;
+  birthMatch: 'exact' | 'close' | 'unknown' | 'mismatch';
+  birthDetails: string;
+  birthScore: number;
+  parentsMatch: 'both' | 'father' | 'mother' | 'patronymic' | 'none' | 'conflict';
+  parentsDetails: string;
+  parentsScore: number;
+  fatherNameA?: string;
+  fatherNameB?: string;
+  motherNameA?: string;
+  motherNameB?: string;
+}
+
 export interface DuplicatePair {
   id: string;
   personA: Person;
@@ -435,7 +451,11 @@ export interface DuplicatePair {
     datesScore: number;
     locationScore: number;
     relationsScore: number;
+    pibScore?: number;
+    birthScore?: number;
+    parentsScore?: number;
   };
+  criteria?: DuplicatePairCriteria;
 }
 
 export interface MergeFieldSelection {
@@ -454,6 +474,8 @@ export interface MergeFieldSelection {
   militaryRank: 'A' | 'B' | 'custom';
   confession: 'A' | 'B' | 'custom';
   avatar: 'A' | 'B' | 'none';
+  father?: 'A' | 'B' | 'none';
+  mother?: 'A' | 'B' | 'none';
   customValues?: Record<string, string>;
   combineBio: boolean;
   combineNotes: boolean;
