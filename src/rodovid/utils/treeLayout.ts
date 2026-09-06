@@ -336,22 +336,11 @@ export function calculateClassicFamilyTreeLayout(
   };
 
   // Helper to determine if a person belongs to a collapsed sibling group
-  const isSiblingOfCollapsed = (pId: string): boolean => {
-    if (collapsedSiblings.has(pId)) return true;
-    const p = database.persons[pId];
-    if (!p) return false;
-    const fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    const mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-    for (const cId of collapsedSiblings) {
-      if (cId === pId) return true;
-      const c = database.persons[cId];
-      if (!c) continue;
-      const cF = c.fatherId || (c.parentFamilyId ? database.families[c.parentFamilyId]?.husbandId : undefined);
-      const cM = c.motherId || (c.parentFamilyId ? database.families[c.parentFamilyId]?.wifeId : undefined);
-      if ((fId && cF && fId === cF) || (mId && cM && mId === cM)) return true;
-      if (p.siblingIds?.includes(cId) || c.siblingIds?.includes(pId)) return true;
-    }
-    return false;
+  const isPersonACollapsedSibling = (pId: string): boolean => {
+    if (!pId) return false;
+    // Direct backbone or spouses of backbone are NEVER collapsed as collateral siblings!
+    if (isDirectBackbone(pId) || isSpouseOfBackbone(pId)) return false;
+    return collapsedSiblings.has(pId);
   };
 
   // 1. Calculate relative generation level for all ancestors, descendants, siblings and spouses
@@ -368,8 +357,8 @@ export function calculateClassicFamilyTreeLayout(
     if (!showSiblings && !isDirectBackbone(pId) && !isSpouseOfBackbone(pId)) {
       return;
     }
-    // If individual sibling branch is collapsed: do not enqueue collateral siblings or their descendants
-    if (isSiblingOfCollapsed(pId) && !isDirectBackbone(pId)) {
+    // If individual sibling branch is collapsed: do not enqueue collateral siblings
+    if (isPersonACollapsedSibling(pId)) {
       return;
     }
     if (!personGen.has(pId)) {
@@ -387,7 +376,7 @@ export function calculateClassicFamilyTreeLayout(
     if (!p) continue;
 
     // 1. All spouses of this person (at same generation)
-    if (!isSiblingOfCollapsed(id) || isDirectBackbone(id)) {
+    if (!isPersonACollapsedSibling(id)) {
       const spouseIds = new Set<string>();
       if (p.spouseIds) p.spouseIds.forEach(s => spouseIds.add(s));
       if (p.spouseFamilyIds) {
@@ -400,14 +389,14 @@ export function calculateClassicFamilyTreeLayout(
         });
       }
       spouseIds.forEach(sId => {
-        if (!collapsedSiblings.has(sId)) {
+        if (!isPersonACollapsedSibling(sId)) {
           enqueuePerson(sId, gen);
         }
       });
     }
 
     // 2. Ancestors (Gen - 1, Gen - 2...) - expandable for ANY person in the tree
-    if (showParents && !collapsedParents.has(id) && (!isSiblingOfCollapsed(id) || isDirectBackbone(id))) {
+    if (showParents && !collapsedParents.has(id) && !isPersonACollapsedSibling(id)) {
       if (maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations) {
         let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
         let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
@@ -429,7 +418,7 @@ export function calculateClassicFamilyTreeLayout(
     }
 
     // 3. Descendants (Gen + 1, Gen + 2...) - expandable for ANY person in the tree
-    if (showDescendants && !collapsedChildren.has(id) && (!isSiblingOfCollapsed(id) || isDirectBackbone(id))) {
+    if (showDescendants && !collapsedChildren.has(id) && !isPersonACollapsedSibling(id)) {
       if (maxGenerations === 0 || (gen + 1) <= maxGenerations) {
         const childIds = new Set<string>();
         if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
@@ -444,7 +433,7 @@ export function calculateClassicFamilyTreeLayout(
           if (!showSiblings && directAncestors.has(id) && !directAncestors.has(cId) && cId !== root.id) {
             return;
           }
-          if (isSiblingOfCollapsed(cId) && !isDirectBackbone(cId)) {
+          if (isPersonACollapsedSibling(cId)) {
             return;
           }
           enqueuePerson(cId, gen + 1);
@@ -453,7 +442,7 @@ export function calculateClassicFamilyTreeLayout(
     }
 
     // 4. Siblings (at same generation) - expandable when showSiblings is active
-    if (showSiblings && !collapsedSiblings.has(id) && !isSiblingOfCollapsed(id)) {
+    if (showSiblings && !collapsedSiblings.has(id) && !isPersonACollapsedSibling(id)) {
       let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
       let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
 
@@ -469,7 +458,7 @@ export function calculateClassicFamilyTreeLayout(
 
       if (p.siblingIds) {
         p.siblingIds.forEach(sId => {
-          if (!collapsedSiblings.has(sId) && !isSiblingOfCollapsed(sId)) {
+          if (!isPersonACollapsedSibling(sId)) {
             enqueuePerson(sId, gen);
           }
         });
@@ -480,7 +469,7 @@ export function calculateClassicFamilyTreeLayout(
           const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
           const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
           const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id)) || (p.siblingIds && p.siblingIds.includes(cand.id));
-          if (isSibling && !collapsedSiblings.has(cand.id) && !isSiblingOfCollapsed(cand.id)) {
+          if (isSibling && !isPersonACollapsedSibling(cand.id)) {
             enqueuePerson(cand.id, gen);
           }
         }
@@ -890,7 +879,7 @@ export function calculateClassicFamilyTreeLayout(
     siblingCount = sibs.length;
     areSiblingsVisible = sibs.some(s => personGen.has(s.id));
     const hasSiblings = siblingCount > 0;
-    const isSiblingsCollapsed = collapsedSiblings.has(p.id) || !showSiblings || (hasSiblings && !areSiblingsVisible) || isSiblingOfCollapsed(p.id);
+    const isSiblingsCollapsed = collapsedSiblings.has(p.id) || !showSiblings || (hasSiblings && !areSiblingsVisible) || isPersonACollapsedSibling(p.id);
 
     const childIds = new Set<string>();
     if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));

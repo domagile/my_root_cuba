@@ -8,7 +8,7 @@ import {
   Compass
 } from 'lucide-react';
 import { TreeIcon } from './common/GenealogyIcons';
-import { useUIStore } from '../stores/useUIStore';
+import { useUIStore, getTabUrl } from '../stores/useUIStore';
 import { NavigationTab } from '../types';
 import { getThemeConfig } from '../utils/theme';
 
@@ -37,15 +37,20 @@ export const BottomNav: React.FC = () => {
         const Icon = item.icon;
         const isActive = activeTab === item.id && !isMobileMenuOpen;
         const isAi = item.id === 'ai-analysis';
+        const itemUrl = getTabUrl(item.id);
 
         return (
-          <button
+          <a
             key={item.id}
             id={`bottom-nav-${item.id}`}
-            onClick={() => {
+            href={itemUrl}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+              e.preventDefault();
               setMobileMenuOpen(false);
               setActiveTab(item.id);
             }}
+            title={`${item.label} (довге натискання для нової вкладки)`}
             className={`flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl transition-all relative ${
               isActive 
                 ? 'text-[#B88E3E] font-bold' 
@@ -61,7 +66,7 @@ export const BottomNav: React.FC = () => {
             <span className="text-[10px] leading-tight tracking-tight mt-0.5 truncate max-w-[58px]">
               {item.label}
             </span>
-          </button>
+          </a>
         );
       })}
 

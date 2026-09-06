@@ -8,8 +8,16 @@ import {
   deleteWhitelistEntryFromCloud,
   subscribeToWhitelistCloud,
   saveAccessConfigToCloud,
-  subscribeToAccessConfigCloud
+  subscribeToAccessConfigCloud,
+  subscribeToFirebaseAuth,
+  signOutFirebase
 } from '../lib/firebase';
+import {
+  extractSessionTokenFromUrl,
+  initCrossTabAuthSync,
+  broadcastAuthLogin,
+  broadcastAuthLogout
+} from '../utils/crossTabAuth';
 
 const STORAGE_KEY = 'genealogy_auth_security_v1';
 
@@ -188,15 +196,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   currentUser: (() => {
     try {
+      // 1. First check URL parameter (highest priority when opening in new tab)
+      const fromUrl = extractSessionTokenFromUrl();
+      if (fromUrl) {
+        if (fromUrl.email && isMasterAdminEmail(fromUrl.email)) {
+          fromUrl.role = 'admin';
+          fromUrl.isWhitelisted = true;
+          fromUrl.isAuthenticated = true;
+        }
+        try {
+          localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(fromUrl));
+        } catch {}
+        return fromUrl;
+      }
+
+      // 2. Check localStorage
       const saved = localStorage.getItem(`${STORAGE_KEY}_currentUser`);
       if (saved) {
         const user: AuthUser = JSON.parse(saved);
-        if (user && user.email && isMasterAdminEmail(user.email)) {
-          user.role = 'admin';
-          user.isWhitelisted = true;
-          user.isAuthenticated = true;
+        if (user && user.email) {
+          if (isMasterAdminEmail(user.email)) {
+            user.role = 'admin';
+            user.isWhitelisted = true;
+            user.isAuthenticated = true;
+          }
+          return user;
         }
-        return user;
       }
       return null;
     } catch {
@@ -243,6 +268,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(user));
       } catch {}
+      broadcastAuthLogin(user);
       set({ currentUser: user });
       return {
         success: true,
@@ -268,6 +294,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(demoUser));
       } catch {}
+      broadcastAuthLogin(demoUser);
       set({ currentUser: demoUser });
       return { success: true, role: 'viewer', isWhitelisted: false, message: 'Вхід у режимі відкритого доступу.' };
     }
@@ -341,6 +368,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(user));
     } catch {}
+    broadcastAuthLogin(user);
     set({ currentUser: user });
 
     const roleName = userRole === 'admin' ? 'Адміністратор' : userRole === 'editor' ? 'Редактор' : userRole === 'researcher' ? 'Дослідник' : 'Переглядач';
@@ -371,6 +399,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(pinUser));
       } catch {}
+      broadcastAuthLogin(pinUser);
       set({ currentUser: pinUser });
       return true;
     }
@@ -397,6 +426,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(user));
     } catch {}
+    broadcastAuthLogin(user);
     set({ currentUser: user });
     return { success: true, name, role };
   },
@@ -405,6 +435,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       localStorage.removeItem(`${STORAGE_KEY}_currentUser`);
     } catch {}
+    broadcastAuthLogout();
+    signOutFirebase().catch(() => {});
     set({ currentUser: null });
   },
 
@@ -761,10 +793,49 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     });
 
+    // 4. Automatic Firebase Auth state listener across tabs/sessions
+    const unsubFirebaseAuth = subscribeToFirebaseAuth((fbUser) => {
+      if (fbUser && fbUser.email) {
+        const current = get().currentUser;
+        if (!current || !current.isAuthenticated || current.email?.toLowerCase() !== fbUser.email.toLowerCase()) {
+          get().loginWithGoogle(fbUser.email, fbUser.displayName || undefined, fbUser.photoURL || undefined);
+        }
+      }
+    });
+
+    // 5. Real-time cross-tab auth sync (BroadcastChannel & storage events)
+    const unsubCrossTab = initCrossTabAuthSync({
+      getCurrentUser: () => get().currentUser,
+      onUserReceived: (receivedUser) => {
+        const current = get().currentUser;
+        if (!current || current.email?.toLowerCase() !== receivedUser.email?.toLowerCase() || current.role !== receivedUser.role) {
+          if (receivedUser.email && isMasterAdminEmail(receivedUser.email)) {
+            receivedUser.role = 'admin';
+            receivedUser.isWhitelisted = true;
+            receivedUser.isAuthenticated = true;
+          }
+          try {
+            localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(receivedUser));
+          } catch {}
+          set({ currentUser: receivedUser });
+        }
+      },
+      onLogout: () => {
+        if (get().currentUser) {
+          try {
+            localStorage.removeItem(`${STORAGE_KEY}_currentUser`);
+          } catch {}
+          set({ currentUser: null });
+        }
+      }
+    });
+
     return () => {
       unsubWhitelist();
       unsubRequests();
       unsubConfig();
+      unsubFirebaseAuth();
+      unsubCrossTab();
     };
   }
 }));

@@ -35,6 +35,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from './components/ContactAuthorModal';
 import { GuestContactBanner } from './components/GuestContactBanner';
 import { getThemeConfig } from './utils/theme';
+import { isUserWhitelisted } from './rodovid/utils/privacy';
 import { RefreshCw, AlertCircle, ArrowLeft, Lock, Mail } from 'lucide-react';
 
 function AppContent() {
@@ -51,14 +52,7 @@ function AppContent() {
   const initCloudAuthSync = useAuthStore((s) => s.initCloudAuthSync);
   const theme = getThemeConfig(themePalette);
 
-  const isWhitelisted = Boolean(
-    currentUser &&
-    currentUser.isAuthenticated &&
-    (currentUser.role === 'admin' ||
-      whitelist.some(
-        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-      ))
-  );
+  const isWhitelisted = isUserWhitelisted(currentUser, whitelist);
 
   // Realtime Cloud Auth Sync (Whitelist, Access Requests, Security Config across all browsers)
   useEffect(() => {
@@ -82,6 +76,25 @@ function AppContent() {
   useEffect(() => {
     initFromUrl();
   }, [initFromUrl]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get('tab');
+        if (tab) {
+          const rodovidViews = ['tree', 'fan', 'persons', 'timeline', 'places', 'sources', 'kinship', 'stats', 'reports', 'conflicts', 'duplicates'];
+          if (rodovidViews.includes(tab)) {
+            useUIStore.getState().setRodovidView(tab as any);
+          } else {
+            useUIStore.getState().setActiveTab(tab);
+          }
+        }
+      } catch {}
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
   const [personToEdit, setPersonToEdit] = useState<Person | null>(null);

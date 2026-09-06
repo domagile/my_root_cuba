@@ -1,9 +1,87 @@
 import { create } from 'zustand';
-import { ThemePalette, AccessLockConfig, ViewMode } from '../types';
+import { ThemePalette, AccessLockConfig, ViewMode, AuthUser } from '../types';
+import { encodeSessionToken } from '../utils/crossTabAuth';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v2';
 
 export type TreeCanvasTheme = 'classic-dark' | 'parchment' | 'light' | 'emerald';
+
+export const RODOVID_VIEWS: ViewMode[] = [
+  'tree',
+  'fan',
+  'persons',
+  'timeline',
+  'places',
+  'sources',
+  'kinship',
+  'stats',
+  'reports',
+  'conflicts',
+  'duplicates'
+];
+
+export const getTabUrl = (tab: string, view?: ViewMode, user?: AuthUser | null): string => {
+  if (typeof window === 'undefined') return `?tab=${tab}`;
+  const url = new URL(window.location.href);
+  if (RODOVID_VIEWS.includes(tab as ViewMode)) {
+    url.searchParams.set('tab', tab);
+    url.searchParams.delete('view');
+  } else {
+    url.searchParams.set('tab', tab);
+    if (view && RODOVID_VIEWS.includes(view)) {
+      url.searchParams.set('view', view);
+    } else {
+      url.searchParams.delete('view');
+    }
+  }
+
+  // Seamless cross-tab auth transfer: include session token if authenticated
+  let activeUser = user;
+  if (activeUser === undefined) {
+    try {
+      const saved = localStorage.getItem('genealogy_auth_security_v1_currentUser');
+      if (saved) activeUser = JSON.parse(saved);
+    } catch {}
+  }
+
+  if (activeUser && activeUser.isAuthenticated) {
+    const token = encodeSessionToken(activeUser);
+    if (token) {
+      url.searchParams.set('_auth_t', token);
+    }
+  }
+
+  return `${url.pathname}${url.search}`;
+};
+
+export const openTabInNewWindow = (tab: string, view?: ViewMode, user?: AuthUser | null) => {
+  if (typeof window === 'undefined') return;
+  const targetUrl = getTabUrl(tab, view, user);
+  window.open(targetUrl, '_blank', 'noopener,noreferrer');
+};
+
+const getInitialNav = (): { activeTab: string; rodovidView: ViewMode } => {
+  if (typeof window !== 'undefined') {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      const view = params.get('view') as ViewMode | null;
+
+      if (tab && RODOVID_VIEWS.includes(tab as ViewMode)) {
+        return { activeTab: 'tree', rodovidView: tab as ViewMode };
+      }
+      if (view && RODOVID_VIEWS.includes(view)) {
+        return { activeTab: 'tree', rodovidView: view };
+      }
+      if (tab) {
+        return { activeTab: tab, rodovidView: 'tree' };
+      }
+    } catch {}
+  }
+  return { activeTab: 'tree', rodovidView: 'tree' };
+};
+
+const initialNav = getInitialNav();
 
 export interface UIState {
   activeTab: string;
@@ -40,8 +118,8 @@ export interface UIState {
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
-  activeTab: 'tree',
-  rodovidView: 'tree',
+  activeTab: initialNav.activeTab,
+  rodovidView: initialNav.rodovidView,
   isMobileMenuOpen: false,
   isSidebarVisible: true,
   isAuthModalOpen: false,
@@ -89,9 +167,33 @@ export const useUIStore = create<UIState>((set, get) => ({
     return true; // Default unlocked for smooth preview experience
   })(),
 
-  setActiveTab: (activeTab: string) => set({ activeTab }),
+  setActiveTab: (activeTab: string) => {
+    set({ activeTab });
+    if (typeof window !== 'undefined') {
+      try {
+        const url = new URL(window.location.href);
+        if (activeTab === 'tree') {
+          const currentRodovid = get().rodovidView;
+          url.searchParams.set('tab', currentRodovid || 'tree');
+        } else {
+          url.searchParams.set('tab', activeTab);
+          url.searchParams.delete('view');
+        }
+        window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+      } catch {}
+    }
+  },
 
-  setRodovidView: (rodovidView: ViewMode) => set({ rodovidView, activeTab: 'tree' }),
+  setRodovidView: (rodovidView: ViewMode) => {
+    set({ rodovidView, activeTab: 'tree' });
+    if (typeof window !== 'undefined') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', rodovidView);
+        window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+      } catch {}
+    }
+  },
 
   setThemePalette: (themePalette: ThemePalette) => {
     try {

@@ -27,7 +27,7 @@ import {
   FanChartClan,
   getMaxAncestorGenerations
 } from '../../utils/treeLayout';
-import { getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
+import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
@@ -77,6 +77,11 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     const safeList = rawList.map((p) => getPrivacySafePerson(p, false));
     return sortPersonsBySurnameAndBirthDesc(safeList);
   }, [database.persons, isWhitelisted]);
+
+  const defaultRootId = useMemo(() => {
+    return database.rootPersonId || findRootPersonId(database.persons);
+  }, [database.rootPersonId, database.persons]);
+
   // Default to 0 = ALL generations
   const [generations, setGenerations] = useState<number>(0);
   const [isCustomGenOpen, setIsCustomGenOpen] = useState<boolean>(false);
@@ -307,11 +312,11 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     return getMaxAncestorGenerations(database, activePersonId);
   }, [database, activePersonId]);
 
-  // Generation options list up to 7, plus custom if selected
+  // Generation options list: 1 to 4 in dropdown, plus custom if selected
   const generationOptions = useMemo(() => {
-    const base = [1, 2, 3, 4, 5, 6, 7];
-    if (generations > 0 && !base.includes(generations)) {
-      return [...base, generations].sort((a, b) => a - b);
+    const base = [1, 2, 3, 4];
+    if (generations > 4) {
+      return [...base, generations];
     }
     return base;
   }, [generations]);
@@ -492,48 +497,51 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
   return (
     <div
-      className={`flex flex-col h-[calc(100vh-4rem)] ${theme.appBg} ${theme.textPrimary} overflow-hidden relative select-none`}
+      className={`flex flex-col h-full w-full ${theme.appBg} ${theme.textPrimary} overflow-hidden relative select-none`}
     >
-      {/* Top Controls */}
+      {/* Top Controls: 2 rows on mobile, tablet & laptop (< 2xl), 1 row on ultra-wide desktop (>= 2xl) */}
       <div
-        className={`h-14 ${theme.headerBg} backdrop-blur border-b ${theme.headerBorder} px-4 flex items-center justify-between z-20 shrink-0 print:hidden`}
+        className={`w-full ${theme.headerBg} backdrop-blur border-b ${theme.headerBorder} px-2.5 sm:px-4 py-1.5 sm:py-2 flex flex-col 2xl:flex-row 2xl:items-center 2xl:justify-between gap-1.5 sm:gap-2 z-20 shrink-0 print:hidden shadow-xs`}
       >
-        <div className="flex items-center gap-3">
-          {onSwitchToTree && (
-            <button
-              onClick={onSwitchToTree}
-              className={`flex items-center gap-1.5 px-3 py-1.5 ${theme.surfaceBg} hover:brightness-110 ${theme.textPrimary} border ${theme.borderSubtle} rounded-lg text-xs font-medium transition-colors cursor-pointer`}
-              title="Повернутися до класичного дерева роду"
-            >
-              <TreeIcon className="w-4 h-4 text-emerald-500" />
-              <span>Дерево</span>
-            </button>
-          )}
-
-          {/* Style & Background Theme Menu Button */}
-          <div className="relative" ref={colorMenuRef}>
-            <button
-              onClick={() => setIsColorMenuOpen((prev) => !prev)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                isColorMenuOpen
-                  ? `${theme.buttonSecondaryBg} ${theme.textPrimary} border-amber-500 shadow-sm`
-                  : `${theme.surfaceBg} ${theme.textPrimary} hover:brightness-110 border ${theme.borderSubtle}`
-              }`}
-              title="Налаштування забарвлення роду та фону полотна"
-              aria-expanded={isColorMenuOpen}
-            >
-              <Palette className="w-4 h-4 text-amber-400" />
-              <ChevronDown
-                className={`w-3 h-3 ${theme.textMuted} transition-transform duration-200 ${
-                  isColorMenuOpen ? 'rotate-180' : ''
-                }`}
-              />
-            </button>
-
-            {isColorMenuOpen && (
-              <div
-                className={`absolute left-0 top-full mt-2 w-72 ${theme.cardBg} border ${theme.cardBorder} rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150`}
+        {/* Row 1 (< 2xl) or Left Group (>= 2xl): Mode, Palette, Generations, Export */}
+        <div className="flex items-center justify-between 2xl:justify-start gap-1.5 sm:gap-2 w-full 2xl:w-auto min-w-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
+            {onSwitchToTree && (
+              <button
+                onClick={onSwitchToTree}
+                className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 ${theme.surfaceBg} hover:brightness-110 ${theme.textPrimary} border ${theme.borderSubtle} rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-xs`}
+                title="Повернутися до класичного дерева роду"
               >
+                <TreeIcon className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>Дерево</span>
+              </button>
+            )}
+
+            {/* Style & Background Theme Menu Button */}
+            <div className="relative shrink-0" ref={colorMenuRef}>
+              <button
+                onClick={() => setIsColorMenuOpen((prev) => !prev)}
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer shadow-xs ${
+                  isColorMenuOpen
+                    ? `${theme.buttonSecondaryBg} ${theme.textPrimary} border-amber-500 ring-1 ring-amber-500/30`
+                    : `${theme.surfaceBg} ${theme.textPrimary} hover:brightness-110 border ${theme.borderSubtle}`
+                }`}
+                title="Налаштування забарвлення роду та фону полотна"
+                aria-expanded={isColorMenuOpen}
+              >
+                <Palette className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="hidden sm:inline font-medium">Кольори</span>
+                <ChevronDown
+                  className={`w-3 h-3 ${theme.textMuted} transition-transform duration-200 ${
+                    isColorMenuOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              {isColorMenuOpen && (
+                <div
+                  className={`absolute left-0 top-full mt-2 w-72 ${theme.cardBg} border ${theme.cardBorder} rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150`}
+                >
                 {/* Section 1: Color Schemes */}
                 <div
                   className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider ${theme.textMuted} border-b ${theme.borderSubtle} mb-1.5`}
@@ -742,12 +750,10 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
           </div>
 
           {/* Generations dropdown */}
-          {/* Generations dropdown */}
           <div
             className={`flex items-center gap-1.5 text-xs ${theme.textSecondary} ${theme.surfaceBg} px-2.5 py-1.5 rounded-lg border ${theme.borderSubtle} shadow-xs`}
           >
             <Layers className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            <span className={`${theme.textMuted} hidden sm:inline font-medium`}>Поколінь:</span>
 
             {isCustomGenOpen ? (
               <form
@@ -809,7 +815,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                   title="Кількість поколінь родоводу"
                 >
                   <option value={0} className={isDark ? 'bg-[#15181b] text-white' : 'bg-white text-neutral-900'}>
-                    Всі покоління
+                    Всі
                   </option>
                   {generationOptions.map((g) => (
                     <option
@@ -817,14 +823,14 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                       value={g}
                       className={isDark ? 'bg-[#15181b] text-white' : 'bg-white text-neutral-900'}
                     >
-                      {getUkrainianGenerationLabel(g)}
+                      {g} пок.
                     </option>
                   ))}
                   <option
                     value="custom"
                     className={isDark ? 'bg-[#15181b] text-amber-400 font-semibold' : 'bg-white text-amber-700 font-semibold'}
                   >
-                    + покоління
+                    + пок.
                   </option>
                 </select>
                 <button
@@ -845,46 +851,21 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               </div>
             )}
           </div>
-
-          <div className="hidden lg:flex items-center gap-2">
-            <span className={`text-xs ${theme.textMuted}`}>Центр:</span>
-            <select
-              value={activePersonId}
-              onChange={(e) => onChangeRoot(e.target.value)}
-              className={`${theme.surfaceBg} ${theme.textPrimary} text-xs border ${theme.borderSubtle} rounded-md px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[190px] truncate cursor-pointer`}
-            >
-              {dropdownPersons.map((p) => {
-                const isLiving = isPersonLiving(database.persons[p.id]);
-                const isMasked = !isWhitelisted && isLiving;
-                return (
-                  <option
-                    key={p.id}
-                    value={p.id}
-                    className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-neutral-900'}
-                  >
-                    {isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
         </div>
 
-        {/* Action Controls: Export, Print, Canvas Theme, Zoom */}
-        <div className="flex items-center gap-2">
-          {/* Compact Export Menu (On-demand) */}
-          <div className="relative" ref={exportMenuRef}>
+        {/* Export Menu on Row 1 (Always accessible on all screen sizes!) */}
+          <div className="relative shrink-0" ref={exportMenuRef}>
             <button
               onClick={() => setIsExportOpen((prev) => !prev)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs ${
                 isExportOpen
-                  ? `${theme.buttonSecondaryBg} ${theme.textPrimary} border-emerald-500 shadow-sm`
+                  ? `${theme.buttonSecondaryBg} ${theme.textPrimary} border-emerald-500 ring-1 ring-emerald-500/30`
                   : `${theme.surfaceBg} ${theme.textSecondary} hover:brightness-110 border ${theme.borderSubtle}`
               }`}
-              title="Експорт та друк віяла"
+              title="Експорт та друк віяла (SVG / PDF)"
               aria-expanded={isExportOpen}
             >
-              <Download className="w-3.5 h-3.5 text-emerald-500" />
+              <Download className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
               <span className="hidden sm:inline">Експорт</span>
               <ChevronDown
                 className={`w-3 h-3 ${theme.textMuted} transition-transform duration-200 ${
@@ -935,24 +916,51 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               </div>
             )}
           </div>
+        </div>
 
+        {/* Row 2 (< 2xl) or Right Group (>= 2xl): Center Person + Zoom Controls */}
+        <div className="flex items-center justify-between 2xl:justify-end gap-1.5 sm:gap-2 w-full 2xl:w-auto min-w-0 pt-1 2xl:pt-0 border-t border-neutral-500/15 2xl:border-t-0">
+          {/* Center Person Selector */}
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 2xl:flex-initial">
+            <span className={`text-xs ${theme.textMuted} hidden sm:inline shrink-0 font-medium`}>Центр:</span>
+            <select
+              value={activePersonId}
+              onChange={(e) => onChangeRoot(e.target.value)}
+              className={`${theme.surfaceBg} ${theme.textPrimary} text-xs border ${theme.borderSubtle} rounded-lg px-2 sm:px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[150px] sm:max-w-[210px] truncate cursor-pointer shadow-xs`}
+              title="Вибрати центральну особу родоводу для віяла"
+            >
+              {dropdownPersons.map((p) => {
+                const isLiving = isPersonLiving(database.persons[p.id]);
+                const isMasked = !isWhitelisted && isLiving;
+                const isRoot = p.id === defaultRootId;
+                return (
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-neutral-900'}
+                  >
+                    {isRoot ? '👑 ' : ''}{isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}{isRoot ? ' (Корінь)' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
 
-
-          {/* Zoom Controls (FamilySearch style: Fit, 100%, + / -) */}
+          {/* Zoom Controls */}
           <div
-            className={`flex items-center gap-1 ${theme.surfaceBg} p-1 rounded-lg border ${theme.borderSubtle}`}
+            className={`flex items-center gap-0.5 sm:gap-1 ${theme.surfaceBg} p-1 rounded-lg border ${theme.borderSubtle} shadow-xs shrink-0`}
           >
             <button
               onClick={() => setScale((s) => Math.max(Number((s * 0.85).toFixed(2)), 0.05))}
-              className={`p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+              className={`p-1 sm:p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
               title="Зменшити (-)"
             >
-              <ZoomOut className="w-4 h-4" />
+              <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
             <button
               onClick={handleFitToScreen}
-              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+              className={`px-1.5 sm:px-2 py-0.5 sm:py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
                 Math.abs(scale - 1) > 0.08
                   ? `${theme.buttonSecondaryBg} ${theme.textPrimary} border ${theme.borderSubtle}`
                   : `${theme.textMuted} hover:${theme.textPrimary}`
@@ -967,25 +975,25 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                 setScale(1);
                 setPan({ x: 0, y: 0 });
               }}
-              className={`px-2 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
+              className={`px-1.5 sm:px-2 py-0.5 sm:py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
                 Math.abs(scale - 1) <= 0.08
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : `${theme.textMuted} hover:${theme.textPrimary}`
               }`}
-              title="100% — Стандартний фіксований масштаб (FamilySearch)"
+              title="100% — Стандартний фіксований масштаб"
             >
               100%
             </button>
 
             <button
               onClick={() => setScale((s) => Math.min(Number((s * 1.15).toFixed(2)), 6.0))}
-              className={`p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+              className={`p-1 sm:p-1.5 ${theme.textSecondary} hover:${theme.textPrimary} hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
               title="Збільшити (+)"
             >
-              <ZoomIn className="w-4 h-4" />
+              <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
-            <span className={`text-[11px] ${theme.textMuted} font-mono px-1.5 hidden sm:inline min-w-[40px] text-right`}>
+            <span className={`text-[11px] ${theme.textMuted} font-mono px-1 hidden md:inline min-w-[36px] text-right`}>
               {Math.round(scale * 100)}%
             </span>
           </div>
@@ -1758,6 +1766,42 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
             <span>Легенда родів ({clans.length})</span>
           </button>
         )}
+
+        {/* Floating Canvas Navigation HUD (Bottom-Right) */}
+        <div className="absolute bottom-5 right-4 z-20 flex flex-col items-center gap-1.5 bg-[#181c20]/90 backdrop-blur-md border border-[#323840] p-1.5 rounded-2xl shadow-2xl">
+          <button
+            type="button"
+            onClick={() => setScale((s) => Math.min(Number((s * 1.2).toFixed(2)), 6.0))}
+            className="w-8 h-8 rounded-xl bg-[#23272d] hover:bg-[#2e343c] text-slate-200 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-[#3a414a] shadow-xs"
+            title="Збільшити масштаб"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setScale((s) => Math.max(Number((s * 0.8).toFixed(2)), 0.05))}
+            className="w-8 h-8 rounded-xl bg-[#23272d] hover:bg-[#2e343c] text-slate-200 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-[#3a414a] shadow-xs"
+            title="Зменшити масштаб"
+          >
+            <ZoomOut className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleFitToScreen}
+            className="w-8 h-8 rounded-xl bg-[#23272d] hover:bg-[#2e343c] text-slate-200 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-[#3a414a] shadow-xs"
+            title="Вписати в екран"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onChangeRoot(defaultRootId)}
+            className="w-8 h-8 rounded-xl bg-[#23272d] hover:bg-[#2e343c] text-amber-400 hover:text-amber-300 flex items-center justify-center transition-colors cursor-pointer border border-[#3a414a] shadow-xs"
+            title="До кореня родоводу"
+          >
+            <Sparkles className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -117,8 +117,8 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative min-w-[240px]">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
+          <div className="relative flex-1 sm:min-w-[240px]">
             <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
             <input
               type="text"
@@ -131,7 +131,7 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
 
           <button
             onClick={onOpenAddFamily}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors shrink-0 cursor-pointer"
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors shrink-0 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Додати союз</span>

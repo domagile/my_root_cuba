@@ -38,8 +38,7 @@ import {
   Check,
   Shield,
   Lock,
-  Pencil,
-  SlidersHorizontal
+  Pencil
 } from 'lucide-react';
 import {
   GenealogyDatabase,
@@ -150,11 +149,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return 0;
   });
 
-  // Generation options list up to 7, plus custom if selected
+  // Generation options list: 1 to 4 in dropdown, plus custom if selected
   const treeGenOptions = useMemo(() => {
-    const base = [2, 3, 4, 5, 6, 7];
-    if (generations > 0 && !base.includes(generations)) {
-      return [...base, generations].sort((a, b) => a - b);
+    const base = [1, 2, 3, 4];
+    if (generations > 4) {
+      return [...base, generations];
     }
     return base;
   }, [generations]);
@@ -182,14 +181,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }
     return true;
   });
-  const [isMobileOptionsOpen, setIsMobileOptionsOpen] = useState<boolean>(false);
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
-  const [showClanBorders, setShowClanBorders] = useState<boolean>(true);
-  const [isClanLegendOpen, setIsClanLegendOpen] = useState<boolean>(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
-  const clanLegendRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -198,9 +193,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
       }
       if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
         setIsThemeMenuOpen(false);
-      }
-      if (clanLegendRef.current && !clanLegendRef.current.contains(event.target as Node)) {
-        setIsClanLegendOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -263,33 +255,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
     collapsedSiblings,
     collapsedChildren
   ]);
-
-  // Lineage / Clan color mapping (identic to Fan Chart)
-  const lineageColorMap = useMemo(() => getLineageColorMap(database), [database]);
-
-  // Active clans in currently displayed tree
-  const treeClans = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; color: string; count: number }>();
-    layout.nodes.forEach((n) => {
-      const rawRod = getPersonRodName(n.person);
-      const rawSurname = (n.person.name?.surname || n.person.lastName || n.person.name?.maidenName || n.person.maidenName || '').trim();
-      if (!rawSurname || rawSurname === 'Рід') return;
-      const canonical = normalizeUkrainianSurnameGender(rawSurname) || rawRod;
-      const clanId = canonical;
-      const clanName = formatClanName(canonical);
-      const color = getPersonClanColor(n.person, lineageColorMap);
-
-      const existing = Array.from(map.values()).find(
-        (c) => c.id.toLowerCase() === clanId.toLowerCase() || areSurnamesEquivalent(clanId, c.id)
-      );
-      if (existing) {
-        existing.count += 1;
-      } else {
-        map.set(clanId, { id: clanId, name: clanName, color, count: 1 });
-      }
-    });
-    return Array.from(map.values()).sort((a, b) => b.count - a.count);
-  }, [layout.nodes, lineageColorMap]);
 
   const setAnchorForPerson = useCallback((personId: string) => {
     const node = layout.nodes.find((n) => n.person.id === personId);
@@ -358,21 +323,21 @@ export const TreeView: React.FC<TreeViewProps> = ({
       const next = new Set(prev);
       const isCollapsed = isCurrentlyCollapsed !== undefined
         ? isCurrentlyCollapsed
-        : (next.has(personId) || Array.from(siblingIds).some(id => next.has(id)));
+        : (Array.from(siblingIds).some(id => next.has(id)) || next.has(personId));
       const shouldCollapse = !isCollapsed;
 
       if (shouldCollapse) {
-        // Collapse: add personId and all their collateral siblings to collapsed set
-        next.add(personId);
+        // Collapse: hide all collateral siblings of this person (DO NOT hide personId itself!)
         siblingIds.forEach((sId) => {
           next.add(sId);
         });
-      } else {
-        // Expand: remove personId and all their siblings from collapsed set
         next.delete(personId);
+      } else {
+        // Expand: unhide all siblings
         siblingIds.forEach((sId) => {
           next.delete(sId);
         });
+        next.delete(personId);
         if (!showSiblings) {
           setShowSiblings(true);
         }
@@ -864,13 +829,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
       const avatarBg = isMale ? '#0c4a6e' : isFemale ? '#701a4f' : '#334155';
       const avatarStroke = isMale ? '#0284c7' : isFemale ? '#e11d48' : '#64748b';
       const isRoot = p.id === activePersonId;
-      const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
-      const hasSurname = Boolean(rawSurname && rawSurname !== 'Рід');
-      const clanColor = hasSurname ? getPersonClanColor(p, lineageColorMap) : '#393f47';
-      const cardBorder = (showClanBorders && hasSurname)
-        ? clanColor
-        : (isRoot ? (isFemale ? '#f43f5e' : '#38bdf8') : '#393f47');
-      const borderWidth = (showClanBorders && hasSurname) ? '2' : (isRoot ? '2.5' : '1.5');
+      const cardBorder = isRoot ? (isFemale ? '#f43f5e' : '#38bdf8') : '#393f47';
+      const borderWidth = isRoot ? '2.5' : '1.5';
 
       const firstName = escapeXml(p.name?.given || p.firstName || '');
       const lastName = escapeXml(p.name?.surname || p.lastName || '');
@@ -904,124 +864,327 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   return (
     <div className="flex flex-col h-full w-full bg-[#23272b] overflow-hidden relative select-none">
-      {/* Top Toolbar */}
-      <div className="h-14 bg-[#1e2226] border-b border-[#323840] px-2 sm:px-3 md:px-4 flex items-center justify-between gap-1.5 sm:gap-2 md:gap-3 z-20 shrink-0 print:hidden shadow-md overflow-x-auto scrollbar-none w-full max-w-full">
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Layout & Mode Switch */}
-          <div className="flex items-center bg-[#15181b] p-0.5 rounded-lg border border-[#2d3238] shrink-0">
-            <button
-              onClick={() => setLayoutType('ancestors')}
-              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 text-white shadow-sm cursor-pointer"
-              title="Класична вертикальна структура родоводу (FamilySearch style)"
-            >
-              <TreeIcon className="w-4 h-4 text-emerald-100" />
-              <span className="hidden sm:inline">Дерево</span>
-            </button>
-
-            {onSwitchToFan && (
+      {/* Top Toolbar: 2 rows on mobile, tablet & laptop (< 2xl), 1 row on large screen (>= 2xl) */}
+      <div className="w-full bg-[#1e2226] border-b border-[#323840] px-2.5 sm:px-4 py-1.5 sm:py-2 flex flex-col 2xl:flex-row 2xl:items-center 2xl:justify-between gap-1.5 sm:gap-2 z-20 shrink-0 print:hidden shadow-md">
+        {/* Row 1 (< 2xl) or Left Group (>= 2xl): Mode, Generations, Siblings, Clan Borders, Clan Legend, Theme, Export */}
+        <div className="flex items-center justify-between 2xl:justify-start gap-1.5 sm:gap-2 w-full 2xl:w-auto min-w-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0 flex-wrap">
+            {/* Layout & Mode Switch */}
+            <div className="flex items-center bg-[#15181b] p-0.5 rounded-lg border border-[#2d3238] shrink-0 shadow-xs">
               <button
-                onClick={onSwitchToFan}
-                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                title="Перемкнути у віялову діаграму (Fan Chart)"
+                type="button"
+                onClick={() => setLayoutType('ancestors')}
+                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 text-white shadow-xs cursor-pointer"
+                title="Класична вертикальна структура родоводу (FamilySearch style)"
               >
-                <FanIcon className="w-4 h-4 text-amber-400" />
-                <span className="hidden sm:inline">Віяло</span>
+                <TreeIcon className="w-4 h-4 text-emerald-100 shrink-0" />
+                <span>Дерево</span>
               </button>
-            )}
-          </div>
 
-          {/* Generations dropdown */}
-          <div className="flex items-center gap-1 sm:gap-1.5 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-2 sm:px-2.5 py-1.5 rounded-lg shadow-xs shrink-0">
-            <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="text-slate-400 hidden xl:inline">Поколінь:</span>
-
-            {isCustomGenOpen ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const parsed = parseInt(customGenInput.trim(), 10);
-                  if (!isNaN(parsed) && parsed > 0) {
-                    setGenerations(parsed);
-                  }
-                  setIsCustomGenOpen(false);
-                }}
-                className="flex items-center gap-1"
-              >
-                <input
-                  type="number"
-                  min={1}
-                  max={99}
-                  autoFocus
-                  value={customGenInput}
-                  onChange={(e) => setCustomGenInput(e.target.value)}
-                  placeholder="№"
-                  className="w-10 px-1 py-0.5 text-xs bg-[#22262a] border border-amber-500/70 rounded text-amber-300 text-center font-bold focus:outline-none"
-                  title="Введіть бажану кількість поколінь"
-                />
-                <button
-                  type="submit"
-                  className="px-1.5 py-0.5 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded cursor-pointer transition-colors"
-                  title="Застосувати"
-                >
-                  ✓
-                </button>
+              {onSwitchToFan && (
                 <button
                   type="button"
-                  onClick={() => setIsCustomGenOpen(false)}
-                  className="px-1 py-0.5 text-[11px] text-slate-400 hover:text-white rounded cursor-pointer transition-colors"
-                  title="Скасувати"
+                  onClick={onSwitchToFan}
+                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Перемкнути у віялову діаграму (Fan Chart)"
                 >
-                  ✕
+                  <FanIcon className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="hidden sm:inline">Віяло</span>
                 </button>
-              </form>
-            ) : (
-              <div className="flex items-center gap-1">
-                <select
-                  value={generations}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === 'custom') {
-                      setCustomGenInput(String(generations || 5));
-                      setIsCustomGenOpen(true);
-                    } else {
-                      setGenerations(Number(val));
+              )}
+            </div>
+
+            {/* Generations dropdown (компактно, 1-4 покоління, потім +) */}
+            <div className="flex items-center gap-1 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-2 py-1.5 rounded-lg shadow-xs shrink-0">
+              <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+
+              {isCustomGenOpen ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const parsed = parseInt(customGenInput.trim(), 10);
+                    if (!isNaN(parsed) && parsed > 0) {
+                      setGenerations(parsed);
                     }
+                    setIsCustomGenOpen(false);
                   }}
-                  className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer py-0.5 max-w-[105px] sm:max-w-[115px]"
-                  title="Кількість поколінь родоводу"
+                  className="flex items-center gap-1"
                 >
-                  <option value={0} className="bg-[#1b1f24] text-white">Всі покоління</option>
-                  {treeGenOptions.map((g) => (
-                    <option key={g} value={g} className="bg-[#1b1f24] text-white">
-                      {getUkrainianGenerationLabel(g)}
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    autoFocus
+                    value={customGenInput}
+                    onChange={(e) => setCustomGenInput(e.target.value)}
+                    placeholder="№"
+                    className="w-9 px-1 py-0.5 text-xs bg-[#22262a] border border-amber-500/70 rounded text-amber-300 text-center font-bold focus:outline-none"
+                    title="Введіть кількість поколінь"
+                  />
+                  <button
+                    type="submit"
+                    className="px-1.5 py-0.5 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded cursor-pointer transition-colors"
+                    title="Застосувати"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomGenOpen(false)}
+                    className="px-1 py-0.5 text-[11px] text-slate-400 hover:text-white rounded cursor-pointer transition-colors"
+                    title="Скасувати"
+                  >
+                    ✕
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <select
+                    value={generations}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'custom') {
+                        setCustomGenInput(String(generations > 0 ? generations : 4));
+                        setIsCustomGenOpen(true);
+                      } else {
+                        setGenerations(Number(val));
+                      }
+                    }}
+                    className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer py-0.5"
+                    title="Кількість поколінь родоводу"
+                  >
+                    <option value={0} className="bg-[#1b1f24] text-white">Всі</option>
+                    {treeGenOptions.map((g) => (
+                      <option key={g} value={g} className="bg-[#1b1f24] text-white">
+                        {g} пок.
+                      </option>
+                    ))}
+                    <option value="custom" className="bg-[#1b1f24] text-amber-400 font-semibold">
+                      + пок.
                     </option>
-                  ))}
-                  <option value="custom" className="bg-[#1b1f24] text-amber-400 font-semibold">
-                    + покоління
-                  </option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCustomGenInput(String(generations || 5));
-                    setIsCustomGenOpen(true);
-                  }}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-[#23282e] hover:bg-amber-600/80 text-amber-300 hover:text-white font-bold text-xs border border-[#383e46] transition-colors cursor-pointer shrink-0"
-                  title="Ввести своє значення поколінь (+)"
-                >
-                  +
-                </button>
-              </div>
-            )}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomGenInput(String(generations > 0 ? generations : 4));
+                      setIsCustomGenOpen(true);
+                    }}
+                    className="w-5 h-5 flex items-center justify-center rounded bg-[#23282e] hover:bg-amber-600/80 text-amber-300 hover:text-white font-bold text-xs border border-[#383e46] transition-colors cursor-pointer shrink-0"
+                    title="Ввести своє значення поколінь (+)"
+                  >
+                    +
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Sibling Toggle: Всі родичі / Прямі */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowSiblings((prev) => {
+                  const next = !prev;
+                  if (!next) {
+                    setCollapsedSiblings(new Set());
+                  }
+                  return next;
+                });
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-xs shrink-0 ${
+                showSiblings
+                  ? 'bg-sky-950/70 text-sky-300 border-sky-700/60 hover:bg-sky-900/80'
+                  : 'bg-amber-950/70 text-amber-300 border-amber-700/60 hover:bg-amber-900/80'
+              }`}
+              title={showSiblings ? "Сховати братів та сестер (прямі)" : "Показати братів та сестер (всі родичі)"}
+            >
+              <Users className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span>{showSiblings ? 'Всі родичі' : 'Прямі'}</span>
+            </button>
           </div>
 
+          {/* Right cluster of Row 1: Theme, Export, Person Report */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* Canvas Theme Selector Dropdown */}
+            <div className="relative shrink-0" ref={themeMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsThemeMenuOpen((prev) => !prev)}
+                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer shadow-xs ${
+                  isThemeMenuOpen
+                    ? 'bg-slate-700 text-white border-slate-600'
+                    : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
+                }`}
+                title="Колірна тема фону дерева"
+              >
+                <Palette className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="hidden sm:inline">Фон</span>
+              </button>
+
+              {isThemeMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-56 bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-[#2d3238] mb-1">
+                    Тема фону полотна
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCanvasTheme('classic-dark');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                      canvasTheme === 'classic-dark'
+                        ? 'bg-[#252a30] text-white font-semibold'
+                        : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-4 h-4 rounded-full bg-[#1b1f23] border border-slate-600 flex items-center justify-center">
+                        <Moon className="w-2.5 h-2.5 text-slate-300" />
+                      </div>
+                      <span>Графіт (Темна)</span>
+                    </div>
+                    {canvasTheme === 'classic-dark' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCanvasTheme('parchment');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                      canvasTheme === 'parchment'
+                        ? 'bg-[#252a30] text-white font-semibold'
+                        : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-4 h-4 rounded-full bg-[#f4ede2] border border-amber-600" />
+                      <span>Пергамент</span>
+                    </div>
+                    {canvasTheme === 'parchment' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCanvasTheme('light');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                      canvasTheme === 'light'
+                        ? 'bg-[#252a30] text-white font-semibold'
+                        : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-4 h-4 rounded-full bg-white border border-slate-300 flex items-center justify-center">
+                        <Sun className="w-2.5 h-2.5 text-amber-500" />
+                      </div>
+                      <span>Світла</span>
+                    </div>
+                    {canvasTheme === 'light' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCanvasTheme('emerald');
+                      setIsThemeMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                      canvasTheme === 'emerald'
+                        ? 'bg-[#252a30] text-white font-semibold'
+                        : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-4 h-4 rounded-full bg-emerald-700 border border-emerald-500" />
+                      <span>Смарагдовий ліс</span>
+                    </div>
+                    {canvasTheme === 'emerald' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Export Menu (Always visible on all screen sizes) */}
+            <div className="relative shrink-0" ref={exportMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsExportOpen((prev) => !prev)}
+                className={`flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs ${
+                  isExportOpen
+                    ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
+                    : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
+                }`}
+                title="Експорт та друк дерева (SVG / PDF)"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="hidden sm:inline">Експорт</span>
+              </button>
+
+              {isExportOpen && (
+                <div className="absolute right-0 top-full mt-2 w-72 bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-[#2d3238] mb-1">
+                    Збереження та експорт
+                  </div>
+                  <button
+                    onClick={() => {
+                      handleExportSvg();
+                      setIsExportOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-medium text-slate-200">Скачати векторне дерево (SVG)</div>
+                      <div className="text-[10px] text-slate-400">Векторний файл без втрати якості для друку</div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      handlePrint();
+                      setIsExportOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-sky-400 shrink-0" />
+                    <div>
+                      <div className="font-medium text-slate-200">Роздрукувати / Зберегти в PDF</div>
+                      <div className="text-[10px] text-slate-400">Друк на папері або експорт у PDF</div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setReportPersonId(activePersonId);
+                      setIsExportOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-medium text-slate-200">Звіт про особу (PDF/TXT)</div>
+                      <div className="text-[10px] text-slate-400">Повний родовідний звіт про вибрану людину</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Row 2 (< 2xl) or Right Group (>= 2xl): Root Person Selector + Zoom Controls */}
+        <div className="flex items-center justify-between 2xl:justify-end gap-1.5 sm:gap-2 w-full 2xl:w-auto min-w-0 pt-1 2xl:pt-0 border-t border-slate-700/30 2xl:border-t-0">
           {/* Root Person Selector */}
-          <div className="hidden md:flex items-center gap-1.5 shrink-0">
-            <span className="text-xs text-slate-400 hidden lg:inline">Корінь:</span>
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 2xl:flex-initial">
+            <span className="text-xs text-slate-400 hidden sm:inline shrink-0 font-medium">Корінь:</span>
             <select
               value={activePersonId}
               onChange={(e) => onChangeRoot(e.target.value)}
-              className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-md px-2 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[130px] sm:max-w-[160px] lg:max-w-[210px] truncate cursor-pointer shadow-xs"
+              className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-lg px-2 sm:px-2.5 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[150px] sm:max-w-[210px] truncate cursor-pointer shadow-xs"
+              title="Вибрати особу як корінь родоводу"
             >
               {dropdownPersons.map((p) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
@@ -1034,375 +1197,52 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 );
               })}
             </select>
-
-            {/* Quick Button: Return / Focus to Root Person */}
-            <button
-              type="button"
-              onClick={handleFocusRootPerson}
-              className={`flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium border transition-all cursor-pointer shadow-xs ${
-                activePersonId === rootPersonId
-                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60 hover:bg-emerald-900/80'
-                  : 'bg-[#15181b] text-amber-300 hover:text-white hover:bg-amber-950/60 border-amber-600/50'
-              }`}
-              title="Сфокусувати на корінній особі родоводу"
-            >
-              <Sparkles className={`w-3 h-3 ${activePersonId === rootPersonId ? 'text-emerald-400' : 'text-amber-400'}`} />
-              <span className="hidden xl:inline">До кореня</span>
-            </button>
           </div>
 
-          {/* Sibling Toggle: Consolidated, responsive button */}
-          <button
-            type="button"
-            onClick={() => {
-              setShowSiblings((prev) => {
-                const next = !prev;
-                if (!next) {
-                  setCollapsedSiblings(new Set());
-                }
-                return next;
-              });
-            }}
-            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs shrink-0 ${
-              showSiblings
-                ? 'bg-sky-950/70 text-sky-300 border-sky-700/60 hover:bg-sky-900/80'
-                : 'bg-amber-950/70 text-amber-300 border-amber-700/60 hover:bg-amber-900/80'
-            }`}
-            title={showSiblings ? "Сховати всіх братів та сестер (тільки прямі предки)" : "Показати братів та сестер (всі родичі)"}
-          >
-            <Users className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            <span className="hidden sm:inline">{showSiblings ? 'Всі родичі' : 'Тільки прямі'}</span>
-            <span className="sm:hidden">{showSiblings ? 'Всі' : 'Прямі'}</span>
-          </button>
-
-          {/* Clan Outline / Rod Borders Toggle */}
-          <button
-            type="button"
-            onClick={() => setShowClanBorders((prev) => !prev)}
-            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs shrink-0 ${
-              showClanBorders
-                ? 'bg-amber-950/70 text-amber-300 border-amber-600/70 hover:bg-amber-900/80 ring-1 ring-amber-500/30'
-                : 'bg-[#15181b] text-slate-400 hover:text-slate-200 border-[#2d3238]'
-            }`}
-            title={showClanBorders ? "Вимкнути контури карток за родами" : "Увімкнути контури карток за родами (кольори роду як у віялі)"}
-          >
-            <span
-              className="w-2.5 h-2.5 rounded-full shrink-0 border border-white/20"
-              style={{
-                background: showClanBorders
-                  ? 'linear-gradient(135deg, #059669 0%, #0284c7 50%, #d97706 100%)'
-                  : '#64748b'
-              }}
-            />
-            <span className="hidden xl:inline">Контури родів</span>
-          </button>
-
-          {/* Clan Legend Popover */}
-          {showClanBorders && treeClans.length > 0 && (
-            <div className="relative" ref={clanLegendRef}>
+          {/* Zoom Controls + All Options button */}
+          <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-0.5 sm:gap-1 bg-[#15181b] border border-[#2d3238] p-1 rounded-lg shrink-0 shadow-xs">
               <button
                 type="button"
-                onClick={() => setIsClanLegendOpen((prev) => !prev)}
-                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs shrink-0 ${
-                  isClanLegendOpen
-                    ? 'bg-slate-700 text-white border-slate-600'
-                    : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
-                }`}
-                title="Показати колірну легенду родів родоводу"
+                onClick={() => zoomAroundCenter(0.85)}
+                className="p-1 sm:p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
+                title="Зменшити масштаб (-)"
               >
-                <PieChart className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden md:inline">Роди:</span>
-                <span className="font-mono font-bold text-amber-300 text-[11px]">{treeClans.length}</span>
+                <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
 
-              {isClanLegendOpen && (
-                <div className="absolute left-0 top-full mt-2 w-72 max-h-80 overflow-y-auto bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between border-b border-[#2d3238] pb-1.5 mb-2">
-                    <span className="text-xs font-bold text-amber-400">Роди у цьому дереві</span>
-                    <span className="text-[10px] text-slate-400">{treeClans.length} родів</span>
-                  </div>
-                  <div className="space-y-1">
-                    {treeClans.map((clan) => (
-                      <div
-                        key={clan.id}
-                        className="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-[#252a30] text-xs transition-colors"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="w-3.5 h-3.5 rounded-full shrink-0 border border-white/20 shadow-xs"
-                            style={{ backgroundColor: clan.color }}
-                          />
-                          <span className="font-medium text-slate-200 truncate">{clan.name}</span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 shrink-0 ml-2 font-mono">
-                          {clan.count} {clan.count === 1 ? 'особа' : clan.count < 5 ? 'особи' : 'осіб'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-                title="Легенда родів на поточному дереві (кольори контурів)"
+              <button
+                type="button"
+                onClick={centerTree}
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 text-[11px] font-medium text-emerald-400 hover:text-emerald-300 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Вписати все дерево в екран"
               >
-                <div className="flex -space-x-1 overflow-hidden">
-                  {treeClans.slice(0, 3).map((c) => (
-                    <span
-                      key={c.id}
-                      className="inline-block w-2.5 h-2.5 rounded-full ring-1 ring-[#1b1f24]"
-                      style={{ backgroundColor: c.color }}
-                    />
-                  ))}
-                </div>
-                <span className="text-[11px] font-bold text-amber-300">{treeClans.length}</span>
+                Вписати
               </button>
 
-              {isClanLegendOpen && (
-                <div className="absolute left-0 top-full mt-2 w-72 max-h-80 overflow-y-auto bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-[#2d3238]">
-                    <span className="text-[11px] font-bold text-slate-300">Роди на дереві (кольори контурів)</span>
-                    <span className="text-[10px] text-slate-400 font-medium">{treeClans.length} {treeClans.length === 1 ? 'рід' : treeClans.length < 5 ? 'роди' : 'родів'}</span>
-                  </div>
-                  <div className="space-y-1">
-                    {treeClans.map((clan) => (
-                      <div
-                        key={clan.id}
-                        className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#22272e] hover:bg-[#2a3038] text-xs transition-colors"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="w-3.5 h-3.5 rounded-full shrink-0 border border-white/20 shadow-xs"
-                            style={{ backgroundColor: clan.color }}
-                          />
-                          <span className="font-medium text-slate-200 truncate">{clan.name}</span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 shrink-0 ml-2 font-mono">
-                          {clan.count} {clan.count === 1 ? 'особа' : clan.count < 5 ? 'особи' : 'осіб'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={() => setScale(1.0)}
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 text-[11px] text-slate-300 hover:text-white font-bold rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Скинути масштаб до 100%"
+              >
+                100%
+              </button>
+
+              <button
+                type="button"
+                onClick={() => zoomAroundCenter(1.18)}
+                className="p-1 sm:p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
+                title="Збільшити масштаб (+)"
+              >
+                <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
+
+              <span className="text-[11px] text-slate-400 font-mono px-1 hidden md:inline min-w-[36px] text-right">
+                {Math.round(scale * 100)}%
+              </span>
             </div>
-          )}
-        </div>
-
-        {/* Action Controls */}
-        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-          {/* Quick Person Report Export */}
-          <button
-            type="button"
-            onClick={() => setReportPersonId(activePersonId)}
-            className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-[#2d3238] bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer shadow-xs shrink-0"
-            title="Згенерувати короткий звіт про особу (PDF / TXT)"
-          >
-            <FileText className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="hidden xl:inline">Звіт (PDF/TXT)</span>
-          </button>
-
-          {/* Export Menu */}
-          <div className="relative shrink-0" ref={exportMenuRef}>
-            <button
-              type="button"
-              onClick={() => setIsExportOpen((prev) => !prev)}
-              className={`p-1.5 sm:p-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
-                isExportOpen
-                  ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
-                  : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
-              }`}
-              title="Експорт та друк дерева (SVG / PDF)"
-            >
-              <Download className="w-4 h-4 text-emerald-400" />
-            </button>
-
-            {isExportOpen && (
-              <div className="absolute right-0 top-full mt-2 w-72 bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-[#2d3238] mb-1">
-                  Збереження та експорт
-                </div>
-                <button
-                  onClick={() => {
-                    handleExportSvg();
-                    setIsExportOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
-                >
-                  <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <div>
-                    <div className="font-medium text-slate-200">Скачати векторне дерево (SVG)</div>
-                    <div className="text-[10px] text-slate-400">Векторний файл без втрати якості для друку</div>
-                  </div>
-                </button>
-                <button
-                  onClick={() => {
-                    handlePrint();
-                    setIsExportOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
-                >
-                  <Printer className="w-4 h-4 text-sky-400 shrink-0" />
-                  <div>
-                    <div className="font-medium text-slate-200">Роздрукувати / Зберегти в PDF</div>
-                    <div className="text-[10px] text-slate-400">Друк на папері або експорт у PDF</div>
-                  </div>
-                </button>
-              </div>
-            )}
           </div>
-
-          {/* Canvas Theme Selector Dropdown */}
-          <div className="relative shrink-0 hidden md:block" ref={themeMenuRef}>
-            <button
-              type="button"
-              onClick={() => setIsThemeMenuOpen((prev) => !prev)}
-              className={`p-1.5 sm:p-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
-                isThemeMenuOpen
-                  ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
-                  : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
-              }`}
-              title="Колірна тема фону дерева"
-            >
-              <Palette className="w-4 h-4 text-amber-400" />
-            </button>
-
-            {isThemeMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-[#2d3238] mb-1">
-                  Тема фону полотна
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCanvasTheme('classic-dark');
-                    setIsThemeMenuOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
-                    canvasTheme === 'classic-dark'
-                      ? 'bg-[#252a30] text-white font-semibold'
-                      : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-[#1b1f23] border border-slate-600 flex items-center justify-center">
-                      <Moon className="w-2.5 h-2.5 text-slate-300" />
-                    </div>
-                    <span>Графіт (Темна)</span>
-                  </div>
-                  {canvasTheme === 'classic-dark' && <Check className="w-3.5 h-3.5 text-amber-400" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCanvasTheme('parchment');
-                    setIsThemeMenuOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
-                    canvasTheme === 'parchment'
-                      ? 'bg-[#252a30] text-white font-semibold'
-                      : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-[#f4ede2] border border-amber-600" />
-                    <span>Пергамент</span>
-                  </div>
-                  {canvasTheme === 'parchment' && <Check className="w-3.5 h-3.5 text-amber-400" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCanvasTheme('light');
-                    setIsThemeMenuOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
-                    canvasTheme === 'light'
-                      ? 'bg-[#252a30] text-white font-semibold'
-                      : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-white border border-slate-300 flex items-center justify-center">
-                      <Sun className="w-2.5 h-2.5 text-amber-500" />
-                    </div>
-                    <span>Світла</span>
-                  </div>
-                  {canvasTheme === 'light' && <Check className="w-3.5 h-3.5 text-amber-400" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCanvasTheme('emerald');
-                    setIsThemeMenuOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
-                    canvasTheme === 'emerald'
-                      ? 'bg-[#252a30] text-white font-semibold'
-                      : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-emerald-700 border border-emerald-500" />
-                    <span>Смарагдовий ліс</span>
-                  </div>
-                  {canvasTheme === 'emerald' && <Check className="w-3.5 h-3.5 text-amber-400" />}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Zoom Controls (Desktop) */}
-          <div className="hidden lg:flex items-center gap-1 bg-[#15181b] border border-[#2d3238] p-1 rounded-lg shrink-0">
-            <button
-              onClick={() => zoomAroundCenter(1.18)}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
-              title="Збільшити масштаб"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => zoomAroundCenter(0.85)}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
-              title="Зменшити масштаб"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-            <button
-              onClick={centerTree}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer"
-              title="Центрувати дерево у вікні"
-            >
-              <Maximize2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => {
-                const cw = containerDimensions.width || 1000;
-                const ch = containerDimensions.height || 700;
-                setScale(1.0);
-              }}
-              className="text-[11px] text-slate-400 hover:text-white font-mono px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
-              title="Скинути масштаб до 100%"
-            >
-              {Math.round(scale * 100)}%
-            </button>
-          </div>
-
-          {/* All Options Modal Trigger (Mobile & Tablet) */}
-          <button
-            type="button"
-            onClick={() => setIsMobileOptionsOpen(true)}
-            className="flex lg:hidden items-center gap-1.5 px-2 sm:px-2.5 py-1.5 bg-[#252a30] hover:bg-[#303640] text-amber-400 border border-[#3e4652] rounded-lg text-xs font-semibold shadow-xs cursor-pointer shrink-0"
-            title="Відкрити всі налаштування та функції дерева"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">Опції</span>
-          </button>
         </div>
       </div>
 
@@ -1553,10 +1393,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
             const hasSurname = Boolean(rawSurname && rawSurname !== 'Рід');
             const canonicalRod = normalizeUkrainianSurnameGender(rawSurname) || rawRod;
-            const clanColor = (showClanBorders && hasSurname)
-              ? getPersonClanColor(p, lineageColorMap)
-              : (isLightCanvas ? '#d8cfbe' : '#383e46');
-            const clanTitle = hasSurname ? formatClanName(canonicalRod) : '';
+            const cardBorderColor = isLightCanvas ? '#d8cfbe' : '#383e46';
             const isCardHovered = hoveredPersonId === p.id;
 
             // LOD distant zoom
@@ -1570,8 +1407,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     top: `${node.y}px`,
                     width: `${node.width}px`,
                     height: `${node.height}px`,
-                    borderColor: clanColor,
-                    borderWidth: showClanBorders && hasSurname ? '2px' : '1px',
+                    borderColor: cardBorderColor,
+                    borderWidth: '1px',
                     borderStyle: 'solid'
                   }}
                   onMouseEnter={() => setHoveredPersonId(p.id)}
@@ -1587,7 +1424,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       onChangeRoot(p.id);
                     }
                   }}
-                  title={clanTitle ? `${getFullName(p)} • ${clanTitle} • Натисніть для фокусу` : (p.id === activePersonId ? 'Поточна особа' : 'Зробити фокусом дерева')}
+                  title={p.id === activePersonId ? 'Поточна особа' : 'Зробити фокусом дерева'}
                 >
                   {isTreeRoot && (
                     <span
@@ -1633,12 +1470,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   top: `${node.y}px`,
                   width: `${node.width}px`,
                   height: `${node.height}px`,
-                  borderColor: clanColor,
-                  borderWidth: showClanBorders && hasSurname ? '2px' : '1px',
-                  borderStyle: 'solid',
-                  boxShadow: (showClanBorders && isCardHovered && hasSurname)
-                    ? `0 14px 28px -4px ${clanColor}50, 0 4px 10px -3px ${clanColor}25`
-                    : undefined
+                  borderColor: cardBorderColor,
+                  borderWidth: '1px',
+                  borderStyle: 'solid'
                 }}
                 onMouseEnter={() => setHoveredPersonId(p.id)}
                 onMouseLeave={() => setHoveredPersonId(null)}
@@ -1659,7 +1493,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     onChangeRoot(p.id);
                   }
                 }}
-                title={clanTitle ? `${getFullName(p)} • ${clanTitle} • Натисніть для фокусу` : (p.id === activePersonId ? 'Поточна особа' : 'Зробити фокусом дерева')}
+                title={p.id === activePersonId ? 'Поточна особа' : 'Зробити фокусом дерева'}
               >
                 {/* Root Person Indicator Badge */}
                 {isTreeRoot && (
@@ -2096,6 +1930,44 @@ export const TreeView: React.FC<TreeViewProps> = ({
             })()}
           </div>
         )}
+
+        {/* Floating Canvas Navigation HUD (Quick 1-tap zoom, fit and root focus on mobile & tablet) */}
+        <div className="absolute bottom-6 right-4 sm:bottom-7 sm:right-6 z-20 flex items-center gap-1 bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] p-1 rounded-xl shadow-2xl">
+          <button
+            type="button"
+            onClick={() => zoomAroundCenter(1.2)}
+            className="p-1.5 text-slate-200 hover:text-white hover:bg-slate-700/80 rounded-lg transition-colors cursor-pointer"
+            title="Збільшити масштаб (+)"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => zoomAroundCenter(0.83)}
+            className="p-1.5 text-slate-200 hover:text-white hover:bg-slate-700/80 rounded-lg transition-colors cursor-pointer"
+            title="Зменшити масштаб (-)"
+          >
+            <ZoomOut className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={centerTree}
+            className="p-1.5 text-slate-200 hover:text-white hover:bg-slate-700/80 rounded-lg transition-colors cursor-pointer"
+            title="Вписати все дерево в екран"
+          >
+            <Maximize2 className="w-4 h-4 text-emerald-400" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowMinimap((prev) => !prev)}
+            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+              showMinimap ? 'bg-emerald-600/30 text-emerald-300' : 'text-slate-400 hover:text-white hover:bg-slate-700/80'
+            }`}
+            title={showMinimap ? 'Сховати міні-мапу' : 'Показати міні-мапу'}
+          >
+            <Compass className="w-4 h-4" />
+          </button>
+        </div>
 
         {!showMinimap && (
           <button

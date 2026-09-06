@@ -207,98 +207,115 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               Всього знайдено {sortedPersons.length} з {Object.keys(database.persons).length} записів
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => useUIStore.getState().setRodovidView('duplicates')}
-            className="self-start sm:self-auto px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 transition-colors flex items-center gap-1.5 cursor-pointer"
-            title="Перевірити дублікати та об'єднати повтори"
-          >
-            <GitMerge className="w-3.5 h-3.5" />
-            <span>Перевірити дублікати</span>
-          </button>
+          <div className="flex items-center flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => useUIStore.getState().setRodovidView('duplicates')}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="Перевірити дублікати та об'єднати повтори"
+            >
+              <GitMerge className="w-3.5 h-3.5" />
+              <span>Перевірити дублікати</span>
+            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={onOpenAddPerson}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                title="Створити нову особу в родинному дереві"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Додати особу</span>
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Filters and Search row */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-2.5 pt-2 border-t ${theme.borderSubtle}`}>
-          {/* Search Input */}
-          <div className="lg:col-span-2 relative">
-            <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
-            <input
-              type="text"
-              placeholder="Пошук за ПІБ, #хештегом, місцем..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className={`w-full pl-9 pr-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-400 focus:outline-none focus:border-emerald-500`}
-            />
+        {/* Filters and Search: 2 responsive rows ensuring full visibility on mobile, tablet & laptop */}
+        <div className={`flex flex-col gap-2.5 pt-2 border-t ${theme.borderSubtle}`}>
+          {/* Row 1: Search (flexible) + Tag Filter + Research Status */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+            {/* Search Input */}
+            <div className="lg:col-span-6 relative">
+              <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
+              <input
+                type="text"
+                placeholder="Пошук за ПІБ, #хештегом, місцем..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className={`w-full pl-9 pr-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-400 focus:outline-none focus:border-emerald-500`}
+              />
+            </div>
+
+            {/* Tag / Hashtag Filter Dropdown */}
+            <div className="lg:col-span-3">
+              <select
+                value={tagFilter}
+                onChange={(e) => setTagFilter(e.target.value)}
+                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
+                  tagFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
+                } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+              >
+                <option value="ALL">Всі хештеги ({availableHashtags.length})</option>
+                {availableHashtags.map((h) => (
+                  <option key={h.tag} value={h.tag}>
+                    #{h.tag} ({h.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Research Status Filter */}
+            <div className="lg:col-span-3">
+              <select
+                value={researchStatusFilter}
+                onChange={(e) => setResearchStatusFilter(e.target.value as any)}
+                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
+                  researchStatusFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
+                } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+              >
+                <option value="ALL">Статус: Всі</option>
+                <option value="CONFIRMED">Підтверджена особа</option>
+                <option value="HYPOTHESIS">Гіпотеза</option>
+              </select>
+            </div>
           </div>
 
-          {/* Tag / Hashtag Filter Dropdown */}
-          <div>
-            <select
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
-              className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
-                tagFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
-              } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
-            >
-              <option value="ALL">Всі хештеги ({availableHashtags.length})</option>
-              {availableHashtags.map((h) => (
-                <option key={h.tag} value={h.tag}>
-                  #{h.tag} ({h.count})
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Row 2: Gender + Life State + Sort By + Direction + View Mode */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-12 gap-2.5">
+            {/* Gender Filter */}
+            <div className="lg:col-span-3">
+              <select
+                value={genderFilter}
+                onChange={(e) => setGenderFilter(e.target.value as any)}
+                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+              >
+                <option value="ALL">Будь-яка стать</option>
+                <option value="M">Чоловіча стать</option>
+                <option value="F">Жіноча стать</option>
+                <option value="U">Не вказано</option>
+              </select>
+            </div>
 
-          {/* Research Status Filter */}
-          <div>
-            <select
-              value={researchStatusFilter}
-              onChange={(e) => setResearchStatusFilter(e.target.value as any)}
-              className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
-                researchStatusFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
-              } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
-            >
-              <option value="ALL">Статус: Всі</option>
-              <option value="CONFIRMED">Підтверджена особа</option>
-              <option value="HYPOTHESIS">Гіпотеза</option>
-            </select>
-          </div>
+            {/* Status Filter */}
+            <div className="lg:col-span-3">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+              >
+                <option value="ALL">Будь-який стан</option>
+                <option value="LIVING">Нині живі</option>
+                <option value="DECEASED">Померлі</option>
+              </select>
+            </div>
 
-          {/* Gender Filter */}
-          <div>
-            <select
-              value={genderFilter}
-              onChange={(e) => setGenderFilter(e.target.value as any)}
-              className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
-            >
-              <option value="ALL">Будь-яка стать</option>
-              <option value="M">Чоловіча стать</option>
-              <option value="F">Жіноча стать</option>
-              <option value="U">Не вказано</option>
-            </select>
-          </div>
-
-          {/* Status Filter */}
-          <div>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
-            >
-              <option value="ALL">Будь-який стан</option>
-              <option value="LIVING">Нині живі</option>
-              <option value="DECEASED">Померлі</option>
-            </select>
-          </div>
-
-          {/* Layout and Sort Toggle */}
-          <div className="flex items-center gap-2">
-            <div className="flex-1">
+            {/* Sort Select */}
+            <div className="col-span-2 sm:col-span-1 lg:col-span-4 flex items-center gap-1.5">
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+                className={`flex-1 min-w-0 px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
               >
                 <option value="surname">За прізвищем</option>
                 <option value="tag">За хештегом (А-Я)</option>
@@ -307,31 +324,37 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 <option value="events">За подіями</option>
                 <option value="citations">За джерелами</option>
               </select>
+
+              <button
+                type="button"
+                onClick={() => setSortAsc(!sortAsc)}
+                className={`p-2 shrink-0 ${theme.inputBg} border ${theme.inputBorder} rounded-lg ${theme.textSecondary} hover:${theme.textPrimary} cursor-pointer transition-colors`}
+                title={sortAsc ? 'За зростанням' : 'За спаданням'}
+              >
+                <ArrowUpDown className="w-4 h-4" />
+              </button>
             </div>
 
-            <button
-              onClick={() => setSortAsc(!sortAsc)}
-              className={`p-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg ${theme.textSecondary} hover:${theme.textPrimary} cursor-pointer`}
-              title={sortAsc ? 'За зростанням' : 'За спаданням'}
-            >
-              <ArrowUpDown className="w-4 h-4" />
-            </button>
-
-            <div className={`flex border ${theme.borderSubtle} rounded-lg overflow-hidden ${theme.surfaceBg}`}>
-              <button
-                onClick={() => setViewMode('table')}
-                className={`p-2 cursor-pointer ${viewMode === 'table' ? 'bg-emerald-600 text-white' : `${theme.textMuted} hover:${theme.textPrimary}`}`}
-                title="Таблиця"
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('cards')}
-                className={`p-2 cursor-pointer ${viewMode === 'cards' ? 'bg-emerald-600 text-white' : `${theme.textMuted} hover:${theme.textPrimary}`}`}
-                title="Картки"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
+            {/* View Mode Toggle (Table / Cards) */}
+            <div className="col-span-2 sm:col-span-3 lg:col-span-2 flex items-center justify-end">
+              <div className={`flex border ${theme.borderSubtle} rounded-lg overflow-hidden ${theme.surfaceBg} shrink-0`}>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('table')}
+                  className={`p-2 cursor-pointer transition-colors ${viewMode === 'table' ? 'bg-emerald-600 text-white' : `${theme.textMuted} hover:${theme.textPrimary}`}`}
+                  title="Таблиця"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('cards')}
+                  className={`p-2 cursor-pointer transition-colors ${viewMode === 'cards' ? 'bg-emerald-600 text-white' : `${theme.textMuted} hover:${theme.textPrimary}`}`}
+                  title="Картки"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>

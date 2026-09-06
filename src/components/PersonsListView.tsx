@@ -554,14 +554,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
 
         {/* Bottom row: Filter Selects */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 border-t border-[#262626]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-2 pt-1.5 border-t border-[#262626]">
           {/* Tag Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase">Хештег:</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase shrink-0">Хештег:</span>
             <select
               value={tagFilter}
               onChange={(e) => setTagFilter(e.target.value)}
-              className={`flex-1 px-2 py-1 bg-[#121212] border ${
+              className={`flex-1 min-w-0 px-2 py-1 bg-[#121212] border ${
                 tagFilter !== 'all' ? 'border-[#B88E3E] text-[#B88E3E]' : 'border-[#333333] text-[#E5E5E5]'
               } rounded-md text-xs focus:outline-none focus:border-[#B88E3E] cursor-pointer`}
             >
@@ -575,12 +575,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           </div>
 
           {/* Gender Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase">Стать:</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase shrink-0">Стать:</span>
             <select
               value={genderFilter}
               onChange={(e) => setGenderFilter(e.target.value as any)}
-              className="flex-1 px-2 py-1 bg-[#121212] border border-[#333333] rounded-md text-xs text-[#E5E5E5] focus:outline-none focus:border-[#B88E3E] cursor-pointer"
+              className="flex-1 min-w-0 px-2 py-1 bg-[#121212] border border-[#333333] rounded-md text-xs text-[#E5E5E5] focus:outline-none focus:border-[#B88E3E] cursor-pointer"
             >
               <option value="all">Усі</option>
               <option value="male">Чоловіки</option>
@@ -589,12 +589,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           </div>
 
           {/* Life State Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase">Стан:</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase shrink-0">Стан:</span>
             <select
               value={lifeStateFilter}
               onChange={(e) => setLifeStateFilter(e.target.value as any)}
-              className="flex-1 px-2 py-1 bg-[#121212] border border-[#333333] rounded-md text-xs text-[#E5E5E5] focus:outline-none focus:border-[#B88E3E] cursor-pointer"
+              className="flex-1 min-w-0 px-2 py-1 bg-[#121212] border border-[#333333] rounded-md text-xs text-[#E5E5E5] focus:outline-none focus:border-[#B88E3E] cursor-pointer"
             >
               <option value="all">Усі</option>
               <option value="alive">Живі</option>
@@ -603,12 +603,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           </div>
 
           {/* Status Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase whitespace-nowrap">Статус дослідження:</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase shrink-0">Статус:</span>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="flex-1 px-2 py-1 bg-[#121212] border border-[#333333] rounded-md text-xs text-[#E5E5E5] focus:outline-none focus:border-[#B88E3E] cursor-pointer"
+              className="flex-1 min-w-0 px-2 py-1 bg-[#121212] border border-[#333333] rounded-md text-xs text-[#E5E5E5] focus:outline-none focus:border-[#B88E3E] cursor-pointer"
             >
               <option value="all">Усі статуси</option>
               <option value="confirmed">Підтверджена особа</option>
@@ -617,14 +617,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           </div>
 
           {/* RESET BUTTON */}
-          <div className="flex justify-end">
+          <div className="flex sm:col-span-2 lg:col-span-4 xl:col-span-1 justify-end items-center">
             {(searchQuery || tagFilter !== 'all' || genderFilter !== 'all' || lifeStateFilter !== 'all' || statusFilter !== 'all' || tabFilter !== 'all') ? (
               <button
                 onClick={resetFilters}
-                className="text-xs font-semibold text-[#B88E3E] hover:text-[#E5E5E5] transition-colors flex items-center gap-1 cursor-pointer px-2.5 py-1 bg-[#262626] hover:bg-[#333333] rounded-md border border-[#333333]"
+                className="w-full xl:w-auto text-xs font-semibold text-[#B88E3E] hover:text-[#E5E5E5] transition-colors flex items-center justify-center gap-1 cursor-pointer px-2.5 py-1 bg-[#262626] hover:bg-[#333333] rounded-md border border-[#333333]"
               >
                 <X className="w-3.5 h-3.5" />
-                <span>Скинути</span>
+                <span>Скинути фільтри</span>
               </button>
             ) : null}
           </div>
@@ -675,8 +675,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         )}
       </div>
 
-      {/* 3. TOOLBAR & DISPLAY OPTIONS */}
-      <div className="p-2.5 rounded-xl bg-[#1A1A1A] border border-[#2A2A2A] flex flex-col md:flex-row items-center justify-between gap-2.5 shadow-sm">
+      {/* 3. TOOLBAR & DISPLAY OPTIONS: 2 rows when needed on mobile, tablet & laptop */}
+      <div className="p-2.5 rounded-xl bg-[#1A1A1A] border border-[#2A2A2A] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
         {/* Left: Select Mode Toggle, Select Page, Export, Delete/Restore Selected */}
         <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
           <button

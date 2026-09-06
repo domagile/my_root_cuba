@@ -112,6 +112,8 @@ export interface Person {
   godparents?: GodparentItem[];
   godparentIds?: string[];
   godchildrenIds?: string[];
+  witnessIds?: string[];
+  witnessedPersonIds?: string[];
   historicalPlaces?: HistoricalPlaceItem[];
   isLiving?: boolean;
   fatherId?: string;

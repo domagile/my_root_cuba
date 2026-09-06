@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AddPersonModal } from './AddPersonModal';
 import { useGenealogy, useUIStore } from '../../context/GenealogyContext';
 import { useAuthStore } from '../../stores/useAuthStore';
@@ -14,18 +14,26 @@ export interface PersonDetailModalProps {
   onClose: () => void;
   onEdit?: (person: Person) => void;
   onOpenAddRelation?: (type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling', targetPersonId: string) => void;
+  onSelectPerson?: (id: string) => void;
 }
 
 export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   personId,
   onClose,
   onEdit,
-  onOpenAddRelation
+  onOpenAddRelation,
+  onSelectPerson
 }) => {
   const { deletePerson, setSelectedPersonId } = useGenealogy();
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
+
+  const [activePersonId, setActivePersonId] = useState(personId);
+
+  useEffect(() => {
+    setActivePersonId(personId);
+  }, [personId]);
 
   const canEdit = Boolean(
     currentUser &&
@@ -41,7 +49,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
   return (
     <AddPersonModal
-      personId={personId}
+      personId={activePersonId}
       onClose={onClose}
       isReadOnly={!canEdit}
       onChangeRoot={(id) => {
@@ -54,7 +62,9 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
       }}
       onDeletePerson={deletePerson}
       onSelectPerson={(id) => {
+        setActivePersonId(id);
         setSelectedPersonId(id);
+        if (onSelectPerson) onSelectPerson(id);
       }}
     />
   );

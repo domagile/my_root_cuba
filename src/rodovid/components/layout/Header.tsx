@@ -26,10 +26,11 @@ import {
   Eye,
   ShieldCheck,
   Mail,
-  GitMerge
+  GitMerge,
+  ExternalLink
 } from 'lucide-react';
 import { ViewMode } from '../../types/genealogy';
-import { useUIStore } from '../../../stores/useUIStore';
+import { useUIStore, getTabUrl } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
 import { AuthUser } from '../../../types';
 
@@ -189,18 +190,23 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Desktop Navigation */}
-        <nav className="flex items-center gap-1 py-1">
+        <nav className="hidden md:flex items-center gap-1 py-1 overflow-x-auto scrollbar-none min-w-0">
           {/* Primary items */}
           {primaryNav.map((item) => {
             const Icon = item.icon;
             const isActive = currentView === item.id;
+            const itemUrl = getTabUrl(item.id);
             return (
-              <button
+              <a
                 key={item.id}
-                onClick={() => {
+                href={itemUrl}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                  e.preventDefault();
                   onViewChange(item.id);
                   setIsMoreMenuOpen(false);
                 }}
+                title={`${item.label} (Ctrl+клік або коліщатко для нової вкладки)`}
                 className={`flex items-center gap-1.5 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
                     ? 'bg-emerald-600 text-white shadow-xs font-bold'
@@ -211,7 +217,7 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Icon className="w-3.5 h-3.5" />
                 <span>{item.label}</span>
-              </button>
+              </a>
             );
           })}
 
@@ -222,10 +228,17 @@ export const Header: React.FC<HeaderProps> = ({
                 {secondaryNav.map((item) => {
                   const Icon = item.icon;
                   const isActive = currentView === item.id;
+                  const itemUrl = getTabUrl(item.id);
                   return (
-                    <button
+                    <a
                       key={item.id}
-                      onClick={() => onViewChange(item.id)}
+                      href={itemUrl}
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                        e.preventDefault();
+                        onViewChange(item.id);
+                      }}
+                      title={`${item.label} (Ctrl+клік або коліщатко для нової вкладки)`}
                       className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                         isActive
                           ? 'bg-emerald-600 text-white shadow-xs'
@@ -236,7 +249,7 @@ export const Header: React.FC<HeaderProps> = ({
                     >
                       <Icon className="w-3.5 h-3.5" />
                       <span>{item.label}</span>
-                    </button>
+                    </a>
                   );
                 })}
               </div>
@@ -267,24 +280,42 @@ export const Header: React.FC<HeaderProps> = ({
                     {secondaryNav.map((item) => {
                       const Icon = item.icon;
                       const isActive = currentView === item.id;
+                      const itemUrl = getTabUrl(item.id);
                       return (
-                        <button
-                          key={item.id}
-                          onClick={() => {
-                            onViewChange(item.id);
-                            setIsMoreMenuOpen(false);
-                          }}
-                          className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs text-left transition-colors cursor-pointer ${
-                            isActive
-                              ? 'bg-emerald-600 text-white font-semibold'
-                              : isDarkMode
-                              ? 'text-slate-200 hover:bg-slate-800 hover:text-white'
-                              : 'text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900'
-                          }`}
-                        >
-                          <Icon className="w-4 h-4 text-emerald-500 shrink-0" />
-                          <span>{item.label}</span>
-                        </button>
+                        <div key={item.id} className="relative group/tool flex items-center">
+                          <a
+                            href={itemUrl}
+                            onClick={(e) => {
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                              e.preventDefault();
+                              onViewChange(item.id);
+                              setIsMoreMenuOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs text-left transition-colors cursor-pointer ${
+                              isActive
+                                ? 'bg-emerald-600 text-white font-semibold'
+                                : isDarkMode
+                                ? 'text-slate-200 hover:bg-slate-800 hover:text-white'
+                                : 'text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900'
+                            }`}
+                          >
+                            <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-emerald-500'} shrink-0`} />
+                            <span className="flex-1 truncate">{item.label}</span>
+                          </a>
+                          <a
+                            href={itemUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsMoreMenuOpen(false);
+                            }}
+                            className="absolute right-2 p-1 text-neutral-400 hover:text-emerald-400 opacity-0 group-hover/tool:opacity-100 transition-opacity"
+                            title={`Відкрити «${item.label}» у новій вкладці`}
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
                       );
                     })}
                   </div>
@@ -315,21 +346,20 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* Contact Author Button (domagile@gmail.com) */}
-          {onOpenContactAuthor && (
-            <button
-              onClick={onOpenContactAuthor}
-              className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-md text-xs font-medium ${
-                isDarkMode
-                  ? 'bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border-amber-500/40'
-                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
-              } border transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs`}
-              title="Зв'язок з автором дерева (domagile@gmail.com) — для пошуку спільних предків"
-              aria-label="Зв'язок з автором"
-            >
-              <Mail className="w-3.5 h-3.5 text-amber-500" />
-              <span className="hidden sm:inline">Автор</span>
-            </button>
-          )}
+          <button
+            id="rodovid-header-contact-btn"
+            onClick={() => onOpenContactAuthor ? onOpenContactAuthor() : openContactModal()}
+            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-md text-xs font-medium ${
+              isDarkMode
+                ? 'bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border-amber-500/40'
+                : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+            } border transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs`}
+            title="Зв'язок з автором дерева (domagile@gmail.com) — для пошуку спільних предків"
+            aria-label="Зв'язок з автором"
+          >
+            <Mail className="w-3.5 h-3.5 text-amber-500" />
+            <span className="hidden sm:inline">Автор</span>
+          </button>
 
           {/* Night / Day mode toggle */}
           <button
@@ -347,21 +377,6 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <Moon className="w-3.5 h-3.5 text-indigo-600" />
             )}
-          </button>
-
-          {/* Contact Author Button (domagile@gmail.com) */}
-          <button
-            id="rodovid-header-contact-btn"
-            onClick={() => openContactModal()}
-            className={`p-2 rounded-lg text-xs font-semibold ${
-              isDarkMode
-                ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-500/30'
-                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
-            } border transition-colors shrink-0 cursor-pointer shadow-xs flex items-center gap-1.5`}
-            title="Шукаєте спільних предків? Написати автору (domagile@gmail.com)"
-          >
-            <Mail className="w-4 h-4 text-emerald-500" />
-            <span className="hidden sm:inline">Зв'язок</span>
           </button>
 
           {/* Whitelist Login Button for Guests / Read-only users */}

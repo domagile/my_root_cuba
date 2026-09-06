@@ -30,10 +30,11 @@ import {
   ChevronLeft,
   Lock,
   KeyRound,
-  Mail
+  Mail,
+  ExternalLink
 } from 'lucide-react';
 import { TreeIcon, FanIcon } from './common/GenealogyIcons';
-import { useUIStore } from '../stores/useUIStore';
+import { useUIStore, getTabUrl } from '../stores/useUIStore';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { NavigationTab, ViewMode } from '../types';
@@ -202,21 +203,41 @@ export const Sidebar: React.FC = () => {
             {(isWhitelisted ? rodovidItems : rodovidItems.filter((i) => i.isPublic)).map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === 'tree' && rodovidView === item.id;
+              const itemUrl = getTabUrl(item.id);
               return (
-                <button
-                  key={`rodovid-${item.id}`}
-                  id={`nav-btn-rodovid-${item.id}`}
-                  onClick={() => handleRodovidClick(item)}
-                  title={isCollapsed ? item.label : undefined}
-                  className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
-                    isActive
-                      ? theme.sidebarActiveNav
-                      : `${theme.sidebarText} ${theme.sidebarHover}`
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#B88E3E]' : 'text-emerald-500'}`} />
-                  <span className={`truncate flex-1 text-left ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
-                </button>
+                <div key={`rodovid-${item.id}`} className="relative group/nav flex items-center">
+                  <a
+                    id={`nav-btn-rodovid-${item.id}`}
+                    href={itemUrl}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                      e.preventDefault();
+                      handleRodovidClick(item);
+                    }}
+                    title={isCollapsed ? `${item.label} (клікніть коліщатком або іконку для нової вкладки)` : `${item.label} (Ctrl+клік або коліщатко миші для нової вкладки)`}
+                    className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
+                      isActive
+                        ? theme.sidebarActiveNav
+                        : `${theme.sidebarText} ${theme.sidebarHover}`
+                    }`}
+                  >
+                    <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#B88E3E]' : 'text-emerald-500'}`} />
+                    <span className={`truncate flex-1 text-left ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                  </a>
+                  {(!isCollapsed || isMobileMenuOpen) && (
+                    <a
+                      href={itemUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute right-2 p-1 rounded-md text-neutral-400 hover:text-[#B88E3E] dark:hover:text-amber-300 hover:bg-black/10 dark:hover:bg-white/10 opacity-0 group-hover/nav:opacity-100 transition-opacity cursor-pointer"
+                      title={`Відкрити «${item.label}» у новій вкладці браузера`}
+                      aria-label={`Відкрити ${item.label} у новій вкладці`}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -232,21 +253,41 @@ export const Sidebar: React.FC = () => {
               {researchItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
+                const itemUrl = getTabUrl(item.id);
                 return (
-                  <button
-                    key={`research-${item.id}`}
-                    id={`nav-btn-${item.id}`}
-                    onClick={() => handleNavTabClick(item)}
-                    title={isCollapsed ? item.label : undefined}
-                    className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
-                      isActive
-                        ? theme.sidebarActiveNav
-                        : `${theme.sidebarText} ${theme.sidebarHover}`
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 flex-shrink-0 text-[#B88E3E]" />
-                    <span className={`truncate flex-1 text-left ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
-                  </button>
+                  <div key={`research-${item.id}`} className="relative group/nav flex items-center">
+                    <a
+                      id={`nav-btn-${item.id}`}
+                      href={itemUrl}
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                        e.preventDefault();
+                        handleNavTabClick(item);
+                      }}
+                      title={isCollapsed ? `${item.label} (клікніть коліщатком для нової вкладки)` : `${item.label} (Ctrl+клік або коліщатко миші для нової вкладки)`}
+                      className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
+                        isActive
+                          ? theme.sidebarActiveNav
+                          : `${theme.sidebarText} ${theme.sidebarHover}`
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 flex-shrink-0 text-[#B88E3E]" />
+                      <span className={`truncate flex-1 text-left ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                    </a>
+                    {(!isCollapsed || isMobileMenuOpen) && (
+                      <a
+                        href={itemUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-2 p-1 rounded-md text-neutral-400 hover:text-[#B88E3E] dark:hover:text-amber-300 hover:bg-black/10 dark:hover:bg-white/10 opacity-0 group-hover/nav:opacity-100 transition-opacity cursor-pointer"
+                        title={`Відкрити «${item.label}» у новій вкладці браузера`}
+                        aria-label={`Відкрити ${item.label} у новій вкладці`}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -276,19 +317,37 @@ export const Sidebar: React.FC = () => {
             <span className="text-[11px] truncate">Осіб: {personsCount}</span>
           </div>
           {isWhitelisted ? (
-            <button
-              onClick={() => handleNavTabClick({ id: 'settings', label: 'Налаштування' })}
-              className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-1.5 relative`}
-              title={isAdmin && pendingRequestsCount > 0 ? `Налаштування (Є ${pendingRequestsCount} нових заявок)` : 'Налаштування'}
-            >
-              <Settings className="w-3.5 h-3.5" />
-              {(!isCollapsed || isMobileMenuOpen) && <span className="text-[11px]">Налаштування</span>}
-              {isAdmin && pendingRequestsCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-mono text-[9px] font-bold leading-none animate-pulse">
-                  {pendingRequestsCount}
-                </span>
+            <div className="relative group/nav flex items-center">
+              <a
+                href={getTabUrl('settings')}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                  e.preventDefault();
+                  handleNavTabClick({ id: 'settings', label: 'Налаштування' });
+                }}
+                className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-1.5 relative`}
+                title={isAdmin && pendingRequestsCount > 0 ? `Налаштування (Є ${pendingRequestsCount} нових заявок; Ctrl+клік для нової вкладки)` : 'Налаштування (Ctrl+клік для нової вкладки)'}
+              >
+                <Settings className="w-3.5 h-3.5" />
+                {(!isCollapsed || isMobileMenuOpen) && <span className="text-[11px]">Налаштування</span>}
+                {isAdmin && pendingRequestsCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-mono text-[9px] font-bold leading-none animate-pulse">
+                    {pendingRequestsCount}
+                  </span>
+                )}
+              </a>
+              {(!isCollapsed || isMobileMenuOpen) && (
+                <a
+                  href={getTabUrl('settings')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1 text-neutral-400 hover:text-[#B88E3E] opacity-0 group-hover/nav:opacity-100 transition-opacity"
+                  title="Відкрити налаштування у новій вкладці"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                </a>
               )}
-            </button>
+            </div>
           ) : (
             <button
               onClick={() => openAuthModal()}

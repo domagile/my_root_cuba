@@ -6,6 +6,7 @@
 import { Person, GenealogyDatabase, PersonLifeEventItem, GodparentItem, CustomFieldItem } from '../types/genealogy';
 import { getFullName } from './relationship';
 import { comparePersonsByAge, getPersonBirthYear } from './treeLayout';
+import { getBidirectionalGodchildren, getBidirectionalWitnessedPersons } from '../../utils/spiritualRelations';
 
 export interface PersonReportOptions {
   includeBio?: boolean;
@@ -393,6 +394,32 @@ export function generatePersonTextReport(
         const notes = gp.notes ? ` (${gp.notes})` : '';
         lines.push(`  ${idx + 1}. ${roleStr}: ${gp.name}${notes}`);
       });
+    }
+
+    // Godchildren & Witnessed Persons (bidirectional spiritual links)
+    if (opts.includeExtendedRelations && database?.persons) {
+      const allPersons = Object.values(database.persons);
+      const godchildrenList = getBidirectionalGodchildren(person.id, fullName, allPersons, person);
+      if (godchildrenList.length > 0) {
+        lines.push('');
+        lines.push(`ХРЕСНИКИ / ПОХРЕСНИКИ (${godchildrenList.length}):`);
+        godchildrenList.forEach((item, idx) => {
+          const notes = item.notes ? ` (${item.notes})` : '';
+          const parents = item.parentsLabel ? ` [Батьки / куми: ${item.parentsLabel}]` : '';
+          lines.push(`  ${idx + 1}. ${getFullName(item.person)} — ${item.roleLabel}${parents}${notes}`);
+        });
+      }
+
+      const witnessedList = getBidirectionalWitnessedPersons(person.id, fullName, allPersons, person);
+      if (witnessedList.length > 0) {
+        lines.push('');
+        lines.push(`СВІДЧЕННЯ ТА ПОРУЧИТЕЛЬСТВА (${witnessedList.length}):`);
+        witnessedList.forEach((item, idx) => {
+          const notes = item.notes ? ` (${item.notes})` : '';
+          const event = item.eventLabel ? ` [${item.eventLabel}]` : '';
+          lines.push(`  ${idx + 1}. ${getFullName(item.person)} — ${item.roleLabel || 'Свідок'}${event}${notes}`);
+        });
+      }
     }
   }
 

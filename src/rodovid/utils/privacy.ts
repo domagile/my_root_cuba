@@ -14,8 +14,8 @@ export const isUserWhitelisted = (
   user: AuthUser | null,
   whitelist: WhitelistEntry[] = []
 ): boolean => {
-  if (!user) return false;
-  if (user.role === 'admin') return true;
+  if (!user || !user.isAuthenticated) return false;
+  if (user.role === 'admin' || user.role === 'editor' || user.role === 'researcher') return true;
   if (user.isWhitelisted) return true;
   if (!user.email) return false;
   const clean = user.email.trim().toLowerCase();

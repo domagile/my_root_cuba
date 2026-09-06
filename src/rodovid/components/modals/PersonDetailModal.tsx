@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AddPersonModal } from '../../../components/Tree/AddPersonModal';
 import { useGenealogy } from '../../../context/GenealogyContext';
 import { GenealogyDatabase } from '../../../types';
@@ -32,14 +32,22 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   isReadOnly = false
 }) => {
   const { deletePerson } = useGenealogy();
+  const [activePersonId, setActivePersonId] = useState<string | null>(personId);
 
-  if (!personId) return null;
+  useEffect(() => {
+    setActivePersonId(personId);
+  }, [personId]);
+
+  if (!activePersonId) return null;
 
   return (
     <AddPersonModal
-      personId={personId}
+      personId={activePersonId}
       onClose={onClose}
-      onSelectPerson={onSelectPerson}
+      onSelectPerson={(id) => {
+        setActivePersonId(id);
+        if (onSelectPerson) onSelectPerson(id);
+      }}
       onDeletePerson={onDeletePerson || deletePerson}
       onChangeRoot={onChangeRoot}
       onOpenKinshipWith={onOpenKinshipWith}

@@ -8,8 +8,9 @@ import { BarChart3, Users, Heart, Calendar, Trophy, PieChart, MapPin } from 'luc
 import { GenealogyDatabase, Person, Family } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
 import { getThemeConfig } from '../../../utils/theme';
-import { normalizeUkrainianSurnameGender, normalizeUkrainianPlace, areSurnamesEquivalent } from '../../../utils/ukrainianPhonetics';
+import { normalizeUkrainianSurnameGender, normalizeUkrainianPlace, areSurnamesEquivalent, formatClanName } from '../../../utils/ukrainianPhonetics';
 import { isPersonMale, isPersonFemale } from '../../utils/genderUtils';
+import { getLineageColorMap, getPersonClanColor, getPersonRodName } from '../../utils/treeLayout';
 
 interface StatisticsViewProps {
   database: GenealogyDatabase;
@@ -100,7 +101,35 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
       topSurnames,
       topPlaces
     };
-  }, [persons, families]);
+  }, [persons, families, database]);
+
+  // Comprehensive clan breakdown with canonical names, lineage colors & member counts
+  const clans = useMemo(() => {
+    const lineageColorMap = getLineageColorMap(database);
+    const map = new Map<string, { id: string; name: string; color: string; count: number; persons: Person[] }>();
+
+    persons.forEach((p) => {
+      const rawRod = getPersonRodName(p);
+      const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
+      if (!rawSurname || rawSurname === 'Рід') return;
+      const canonical = normalizeUkrainianSurnameGender(rawSurname) || rawRod;
+      const clanId = canonical;
+      const clanName = formatClanName(canonical);
+      const color = getPersonClanColor(p, lineageColorMap);
+
+      const existing = Array.from(map.values()).find(
+        (c) => c.id.toLowerCase() === clanId.toLowerCase() || areSurnamesEquivalent(clanId, c.id)
+      );
+      if (existing) {
+        existing.count += 1;
+        existing.persons.push(p);
+      } else {
+        map.set(clanId, { id: clanId, name: clanName, color, count: 1, persons: [p] });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [database, persons]);
 
   return (
     <div className={`max-w-7xl mx-auto px-4 py-6 space-y-6 ${theme.textPrimary}`}>
@@ -169,6 +198,84 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
             <div className={`text-xs ${theme.textMuted} pt-2`}>Недостатньо дат</div>
           )}
         </div>
+      </div>
+
+      {/* Clans & Lineages Section (moved from TreeView) */}
+      <div className={`p-6 rounded-xl ${theme.cardBg} border ${theme.cardBorder} space-y-4 shadow-xs`}>
+        <div className="flex items-center justify-between">
+          <h3 className={`text-xs font-bold ${theme.textSecondary} flex items-center gap-2 uppercase tracking-wider`}>
+            <PieChart className="w-4 h-4 text-amber-500" />
+            <span>Роди та гілки родоводу</span>
+          </h3>
+          <span className={`text-[11px] ${theme.textMuted}`}>{clans.length} родів у базі</span>
+        </div>
+
+        {clans.length === 0 ? (
+          <p className={`text-xs ${theme.textMuted} italic py-4 text-center`}>Немає даних про роди</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {clans.map((clan) => {
+              const pct = stats.totalPersons > 0 ? Math.round((clan.count / stats.totalPersons) * 100) : 0;
+              return (
+                <div
+                  key={clan.id}
+                  className={`p-3.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} flex flex-col justify-between space-y-2 hover:border-amber-500/40 transition-colors`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span
+                        className="w-3.5 h-3.5 rounded-full shrink-0 border border-white/25 shadow-xs"
+                        style={{ backgroundColor: clan.color }}
+                      />
+                      <span className={`font-bold text-xs ${theme.textPrimary} truncate`} title={clan.name}>
+                        {clan.name}
+                      </span>
+                    </div>
+                    <span className={`font-mono text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-amber-950/60 text-amber-400' : 'bg-amber-100 text-amber-800'} font-bold shrink-0`}>
+                      {clan.count} {clan.count === 1 ? 'особа' : clan.count < 5 ? 'особи' : 'осіб'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="w-full bg-slate-700/30 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{ width: `${Math.max(pct, 4)}%`, backgroundColor: clan.color }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span>Частка у базі: {pct}%</span>
+                    </div>
+                  </div>
+
+                  {/* Quick Person Jump Pills */}
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {clan.persons.slice(0, 3).map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => onSelectPerson(p.id)}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors truncate max-w-[140px] cursor-pointer ${
+                          isDark
+                            ? 'bg-[#1b1f24] hover:bg-slate-700 text-slate-300 border-[#2d3238]'
+                            : 'bg-white hover:bg-amber-50 text-slate-700 border-slate-200'
+                        }`}
+                        title={`Перейти до ${p.firstName} ${p.lastName}`}
+                      >
+                        {p.firstName} {p.lastName}
+                      </button>
+                    ))}
+                    {clan.persons.length > 3 && (
+                      <span className="text-[10px] text-slate-400 self-center pl-0.5">
+                        +{clan.persons.length - 3}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Demographics: Top Surnames & Top Settlements */}

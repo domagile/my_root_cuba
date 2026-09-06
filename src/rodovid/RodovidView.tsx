@@ -28,7 +28,7 @@ import { RelationManagerModal } from '../components/Tree/RelationManagerModal';
 import { AddPersonModal } from '../components/Tree/AddPersonModal';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useUIStore } from '../stores/useUIStore';
-import { useAuthStore } from '../stores/useAuthStore';
+import { useAuthStore, isMasterAdminEmail } from '../stores/useAuthStore';
 import { AuthModal } from '../components/AuthModal';
 import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from '../components/ContactAuthorModal';
 import { getThemeConfig } from '../utils/theme';
@@ -89,9 +89,13 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
   // Read-only condition: Only whitelisted users with active status and role admin/editor can edit
   const isReadOnly = useMemo(() => {
     if (isSharedViewer && sharedMeta?.mode === 'readonly') return true;
-    if (!currentUser) return true;
+    if (!currentUser || !currentUser.isAuthenticated) return true;
+    if (currentUser.role === 'admin' || isMasterAdminEmail(currentUser.email)) return false;
+    if (currentUser.isWhitelisted && (currentUser.role === 'editor' || currentUser.role === 'researcher')) return false;
+    const cleanEmail = currentUser.email?.toLowerCase();
+    if (!cleanEmail) return true;
     const entry = whitelist.find(
-      (w) => w.email.toLowerCase() === currentUser.email.toLowerCase() && w.status === 'active'
+      (w) => w.email.toLowerCase() === cleanEmail && w.status === 'active'
     );
     if (!entry) return true;
     return entry.role !== 'admin' && entry.role !== 'editor';
