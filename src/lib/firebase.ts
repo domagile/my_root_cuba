@@ -577,6 +577,26 @@ export async function deleteWhitelistEntryFromCloud(
   }
 }
 
+export async function deleteAccessRequestFromCloud(
+  requestId: string,
+  projectId: string = DEFAULT_PROJECT_ID
+): Promise<boolean> {
+  try {
+    const db = getDbInstance();
+    if (!db || !requestId) return false;
+    const docRef = doc(db, 'projects', projectId, 'accessRequests', String(requestId));
+    await deleteDoc(docRef);
+    try {
+      const topRef = doc(db, 'accessRequests', String(requestId));
+      await deleteDoc(topRef);
+    } catch {}
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/accessRequests/${requestId}`);
+    return false;
+  }
+}
+
 export async function saveAccessConfigToCloud(
   config: any,
   projectId: string = DEFAULT_PROJECT_ID

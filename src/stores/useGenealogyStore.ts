@@ -6,11 +6,14 @@ import { findRootPersonId } from '../rodovid/utils/relationship';
 import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { useAuthStore } from './useAuthStore';
+import { isDemoPerson, isDemoFamily } from '../utils/demoPurge';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
 
-export const INITIAL_PERSONS: Person[] = FAMILIO_PERSONS;
-export const INITIAL_FAMILIES: Record<string, Family> = FAMILIO_FAMILIES;
+export const INITIAL_PERSONS: Person[] = FAMILIO_PERSONS.filter((p) => !isDemoPerson(p));
+export const INITIAL_FAMILIES: Record<string, Family> = Object.fromEntries(
+  Object.entries(FAMILIO_FAMILIES).filter(([k, v]) => !isDemoFamily(k, v))
+);
 export const INITIAL_SOURCES: Record<string, Source> = FAMILIO_SOURCES;
 export const INITIAL_EVENTS: Record<string, LifeEvent> = FAMILIO_EVENTS;
 
@@ -92,7 +95,7 @@ export interface GenealogyDataState {
   setGitConfig: (config: GitConfig) => void;
   setGoogleDriveEmail: (email: string) => void;
   exportGedcomData: () => void;
-  resetPersonsToSample: () => void;
+  purgeDemoDataFromTree: () => void;
 }
 
 export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
@@ -107,7 +110,10 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed.map(normalizePerson);
+          const cleaned = parsed.filter((p) => !isDemoPerson(p));
+          if (cleaned.length > 0) {
+            return cleaned.map(normalizePerson);
+          }
         }
       }
       return INITIAL_PERSONS.map(normalizePerson);
@@ -122,7 +128,15 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed;
+          const cleaned: Record<string, Family> = {};
+          for (const [k, v] of Object.entries(parsed)) {
+            if (!isDemoFamily(k, v)) {
+              cleaned[k] = v as Family;
+            }
+          }
+          if (Object.keys(cleaned).length > 0) {
+            return cleaned;
+          }
         }
       }
       return INITIAL_FAMILIES;
@@ -561,22 +575,22 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     URL.revokeObjectURL(url);
   },
 
-  resetPersonsToSample: () =>
-    set(() => {
-      const sample = INITIAL_PERSONS.map(normalizePerson);
+  purgeDemoDataFromTree: () =>
+    set((state) => {
+      const cleanPersons = state.persons.filter((p) => !isDemoPerson(p));
+      const cleanFamilies: Record<string, Family> = {};
+      for (const [k, v] of Object.entries(state.families)) {
+        if (!isDemoFamily(k, v)) {
+          cleanFamilies[k] = v;
+        }
+      }
       try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(sample));
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(INITIAL_FAMILIES));
-        localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(INITIAL_SOURCES));
-        localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(INITIAL_EVENTS));
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify([]));
+        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(cleanPersons));
+        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(cleanFamilies));
       } catch {}
       return {
-        persons: sample,
-        families: INITIAL_FAMILIES,
-        sources: INITIAL_SOURCES,
-        events: INITIAL_EVENTS,
-        trashPersons: []
+        persons: cleanPersons,
+        families: cleanFamilies
       };
     })
 }));

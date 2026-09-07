@@ -56,7 +56,7 @@ export const SettingsView: React.FC = () => {
     exportJsonData, 
     exportGedcomData, 
     importJsonData, 
-    resetToSampleData,
+    purgeAllDemoData,
     persons,
     families,
     sources,
@@ -97,7 +97,6 @@ export const SettingsView: React.FC = () => {
 
   const theme = getThemeConfig(themePalette);
   const [importStatus, setImportStatus] = useState<string | null>(null);
-  const [confirmReset, setConfirmReset] = useState(false);
   const [confirmPull, setConfirmPull] = useState(false);
   const [cloudFeedback, setCloudFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
 
@@ -812,34 +811,20 @@ export const SettingsView: React.FC = () => {
               <span>Експорт у GEDCOM</span>
             </button>
 
-            {confirmReset ? (
-              <div className="flex items-center justify-center gap-2 p-1.5 bg-rose-950/40 border border-rose-800/40 rounded-xl">
-                <span className="text-xs text-rose-300 font-medium">Скинути всі дані?</span>
-                <button
-                  onClick={() => {
-                    resetToSampleData();
-                    setConfirmReset(false);
-                  }}
-                  className="px-2.5 py-1 bg-rose-700 hover:bg-rose-800 text-white rounded text-xs font-bold cursor-pointer"
-                >
-                  Так, скинути
-                </button>
-                <button
-                  onClick={() => setConfirmReset(false)}
-                  className="px-2.5 py-1 bg-[#262626] text-gray-300 rounded text-xs cursor-pointer"
-                >
-                  Ні
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setConfirmReset(true)}
-                className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-medium text-xs transition-all cursor-pointer"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Відновити демо-архів</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('Видалити всі залишки демонстраційних даних (Коваленки, зразки записів, тестові нотатки)? Ваші власні дані та додані родичі залишаться збереженими.')) {
+                  purgeAllDemoData();
+                  setImportStatus('Усі залишки демо-даних успішно очищено!');
+                  setTimeout(() => setImportStatus(null), 4000);
+                }
+              }}
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-medium text-xs transition-all cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Очистити залишки демо-даних</span>
+            </button>
           </div>
         </div>
 
@@ -989,7 +974,7 @@ export const SettingsView: React.FC = () => {
               Режим захисту доступу
             </label>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div
                 onClick={() => setAccessConfig({ ...accessConfig, mode: 'whitelist_only' })}
                 className={`p-3.5 rounded-xl border cursor-pointer transition-all space-y-1 ${
@@ -1027,26 +1012,6 @@ export const SettingsView: React.FC = () => {
                 </div>
                 <p className={`text-[11px] ${theme.cardSubtext} leading-tight`}>
                   Основний вхід по Google email + можливість увійти за гостьовим PIN.
-                </p>
-              </div>
-
-              <div
-                onClick={() => setAccessConfig({ ...accessConfig, mode: 'open_demo' })}
-                className={`p-3.5 rounded-xl border cursor-pointer transition-all space-y-1 ${
-                  accessConfig.mode === 'open_demo'
-                    ? 'border-[#B88E3E] bg-[#B88E3E]/10 ring-2 ring-[#B88E3E]/30'
-                    : 'border-black/10 dark:border-white/10 hover:border-[#B88E3E]/50'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-bold ${theme.cardTitle} flex items-center gap-1.5`}>
-                    <Users className="w-4 h-4 text-blue-500" />
-                    <span>Відкритий доступ (Демо)</span>
-                  </span>
-                  {accessConfig.mode === 'open_demo' && <Check className="w-4 h-4 text-[#B88E3E]" />}
-                </div>
-                <p className={`text-[11px] ${theme.cardSubtext} leading-tight`}>
-                  Будь-який відвідувач може переглядати дерево без авторизації.
                 </p>
               </div>
             </div>

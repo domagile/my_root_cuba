@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { GenealogyDatabase } from '../../types/genealogy';
 import { parseGedcom, exportToGedcom } from '../../utils/gedcom';
-import { SAMPLE_DATABASE } from '../../data/sampleData';
 
 interface GedcomModalProps {
   database: GenealogyDatabase;
@@ -25,7 +24,7 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
   onClose,
   onImportDatabase
 }) => {
-  const [activeTab, setActiveTab] = useState<'import' | 'export' | 'presets'>('import');
+  const [activeTab, setActiveTab] = useState<'import' | 'export'>('import');
   const [pastedGedcom, setPastedGedcom] = useState('');
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
@@ -94,146 +93,6 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // Load presets
-  const handleLoadSample = (sampleType: 'morozov' | 'romanov') => {
-    if (sampleType === 'morozov') {
-      onImportDatabase(SAMPLE_DATABASE);
-      setImportStatus('Завантажено архів Морозових — Волкових');
-    } else if (sampleType === 'romanov') {
-      const romanovDb: GenealogyDatabase = {
-        title: 'Династія Романових (XIX–XX ст.)',
-        description: 'Гілки Олександра II, Олександра III та Миколи II з історичними джерелами.',
-        lastModified: new Date().toISOString(),
-        grampsCompatibilityVersion: '5.1.6',
-        rootPersonId: 'R0001',
-        events: {},
-        sources: {
-          'SR01': {
-            id: 'SR01',
-            title: 'Державний архів Російської Федерації (ГАРФ)',
-            archiveReference: 'Фонд 601 (Імператор Микола II)',
-            notes: 'Щоденники та листування членів імператорської родини.'
-          }
-        },
-        places: {
-          'PR01': {
-            id: 'PR01',
-            name: 'Санкт-Петербург, Зимовий палац',
-            country: 'Росія',
-            region: 'Санкт-Петербурзька губ.'
-          }
-        },
-        persons: {
-          'R0001': {
-            id: 'R0001',
-            name: { given: 'Микола', patronymic: 'Олександрович', surname: 'Романов', prefix: 'Імператор' },
-            gender: 'M',
-            isLiving: false,
-            birthDate: '18.05.1868',
-            birthYear: 1868,
-            birthPlace: 'Царське Село',
-            deathDate: '17.07.1918',
-            deathYear: 1918,
-            deathPlace: 'Єкатеринбург',
-            avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80',
-            occupation: 'Імператор Всеросійський',
-            events: [],
-            parentFamilyId: 'FR01',
-            spouseFamilyIds: ['FR02']
-          },
-          'R0002': {
-            id: 'R0002',
-            name: { given: 'Олександра', patronymic: 'Федорівна', surname: 'Романова', prefix: 'Імператриця', maidenName: 'Гессен-Дармштадтська' },
-            gender: 'F',
-            isLiving: false,
-            birthDate: '06.06.1872',
-            birthYear: 1872,
-            deathDate: '17.07.1918',
-            deathYear: 1918,
-            events: [],
-            spouseFamilyIds: ['FR02']
-          },
-          'R0003': {
-            id: 'R0003',
-            name: { given: 'Олександр', patronymic: 'Олександрович', surname: 'Романов', prefix: 'Імператор Олександр III' },
-            gender: 'M',
-            isLiving: false,
-            birthDate: '10.03.1845',
-            birthYear: 1845,
-            deathDate: '01.11.1894',
-            deathYear: 1894,
-            events: [],
-            spouseFamilyIds: ['FR01']
-          },
-          'R0004': {
-            id: 'R0004',
-            name: { given: 'Марія', patronymic: 'Федорівна', surname: 'Романова', prefix: 'Імператриця', maidenName: 'Дагмар Данська' },
-            gender: 'F',
-            isLiving: false,
-            birthDate: '26.11.1847',
-            birthYear: 1847,
-            deathDate: '13.10.1928',
-            deathYear: 1928,
-            events: [],
-            spouseFamilyIds: ['FR01']
-          },
-          'R0005': {
-            id: 'R0005',
-            name: { given: 'Олексій', patronymic: 'Миколайович', surname: 'Романов', prefix: 'Цесаревич' },
-            gender: 'M',
-            isLiving: false,
-            birthDate: '12.08.1904',
-            birthYear: 1904,
-            deathDate: '17.07.1918',
-            deathYear: 1918,
-            events: [],
-            parentFamilyId: 'FR02',
-            spouseFamilyIds: []
-          },
-          'R0006': {
-            id: 'R0006',
-            name: { given: 'Ольга', patronymic: 'Миколаївна', surname: 'Романова', prefix: 'Велика княжна' },
-            gender: 'F',
-            isLiving: false,
-            birthDate: '15.11.1895',
-            birthYear: 1895,
-            deathDate: '17.07.1918',
-            deathYear: 1918,
-            events: [],
-            parentFamilyId: 'FR02',
-            spouseFamilyIds: []
-          }
-        },
-        families: {
-          'FR01': {
-            id: 'FR01',
-            husbandId: 'R0003',
-            wifeId: 'R0004',
-            relationshipType: 'Married',
-            children: [{ personId: 'R0001', relationType: 'Biological' }],
-            events: []
-          },
-          'FR02': {
-            id: 'FR02',
-            husbandId: 'R0001',
-            wifeId: 'R0002',
-            relationshipType: 'Married',
-            marriageDate: '26.11.1894',
-            marriageYear: 1894,
-            marriagePlace: 'Санкт-Петербург, Зимовий палац',
-            children: [
-              { personId: 'R0005', relationType: 'Biological' },
-              { personId: 'R0006', relationType: 'Biological' }
-            ],
-            events: []
-          }
-        }
-      };
-      onImportDatabase(romanovDb);
-      setImportStatus('Завантажено історичну династію Романових');
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-150">
@@ -274,16 +133,6 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
             }`}
           >
             Експорт бази
-          </button>
-          <button
-            onClick={() => setActiveTab('presets')}
-            className={`py-3 border-b-2 transition-colors ${
-              activeTab === 'presets'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Готові демо-дерева
           </button>
         </div>
 
@@ -382,44 +231,6 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
                     Повна база з усіма архівними цитатами, фотографіями, нотатками та координатами місць.
                   </p>
                 </button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'presets' && (
-            <div className="space-y-3">
-              <span className="text-xs font-semibold text-slate-300 block">
-                Демонстраційні родові архіви:
-              </span>
-
-              <div
-                onClick={() => handleLoadSample('morozov')}
-                className="p-3.5 bg-slate-950 border border-slate-800 hover:border-emerald-500 rounded-xl cursor-pointer transition-colors space-y-1"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="font-semibold text-xs text-white">
-                    Рід Морозових — Волкових (1825–2000)
-                  </h4>
-                  <span className="text-[10px] text-emerald-400 font-mono">15 осіб • 8 сімей</span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  Метричні записи, ревізькі казки, купці, офіцери та блокадні документи Ленинграда.
-                </p>
-              </div>
-
-              <div
-                onClick={() => handleLoadSample('romanov')}
-                className="p-3.5 bg-slate-950 border border-slate-800 hover:border-emerald-500 rounded-xl cursor-pointer transition-colors space-y-1"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="font-semibold text-xs text-white">
-                    Династія Романових (XIX–XX ст.)
-                  </h4>
-                  <span className="text-[10px] text-emerald-400 font-mono">Імператорський дім</span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  Гілка Олександра II, Олександра III та Миколи II з архівними фондами ГАРФ.
-                </p>
               </div>
             </div>
           )}

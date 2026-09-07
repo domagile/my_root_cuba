@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { isDemoSnapshot } from './demoPurge';
+
 // IndexedDB database configuration
 const DB_NAME = 'GenealogyWorkstationPersistence';
 const DB_VERSION = 1;
@@ -177,14 +179,26 @@ export async function getAllSnapshots(): Promise<DataSnapshot[]> {
   try {
     const db = await getDB();
     return new Promise((resolve) => {
-      const tx = db.transaction(SNAPSHOTS_STORE, 'readonly');
+      const tx = db.transaction(SNAPSHOTS_STORE, 'readwrite');
       const store = tx.objectStore(SNAPSHOTS_STORE);
       const req = store.getAll();
 
       req.onsuccess = () => {
-        const list = (req.result || []) as DataSnapshot[];
-        list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        resolve(list);
+        const rawList = (req.result || []) as DataSnapshot[];
+        const cleanList: DataSnapshot[] = [];
+
+        rawList.forEach((snap) => {
+          if (isDemoSnapshot(snap)) {
+            try {
+              store.delete(snap.id);
+            } catch {}
+          } else {
+            cleanList.push(snap);
+          }
+        });
+
+        cleanList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        resolve(cleanList);
       };
       req.onerror = () => resolve([]);
     });

@@ -25,125 +25,17 @@ import {
   saveMatrixEntryDoc,
   deleteMatrixEntryDoc
 } from '../lib/firebase';
+import { isDemoResearchItem } from '../utils/demoPurge';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v2';
 
-export const INITIAL_METRICS: MetricRecord[] = [
-  {
-    id: 'm-1',
-    title: 'Метрична книга церкви Покрови Пресвятої Богородиці 1878 року',
-    archive: 'ДАПО (Полтава)',
-    fund: 'Ф. 1011',
-    inventory: 'Оп. 1',
-    caseNumber: 'Спр. 45',
-    year: 1878,
-    recordType: 'birth',
-    village: 'с. Чернечий Яр',
-    church: 'Покровська',
-    page: '12 зв.',
-    itemNumber: '14',
-    transcription: '10 лютого 1878 року народжений, 12 охрещений Іоанн. Батьки: козак Остап Григорійович Коваленко і законна дружина його Марія Іванівна, обоє православні.',
-    indexedPersons: [
-      { name: 'Іван Коваленко', role: 'Дитина (новонароджений)' },
-      { name: 'Остап Коваленко', role: 'Батько' },
-      { name: 'Марія Коваленко', role: 'Мати' }
-    ],
-    isVerified: true
-  },
-  {
-    id: 'm-2',
-    title: 'Метрична книга про шлюб 1875 р.',
-    archive: 'ДАПО (Полтава)',
-    fund: 'Ф. 1011',
-    inventory: 'Оп. 1',
-    caseNumber: 'Спр. 38',
-    year: 1875,
-    recordType: 'marriage',
-    village: 'м. Диканька',
-    page: '44',
-    itemNumber: '7',
-    transcription: '18 жовтня 1875 року обвінчані: козак хутора Чернечий Яр Остап Григорійович Коваленко, 30 років, та дівиця Марія Іванівна Лисенко, 25 років.',
-    indexedPersons: [
-      { name: 'Остап Коваленко', role: 'Наречений' },
-      { name: 'Марія Лисенко', role: 'Наречена' }
-    ],
-    isVerified: true
-  }
-];
-
-export const INITIAL_DOCUMENTS: GenealogyDocument[] = [
-  {
-    id: 'doc-1',
-    title: 'Виписка з метричної книги про народження Івана Коваленка 1878 р.',
-    type: 'metric',
-    archive: 'ДАПО',
-    fund: 'Ф. 1011',
-    inventory: 'Оп. 1',
-    caseNumber: 'Спр. 45',
-    year: 1878,
-    location: 'с. Чернечий Яр',
-    transcription: 'Запис №14 про народження хлопчика Івана.',
-    createdAt: new Date().toISOString()
-  }
-];
-
-export const INITIAL_TASKS: GenealogyTask[] = [
-  {
-    id: 't-1',
-    title: 'Опрацювати ревізькі казки 1858 року по с. Чернечий Яр',
-    priority: 'high',
-    status: 'in_progress',
-    category: 'archive',
-    description: 'Перевірити склад родини Григорія Коваленка за 10-ю ревізією.'
-  },
-  {
-    id: 't-2',
-    title: 'Надіслати запит до ДАПО щодо шлюбного обшуку 1875 р.',
-    priority: 'medium',
-    status: 'todo',
-    category: 'archive'
-  }
-];
-
-export const INITIAL_HYPOTHESES: GenealogyHypothesis[] = [
-  {
-    id: 'h-1',
-    title: 'Походження роду Коваленків з козаків Гадяцького полку',
-    hypothesis: 'Остап Григорович Коваленко є прямим нащадком сотника Коваля з реєстру 1756 року.',
-    status: 'active',
-    argumentsFor: ['Сповідні розписи вказують спадковий козацький статус родини.'],
-    argumentsAgainst: []
-  }
-];
-
-export const INITIAL_FINDINGS: GenealogyFinding[] = [
-  {
-    id: 'f-1',
-    title: 'Підтверджено точну дату народження Івана Остаповича (10.02.1878)',
-    description: 'Знайдено актовий запис №14 у метричній книзі Покровської церкви.',
-    confidence: 'confirmed',
-    discoveryDate: new Date().toISOString().split('T')[0],
-    linkedPersonIds: ['p-3']
-  }
-];
-
-export const INITIAL_REQUESTS: ArchiveRequest[] = [
-  {
-    id: 'req-1',
-    archiveName: 'Державний архів Полтавської області (ДАПО)',
-    requestSubject: 'Пошук сповідного розпису за 1860 рік по Диканському благочинню',
-    targetPersonOrFamily: 'Родина Коваленків',
-    sentDate: '2026-07-15',
-    status: 'received',
-    responseSummary: 'Отримано цифрову копію справи 122 арк. 88.'
-  }
-];
-
-export const INITIAL_MATRIX: YearMatrixEntry[] = [
-  { id: 'mx-1', village: 'Чернечий Яр', year: 1875, hasBirth: true, hasMarriage: true, hasDeath: true, hasConfession: false, hasRevision: false },
-  { id: 'mx-2', village: 'Чернечий Яр', year: 1878, hasBirth: true, hasMarriage: true, hasDeath: true, hasConfession: false, hasRevision: false },
-  { id: 'mx-3', village: 'Чернечий Яр', year: 1880, hasBirth: true, hasMarriage: false, hasDeath: true, hasConfession: true, hasRevision: false }
-];
+export const INITIAL_METRICS: MetricRecord[] = [];
+export const INITIAL_DOCUMENTS: GenealogyDocument[] = [];
+export const INITIAL_TASKS: GenealogyTask[] = [];
+export const INITIAL_HYPOTHESES: GenealogyHypothesis[] = [];
+export const INITIAL_FINDINGS: GenealogyFinding[] = [];
+export const INITIAL_REQUESTS: ArchiveRequest[] = [];
+export const INITIAL_MATRIX: YearMatrixEntry[] = [];
 
 export interface ResearchDataState {
   metricRecords: MetricRecord[];
@@ -202,71 +94,113 @@ export interface ResearchDataState {
   addRangeAnalysis: (ra: any) => void;
   deleteRangeAnalysis: (id: string) => void;
 
-  // Reset
-  resetResearchToSample: () => void;
+  // Purge Demo Data
+  purgeDemoResearchData: () => void;
 }
 
 export const useResearchStore = create<ResearchDataState>((set) => ({
   metricRecords: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_metrics`);
-      return saved ? JSON.parse(saved) : INITIAL_METRICS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((m) => !isDemoResearchItem(m));
+        }
+      }
+      return [];
     } catch {
-      return INITIAL_METRICS;
+      return [];
     }
   })(),
 
   documents: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_documents`);
-      return saved ? JSON.parse(saved) : INITIAL_DOCUMENTS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((d) => !isDemoResearchItem(d));
+        }
+      }
+      return [];
     } catch {
-      return INITIAL_DOCUMENTS;
+      return [];
     }
   })(),
 
   tasks: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_tasks`);
-      return saved ? JSON.parse(saved) : INITIAL_TASKS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((t) => !isDemoResearchItem(t));
+        }
+      }
+      return [];
     } catch {
-      return INITIAL_TASKS;
+      return [];
     }
   })(),
 
   findings: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_findings`);
-      return saved ? JSON.parse(saved) : INITIAL_FINDINGS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((f) => !isDemoResearchItem(f));
+        }
+      }
+      return [];
     } catch {
-      return INITIAL_FINDINGS;
+      return [];
     }
   })(),
 
   hypotheses: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_hypotheses`);
-      return saved ? JSON.parse(saved) : INITIAL_HYPOTHESES;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((h) => !isDemoResearchItem(h));
+        }
+      }
+      return [];
     } catch {
-      return INITIAL_HYPOTHESES;
+      return [];
     }
   })(),
 
   requests: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_requests`);
-      return saved ? JSON.parse(saved) : INITIAL_REQUESTS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((r) => !isDemoResearchItem(r));
+        }
+      }
+      return [];
     } catch {
-      return INITIAL_REQUESTS;
+      return [];
     }
   })(),
 
   matrixEntries: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_matrix`);
-      return saved ? JSON.parse(saved) : INITIAL_MATRIX;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((e) => !isDemoResearchItem(e));
+        }
+      }
+      return [];
     } catch {
-      return INITIAL_MATRIX;
+      return [];
     }
   })(),
 
@@ -633,25 +567,34 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       rangeAnalyses: state.rangeAnalyses.filter((r) => r.id !== id)
     })),
 
-  resetResearchToSample: () =>
-    set(() => {
+  purgeDemoResearchData: () =>
+    set((state) => {
+      const cleanMetrics = state.metricRecords.filter((m) => !isDemoResearchItem(m));
+      const cleanDocs = state.documents.filter((d) => !isDemoResearchItem(d));
+      const cleanTasks = state.tasks.filter((t) => !isDemoResearchItem(t));
+      const cleanFindings = state.findings.filter((f) => !isDemoResearchItem(f));
+      const cleanHypotheses = state.hypotheses.filter((h) => !isDemoResearchItem(h));
+      const cleanRequests = state.requests.filter((r) => !isDemoResearchItem(r));
+      const cleanMatrix = state.matrixEntries.filter((e) => !isDemoResearchItem(e));
+
       try {
-        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(INITIAL_METRICS));
-        localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(INITIAL_DOCUMENTS));
-        localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(INITIAL_TASKS));
-        localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(INITIAL_FINDINGS));
-        localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(INITIAL_HYPOTHESES));
-        localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(INITIAL_REQUESTS));
-        localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(INITIAL_MATRIX));
+        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(cleanMetrics));
+        localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(cleanDocs));
+        localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(cleanTasks));
+        localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(cleanFindings));
+        localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(cleanHypotheses));
+        localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(cleanRequests));
+        localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(cleanMatrix));
       } catch {}
+
       return {
-        metricRecords: INITIAL_METRICS,
-        documents: INITIAL_DOCUMENTS,
-        tasks: INITIAL_TASKS,
-        findings: INITIAL_FINDINGS,
-        hypotheses: INITIAL_HYPOTHESES,
-        requests: INITIAL_REQUESTS,
-        matrixEntries: INITIAL_MATRIX,
+        metricRecords: cleanMetrics,
+        documents: cleanDocs,
+        tasks: cleanTasks,
+        findings: cleanFindings,
+        hypotheses: cleanHypotheses,
+        requests: cleanRequests,
+        matrixEntries: cleanMatrix,
         rangeAnalyses: []
       };
     })

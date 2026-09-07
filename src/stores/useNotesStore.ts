@@ -1,102 +1,11 @@
 import { create } from 'zustand';
 import { ResearchNote, NoteColor, ChecklistItem } from '../types';
 import { saveNoteDoc, deleteNoteDoc } from '../lib/firebase';
+import { isDemoNote } from '../utils/demoPurge';
 
 const STORAGE_KEY = 'genealogy_research_notes_v1';
 
-export const SAMPLE_NOTES: ResearchNote[] = [
-  {
-    id: 'note-1',
-    title: '📌 Гіпотеза: Походження роду Коваленків від сотника Гадяцького полку',
-    content: 'За козацьким реєстром 1756 року знайдено згадку про сотника Василя Коваля. Сповідні розписи 1860 року села Чернечий Яр вказують спадковий козацький стан для всієї родини Остапа Коваленка.\n\nНеобхідно порівняти з ревізькими казками 1795 та 1811 рр. з ДАПО.',
-    isChecklist: false,
-    color: 'amber',
-    isPinned: true,
-    isArchived: false,
-    isTrash: false,
-    tags: ['гіпотеза', 'гадяч', 'полтавщина', 'козаки'],
-    createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000 * 1).toISOString()
-  },
-  {
-    id: 'note-2',
-    title: '📋 План замовлення та опрацювання справ у ДАПО (Полтава)',
-    content: '',
-    isChecklist: true,
-    checklistItems: [
-      { id: 'cli-1', text: 'Фонд 1011, Опис 1, Спр. 45 (Метрична книга 1878 р. с. Чернечий Яр) — знайдено запис про народження Івана', isCompleted: true },
-      { id: 'cli-2', text: 'Фонд 1011, Опис 1, Спр. 38 (Метрична книга 1875 р. с. Чернечий Яр) — запис про шлюб Остапа та Марії', isCompleted: true },
-      { id: 'cli-3', text: 'Фонд 987, Опис 2, Спр. 114 (10-та ревізька казка 1858 р. козаків хутора)', isCompleted: false },
-      { id: 'cli-4', text: 'Сповідний розпис Покровської церкви 1860 року (перевірити склад двору Коваленків)', isCompleted: false },
-      { id: 'cli-5', text: 'Справа про підтвердження дворянських або козацьких прав роду (Фонд 212)', isCompleted: false }
-    ],
-    color: 'emerald',
-    isPinned: true,
-    isArchived: false,
-    isTrash: false,
-    tags: ['архів', 'ДАПО', 'план', 'метрики'],
-    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000 * 2).toISOString()
-  },
-  {
-    id: 'note-3',
-    title: '📜 Знахідка: Метричний запис №14 про народження Івана (1878 р.)',
-    content: '«10 лютого 1878 року народжений, 12 охрещений Іоанн. Батьки: козак Остап Григорійович Коваленко та його законна дружина Марія Іванівна, обоє православні.\nВосприємники (хрещені): козак хутора Чернечий Яр Степан Шевченко та козачка Ганна Дяченко».',
-    isChecklist: false,
-    color: 'sky',
-    isPinned: false,
-    isArchived: false,
-    isTrash: false,
-    tags: ['знахідка', 'метрика', '1878', 'хрещені'],
-    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000 * 2).toISOString()
-  },
-  {
-    id: 'note-4',
-    title: '🎙️ Питання для родинного інтерв’ю з бабусею Марією',
-    content: '',
-    isChecklist: true,
-    checklistItems: [
-      { id: 'cli-6', text: 'Дізнатися дівоче прізвище прабабусі Євдокії (підтверджено: Лисенко)', isCompleted: true },
-      { id: 'cli-7', text: 'Чи збереглися старі листи, грамоти або документи до 1917 року?', isCompleted: false },
-      { id: 'cli-8', text: 'Розпитати про брата дідуся Петра, який виїхав на заробітки у 1920-х рр.', isCompleted: false },
-      { id: 'cli-9', text: 'Оцифрувати та підписати чорно-білий фотоальбом 1930–1950 років', isCompleted: false }
-    ],
-    color: 'rose',
-    isPinned: false,
-    isArchived: false,
-    isTrash: false,
-    tags: ['інтервю', 'родина', 'спогади', 'фото'],
-    createdAt: new Date(Date.now() - 86400000 * 4).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000 * 1).toISOString()
-  },
-  {
-    id: 'note-5',
-    title: '🧬 Аналіз ДНК-збігу (GEDmatch / MyHeritage)',
-    content: 'Виявлено збіг 142 cM (4 спільні сегменти) з дослідником Олександром Ковалем (Канада).\n\nНайбільший спільний сегмент на 7-й хромосомі: 44.2 cM. Спільний предок імовірно по лінії Григорія Коваленка (~1820–1885 рр.). Необхідно зіставити родоводи до 5-го коліна.',
-    isChecklist: false,
-    color: 'purple',
-    isPinned: false,
-    isArchived: false,
-    isTrash: false,
-    tags: ['ДНК', 'генетика', 'збіг', 'канада'],
-    createdAt: new Date(Date.now() - 86400000 * 6).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000 * 3).toISOString()
-  },
-  {
-    id: 'note-6',
-    title: '🏛️ Контакти архівів та корисні генеалогічні ресурси',
-    content: '• ДАПО (Полтава): читальний зал вівторок-четвер 10:00-16:00, ел. пошта dapo@archive.gov.ua\n• ЦДІАК України (Київ): Фонд 127 (Київська духовна консисторія)\n• FamilySearch каталоги: мікрофільми Полтавської єпархії (метрики 1780-1920)\n• Форум uagenealogy.com.ua',
-    isChecklist: false,
-    color: 'slate',
-    isPinned: false,
-    isArchived: false,
-    isTrash: false,
-    tags: ['архів', 'контакти', 'посилання'],
-    createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000 * 4).toISOString()
-  }
-];
+export const SAMPLE_NOTES: ResearchNote[] = [];
 
 export type NoteFilterType = 'all' | 'pinned' | 'checklists' | 'archived' | 'trash';
 
@@ -136,7 +45,8 @@ export interface NotesStoreState {
 
   // Sync / Reset
   batchSetNotes: (notes: ResearchNote[]) => void;
-  resetToDefaultSampleNotes: () => void;
+  purgeDemoNotes: () => void;
+  resetToDefaultSampleNotes?: () => void;
 }
 
 export const useNotesStore = create<NotesStoreState>((set, get) => ({
@@ -145,11 +55,13 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) {
+          return parsed.filter((n) => !isDemoNote(n));
+        }
       }
-      return SAMPLE_NOTES;
+      return [];
     } catch {
-      return SAMPLE_NOTES;
+      return [];
     }
   })(),
 
@@ -445,13 +357,23 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
     });
   },
 
-  resetToDefaultSampleNotes: () => {
-    set(() => {
+  purgeDemoNotes: () => {
+    set((state) => {
+      const clean = state.notes.filter((n) => !isDemoNote(n));
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(SAMPLE_NOTES));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
       } catch {}
-      SAMPLE_NOTES.forEach((sn) => saveNoteDoc(sn));
-      return { notes: SAMPLE_NOTES };
+      return { notes: clean };
+    });
+  },
+
+  resetToDefaultSampleNotes: () => {
+    set((state) => {
+      const clean = state.notes.filter((n) => !isDemoNote(n));
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
+      } catch {}
+      return { notes: clean };
     });
   }
 }));

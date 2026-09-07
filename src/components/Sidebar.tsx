@@ -37,6 +37,7 @@ import { TreeIcon, FanIcon } from './common/GenealogyIcons';
 import { useUIStore, getTabUrl } from '../stores/useUIStore';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { useAuthStore } from '../stores/useAuthStore';
+import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { NavigationTab, ViewMode } from '../types';
 import { getThemeConfig } from '../utils/theme';
 
@@ -57,14 +58,7 @@ export const Sidebar: React.FC = () => {
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
   const accessRequests = useAuthStore((s) => s.accessRequests);
-  const isWhitelisted = Boolean(
-    currentUser &&
-    currentUser.isAuthenticated &&
-    (currentUser.role === 'admin' ||
-      whitelist.some(
-        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-      ))
-  );
+  const isWhitelisted = isUserWhitelisted(currentUser, whitelist);
 
   const isAdmin = Boolean(
     currentUser &&
@@ -138,8 +132,7 @@ export const Sidebar: React.FC = () => {
         id="app-sidebar" 
         className={`
           fixed md:relative top-0 bottom-0 left-0 z-50 md:z-20
-          ${isSidebarVisible ? (isCollapsed ? 'md:w-16' : 'md:w-64') : 'md:w-0 md:border-r-0 md:overflow-hidden md:p-0'} 
-          w-72 max-w-[85vw]
+          ${isSidebarVisible ? (isCollapsed ? 'w-16 md:w-16' : 'w-72 max-w-[85vw] md:w-64') : 'w-0 border-r-0 overflow-hidden p-0'} 
           ${theme.sidebarBg} ${theme.sidebarText} 
           flex flex-col h-full border-r ${theme.sidebarBorder} select-none flex-shrink-0 
           transition-all duration-300 ease-in-out
@@ -152,7 +145,7 @@ export const Sidebar: React.FC = () => {
             <div className="w-8 h-8 rounded-lg bg-[#B88E3E]/20 border border-[#B88E3E]/40 flex items-center justify-center text-[#B88E3E] shrink-0">
               <FolderTree className="w-4 h-4" />
             </div>
-            {(!isCollapsed || isMobileMenuOpen) && (
+            {!isCollapsed && (
               <div className="whitespace-nowrap overflow-hidden">
                 <h1 className="font-bold text-sm leading-tight tracking-wide">Родовід</h1>
                 <p className="text-[10px] opacity-75">Генеалогія & Архіви</p>
@@ -161,11 +154,11 @@ export const Sidebar: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1">
-            {/* Desktop Collapse / Expand Button */}
+            {/* Collapse / Expand Button (Mobile & Desktop) */}
             <button 
               onClick={() => setIsCollapsed(!isCollapsed)}
-              className={`hidden md:flex p-1.5 rounded-lg ${theme.sidebarHover} transition-colors text-[#B88E3E] shrink-0 cursor-pointer`}
-              title={isCollapsed ? 'Розгорнути назви' : 'Згорнути до значків'}
+              className={`flex p-1.5 rounded-lg ${theme.sidebarHover} transition-colors text-[#B88E3E] shrink-0 cursor-pointer`}
+              title={isCollapsed ? 'Розгорнути список' : 'Згорнути список'}
             >
               {isCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
             </button>
@@ -194,7 +187,7 @@ export const Sidebar: React.FC = () => {
         <nav className="flex-1 py-3 px-2 space-y-4 overflow-y-auto scrollbar-thin">
           {/* Section 1: Родовід (Інструменти родинного дерева) */}
           <div className="space-y-1">
-            {(!isCollapsed || isMobileMenuOpen) && isWhitelisted && (
+            {!isCollapsed && isWhitelisted && (
               <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#B88E3E] opacity-90 flex items-center justify-between">
                 <span>Родовід</span>
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#B88E3E]/15 font-mono">{rodovidItems.length}</span>
@@ -203,7 +196,7 @@ export const Sidebar: React.FC = () => {
             {(isWhitelisted ? rodovidItems : rodovidItems.filter((i) => i.isPublic)).map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === 'tree' && rodovidView === item.id;
-              const itemUrl = getTabUrl(item.id);
+              const itemUrl = getTabUrl(item.id, undefined, currentUser);
               return (
                 <div key={`rodovid-${item.id}`} className="relative group/nav flex items-center">
                   <a
@@ -214,17 +207,17 @@ export const Sidebar: React.FC = () => {
                       e.preventDefault();
                       handleRodovidClick(item);
                     }}
-                    title={isCollapsed ? `${item.label} (клікніть коліщатком або іконку для нової вкладки)` : `${item.label} (Ctrl+клік або коліщатко миші для нової вкладки)`}
-                    className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
+                    title={isCollapsed ? `${item.label} (клікніть для переходу)` : `${item.label} (Ctrl+клік або коліщатко миші для нової вкладки)`}
+                    className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-2.5 px-3'} py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
                       isActive
                         ? theme.sidebarActiveNav
                         : `${theme.sidebarText} ${theme.sidebarHover}`
                     }`}
                   >
                     <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#B88E3E]' : 'text-emerald-500'}`} />
-                    <span className={`truncate flex-1 text-left ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                    <span className={`truncate flex-1 text-left ${isCollapsed ? 'hidden' : 'block'}`}>{item.label}</span>
                   </a>
-                  {(!isCollapsed || isMobileMenuOpen) && (
+                  {!isCollapsed && (
                     <a
                       href={itemUrl}
                       target="_blank"
@@ -245,7 +238,7 @@ export const Sidebar: React.FC = () => {
           {/* Section 2: Дослідження та Докази (Only visible for whitelisted members) */}
           {isWhitelisted && (
             <div className="space-y-1 pt-2 border-t border-white/5">
-              {(!isCollapsed || isMobileMenuOpen) && (
+              {!isCollapsed && (
                 <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400 opacity-90 flex items-center justify-between">
                   <span>Дослідження & AI</span>
                 </div>
@@ -253,7 +246,7 @@ export const Sidebar: React.FC = () => {
               {researchItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
-                const itemUrl = getTabUrl(item.id);
+                const itemUrl = getTabUrl(item.id, undefined, currentUser);
                 return (
                   <div key={`research-${item.id}`} className="relative group/nav flex items-center">
                     <a
@@ -264,17 +257,17 @@ export const Sidebar: React.FC = () => {
                         e.preventDefault();
                         handleNavTabClick(item);
                       }}
-                      title={isCollapsed ? `${item.label} (клікніть коліщатком для нової вкладки)` : `${item.label} (Ctrl+клік або коліщатко миші для нової вкладки)`}
-                      className={`w-full flex items-center ${isCollapsed ? 'md:justify-center md:px-0' : 'gap-2.5 px-3'} gap-2.5 px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
+                      title={isCollapsed ? `${item.label} (клікніть для переходу)` : `${item.label} (Ctrl+клік або коліщатко миші для нової вкладки)`}
+                      className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-2.5 px-3'} py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-150 cursor-pointer ${
                         isActive
                           ? theme.sidebarActiveNav
                           : `${theme.sidebarText} ${theme.sidebarHover}`
                       }`}
                     >
                       <Icon className="w-4 h-4 flex-shrink-0 text-[#B88E3E]" />
-                      <span className={`truncate flex-1 text-left ${isCollapsed ? 'md:hidden' : 'block'}`}>{item.label}</span>
+                      <span className={`truncate flex-1 text-left ${isCollapsed ? 'hidden' : 'block'}`}>{item.label}</span>
                     </a>
-                    {(!isCollapsed || isMobileMenuOpen) && (
+                    {!isCollapsed && (
                       <a
                         href={itemUrl}
                         target="_blank"
@@ -299,11 +292,11 @@ export const Sidebar: React.FC = () => {
           <button
             id="sidebar-contact-author-btn"
             onClick={() => openContactModal()}
-            className={`w-full flex items-center ${isCollapsed ? 'md:justify-center px-0' : 'gap-2 px-2'} py-1.5 rounded-lg text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer`}
+            className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-2 px-2'} py-1.5 rounded-lg text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer`}
             title="Шукаєте спільних предків? Написати автору (domagile@gmail.com)"
           >
             <Mail className="w-4 h-4 shrink-0 text-emerald-500" />
-            <div className={`text-left min-w-0 ${isCollapsed ? 'md:hidden' : 'block'}`}>
+            <div className={`text-left min-w-0 ${isCollapsed ? 'hidden' : 'block'}`}>
               <div className="text-[10px] opacity-70 leading-none">Зв'язок з автором:</div>
               <div className="text-[11px] font-mono font-semibold truncate text-emerald-700 dark:text-emerald-300">domagile@gmail.com</div>
             </div>
@@ -311,8 +304,8 @@ export const Sidebar: React.FC = () => {
         </div>
 
         {/* Footer info & settings */}
-        <div className={`p-2.5 border-t ${theme.sidebarBorder} flex items-center ${isCollapsed ? 'md:justify-center' : 'justify-between'} justify-between text-xs shrink-0`}>
-          <div className={`flex items-center gap-1.5 opacity-80 ${isCollapsed ? 'md:hidden' : 'flex'}`}>
+        <div className={`p-2.5 border-t ${theme.sidebarBorder} flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} text-xs shrink-0`}>
+          <div className={`flex items-center gap-1.5 opacity-80 ${isCollapsed ? 'hidden' : 'flex'}`}>
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
             <span className="text-[11px] truncate">Осіб: {personsCount}</span>
           </div>
@@ -329,14 +322,14 @@ export const Sidebar: React.FC = () => {
                 title={isAdmin && pendingRequestsCount > 0 ? `Налаштування (Є ${pendingRequestsCount} нових заявок; Ctrl+клік для нової вкладки)` : 'Налаштування (Ctrl+клік для нової вкладки)'}
               >
                 <Settings className="w-3.5 h-3.5" />
-                {(!isCollapsed || isMobileMenuOpen) && <span className="text-[11px]">Налаштування</span>}
+                {!isCollapsed && <span className="text-[11px]">Налаштування</span>}
                 {isAdmin && pendingRequestsCount > 0 && (
                   <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-mono text-[9px] font-bold leading-none animate-pulse">
                     {pendingRequestsCount}
                   </span>
                 )}
               </a>
-              {(!isCollapsed || isMobileMenuOpen) && (
+              {!isCollapsed && (
                 <a
                   href={getTabUrl('settings')}
                   target="_blank"
@@ -355,7 +348,7 @@ export const Sidebar: React.FC = () => {
               title="Авторизуватися"
             >
               <KeyRound className="w-3 h-3 text-amber-400" />
-              {(!isCollapsed || isMobileMenuOpen) && <span>Вхід</span>}
+              {!isCollapsed && <span>Вхід</span>}
             </button>
           )}
         </div>

@@ -701,24 +701,114 @@ export function calculateClassicFamilyTreeLayout(
   let maxTreeWidth = 1600;
   let maxTreeHeight = totalGens * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 200;
 
-  // Initial horizontal placement per generation with generous family spacing
-  genUnits.forEach((units, gen) => {
-    // Sort units within the same generation so older siblings are placed to the left of younger siblings
-    units.sort((uA, uB) => {
-      const pA = uA.primary;
-      const pB = uB.primary;
-      const fA = pA.fatherId || (pA.parentFamilyId ? database.families[pA.parentFamilyId]?.husbandId : undefined);
-      const mA = pA.motherId || (pA.parentFamilyId ? database.families[pA.parentFamilyId]?.wifeId : undefined);
-      const fB = pB.fatherId || (pB.parentFamilyId ? database.families[pB.parentFamilyId]?.husbandId : undefined);
-      const mB = pB.motherId || (pB.parentFamilyId ? database.families[pB.parentFamilyId]?.wifeId : undefined);
+  // Helpers for sibling detection and accurate person coordinate calculations
+  const getParentsOfPerson = (pId: string) => {
+    const p = database.persons[pId];
+    if (!p) return { fatherId: undefined, motherId: undefined };
+    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    if (!fId && !mId && database.families) {
+      const matchingFam = Object.values(database.families).find(fam => 
+        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
+      );
+      if (matchingFam) {
+        fId = matchingFam.husbandId;
+        mId = matchingFam.wifeId;
+      }
+    }
+    return { fatherId: fId, motherId: mId };
+  };
 
-      const shareParents = (fA && fB && fA === fB) || (mA && mB && mA === mB) ||
-        (pA.siblingIds && pA.siblingIds.includes(pB.id)) || (pB.siblingIds && pB.siblingIds.includes(pA.id));
-      if (shareParents) {
-        return comparePersonsByAge(pA, pB);
+  const areSiblings = (pId1: string, pId2: string): boolean => {
+    if (!pId1 || !pId2 || pId1 === pId2) return false;
+    const p1 = database.persons[pId1];
+    const p2 = database.persons[pId2];
+    if (!p1 || !p2) return false;
+    if (p1.siblingIds?.includes(pId2) || p2.siblingIds?.includes(pId1)) return true;
+    const par1 = getParentsOfPerson(pId1);
+    const par2 = getParentsOfPerson(pId2);
+    return Boolean(
+      (par1.fatherId && par1.fatherId === par2.fatherId) ||
+      (par1.motherId && par1.motherId === par2.motherId)
+    );
+  };
+
+  const getPersonCenterXInUnits = (personId: string, uList: Unit[]): number | undefined => {
+    for (const u of uList) {
+      if (u.primary.id === personId) {
+        return u.x + CLASSIC_CARD_WIDTH / 2;
+      }
+      if (u.spouses) {
+        for (let sIdx = 0; sIdx < u.spouses.length; sIdx++) {
+          if (u.spouses[sIdx].spouse.id === personId) {
+            return u.x + (sIdx + 1) * (CLASSIC_CARD_WIDTH + SPOUSE_GAP) + CLASSIC_CARD_WIDTH / 2;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+
+  // Initial horizontal placement per generation with family-aware clustering
+  // (Primary's siblings to the left, Spouse's siblings e.g. sister to the right)
+  genUnits.forEach((units, gen) => {
+    const orderedUnits: Unit[] = [];
+    const usedUnitPrimaries = new Set<string>();
+
+    const getUnitPersonIds = (u: Unit): string[] => {
+      const ids = [u.primary.id];
+      if (u.spouses) {
+        u.spouses.forEach(s => ids.push(s.spouse.id));
+      }
+      return ids;
+    };
+
+    const findSiblingUnitsOf = (personId: string, exclude: Unit[]): Unit[] => {
+      return units.filter(u => {
+        if (usedUnitPrimaries.has(u.primary.id)) return false;
+        if (exclude.some(ex => ex.primary.id === u.primary.id)) return false;
+        const pIds = getUnitPersonIds(u);
+        return pIds.some(pId => areSiblings(pId, personId));
+      });
+    };
+
+    // First, process couples so siblings cluster on the correct side
+    const coupleUnits = units.filter(u => (u.type === 'couple' || u.type === 'multi_spouse') && u.spouses.length > 0);
+
+    coupleUnits.forEach(cUnit => {
+      if (usedUnitPrimaries.has(cUnit.primary.id)) return;
+
+      // 1. Siblings of primary (husband) -> placed to the LEFT
+      const primarySiblings = findSiblingUnitsOf(cUnit.primary.id, [cUnit]);
+      primarySiblings.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
+
+      // 2. Siblings of spouse (wife, e.g. Евгения -> sister Штома) -> placed to the RIGHT
+      const spouseSiblings: Unit[] = [];
+      cUnit.spouses.forEach(sp => {
+        const sibs = findSiblingUnitsOf(sp.spouse.id, [cUnit, ...primarySiblings, ...spouseSiblings]);
+        sibs.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
+        spouseSiblings.push(...sibs);
+      });
+
+      primarySiblings.forEach(u => usedUnitPrimaries.add(u.primary.id));
+      usedUnitPrimaries.add(cUnit.primary.id);
+      spouseSiblings.forEach(u => usedUnitPrimaries.add(u.primary.id));
+
+      orderedUnits.push(...primarySiblings, cUnit, ...spouseSiblings);
+    });
+
+    // Append remaining single/unconnected units
+    const remainingUnits = units.filter(u => !usedUnitPrimaries.has(u.primary.id));
+    remainingUnits.sort((uA, uB) => {
+      const share = areSiblings(uA.primary.id, uB.primary.id);
+      if (share) {
+        return comparePersonsByAge(uA.primary, uB.primary);
       }
       return 0;
     });
+    orderedUnits.push(...remainingUnits);
+
+    units.splice(0, units.length, ...orderedUnits);
 
     let currentX = 100;
     units.forEach((unit, idx) => {
@@ -729,7 +819,7 @@ export function calculateClassicFamilyTreeLayout(
     maxTreeWidth = Math.max(maxTreeWidth, currentX + 100);
   });
 
-  // Center levels relative to each other (align parents above their children & children under parents)
+  // Center levels relative to each other (align parents above children & children under parents)
   for (let pass = 0; pass < 3; pass++) {
     // Bottom-up pass: align parents above children
     for (let gen = totalGens - 2; gen >= 0; gen--) {
@@ -738,30 +828,23 @@ export function calculateClassicFamilyTreeLayout(
 
       parentUnits.forEach((pUnit) => {
         if (pUnit.childrenIds.length > 0) {
-          const childUnitMatches = childUnits.filter(cu => 
-            pUnit.childrenIds.includes(cu.primary.id) || (cu.spouses && cu.spouses.some(s => pUnit.childrenIds.includes(s.spouse.id)))
-          );
+          const childCenters: number[] = [];
+          pUnit.childrenIds.forEach(cId => {
+            const cx = getPersonCenterXInUnits(cId, childUnits);
+            if (cx !== undefined) childCenters.push(cx);
+          });
 
-          if (childUnitMatches.length > 0) {
-            // Sort child units chronologically by age: oldest to the left, younger to the right
-            childUnitMatches.sort((cuA, cuB) => {
-              const childA = pUnit.childrenIds.includes(cuA.primary.id)
-                ? cuA.primary
-                : cuA.spouses.find(s => pUnit.childrenIds.includes(s.spouse.id))?.spouse || cuA.primary;
-              const childB = pUnit.childrenIds.includes(cuB.primary.id)
-                ? cuB.primary
-                : cuB.spouses.find(s => pUnit.childrenIds.includes(s.spouse.id))?.spouse || cuB.primary;
-              return comparePersonsByAge(childA, childB);
-            });
-
-            const firstChildX = childUnitMatches[0].x;
-            const lastChildX = childUnitMatches[childUnitMatches.length - 1].x + childUnitMatches[childUnitMatches.length - 1].width;
-            const childrenCenterX = (firstChildX + lastChildX) / 2;
-            const idealParentX = childrenCenterX - pUnit.width / 2;
-            pUnit.x = idealParentX;
+          if (childCenters.length > 0) {
+            const minCx = Math.min(...childCenters);
+            const maxCx = Math.max(...childCenters);
+            const childrenCenterX = (minCx + maxCx) / 2;
+            pUnit.x = childrenCenterX - pUnit.width / 2;
           }
         }
       });
+
+      // Sort parent units horizontally to match left-to-right positions of their children branches
+      parentUnits.sort((uA, uB) => uA.x - uB.x);
 
       // Prevent overlapping within the same generation
       for (let i = 1; i < parentUnits.length; i++) {
@@ -788,25 +871,34 @@ export function calculateClassicFamilyTreeLayout(
           );
 
           if (childUnitMatches.length > 0) {
-            // Sort child units chronologically by age: oldest to the left, younger to the right
-            childUnitMatches.sort((cuA, cuB) => {
-              const childA = pUnit.childrenIds.includes(cuA.primary.id)
-                ? cuA.primary
-                : cuA.spouses.find(s => pUnit.childrenIds.includes(s.spouse.id))?.spouse || cuA.primary;
-              const childB = pUnit.childrenIds.includes(cuB.primary.id)
-                ? cuB.primary
-                : cuB.spouses.find(s => pUnit.childrenIds.includes(s.spouse.id))?.spouse || cuB.primary;
-              return comparePersonsByAge(childA, childB);
-            });
+            const coupleWithSpouseChild = childUnitMatches.find(cu => 
+              cu.spouses && cu.spouses.some(s => pUnit.childrenIds.includes(s.spouse.id))
+            );
 
-            const parentCenterX = pUnit.x + pUnit.width / 2;
-            const totalChildGroupWidth = childUnitMatches.reduce((acc, cu) => acc + cu.width, 0) + (childUnitMatches.length - 1) * SIBLING_GAP;
-            let startChildX = parentCenterX - totalChildGroupWidth / 2;
+            if (coupleWithSpouseChild) {
+              // The spouse is on the right of the couple. Sibling children (like the sister) are aligned to the right
+              const otherSiblings = childUnitMatches.filter(cu => cu.primary.id !== coupleWithSpouseChild.primary.id);
+              let nextSibX = coupleWithSpouseChild.x + coupleWithSpouseChild.width + SIBLING_GAP;
+              otherSiblings.forEach(sibUnit => {
+                sibUnit.x = nextSibX;
+                nextSibX += sibUnit.width + SIBLING_GAP;
+              });
+            } else {
+              childUnitMatches.sort((cuA, cuB) => {
+                const childA = cuA.primary;
+                const childB = cuB.primary;
+                return comparePersonsByAge(childA, childB);
+              });
 
-            childUnitMatches.forEach((cu) => {
-              cu.x = startChildX;
-              startChildX += cu.width + SIBLING_GAP;
-            });
+              const parentCenterX = pUnit.x + pUnit.width / 2;
+              const totalChildGroupWidth = childUnitMatches.reduce((acc, cu) => acc + cu.width, 0) + (childUnitMatches.length - 1) * SIBLING_GAP;
+              let startChildX = parentCenterX - totalChildGroupWidth / 2;
+
+              childUnitMatches.forEach((cu) => {
+                cu.x = startChildX;
+                startChildX += cu.width + SIBLING_GAP;
+              });
+            }
           }
         }
       });

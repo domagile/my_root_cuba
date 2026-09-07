@@ -27,6 +27,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { getSavedUserTreeState } from '../utils/userTreeState';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
+import { isDemoPerson, isDemoResearchItem, purgeDemoStorage } from '../utils/demoPurge';
 
 export { useUIStore } from '../stores/useUIStore';
 export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore';
@@ -150,7 +151,8 @@ export interface GenealogyContextType {
   exportJsonData: () => void;
   exportGedcomData: () => void;
   importJsonData: (jsonStr: string) => boolean;
-  resetToSampleData: () => void;
+  purgeAllDemoData: () => void;
+  resetToSampleData?: () => void;
 }
 
 const GenealogyContext = createContext<GenealogyContextType | null>(null);
@@ -190,7 +192,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const googleDriveEmail = useGenealogyStore((s) => s.googleDriveEmail);
   const setGoogleDriveEmail = useGenealogyStore((s) => s.setGoogleDriveEmail);
   const exportGedcomData = useGenealogyStore((s) => s.exportGedcomData);
-  const resetPersonsToSample = useGenealogyStore((s) => s.resetPersonsToSample);
+  const purgeDemoDataFromTree = useGenealogyStore((s) => s.purgeDemoDataFromTree);
 
   const families = useGenealogyStore((s) => s.families);
   const setFamilies = useGenealogyStore((s) => s.setFamilies);
@@ -256,7 +258,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const rangeAnalyses = useResearchStore((s) => s.rangeAnalyses);
   const addRangeAnalysis = useResearchStore((s) => s.addRangeAnalysis);
   const deleteRangeAnalysis = useResearchStore((s) => s.deleteRangeAnalysis);
-  const resetResearchToSample = useResearchStore((s) => s.resetResearchToSample);
+  const purgeDemoResearchData = useResearchStore((s) => s.purgeDemoResearchData);
 
   const syncStatus = useCloudSyncStore((s) => s.status);
   const lastSyncTime = useCloudSyncStore((s) => s.lastSyncTime);
@@ -489,14 +491,30 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     (jsonStr: string) => {
       try {
         const parsed = JSON.parse(jsonStr);
-        if (parsed.persons && Array.isArray(parsed.persons)) setPersons(parsed.persons);
-        if (parsed.metricRecords && Array.isArray(parsed.metricRecords)) setMetricRecords(parsed.metricRecords);
-        if (parsed.documents && Array.isArray(parsed.documents)) setDocuments(parsed.documents);
-        if (parsed.tasks && Array.isArray(parsed.tasks)) setTasks(parsed.tasks);
-        if (parsed.findings && Array.isArray(parsed.findings)) setFindings(parsed.findings);
-        if (parsed.hypotheses && Array.isArray(parsed.hypotheses)) setHypotheses(parsed.hypotheses);
-        if (parsed.requests && Array.isArray(parsed.requests)) setRequests(parsed.requests);
-        if (parsed.matrixEntries && Array.isArray(parsed.matrixEntries)) setMatrixEntries(parsed.matrixEntries);
+        if (parsed.persons && Array.isArray(parsed.persons)) {
+          setPersons(parsed.persons.filter((p: any) => !isDemoPerson(p)).map(normalizePerson));
+        }
+        if (parsed.metricRecords && Array.isArray(parsed.metricRecords)) {
+          setMetricRecords(parsed.metricRecords.filter((m: any) => !isDemoResearchItem(m)));
+        }
+        if (parsed.documents && Array.isArray(parsed.documents)) {
+          setDocuments(parsed.documents.filter((d: any) => !isDemoResearchItem(d)));
+        }
+        if (parsed.tasks && Array.isArray(parsed.tasks)) {
+          setTasks(parsed.tasks.filter((t: any) => !isDemoResearchItem(t)));
+        }
+        if (parsed.findings && Array.isArray(parsed.findings)) {
+          setFindings(parsed.findings.filter((f: any) => !isDemoResearchItem(f)));
+        }
+        if (parsed.hypotheses && Array.isArray(parsed.hypotheses)) {
+          setHypotheses(parsed.hypotheses.filter((h: any) => !isDemoResearchItem(h)));
+        }
+        if (parsed.requests && Array.isArray(parsed.requests)) {
+          setRequests(parsed.requests.filter((r: any) => !isDemoResearchItem(r)));
+        }
+        if (parsed.matrixEntries && Array.isArray(parsed.matrixEntries)) {
+          setMatrixEntries(parsed.matrixEntries.filter((e: any) => !isDemoResearchItem(e)));
+        }
         return true;
       } catch (err) {
         console.error('Import error:', err);
@@ -506,11 +524,16 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     [setPersons, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries]
   );
 
-  // Reset to sample
+  // Purge all demo data from tree and research
+  const purgeAllDemoData = useCallback(() => {
+    purgeDemoDataFromTree();
+    purgeDemoResearchData();
+    purgeDemoStorage();
+  }, [purgeDemoDataFromTree, purgeDemoResearchData]);
+
   const resetToSampleData = useCallback(() => {
-    resetPersonsToSample();
-    resetResearchToSample();
-  }, [resetPersonsToSample, resetResearchToSample]);
+    purgeAllDemoData();
+  }, [purgeAllDemoData]);
 
   const value = useMemo(
     () => ({
@@ -601,6 +624,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       exportJsonData,
       exportGedcomData,
       importJsonData,
+      purgeAllDemoData,
       resetToSampleData
     }),
     [
@@ -690,6 +714,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       exportJsonData,
       exportGedcomData,
       importJsonData,
+      purgeAllDemoData,
       resetToSampleData
     ]
   );

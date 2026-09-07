@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Lock, Flame, X, MoreVertical } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
-import { useAuthStore } from '../stores/useAuthStore';
+import { useAuthStore, isMasterAdminEmail } from '../stores/useAuthStore';
+import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { ShareTreeModal } from '../rodovid/components/modals/ShareTreeModal';
@@ -20,6 +21,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
     searchQuery, 
     setSearchQuery, 
     persons, 
+    families,
     metricRecords, 
     themePalette, 
     setThemePalette,
@@ -43,18 +45,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const setRodovidView = useUIStore((s) => s.setRodovidView);
 
   const { currentUser, whitelist, accessRequests, logout } = useAuthStore();
-  const isWhitelisted = Boolean(
-    currentUser &&
-    currentUser.isAuthenticated &&
-    whitelist.some(
-      (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.status === 'active'
-    )
-  );
+  const isWhitelisted = isUserWhitelisted(currentUser, whitelist);
 
   const isAdmin = Boolean(
     currentUser &&
     currentUser.isAuthenticated &&
     (currentUser.role === 'admin' ||
+      isMasterAdminEmail(currentUser.email) ||
       whitelist.some(
         (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.role === 'admin' && w.status === 'active'
       ))
@@ -128,6 +125,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const lightThemes = themeList.filter(t => t.category === 'light');
   const darkThemes = themeList.filter(t => t.category === 'dark');
 
+  const [isFullSyncing, setIsFullSyncing] = useState(false);
+
   const handleHeaderPush = async () => {
     setCloudActionMsg(null);
     const res = await triggerUploadToCloud();
@@ -142,6 +141,29 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
     setTimeout(() => setCloudActionMsg(null), 4000);
   };
 
+  const handleFullSync = async () => {
+    setIsFullSyncing(true);
+    setCloudActionMsg(null);
+    try {
+      const pushRes = await triggerUploadToCloud();
+      if (!pushRes.success) {
+        setCloudActionMsg({ text: pushRes.message, isError: true });
+        return;
+      }
+      const pullRes = await triggerDownloadFromCloud();
+      if (pullRes.success) {
+        setCloudActionMsg({ text: 'Синхронізацію успішно завершено! Дані актуалізовано в БД Firestore.', isError: false });
+      } else {
+        setCloudActionMsg({ text: `Вивантажено в БД, але помилка оновлення: ${pullRes.message}`, isError: true });
+      }
+    } catch (e: any) {
+      setCloudActionMsg({ text: e?.message || 'Помилка синхронізації з Firestore', isError: true });
+    } finally {
+      setIsFullSyncing(false);
+      setTimeout(() => setCloudActionMsg(null), 5000);
+    }
+  };
+
   const formatLastSync = (iso: string | null) => {
     if (!iso) return 'Немає даних';
     try {
@@ -152,9 +174,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
     }
   };
 
+  const isSyncingActive = syncStatus === 'syncing' || isManualPushing || isManualPulling || isFullSyncing;
+
   return (
     <>
-      <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-2 sm:px-4 md:px-6 flex items-center justify-between gap-1.5 sm:gap-2.5 md:gap-4 flex-shrink-0 transition-colors duration-300 relative w-full max-w-full overflow-hidden`}>
+      <header id="app-header" className={`h-16 ${theme.headerBg} border-b ${theme.headerBorder} ${theme.headerText} px-2 sm:px-4 md:px-6 flex items-center justify-between gap-1.5 sm:gap-2.5 md:gap-4 flex-shrink-0 transition-colors duration-300 relative w-full max-w-full z-30`}>
         {/* Left Sidebar Menu Toggle Button */}
         <button
           id="app-sidebar-toggle"
@@ -176,24 +200,25 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
         {/* Quick Cloud Sync Status Flame Icon Button */}
         <div className="relative flex items-center">
           <button
+            id="cloud-sync-flame-btn"
             onClick={() => setShowCloudPopover(!showCloudPopover)}
             className={`p-2 rounded-xl border transition-all cursor-pointer shadow-xs relative flex items-center justify-center ${
-              syncStatus === 'syncing' || isManualPushing || isManualPulling
-                ? 'bg-amber-500/20 border-amber-500/50 text-amber-500 hover:bg-amber-500/30'
+              isSyncingActive
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-500 hover:bg-amber-500/30 ring-2 ring-amber-400/40'
                 : syncStatus === 'error'
                 ? 'bg-rose-500/20 border-rose-500/50 text-rose-500 hover:bg-rose-500/30'
                 : 'bg-amber-500/10 dark:bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25'
             }`}
             title={
-              syncStatus === 'syncing' || isManualPushing || isManualPulling
-                ? 'Firestore: Синхронізація...'
+              isSyncingActive
+                ? 'Firestore: Синхронізація з БД триває...'
                 : syncStatus === 'error'
                 ? 'Firestore: Помилка синхронізації'
-                : `Firestore: Синхронізовано (${persons.length} осіб)`
+                : `Firestore: Синхронізовано з БД (${persons.length} осіб) — Натисніть для меню`
             }
           >
-            <Flame className={`w-4 h-4 ${syncStatus === 'syncing' || isManualPushing || isManualPulling ? 'animate-pulse text-amber-400' : ''}`} />
-            {syncStatus === 'syncing' || isManualPushing || isManualPulling ? (
+            <Flame className={`w-4 h-4 ${isSyncingActive ? 'animate-pulse text-amber-400' : ''}`} />
+            {isSyncingActive ? (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
             ) : syncStatus === 'error' ? (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
@@ -205,94 +230,142 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
           {/* Cloud Details Popover */}
           {showCloudPopover && (
             <>
-              {/* Invisible backdrop to dismiss on click outside anywhere */}
+              {/* Semi-transparent backdrop to dismiss on click outside anywhere */}
               <div 
-                className="fixed inset-0 z-40" 
+                className="fixed inset-0 z-[90] bg-black/20 backdrop-blur-[0.5px]" 
                 onClick={() => setShowCloudPopover(false)} 
               />
 
               <div 
                 ref={popoverRef}
-                className={`absolute top-full mt-2.5 right-0 sm:left-0 sm:right-auto w-80 max-w-[calc(100vw-24px)] rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-4 z-50 space-y-3 ${theme.cardTitle}`}
+                className={`absolute top-full mt-2.5 right-0 sm:left-1/2 sm:-translate-x-1/2 w-84 sm:w-92 max-w-[calc(100vw-20px)] rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-4 z-[100] space-y-3.5 ${theme.cardTitle} animate-in fade-in zoom-in-95 duration-150`}
               >
-                <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-2">
+                {/* Popover Header */}
+                <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-2.5">
                   <div className="flex items-center gap-2">
-                    <Flame className="w-4 h-4 text-[#B88E3E]" />
-                    <span className="font-bold text-xs">Хмарна синхронізація Firestore</span>
+                    <div className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center text-amber-500">
+                      <Flame className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-xs leading-tight">Синхронізація з БД</h4>
+                      <p className="text-[10px] opacity-65 font-mono">Firestore Cloud Database</p>
+                    </div>
                   </div>
                   <button
                     onClick={() => setShowCloudPopover(false)}
                     className="p-1 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 opacity-70 hover:opacity-100 transition-colors cursor-pointer"
                     title="Закрити"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
 
-                <div className="space-y-1.5 text-[11px] opacity-90">
-                  <div className="flex justify-between">
-                    <span className="opacity-70">Стан зв'язку:</span>
-                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                      {syncStatus === 'syncing' ? 'Йде запис...' : syncStatus === 'error' ? 'Помилка підключення' : 'Атомарно підключено'}
+                {/* Status and Metrics List */}
+                <div className="space-y-2 text-[11px] opacity-95">
+                  <div className="flex items-center justify-between">
+                    <span className="opacity-70">Стан підключення:</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                      {isSyncingActive ? (
+                        <>
+                          <RefreshCw className="w-3 h-3 animate-spin text-amber-500" />
+                          <span className="text-amber-500">Йде синхронізація...</span>
+                        </>
+                      ) : syncStatus === 'error' ? (
+                        <>
+                          <AlertCircle className="w-3 h-3 text-rose-500" />
+                          <span className="text-rose-500">Помилка підключення</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span>Підключено до БД</span>
+                        </>
+                      )}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-70">Останній запис:</span>
-                    <span className="font-mono">{formatLastSync(lastSyncTime)}</span>
+
+                  <div className="flex items-center justify-between">
+                    <span className="opacity-70">Останній сеанс:</span>
+                    <span className="font-mono text-xs font-semibold">{formatLastSync(lastSyncTime)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-70">Записів у базі:</span>
-                    <span>{persons.length} осіб / {metricRecords.length} метрик</span>
+
+                  <div className="flex items-center justify-between">
+                    <span className="opacity-70">Об'єктів у проекті:</span>
+                    <span className="font-medium">
+                      {persons.length} осіб • {Object.keys(families || {}).length} родин • {metricRecords.length} метрик
+                    </span>
                   </div>
+
                   {lastSyncError && (
-                    <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[10px]">
+                    <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] leading-relaxed">
                       {lastSyncError}
                     </div>
                   )}
                 </div>
 
+                {/* Status action alert message */}
                 {cloudActionMsg && (
-                  <div className={`p-2 rounded-lg text-[10px] flex items-center gap-1.5 ${
+                  <div className={`p-2.5 rounded-xl text-[11px] flex items-center gap-2 ${
                     cloudActionMsg.isError
-                      ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
-                      : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                      ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30'
                   }`}>
-                    {cloudActionMsg.isError ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
-                    <span>{cloudActionMsg.text}</span>
+                    {cloudActionMsg.isError ? (
+                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                    ) : (
+                      <Check className="w-4 h-4 shrink-0 text-emerald-500" />
+                    )}
+                    <span className="leading-snug">{cloudActionMsg.text}</span>
                   </div>
                 )}
 
-                {/* Quick Actions inside Popover */}
-                <div className="grid grid-cols-2 gap-2 pt-1">
+                {/* Primary Sync Button: Full Sync Now */}
+                <button
+                  id="primary-sync-now-btn"
+                  onClick={handleFullSync}
+                  disabled={isSyncingActive}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-bold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50`}
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncingActive ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingActive ? 'Синхронізація з БД...' : 'Синхронізувати зараз'}</span>
+                </button>
+
+                {/* Granular Quick Actions inside Popover */}
+                <div className="grid grid-cols-2 gap-2 pt-0.5">
                   <button
+                    id="popover-push-cloud-btn"
                     onClick={handleHeaderPush}
-                    disabled={isManualPushing || isManualPulling}
-                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-[11px] transition-all cursor-pointer disabled:opacity-50`}
+                    disabled={isSyncingActive}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-[11px] transition-all cursor-pointer disabled:opacity-50 shadow-xs`}
+                    title="Зберегти всі локальні зміни в базу даних Firestore"
                   >
                     <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />
                     <span>{isManualPushing ? 'Запис...' : 'Вивантажити'}</span>
                   </button>
 
                   <button
+                    id="popover-pull-cloud-btn"
                     onClick={handleHeaderPull}
-                    disabled={isManualPushing || isManualPulling}
-                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-[11px] transition-all cursor-pointer hover:opacity-90 disabled:opacity-50`}
+                    disabled={isSyncingActive}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-[11px] transition-all cursor-pointer hover:opacity-90 disabled:opacity-50 shadow-xs`}
+                    title="Отримати найновіші дані з бази даних Firestore"
                   >
                     <Download className={`w-3.5 h-3.5 ${isManualPulling ? 'animate-bounce' : ''}`} />
                     <span>{isManualPulling ? 'Читання...' : 'Завантажити'}</span>
                   </button>
                 </div>
 
-                <div className="text-center pt-1 border-t border-black/5 dark:border-white/5">
+                {/* Footer Link to Settings */}
+                <div className="text-center pt-2 border-t border-black/5 dark:border-white/5">
                   <button
                     onClick={() => {
                       setShowCloudPopover(false);
                       setActiveTab('settings');
                     }}
-                    className="text-[10px] text-[#B88E3E] hover:underline font-medium cursor-pointer"
+                    className="text-[11px] text-[#B88E3E] hover:underline font-semibold cursor-pointer inline-flex items-center gap-1"
                   >
-                    Відкрити повні налаштування Firestore →
+                    <span>Відкрити повні налаштування Firestore</span>
+                    <span>→</span>
                   </button>
                 </div>
               </div>

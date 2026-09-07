@@ -22,7 +22,8 @@ import {
   CheckCircle2,
   HelpCircle,
   FileText,
-  GitMerge
+  GitMerge,
+  ChevronDown
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
@@ -85,6 +86,24 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [personToDelete, setPersonToDelete] = useState<Person | null>(null);
   const [reportPersonId, setReportPersonId] = useState<string | null>(null);
+
+  // Mobile-friendly filter collapse state
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchTerm.trim()) count++;
+    if (tagFilter !== 'ALL') count++;
+    if (researchStatusFilter !== 'ALL') count++;
+    if (genderFilter !== 'ALL') count++;
+    if (statusFilter !== 'ALL') count++;
+    return count;
+  }, [searchTerm, tagFilter, researchStatusFilter, genderFilter, statusFilter]);
 
   // Extract all tree hashtags with counts
   const availableHashtags = useMemo(() => {
@@ -231,8 +250,42 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           </div>
         </div>
 
+        {/* Mobile-Only Collapsible Filter Toggle Header */}
+        <div className="md:hidden flex items-center justify-between gap-2 pt-2 border-t border-slate-700/40">
+          <button
+            type="button"
+            id="toggle-mobile-rodovid-persons-filters-btn"
+            onClick={() => setIsFiltersCollapsed(!isFiltersCollapsed)}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-xs"
+            title={isFiltersCollapsed ? 'Розгорнути список фільтрів та сортування' : 'Згорнути список фільтрів'}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>{isFiltersCollapsed ? 'Розгорнути фільтри' : 'Згорнути фільтри'}</span>
+            {activeFiltersCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-bold">
+                {activeFiltersCount}
+              </span>
+            )}
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isFiltersCollapsed ? '' : 'rotate-180'}`} />
+          </button>
+
+          {/* Compact Quick Search when collapsed on mobile */}
+          {isFiltersCollapsed && (
+            <div className="relative flex-1 min-w-0">
+              <Search className={`w-3.5 h-3.5 ${theme.textMuted} absolute left-2.5 top-1/2 -translate-y-1/2`} />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Швидкий пошук..."
+                className={`w-full pl-7 pr-3 py-1 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-400 focus:outline-none focus:border-emerald-500`}
+              />
+            </div>
+          )}
+        </div>
+
         {/* Filters and Search: 2 responsive rows ensuring full visibility on mobile, tablet & laptop */}
-        <div className={`flex flex-col gap-2.5 pt-2 border-t ${theme.borderSubtle}`}>
+        <div className={`flex flex-col gap-2.5 pt-2 border-t ${theme.borderSubtle} ${isFiltersCollapsed ? 'hidden md:flex' : 'flex'}`}>
           {/* Row 1: Search (flexible) + Tag Filter + Research Status */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
             {/* Search Input */}

@@ -47,8 +47,7 @@ export const DetectiveNotesView: React.FC = () => {
     setSelectedColor,
     setSearchQuery,
     setViewMode,
-    emptyTrash,
-    resetToDefaultSampleNotes
+    emptyTrash
   } = useNotesStore();
 
   const [editingNote, setEditingNote] = useState<ResearchNote | null>(null);
@@ -526,20 +525,9 @@ export const DetectiveNotesView: React.FC = () => {
                   ? 'Спробуйте змінити пошуковий запит або скинути фільтри'
                   : activeFilter === 'trash'
                   ? 'Видалені нотатки з’являтимуться тут перед остаточним очищенням'
-                  : 'Створіть першу замітку розслідування вище або відновіть зразки нотаток.'}
+                  : 'Створіть першу замітку розслідування за допомогою форми вище.'}
               </p>
             </div>
-
-            {!searchQuery && activeFilter === 'all' && (
-              <button
-                type="button"
-                onClick={resetToDefaultSampleNotes}
-                className="mt-3 px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 font-bold text-xs transition-colors border border-amber-500/30 cursor-pointer inline-flex items-center gap-1.5"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Завантажити зразки нотаток</span>
-              </button>
-            )}
           </div>
         )}
       </div>

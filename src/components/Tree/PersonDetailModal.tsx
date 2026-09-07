@@ -39,7 +39,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
     currentUser &&
     currentUser.isAuthenticated &&
     (currentUser.role === 'admin' ||
-      currentUser.role === 'editor' ||
+      (currentUser.role === 'editor' && currentUser.isWhitelisted) ||
       whitelist.some(
         (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() &&
                w.status === 'active' &&

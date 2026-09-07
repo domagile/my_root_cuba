@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Mail, X, HeartHandshake, ExternalLink } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
+import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { getThemeConfig } from '../utils/theme';
 import { AUTHOR_CONTACT_EMAIL } from './ContactAuthorModal';
 
@@ -15,14 +16,7 @@ export const GuestContactBanner: React.FC<GuestContactBannerProps> = ({ onOpenCo
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
 
-  const isWhitelisted = Boolean(
-    currentUser?.isAuthenticated &&
-    whitelist.some(
-      (w) => w.email?.toLowerCase() === currentUser.email?.toLowerCase() &&
-             w.status === 'active' &&
-             (w.role === 'admin' || w.role === 'editor')
-    )
-  );
+  const isWhitelisted = isUserWhitelisted(currentUser, whitelist);
 
   const [isDismissed, setIsDismissed] = useState(false);
 

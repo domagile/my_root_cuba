@@ -195,7 +195,7 @@ export const Header: React.FC<HeaderProps> = ({
           {primaryNav.map((item) => {
             const Icon = item.icon;
             const isActive = currentView === item.id;
-            const itemUrl = getTabUrl(item.id);
+            const itemUrl = getTabUrl(item.id, undefined, currentUser);
             return (
               <a
                 key={item.id}
@@ -228,7 +228,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {secondaryNav.map((item) => {
                   const Icon = item.icon;
                   const isActive = currentView === item.id;
-                  const itemUrl = getTabUrl(item.id);
+                  const itemUrl = getTabUrl(item.id, undefined, currentUser);
                   return (
                     <a
                       key={item.id}
@@ -280,7 +280,7 @@ export const Header: React.FC<HeaderProps> = ({
                     {secondaryNav.map((item) => {
                       const Icon = item.icon;
                       const isActive = currentView === item.id;
-                      const itemUrl = getTabUrl(item.id);
+                      const itemUrl = getTabUrl(item.id, undefined, currentUser);
                       return (
                         <div key={item.id} className="relative group/tool flex items-center">
                           <a

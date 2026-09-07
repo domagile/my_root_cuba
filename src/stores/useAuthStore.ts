@@ -4,6 +4,7 @@ import { sendAdminAccessNotification, formatAccessRequestEmail, EmailDispatchRes
 import {
   saveAccessRequestToCloud,
   subscribeToAccessRequestsCloud,
+  deleteAccessRequestFromCloud,
   saveWhitelistEntryToCloud,
   deleteWhitelistEntryFromCloud,
   subscribeToWhitelistCloud,
@@ -18,20 +19,25 @@ import {
   broadcastAuthLogin,
   broadcastAuthLogout
 } from '../utils/crossTabAuth';
+import {
+  MASTER_ADMIN_EMAILS,
+  DEMO_EMAILS_TO_PURGE,
+  isMasterAdminEmail,
+  isDemoEmail,
+  purgeDemoStorage
+} from '../utils/demoPurge';
+
+export {
+  MASTER_ADMIN_EMAILS,
+  DEMO_EMAILS_TO_PURGE,
+  isMasterAdminEmail,
+  isDemoEmail
+};
+
+// Proactively run browser demo storage purge on module evaluation
+purgeDemoStorage();
 
 const STORAGE_KEY = 'genealogy_auth_security_v1';
-
-// Protected Master Administrator accounts that always have permanent root admin permissions
-export const MASTER_ADMIN_EMAILS = [
-  'domagile@gmail.com',
-  'cubatarara400@gmail.com',
-  'admin@genealogy.org.ua'
-].map((e) => e.toLowerCase());
-
-export function isMasterAdminEmail(email?: string | null): boolean {
-  if (!email) return false;
-  return MASTER_ADMIN_EMAILS.includes(email.trim().toLowerCase());
-}
 
 export const INITIAL_WHITELIST: WhitelistEntry[] = [
   {
@@ -44,54 +50,17 @@ export const INITIAL_WHITELIST: WhitelistEntry[] = [
     notes: 'Автор дерева та головний адміністратор'
   },
   {
-    id: 'w-admin-1',
+    id: 'w-admin-cuba',
     email: 'CubaTarara400@gmail.com',
     name: 'Головний Адміністратор',
     role: 'admin',
     addedAt: '2026-01-01T00:00:00.000Z',
     status: 'active',
     notes: 'Власник проєкту та головний генеалог'
-  },
-  {
-    id: 'w-admin-2',
-    email: 'admin@genealogy.org.ua',
-    name: 'Адміністратор Архіву',
-    role: 'admin',
-    addedAt: '2026-01-10T12:00:00.000Z',
-    status: 'active',
-    notes: 'Системний адміністратор'
-  },
-  {
-    id: 'w-editor-1',
-    email: 'kovalenko.family@gmail.com',
-    name: 'Михайло Коваленко',
-    role: 'editor',
-    addedAt: '2026-02-01T14:30:00.000Z',
-    status: 'active',
-    notes: 'Представник родинної гілки Коваленків'
-  },
-  {
-    id: 'w-researcher-1',
-    email: 'archive.poltava.research@gmail.com',
-    name: 'Олена Гриценко (Архівний експерт)',
-    role: 'researcher',
-    addedAt: '2026-02-15T09:15:00.000Z',
-    status: 'active',
-    notes: 'Дослідниця фондів ДАПО'
   }
 ];
 
-const INITIAL_REQUESTS: AccessRequest[] = [
-  {
-    id: 'req-1',
-    email: 'bogdan.kovalenko.1952@gmail.com',
-    name: 'Богдан Коваленко',
-    note: 'Вітаю! Я син Михайла Коваленка. Хочу переглянути зібрані архівні документи та сповідні розписи нашої родини.',
-    requestedRole: 'viewer',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 3600000 * 5).toISOString()
-  }
-];
+const INITIAL_REQUESTS: AccessRequest[] = [];
 
 const INITIAL_CONFIG: AccessControlConfig = {
   mode: 'whitelist_only',
@@ -156,6 +125,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (!Array.isArray(list) || list.length === 0) {
         list = [...INITIAL_WHITELIST];
       }
+      // Purge all demo emails that might have been saved in browser storage
+      list = list.filter((w) => !isDemoEmail(w.email));
+
       // Ensure master admins are ALWAYS present as active admin
       for (const master of INITIAL_WHITELIST) {
         const idx = list.findIndex((w) => w.email.toLowerCase() === master.email.toLowerCase());
@@ -170,6 +142,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           };
         }
       }
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(list));
+      } catch {}
       return list;
     } catch {
       return INITIAL_WHITELIST;
@@ -179,16 +154,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   accessRequests: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_requests`);
-      return saved ? JSON.parse(saved) : INITIAL_REQUESTS;
+      let list: AccessRequest[] = saved ? JSON.parse(saved) : [];
+      if (!Array.isArray(list)) list = [];
+      list = list.filter((r) => r.id !== 'req-1' && !isDemoEmail(r.email));
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(list));
+      } catch {}
+      return list;
     } catch {
-      return INITIAL_REQUESTS;
+      return [];
     }
   })(),
 
   accessConfig: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_config`);
-      return saved ? JSON.parse(saved) : INITIAL_CONFIG;
+      const parsed: AccessControlConfig = saved ? JSON.parse(saved) : INITIAL_CONFIG;
+      if (parsed.mode === ('open_demo' as any)) {
+        parsed.mode = 'whitelist_only';
+      }
+      return parsed;
     } catch {
       return INITIAL_CONFIG;
     }
@@ -276,27 +261,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isWhitelisted: true,
         message: `Успішний вхід. Рівень доступу: ${userRole === 'admin' ? 'Адміністратор' : 'Редактор'}.`
       };
-    }
-
-    // In open demo mode, allow viewer
-    if (accessConfig.mode === 'open_demo') {
-      const demoUser: AuthUser = {
-        id: `usr-${Date.now()}`,
-        email: cleanEmail,
-        name: name || cleanEmail.split('@')[0],
-        picture,
-        role: 'viewer',
-        isAuthenticated: true,
-        isWhitelisted: false,
-        loginMethod: 'demo',
-        lastActive: new Date().toISOString()
-      };
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(demoUser));
-      } catch {}
-      broadcastAuthLogin(demoUser);
-      set({ currentUser: demoUser });
-      return { success: true, role: 'viewer', isWhitelisted: false, message: 'Вхід у режимі відкритого доступу.' };
     }
 
     return {
@@ -729,18 +693,33 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   initCloudAuthSync: () => {
+    // Proactively clean up any stale demo emails from Firestore whitelist
+    DEMO_EMAILS_TO_PURGE.forEach((demoEmail) => {
+      deleteWhitelistEntryFromCloud(demoEmail).catch(() => {});
+      deleteWhitelistEntryFromCloud(`w-${demoEmail}`).catch(() => {});
+      deleteWhitelistEntryFromCloud(`w-admin-${demoEmail}`).catch(() => {});
+    });
+    deleteAccessRequestFromCloud('req-1').catch(() => {});
+
     // 1. Subscribe to Cloud Whitelist
     const unsubWhitelist = subscribeToWhitelistCloud((cloudList) => {
-      if (cloudList && Array.isArray(cloudList) && cloudList.length > 0) {
+      if (cloudList && Array.isArray(cloudList)) {
         set((state) => {
           const map = new Map<string, WhitelistEntry>();
-          // Existing state
+          // Existing state (excluding demo emails)
           for (const item of state.whitelist) {
-            if (item?.email) map.set(item.email.toLowerCase(), item);
+            if (item?.email && !isDemoEmail(item.email)) {
+              map.set(item.email.toLowerCase(), item);
+            }
           }
-          // Cloud overwrite
+          // Cloud overwrite (excluding demo emails)
           for (const item of cloudList) {
-            if (item?.email) map.set(item.email.toLowerCase(), item);
+            if (item?.email && !isDemoEmail(item.email)) {
+              map.set(item.email.toLowerCase(), item);
+            } else if (item?.email && isDemoEmail(item.email)) {
+              if (item.id) deleteWhitelistEntryFromCloud(item.id).catch(() => {});
+              deleteWhitelistEntryFromCloud(item.email).catch(() => {});
+            }
           }
           // Master admins guarantee
           for (const master of INITIAL_WHITELIST) {
@@ -752,7 +731,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               map.set(lowEmail, { ...existing, role: 'admin', status: 'active' });
             }
           }
-          const merged = Array.from(map.values());
+          const merged = Array.from(map.values()).filter((w) => !isDemoEmail(w.email));
           try {
             localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(merged));
           } catch {}
@@ -767,14 +746,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set((state) => {
           const map = new Map<string, AccessRequest>();
           for (const item of state.accessRequests) {
-            if (item?.id) map.set(item.id, item);
+            if (item?.id && item.id !== 'req-1' && !isDemoEmail(item.email)) {
+              map.set(item.id, item);
+            }
           }
           for (const item of cloudReqs) {
-            if (item?.id) map.set(item.id, item);
+            if (item?.id && item.id !== 'req-1' && !isDemoEmail(item.email)) {
+              map.set(item.id, item);
+            } else if (item?.id && (item.id === 'req-1' || isDemoEmail(item.email))) {
+              deleteAccessRequestFromCloud(item.id).catch(() => {});
+            }
           }
-          const merged = Array.from(map.values()).sort((a, b) =>
-            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-          );
+          const merged = Array.from(map.values())
+            .filter((r) => r.id !== 'req-1' && !isDemoEmail(r.email))
+            .sort((a, b) =>
+              new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+            );
           try {
             localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(merged));
           } catch {}

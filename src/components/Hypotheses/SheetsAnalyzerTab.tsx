@@ -8,8 +8,7 @@ import { SheetDataset, ExtractedMetricRecord, CandidateDraftTree } from '../../t
 import { Person } from '../../types';
 import {
   parseWorkbookMultiSheets,
-  extractRecordsFromSheets,
-  getSampleMultiSheetData
+  extractRecordsFromSheets
 } from '../../utils/sheetsParser';
 import { buildCandidateDraftTree } from '../../utils/treeMatcher';
 import {
@@ -58,13 +57,6 @@ export const SheetsAnalyzerTab: React.FC<SheetsAnalyzerTabProps> = ({
     });
     return Array.from(set).slice(0, 8);
   }, [treePersons]);
-
-  // Load sample dataset
-  const handleLoadSample = () => {
-    const sample = getSampleMultiSheetData();
-    setDatasets(sample);
-    setSelectedSheetNames(sample.map(s => s.sheetName));
-  };
 
   // Handle Excel file upload (Multi-sheet)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -129,7 +121,7 @@ export const SheetsAnalyzerTab: React.FC<SheetsAnalyzerTabProps> = ({
   // Trigger Multi-sheet AI & Genealogical Analysis
   const handleRunAnalysis = () => {
     if (datasets.length === 0) {
-      alert('Будь ласка, завантажте Google Таблицю або оберіть демо-масив.');
+      alert('Будь ласка, завантажте Google Таблицю або файл Excel (.xlsx, .csv).');
       return;
     }
 
@@ -202,16 +194,6 @@ export const SheetsAnalyzerTab: React.FC<SheetsAnalyzerTabProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* 1-Click Demo dataset */}
-            <button
-              onClick={handleLoadSample}
-              className="px-3.5 py-2 bg-[#1B4A3E] hover:bg-[#235C4E] text-[#E2C382] border border-[#225C4D] font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-xs cursor-pointer"
-              title="Завантажити тестовий масив метрик і ревізій с. Покровське"
-            >
-              <Zap className="w-4 h-4 text-[#E2C382]" />
-              <span>Завантажити демо-масив (4 листи)</span>
-            </button>
-
             {/* Excel Upload button */}
             <label className={`px-3.5 py-2 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-xs flex items-center gap-2 cursor-pointer hover:opacity-90 transition-all shadow-xs`}>
               <Upload className="w-4 h-4" />

@@ -23,7 +23,9 @@ import {
   Trash,
   Hash,
   Tag,
-  Sparkles
+  Sparkles,
+  ChevronDown,
+  Filter
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { Person } from '../types';
@@ -92,6 +94,25 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
   // Toast notification state
   const [toast, setToast] = useState<{ message: string; actionText?: string; onAction?: () => void } | null>(null);
+
+  // Mobile-friendly filter collapse state
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchQuery.trim()) count++;
+    if (tagFilter !== 'all') count++;
+    if (genderFilter !== 'all') count++;
+    if (lifeStateFilter !== 'all') count++;
+    if (statusFilter !== 'all') count++;
+    if (tabFilter !== 'all') count++;
+    return count;
+  }, [searchQuery, tagFilter, genderFilter, lifeStateFilter, statusFilter, tabFilter]);
 
   // Modal confirm state
   const [confirmModal, setConfirmModal] = useState<{
@@ -459,8 +480,50 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
       </div>
 
+      {/* Mobile-Only Collapsible Filter Toggle Header */}
+      <div className="md:hidden flex items-center justify-between gap-2 p-2.5 rounded-xl bg-[#1A1A1A] border border-[#2A2A2A] shadow-xs">
+        <button
+          type="button"
+          id="toggle-mobile-persons-filters-btn"
+          onClick={() => setIsFiltersCollapsed(!isFiltersCollapsed)}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#B88E3E]/15 hover:bg-[#B88E3E]/25 text-[#B88E3E] border border-[#B88E3E]/30 flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-xs"
+          title={isFiltersCollapsed ? 'Розгорнути список фільтрів та параметрів' : 'Згорнути список фільтрів'}
+        >
+          <Filter className="w-3.5 h-3.5" />
+          <span>{isFiltersCollapsed ? 'Розгорнути фільтри' : 'Згорнути фільтри'}</span>
+          {activeFiltersCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-[#B88E3E] text-[#0F0F0F] text-[10px] font-bold">
+              {activeFiltersCount}
+            </span>
+          )}
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isFiltersCollapsed ? '' : 'rotate-180'}`} />
+        </button>
+
+        {/* Compact Quick Search when collapsed on mobile */}
+        {isFiltersCollapsed && (
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-3.5 h-3.5 text-[#8C8C8C] absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Швидкий пошук..."
+              className="w-full pl-7 pr-7 py-1 bg-[#121212] border border-[#333333] rounded-lg text-xs text-[#E5E5E5] placeholder-[#666666] focus:outline-none focus:border-[#B88E3E]"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8C8C8C] hover:text-[#E5E5E5]"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* 2. COMPACT FILTER & SUB-TABS BAR */}
-      <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-3 shadow-md space-y-2.5">
+      <div className={`bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-3 shadow-md space-y-2.5 ${isFiltersCollapsed ? 'hidden md:block' : 'block'}`}>
         {/* Top row: Sub-tabs Pills & Search Input */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
           {/* Sub-tabs Pills */}

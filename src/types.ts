@@ -623,7 +623,7 @@ export interface AuthUser {
   role: UserRole;
   isAuthenticated: boolean;
   isWhitelisted: boolean;
-  loginMethod: 'google' | 'email_pin' | 'pin' | 'demo' | 'quick_admin';
+  loginMethod: 'google' | 'email_pin' | 'pin' | 'quick_admin';
   lastActive?: string;
 }
 
@@ -651,7 +651,7 @@ export interface AccessRequest {
 }
 
 export interface AccessControlConfig {
-  mode: 'whitelist_only' | 'whitelist_and_pin' | 'open_demo';
+  mode: 'whitelist_only' | 'whitelist_and_pin';
   pinCode?: string;
   allowPublicRequests: boolean;
   autoApproveViewers?: boolean;

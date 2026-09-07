@@ -19,7 +19,7 @@ export const isUserWhitelisted = (
   if (user.isWhitelisted) return true;
   if (!user.email) return false;
   const clean = user.email.trim().toLowerCase();
-  if (clean === 'domagile@gmail.com' || clean === 'cubatarara400@gmail.com' || clean === 'admin@genealogy.org.ua') return true;
+  if (clean === 'domagile@gmail.com' || clean === 'cubatarara400@gmail.com') return true;
   return whitelist.some(
     (w) => w.email.toLowerCase() === clean && w.status === 'active'
   );
