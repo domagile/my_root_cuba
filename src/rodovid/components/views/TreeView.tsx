@@ -40,7 +40,8 @@ import {
   Shield,
   Lock,
   Pencil,
-  Zap
+  Zap,
+  Target
 } from 'lucide-react';
 import {
   GenealogyDatabase,
@@ -186,8 +187,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [lodMode, setLodMode] = useState<'auto' | 'always' | 'never'>('auto');
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
+  const [isFocusMenuOpen, setIsFocusMenuOpen] = useState<boolean>(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
+  const focusMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -196,6 +199,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
       }
       if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
         setIsThemeMenuOpen(false);
+      }
+      if (focusMenuRef.current && !focusMenuRef.current.contains(event.target as Node)) {
+        setIsFocusMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -235,6 +241,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [reportPersonId, setReportPersonId] = useState<string | null>(null);
   const [selectiveMenuPersonId, setSelectiveMenuPersonId] = useState<string | null>(null);
   const selectiveMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Focus & Lineage Highlighting States (Focus Highlights)
+  const [focusType, setFocusType] = useState<'none' | 'clan' | 'direct-ancestors' | 'direct-descendants' | 'patrilineal' | 'matrilineal'>('none');
+  const [focusPersonId, setFocusPersonId] = useState<string>(activePersonId);
+  const [selectedClanId, setSelectedClanId] = useState<string | null>(null);
+  const [dimOthers, setDimOthers] = useState<boolean>(true);
+  const [colorLinksByClan, setColorLinksByClan] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (focusType !== 'clan') {
+      setFocusPersonId(activePersonId);
+    }
+  }, [activePersonId, focusType]);
 
   // Close selective sibling menu on click outside
   useEffect(() => {
@@ -353,6 +372,172 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
     return { directBackboneSet: directSet, backboneSpouseSet: spouseSet };
   }, [database, activePersonId]);
+
+  const lineageColorMap = useMemo(() => getLineageColorMap(database), [database]);
+
+  // List of all clans represented in the database (or tree)
+  const availableClans = useMemo(() => {
+    const clansMap = new Map<string, { id: string; name: string; color: string; count: number }>();
+    Object.values(database.persons || {}).forEach((p) => {
+      const rawRod = getPersonRodName(p);
+      if (!rawRod || rawRod === 'Рід') return;
+      const canonical = normalizeUkrainianSurnameGender(rawRod) || rawRod;
+      const existingKey = Array.from(clansMap.keys()).find(
+        (k) => k.toLowerCase() === canonical.toLowerCase() || areSurnamesEquivalent(k, canonical)
+      );
+      const key = existingKey || canonical;
+      const clanName = formatClanName(key);
+      const color = getPersonClanColor(p, lineageColorMap);
+
+      if (clansMap.has(key)) {
+        const item = clansMap.get(key)!;
+        item.count += 1;
+      } else {
+        clansMap.set(key, {
+          id: key,
+          name: clanName,
+          color,
+          count: 1
+        });
+      }
+    });
+    return Array.from(clansMap.values()).sort((a, b) => b.count - a.count);
+  }, [database.persons, lineageColorMap]);
+
+  // Calculate focused persons and links for Focus Highlights
+  const { focusedPersonIds, focusedLinkIds, focusColor, focusTitle } = useMemo(() => {
+    const pIds = new Set<string>();
+    const lIds = new Set<string>();
+    if (focusType === 'none') {
+      return { focusedPersonIds: pIds, focusedLinkIds: lIds, focusColor: '#f59e0b', focusTitle: '' };
+    }
+
+    const targetPerson = database.persons[focusPersonId] || database.persons[activePersonId];
+    let color = '#f59e0b';
+    let title = '';
+
+    if (focusType === 'clan' && selectedClanId) {
+      const clanObj = availableClans.find((c) => c.id === selectedClanId || areSurnamesEquivalent(c.id, selectedClanId));
+      color = clanObj?.color || (targetPerson ? getPersonClanColor(targetPerson, lineageColorMap) : '#0284c7');
+      title = `Рід ${clanObj?.name || selectedClanId}`;
+
+      Object.values(database.persons).forEach((p) => {
+        const rawRod = getPersonRodName(p);
+        const canonical = normalizeUkrainianSurnameGender(rawRod) || rawRod;
+        if (
+          canonical.toLowerCase() === selectedClanId.toLowerCase() ||
+          areSurnamesEquivalent(canonical, selectedClanId) ||
+          areSurnamesEquivalent(rawRod, selectedClanId)
+        ) {
+          pIds.add(p.id);
+        }
+      });
+    } else if (focusType === 'direct-ancestors' && targetPerson) {
+      title = `Прямі предки (${getFullName(targetPerson)})`;
+      color = '#f59e0b';
+      const collectAncestors = (pId: string) => {
+        if (!pId || pIds.has(pId)) return;
+        pIds.add(pId);
+        const p = database.persons[pId];
+        if (!p) return;
+        let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+        let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+        if (!fId && !mId && database.families) {
+          const matchingFam = Object.values(database.families).find((fam) =>
+            fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
+          );
+          if (matchingFam) {
+            fId = matchingFam.husbandId;
+            mId = matchingFam.wifeId;
+          }
+        }
+        if (fId) collectAncestors(fId);
+        if (mId) collectAncestors(mId);
+      };
+      collectAncestors(targetPerson.id);
+    } else if (focusType === 'direct-descendants' && targetPerson) {
+      title = `Прямі нащадки (${getFullName(targetPerson)})`;
+      color = '#10b981';
+      const collectDescendants = (pId: string) => {
+        if (!pId || pIds.has(pId)) return;
+        pIds.add(pId);
+        const p = database.persons[pId];
+        if (!p) return;
+        const childIds = new Set<string>();
+        if (p.childrenIds) p.childrenIds.forEach((c) => childIds.add(c));
+        if (p.spouseFamilyIds && database.families) {
+          p.spouseFamilyIds.forEach((fId) => {
+            const fam = database.families[fId];
+            if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
+          });
+        }
+        Object.values(database.persons).forEach((cand) => {
+          if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
+        });
+        childIds.forEach((cId) => collectDescendants(cId));
+      };
+      collectDescendants(targetPerson.id);
+    } else if (focusType === 'patrilineal' && targetPerson) {
+      title = `Чоловіча Y-лінія (${getFullName(targetPerson)})`;
+      color = '#0284c7';
+      let curr: Person | undefined = targetPerson;
+      while (curr) {
+        pIds.add(curr.id);
+        let fId = curr.fatherId || (curr.parentFamilyId ? database.families[curr.parentFamilyId]?.husbandId : undefined);
+        if (!fId && database.families) {
+          const fam = Object.values(database.families).find((f) =>
+            f.children && f.children.some((c: any) => (c.personId || c.id) === curr!.id)
+          );
+          if (fam) fId = fam.husbandId;
+        }
+        curr = fId ? database.persons[fId] : undefined;
+      }
+    } else if (focusType === 'matrilineal' && targetPerson) {
+      title = `Жіноча mt-лінія (${getFullName(targetPerson)})`;
+      color = '#e11d48';
+      let curr: Person | undefined = targetPerson;
+      while (curr) {
+        pIds.add(curr.id);
+        let mId = curr.motherId || (curr.parentFamilyId ? database.families[curr.parentFamilyId]?.wifeId : undefined);
+        if (!mId && database.families) {
+          const fam = Object.values(database.families).find((f) =>
+            f.children && f.children.some((c: any) => (c.personId || c.id) === curr!.id)
+          );
+          if (fam) mId = fam.wifeId;
+        }
+        curr = mId ? database.persons[mId] : undefined;
+      }
+    }
+
+    // Now find links connecting focused persons
+    layout.links.forEach((link) => {
+      if (link.type === 'marriage') {
+        if (link.sourcePersonId && link.targetPersonId) {
+          if (pIds.has(link.sourcePersonId) && pIds.has(link.targetPersonId)) {
+            lIds.add(link.id);
+          }
+        }
+      } else {
+        const isChildInFocus = Boolean(link.childPersonId && pIds.has(link.childPersonId));
+        const isSourceInFocus = Boolean(link.sourcePersonId && pIds.has(link.sourcePersonId));
+        const isTargetInFocus = Boolean(link.targetPersonId && pIds.has(link.targetPersonId));
+
+        if (focusType === 'clan') {
+          if (isChildInFocus || (isSourceInFocus && isTargetInFocus)) {
+            lIds.add(link.id);
+          }
+        } else {
+          if (isChildInFocus && (isSourceInFocus || isTargetInFocus || !link.sourcePersonId)) {
+            lIds.add(link.id);
+          } else if (isSourceInFocus && isTargetInFocus) {
+            lIds.add(link.id);
+          }
+        }
+      }
+    });
+
+    return { focusedPersonIds: pIds, focusedLinkIds: lIds, focusColor: color, focusTitle: title };
+  }, [focusType, focusPersonId, selectedClanId, activePersonId, database, availableClans, layout.links, lineageColorMap]);
 
   const toggleCollapseParents = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
     setAnchorForPerson(personId);
@@ -1187,6 +1372,226 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 <span>Розгорнути гілки ({collapsedSiblings.size})</span>
               </button>
             )}
+
+            {/* Focus Lines & Clans Button */}
+            <div className="relative shrink-0" ref={focusMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsFocusMenuOpen((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-xs ${
+                  focusType !== 'none'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/70 shadow-amber-500/10'
+                    : isFocusMenuOpen
+                    ? 'bg-slate-700 text-white border-slate-600'
+                    : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
+                }`}
+                title="Фокусна підсвітка: виділити рід, прямих предків, нащадків чи Y/mt лінію із затемненням решти дерева"
+              >
+                <Target className={`w-3.5 h-3.5 ${focusType !== 'none' ? 'text-amber-400 animate-pulse' : 'text-amber-400'}`} />
+                <span>
+                  {focusType === 'none'
+                    ? 'Фокус ліній'
+                    : focusType === 'clan'
+                    ? `Рід: ${availableClans.find((c) => c.id === selectedClanId)?.name || selectedClanId}`
+                    : focusType === 'direct-ancestors'
+                    ? 'Прямі предки'
+                    : focusType === 'direct-descendants'
+                    ? 'Прямі нащадки'
+                    : focusType === 'patrilineal'
+                    ? 'Чоловіча лінія'
+                    : 'Жіноча лінія'}
+                </span>
+                {focusType !== 'none' && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFocusType('none');
+                      setSelectedClanId(null);
+                    }}
+                    className="ml-0.5 p-0.5 hover:bg-amber-500/40 rounded text-amber-200 hover:text-white cursor-pointer"
+                    title="Скинути фокус"
+                  >
+                    <X className="w-3 h-3" />
+                  </span>
+                )}
+              </button>
+
+              {isFocusMenuOpen && (
+                <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-80 bg-[#1b1f24] border border-[#383e46] rounded-xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150 max-h-[85vh] overflow-y-auto">
+                  {/* Header */}
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#2d3238]">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                      <Target className="w-4 h-4 text-amber-400" />
+                      <span>Фокусна підсвітка родоводу</span>
+                    </div>
+                    {focusType !== 'none' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFocusType('none');
+                          setSelectedClanId(null);
+                        }}
+                        className="text-[11px] text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                      >
+                        Скинути
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Target Person Info */}
+                  <div className="text-[11px] text-slate-300 mb-2 px-1">
+                    Фокус для особи:{' '}
+                    <span className="font-bold text-white">
+                      {database.persons[focusPersonId]
+                        ? getFullName(database.persons[focusPersonId])
+                        : getFullName(database.persons[activePersonId])}
+                    </span>
+                  </div>
+
+                  {/* Direct Line Options */}
+                  <div className="space-y-1 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusType('direct-ancestors');
+                        setIsFocusMenuOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        focusType === 'direct-ancestors'
+                          ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50'
+                          : 'text-slate-200 hover:bg-[#252a30] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400">👑</span>
+                        <span>Прямі предки (батьки, діди...)</span>
+                      </div>
+                      {focusType === 'direct-ancestors' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusType('direct-descendants');
+                        setIsFocusMenuOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        focusType === 'direct-descendants'
+                          ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/50'
+                          : 'text-slate-200 hover:bg-[#252a30] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-400">👶</span>
+                        <span>Прямі нащадки (діти, онуки...)</span>
+                      </div>
+                      {focusType === 'direct-descendants' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusType('patrilineal');
+                        setIsFocusMenuOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        focusType === 'patrilineal'
+                          ? 'bg-sky-500/20 text-sky-300 font-bold border border-sky-500/50'
+                          : 'text-slate-200 hover:bg-[#252a30] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sky-400">♂️</span>
+                        <span>Чоловіча лінія (Y-DNA: по батьках)</span>
+                      </div>
+                      {focusType === 'patrilineal' && <Check className="w-3.5 h-3.5 text-sky-400" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusType('matrilineal');
+                        setIsFocusMenuOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        focusType === 'matrilineal'
+                          ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/50'
+                          : 'text-slate-200 hover:bg-[#252a30] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-rose-400">♀️</span>
+                        <span>Жіноча лінія (mtDNA: по матерях)</span>
+                      </div>
+                      {focusType === 'matrilineal' && <Check className="w-3.5 h-3.5 text-rose-400" />}
+                    </button>
+                  </div>
+
+                  {/* Clan / Rod Section */}
+                  {availableClans.length > 0 && (
+                    <div className="pt-2 border-t border-[#2d3238]">
+                      <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1.5 px-1">
+                        Виділити рід (кольоровий зв'язок)
+                      </div>
+                      <div className="max-h-36 overflow-y-auto space-y-0.5 pr-1">
+                        {availableClans.map((clan) => {
+                          const isSelected = focusType === 'clan' && selectedClanId === clan.id;
+                          return (
+                            <button
+                              key={clan.id}
+                              type="button"
+                              onClick={() => {
+                                setFocusType('clan');
+                                setSelectedClanId(clan.id);
+                                setIsFocusMenuOpen(false);
+                              }}
+                              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[#252a30] text-white font-bold border border-slate-600'
+                                  : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 truncate min-w-0">
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs"
+                                  style={{ backgroundColor: clan.color }}
+                                />
+                                <span className="truncate">{clan.name}</span>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 shrink-0 ml-1.5">
+                                {clan.count} осіб
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Visual Toggles */}
+                  <div className="pt-2 mt-2 border-t border-[#2d3238] space-y-1.5">
+                    <label className="flex items-center justify-between px-1 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
+                      <span>Затемнювати решту дерева</span>
+                      <input
+                        type="checkbox"
+                        checked={dimOthers}
+                        onChange={(e) => setDimOthers(e.target.checked)}
+                        className="rounded bg-[#22262a] border-slate-600 text-amber-500 focus:ring-0 cursor-pointer"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between px-1 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
+                      <span>Кольорові зв'язки за родами</span>
+                      <input
+                        type="checkbox"
+                        checked={colorLinksByClan}
+                        onChange={(e) => setColorLinksByClan(e.target.checked)}
+                        className="rounded bg-[#22262a] border-slate-600 text-emerald-500 focus:ring-0 cursor-pointer"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Right cluster of Row 1: Theme, Export, Person Report */}
@@ -1491,6 +1896,40 @@ export const TreeView: React.FC<TreeViewProps> = ({
           touchAction: 'none'
         }}
       >
+        {/* Floating Active Focus Status Banner */}
+        {focusType !== 'none' && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#181b1f]/95 backdrop-blur-md border border-amber-500/60 shadow-2xl px-3.5 py-1.5 rounded-full text-xs animate-in fade-in slide-in-from-top-2 duration-200 select-none">
+            <div className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: focusColor }} />
+            <span className="font-bold text-amber-300">{focusTitle}</span>
+            <span className="text-[11px] text-slate-300 font-mono">({focusedPersonIds.size} осіб)</span>
+            <div className="h-3 w-px bg-slate-700 mx-0.5" />
+            <button
+              type="button"
+              onClick={() => setDimOthers((prev) => !prev)}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors cursor-pointer border ${
+                dimOthers
+                  ? 'bg-amber-950/80 text-amber-300 border-amber-700 hover:bg-amber-900'
+                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+              }`}
+              title={dimOthers ? 'Вимкнути затемнення решти дерева' : 'Увімкнути затемнення решти дерева'}
+            >
+              {dimOthers ? 'Затемнення: Увімк' : 'Затемнення: Вимк'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFocusType('none');
+                setSelectedClanId(null);
+              }}
+              className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors cursor-pointer ml-0.5"
+              title="Скинути фокусну підсвітку"
+              aria-label="Скинути фокус"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* World Transform Layer */}
         <div
           className="absolute origin-top-left transition-transform duration-75"
@@ -1515,23 +1954,48 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 )
               );
 
-              const defaultColor = link.color || (isMarriage ? '#a1a1aa' : '#0284c7');
-              const strokeColor = isHovered ? '#38bdf8' : defaultColor;
-              const strokeWidth = isHovered ? (isMarriage ? 3.5 : 3.2) : (isMarriage ? 2 : 2.2);
-              const opacity = hoveredPersonId ? (isHovered ? 1 : 0.38) : 0.95;
+              const isLinkFocused = focusType !== 'none' && focusedLinkIds.has(link.id);
+              const isDimmed = focusType !== 'none' && !isLinkFocused && dimOthers;
+
+              // Color resolution
+              let defaultColor = link.color || (isMarriage ? '#a1a1aa' : '#0284c7');
+              if (colorLinksByClan) {
+                const pTarget = link.childPersonId
+                  ? database.persons[link.childPersonId]
+                  : link.targetPersonId
+                  ? database.persons[link.targetPersonId]
+                  : null;
+                if (pTarget) {
+                  defaultColor = getPersonClanColor(pTarget, lineageColorMap);
+                }
+              }
+              const strokeColor = isLinkFocused ? focusColor : isHovered ? '#38bdf8' : defaultColor;
+              const strokeWidth = isLinkFocused
+                ? (isMarriage ? 4.0 : 3.6)
+                : isHovered
+                ? (isMarriage ? 3.5 : 3.2)
+                : (isMarriage ? 2 : 2.2);
+
+              const opacity = isDimmed
+                ? 0.14
+                : isLinkFocused
+                ? 1.0
+                : hoveredPersonId
+                ? (isHovered ? 1 : 0.35)
+                : 0.95;
 
               return (
-                <g key={link.id} opacity={opacity} className="transition-opacity duration-150">
-                  {/* Glowing halo background on hover */}
-                  {isHovered && (
+                <g key={link.id} opacity={opacity} className="transition-opacity duration-200">
+                  {/* Glowing halo background on focused link or hovered link */}
+                  {(isLinkFocused || isHovered) && (
                     <path
                       d={pathData}
                       fill="none"
-                      stroke="#38bdf8"
-                      strokeWidth={strokeWidth + 4}
+                      stroke={isLinkFocused ? focusColor : '#38bdf8'}
+                      strokeWidth={strokeWidth + 5}
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      opacity={0.35}
+                      opacity={isLinkFocused ? 0.45 : 0.35}
                     />
                   )}
                   <path
@@ -1549,17 +2013,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       <circle
                         cx={(link.sourceX + link.targetX) / 2}
                         cy={link.sourceY}
-                        r={7}
+                        r={isLinkFocused ? 8.5 : 7}
                         fill="#1e2226"
-                        stroke="#a1a1aa"
-                        strokeWidth={1.5}
+                        stroke={isLinkFocused ? focusColor : '#a1a1aa'}
+                        strokeWidth={isLinkFocused ? 2.5 : 1.5}
                       />
                       <text
                         x={(link.sourceX + link.targetX) / 2}
                         y={link.sourceY + 3}
                         fontSize="8"
                         textAnchor="middle"
-                        fill="#cbd5e1"
+                        fill={isLinkFocused ? '#ffffff' : '#cbd5e1'}
                         fontWeight="bold"
                       >
                         {link.marriageOrder || '1'}
@@ -1627,6 +2091,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
               return lifespanStr;
             })();
 
+            const isNodeFocused = focusType === 'none' || focusedPersonIds.has(p.id);
+            const isDimmed = focusType !== 'none' && !isNodeFocused && dimOthers;
+
             // LOD Tier 2: Ultra-distant zoom (< 28%) - Micro Marker Panorama
             if (isMicroLOD) {
               return (
@@ -1638,7 +2105,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     top: `${node.y}px`,
                     width: `${node.width}px`,
                     height: `${node.height}px`,
-                    contain: 'paint layout'
+                    contain: 'paint layout',
+                    opacity: isDimmed ? 0.18 : 1,
+                    filter: isDimmed ? 'grayscale(50%)' : 'none',
+                    transition: 'opacity 0.25s ease'
                   }}
                   className="relative select-none pointer-events-none"
                 >
@@ -1649,7 +2119,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   {/* Micro Pill Marker */}
                   <div
                     style={{
-                      backgroundColor: clanColor || (isMale ? '#0284c7' : isFemale ? '#e11d48' : '#475569')
+                      backgroundColor: clanColor || (isMale ? '#0284c7' : isFemale ? '#e11d48' : '#475569'),
+                      boxShadow: isNodeFocused && focusType !== 'none' ? `0 0 16px ${focusColor}` : undefined
                     }}
                     onMouseEnter={() => setHoveredPersonId(p.id)}
                     onMouseLeave={() => setHoveredPersonId(null)}
@@ -1663,8 +2134,12 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       e.stopPropagation();
                       onSelectPerson(p.id);
                     }}
-                    className={`pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[142px] h-[34px] rounded-full px-2.5 shadow-lg flex items-center justify-between gap-1 cursor-pointer transition-transform duration-100 hover:scale-110 hover:z-30 text-white border border-white/30 ${
-                      isRoot ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/70' : ''
+                    className={`pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[142px] h-[34px] rounded-full px-2.5 shadow-lg flex items-center justify-between gap-1 cursor-pointer transition-transform duration-100 hover:scale-110 hover:z-30 text-white border ${
+                      isNodeFocused && focusType !== 'none'
+                        ? 'ring-4 ring-white border-amber-300 scale-105'
+                        : isRoot
+                        ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/70 border-white/30'
+                        : 'border-white/30'
                     }`}
                     title={`${firstName} ${lastName} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку`}
                   >
@@ -1699,7 +2174,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     top: `${node.y}px`,
                     width: `${node.width}px`,
                     height: `${node.height}px`,
-                    contain: 'paint layout'
+                    contain: 'paint layout',
+                    opacity: isDimmed ? 0.20 : 1,
+                    filter: isDimmed ? 'grayscale(45%)' : 'none',
+                    transition: 'opacity 0.25s ease'
                   }}
                   className="relative group select-none pointer-events-none"
                 >
@@ -1710,9 +2188,14 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   {/* Compact Colored Capsule Card */}
                   <div
                     style={{
-                      borderColor: isRoot ? '#f59e0b' : (isMale ? '#38bdf8' : isFemale ? '#f472b6' : cardBorderColor),
+                      borderColor: isNodeFocused && focusType !== 'none'
+                        ? focusColor
+                        : isRoot
+                        ? '#f59e0b'
+                        : (isMale ? '#38bdf8' : isFemale ? '#f472b6' : cardBorderColor),
                       borderLeftWidth: '4px',
-                      borderLeftColor: clanColor || (isMale ? '#0284c7' : '#e11d48')
+                      borderLeftColor: clanColor || (isMale ? '#0284c7' : '#e11d48'),
+                      boxShadow: isNodeFocused && focusType !== 'none' ? `0 0 16px ${focusColor}60` : undefined
                     }}
                     onMouseEnter={() => setHoveredPersonId(p.id)}
                     onMouseLeave={() => setHoveredPersonId(null)}
@@ -1739,7 +2222,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         ? 'bg-gradient-to-r from-[#3e132c] to-[#541a3c] text-rose-100 hover:border-rose-400'
                         : 'bg-[#22262a] text-slate-100 hover:border-slate-400'
                     } ${
-                      isRoot
+                      isNodeFocused && focusType !== 'none'
+                        ? 'ring-2 ring-white scale-105'
+                        : isRoot
                         ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/40 shadow-lg'
                         : ''
                     }`}
@@ -1785,16 +2270,27 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         {shortLifespan || lifespanStr}
                       </span>
                       {canonicalRod && canonicalRod !== 'Рід' && (
-                        <span
-                          className="text-[9px] px-1 py-0.2 rounded font-bold truncate max-w-[65px]"
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (focusType === 'clan' && selectedClanId === canonicalRod) {
+                              setFocusType('none');
+                              setSelectedClanId(null);
+                            } else {
+                              setFocusType('clan');
+                              setSelectedClanId(canonicalRod);
+                            }
+                          }}
+                          className="text-[9px] px-1 py-0.2 rounded font-bold truncate max-w-[65px] hover:scale-105 transition-transform cursor-pointer"
                           style={{
                             backgroundColor: clanColor ? `${clanColor}25` : 'rgba(0,0,0,0.2)',
                             color: clanColor || undefined
                           }}
-                          title={`Рід: ${canonicalRod}`}
+                          title={`Рід: ${canonicalRod}. Клікніть для фокусу`}
                         >
                           {canonicalRod}
-                        </span>
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1811,9 +2307,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   top: `${node.y}px`,
                   width: `${node.width}px`,
                   height: `${node.height}px`,
-                  borderColor: cardBorderColor,
-                  borderWidth: '1px',
-                  borderStyle: 'solid'
+                  borderColor: isNodeFocused && focusType !== 'none' ? focusColor : cardBorderColor,
+                  borderWidth: isNodeFocused && focusType !== 'none' ? '2px' : '1px',
+                  borderStyle: 'solid',
+                  opacity: isDimmed ? 0.22 : 1,
+                  filter: isDimmed ? 'grayscale(45%)' : 'none',
+                  boxShadow: isNodeFocused && focusType !== 'none' ? `0 0 20px ${focusColor}40` : undefined,
+                  transition: 'opacity 0.25s ease, filter 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease'
                 }}
                 onMouseEnter={() => setHoveredPersonId(p.id)}
                 onMouseLeave={() => setHoveredPersonId(null)}
@@ -1822,7 +2322,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     ? 'bg-white text-neutral-900 shadow-md hover:shadow-lg'
                     : 'bg-[#22262a] text-white shadow-black/40'
                 } ${
-                  isRoot
+                  isNodeFocused && focusType !== 'none'
+                    ? 'ring-2 ring-white/70'
+                    : isRoot
                     ? isFemale
                       ? 'ring-2 ring-rose-500/90 ring-offset-2 ring-offset-[#22262a] shadow-rose-950/50 shadow-2xl'
                       : 'ring-2 ring-sky-500/90 ring-offset-2 ring-offset-[#22262a] shadow-sky-950/50 shadow-2xl'
@@ -1845,6 +2347,51 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     <span>👑</span>
                     <span>Корінь</span>
                   </span>
+                )}
+
+                {/* Focused Lineage Badge */}
+                {focusType !== 'none' && isNodeFocused && (
+                  <span
+                    className="absolute -top-2.5 right-3 z-10 px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 shadow-md border border-white/60 ring-1 select-none animate-in fade-in zoom-in-95"
+                    style={{
+                      backgroundColor: focusColor,
+                      color: '#000000'
+                    }}
+                    title={`Особа у фокусі (${focusTitle})`}
+                  >
+                    <Target className="w-2.5 h-2.5 stroke-[2.5]" />
+                    <span>У фокусі</span>
+                  </span>
+                )}
+
+                {/* Clan / Rod tag pill at top-left (if not root badge) */}
+                {canonicalRod && canonicalRod !== 'Рід' && !isTreeRoot && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (focusType === 'clan' && selectedClanId === canonicalRod) {
+                        setFocusType('none');
+                        setSelectedClanId(null);
+                      } else {
+                        setFocusType('clan');
+                        setSelectedClanId(canonicalRod);
+                      }
+                    }}
+                    className={`absolute -top-2.5 left-2.5 z-10 px-2 py-0.2 rounded-full text-[9px] font-bold truncate max-w-[95px] border shadow-xs transition-transform hover:scale-105 cursor-pointer ${
+                      focusType === 'clan' && selectedClanId === canonicalRod
+                        ? 'ring-1 ring-white shadow-md'
+                        : ''
+                    }`}
+                    style={{
+                      backgroundColor: clanColor ? `${clanColor}35` : 'rgba(30, 41, 59, 0.85)',
+                      color: clanColor || '#94a3b8',
+                      borderColor: clanColor || '#475569'
+                    }}
+                    title={`Рід: ${canonicalRod}. Клікніть для фокусу роду`}
+                  >
+                    {canonicalRod}
+                  </button>
                 )}
 
                 {/* Selective Single-Person Hide/Collapse Button (for collateral sibling cards) */}
@@ -2089,6 +2636,35 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         title="Родинні зв'язки"
                       >
                         <GitFork className="w-3 h-3 rotate-90" />
+                      </button>
+
+                      {/* Focus Line / Highlights Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (focusPersonId === p.id && focusType !== 'none') {
+                            setFocusType('none');
+                            setSelectedClanId(null);
+                          } else {
+                            setFocusPersonId(p.id);
+                            setFocusType('direct-ancestors');
+                          }
+                        }}
+                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
+                          focusPersonId === p.id && focusType !== 'none'
+                            ? 'bg-amber-500 text-stone-950 border-amber-300 ring-1 ring-amber-400'
+                            : isLightCanvas
+                            ? 'bg-amber-50 hover:bg-amber-600 text-amber-800 hover:text-white border-amber-300'
+                            : 'bg-amber-950/40 hover:bg-amber-600 text-amber-400 hover:text-white border-amber-800/60'
+                        }`}
+                        title={
+                          focusPersonId === p.id && focusType !== 'none'
+                            ? 'Вимкнути фокус лінії'
+                            : 'Сфокусувати пряму лінію предків'
+                        }
+                      >
+                        <Target className="w-3 h-3" />
                       </button>
                     </>
                   )}
