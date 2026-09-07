@@ -73,56 +73,75 @@ export async function testGitHubConnection(config: {
 }): Promise<{ success: boolean; message: string; details?: any }> {
   const { owner, repo, branch, token } = config;
 
-  if (!owner || !repo || !token) {
+  if (!owner?.trim() || !repo?.trim() || !token?.trim()) {
     return {
       success: false,
-      message: "Вкажіть власника репозиторію, назву репозиторію та GitHub Personal Access Token."
+      message: "Вкажіть логін власника (латиницею без пробілів), назву репозиторію та GitHub Personal Access Token."
+    };
+  }
+
+  // Check if owner contains invalid characters like Cyrillic or spaces
+  if (/[^\w\-\.]/.test(owner.trim())) {
+    return {
+      success: false,
+      message: `«${owner}» містить недопустимі символи. Логін власника на GitHub має складатися з латинських літер і цифр (наприклад, ваш GitHub username).`
     };
   }
 
   try {
     // 1. Check Repo access
-    const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+    const repoRes = await fetch(`https://api.github.com/repos/${owner.trim()}/${repo.trim()}`, {
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${token.trim()}`,
         Accept: 'application/vnd.github.v3+json'
       }
     });
 
     if (!repoRes.ok) {
       if (repoRes.status === 401) {
-        return { success: false, message: "Недійсний токен доступу (401 Unauthorized)." };
+        return { success: false, message: "Недійсний токен доступу (401 Unauthorized). Перевірте токен або створіть новий у налаштуваннях GitHub." };
       }
       if (repoRes.status === 404) {
-        return { success: false, message: `Репозиторій ${owner}/${repo} не знайдено або токен не має доступу (404 Not Found).` };
+        return {
+          success: false,
+          message: `Репозиторій ${owner}/${repo} не знайдено або токен не має прав «repo» (404 Not Found). Перевірте правильність імені репозиторію або створіть його на GitHub.`
+        };
       }
       return { success: false, message: `Помилка доступу до репозиторію: HTTP ${repoRes.status}` };
     }
 
     const repoData = await repoRes.json();
+    const effectiveBranch = branch?.trim() || repoData.default_branch || 'main';
 
-    // 2. Check Branch access
-    const branchRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/branches/${branch || 'main'}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github.v3+json'
+    // 2. Check Branch access if repository has commits
+    if (repoData.size > 0) {
+      const branchRes = await fetch(`https://api.github.com/repos/${owner.trim()}/${repo.trim()}/branches/${effectiveBranch}`, {
+        headers: {
+          Authorization: `Bearer ${token.trim()}`,
+          Accept: 'application/vnd.github.v3+json'
+        }
+      });
+
+      if (!branchRes.ok && branchRes.status === 404) {
+        return {
+          success: true,
+          message: `Репозиторій знайдено! Гілка «${effectiveBranch}» буде створена автоматично при першому завантаженні (основна гілка: «${repoData.default_branch || 'main'}»).`,
+          details: {
+            fullName: repoData.full_name,
+            isPrivate: repoData.private,
+            defaultBranch: repoData.default_branch || 'main'
+          }
+        };
       }
-    });
-
-    if (!branchRes.ok) {
-      return {
-        success: false,
-        message: `Репозиторій знайдено, але гілку «${branch || 'main'}» не знайдено.`
-      };
     }
 
     return {
       success: true,
-      message: `Зв'язок з репозиторієм ${repoData.full_name} (${branch || 'main'}) успішно встановлено!`,
+      message: `Зв'язок з репозиторієм ${repoData.full_name} (${effectiveBranch}) успішно встановлено! Сховище готове до роботи.`,
       details: {
         fullName: repoData.full_name,
         isPrivate: repoData.private,
-        defaultBranch: repoData.default_branch
+        defaultBranch: repoData.default_branch || 'main'
       }
     };
   } catch (err: any) {
@@ -130,6 +149,118 @@ export async function testGitHubConnection(config: {
       success: false,
       message: `Мережева помилка перевірки зв'язку: ${err.message || String(err)}`
     };
+  }
+}
+
+/**
+ * Fetch GitHub user profile using Personal Access Token
+ */
+export async function fetchGitHubProfile(token: string): Promise<{
+  success: boolean;
+  login?: string;
+  name?: string;
+  avatar_url?: string;
+  error?: string;
+}> {
+  if (!token?.trim()) {
+    return { success: false, error: 'Вкажіть токен GitHub' };
+  }
+  try {
+    const res = await fetch('https://api.github.com/user', {
+      headers: {
+        Authorization: `Bearer ${token.trim()}`,
+        Accept: 'application/vnd.github.v3+json'
+      }
+    });
+    if (!res.ok) {
+      if (res.status === 401) {
+        return { success: false, error: 'Недійсний токен доступу (401 Unauthorized). Перевірте правильність токена.' };
+      }
+      return { success: false, error: `Помилка GitHub API (${res.status})` };
+    }
+    const data = await res.json();
+    return {
+      success: true,
+      login: data.login,
+      name: data.name,
+      avatar_url: data.avatar_url
+    };
+  } catch (err: any) {
+    return { success: false, error: `Мережева помилка: ${err.message || String(err)}` };
+  }
+}
+
+/**
+ * Fetch list of user's GitHub repositories
+ */
+export async function fetchUserRepositories(token: string): Promise<{
+  success: boolean;
+  repos?: Array<{ name: string; full_name: string; private: boolean; default_branch: string }>;
+  error?: string;
+}> {
+  if (!token?.trim()) {
+    return { success: false, error: 'Вкажіть токен' };
+  }
+  try {
+    const res = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member', {
+      headers: {
+        Authorization: `Bearer ${token.trim()}`,
+        Accept: 'application/vnd.github.v3+json'
+      }
+    });
+    if (!res.ok) {
+      return { success: false, error: `Не вдалося отримати список репозиторіїв (${res.status})` };
+    }
+    const data = await res.json();
+    const repos = (Array.isArray(data) ? data : []).map((r: any) => ({
+      name: r.name,
+      full_name: r.full_name,
+      private: r.private,
+      default_branch: r.default_branch || 'main'
+    }));
+    return { success: true, repos };
+  } catch (err: any) {
+    return { success: false, error: err.message || String(err) };
+  }
+}
+
+/**
+ * Create a new repository on GitHub for archiving documents
+ */
+export async function createGitHubRepository(
+  token: string,
+  name: string,
+  isPrivate: boolean = true
+): Promise<{ success: boolean; repo?: any; error?: string }> {
+  if (!token?.trim() || !name?.trim()) {
+    return { success: false, error: 'Вкажіть токен та назву репозиторію' };
+  }
+  try {
+    const res = await fetch('https://api.github.com/user/repos', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token.trim()}`,
+        Accept: 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: name.trim(),
+        private: isPrivate,
+        auto_init: true,
+        description: 'Архів документів та сканів родоводу'
+      })
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errJson.message || `Помилка створення репозиторію (${res.status})`
+      };
+    }
+    const data = await res.json();
+    return { success: true, repo: data };
+  } catch (err: any) {
+    return { success: false, error: err.message || String(err) };
   }
 }
 

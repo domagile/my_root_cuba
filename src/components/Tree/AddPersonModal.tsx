@@ -52,7 +52,7 @@ import {
   HistoricalPlaceItem,
   PersonLifeEventItem
 } from '../../types';
-import { parseAndNormalizeTags, getTreeHashtagsWithCounts, extractHashtagsFromText } from '../../utils/tagUtils';
+import { parseAndNormalizeTags, getTreeHashtagsWithCounts, extractHashtagsFromText, COMMON_GENEALOGY_HASHTAG_PRESETS } from '../../utils/tagUtils';
 import { detectGenderFromName, isPersonMale, isPersonFemale, parseFullNameComponents } from '../../utils/genderUtils';
 import { ContactAuthorModal } from '../ContactAuthorModal';
 import { findDuplicatesForPerson, PersonDuplicateMatch } from '../../utils/duplicateDetector';
@@ -264,7 +264,11 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [occupation, setOccupation] = useState(effectivePerson?.occupation || '');
   const [confession, setConfession] = useState(effectivePerson?.confession || '');
   const [militaryRank, setMilitaryRank] = useState(effectivePerson?.militaryRank || '');
-  const [tagsStr, setTagsStr] = useState((effectivePerson?.tags || []).join(', '));
+  const [tagsStr, setTagsStr] = useState(() => {
+    const raw = effectivePerson?.tags || [];
+    return raw.map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' ');
+  });
+  const [newTagDraft, setNewTagDraft] = useState('');
 
   // 6. Events & Facts
   const [lifeEvents, setLifeEvents] = useState<PersonLifeEventItem[]>(
@@ -495,7 +499,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     setOccupation(effectivePerson.occupation || '');
     setConfession(effectivePerson.confession || '');
     setMilitaryRank(effectivePerson.militaryRank || '');
-    setTagsStr((effectivePerson.tags || []).join(', '));
+    setTagsStr(
+      (effectivePerson.tags || [])
+        .map((t) => (t.startsWith('#') ? t : `#${t}`))
+        .join(' ')
+    );
+    setNewTagDraft('');
     setAvatarUrl(effectivePerson.avatarUrl || effectivePerson.avatar || effectivePerson.photoUrl || '');
     setPhotosList(effectivePerson.photos || []);
     setLifeEvents((effectivePerson.events as PersonLifeEventItem[]) || []);
@@ -523,15 +532,26 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
   // Popular hashtags
   const popularHashtags = useMemo(() => {
-    return getTreeHashtagsWithCounts(persons).slice(0, 8);
+    return getTreeHashtagsWithCounts(persons).slice(0, 10);
   }, [persons]);
+
+  const handleAddHashtagsFromDraft = () => {
+    if (!newTagDraft.trim()) return;
+    const parsed = parseAndNormalizeTags(newTagDraft);
+    if (parsed.length === 0) return;
+    const currentList = parseAndNormalizeTags(tagsStr);
+    const merged = new Set(currentList);
+    parsed.forEach((t) => merged.add(t));
+    setTagsStr(Array.from(merged).map((t) => `#${t}`).join(' '));
+    setNewTagDraft('');
+  };
 
   const handleAddHashtagSuggestion = (tagToAdd: string) => {
     const currentList = parseAndNormalizeTags(tagsStr);
     const clean = tagToAdd.replace(/^#+/, '').trim();
     if (!currentList.some((t) => t.toLowerCase() === clean.toLowerCase())) {
       const next = [...currentList, clean];
-      setTagsStr(next.join(', '));
+      setTagsStr(next.map((t) => `#${t}`).join(' '));
     }
   };
 
@@ -540,7 +560,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     const updated = currentList.filter(
       (t) => t.toLowerCase() !== tagToRemove.toLowerCase()
     );
-    setTagsStr(updated.join(', '));
+    setTagsStr(updated.map((t) => `#${t}`).join(' '));
+  };
+
+  const handleClearAllTags = () => {
+    setTagsStr('');
+    setNewTagDraft('');
   };
 
   const currentTagsList = useMemo(() => {
@@ -2031,52 +2056,106 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               </div>
 
               {/* Tags & Hashtags (Хештеги та теги) */}
-              <div className="pt-3 border-t border-black/5 dark:border-white/5 space-y-2">
+              <div className="pt-3 border-t border-black/5 dark:border-white/5 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
                     <Tag className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>Хештеги / Теги особи</span>
+                    <span>Хештеги особи {currentTagsList.length > 0 && `(${currentTagsList.length})`}</span>
                   </label>
-                  <span className="text-[10px] text-neutral-400">розділяйте комою або #</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-neutral-400">додавайте декілька через # або кому</span>
+                    {currentTagsList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllTags}
+                        className="text-[10px] text-rose-500 hover:text-rose-600 hover:underline cursor-pointer font-medium"
+                      >
+                        Очистити всі
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Active Tag Badges */}
-                {currentTagsList.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 py-1">
+                {currentTagsList.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5">
                     {currentTagsList.map((tag) => (
                       <span
                         key={tag}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30 shadow-2xs group transition-all"
                       >
-                        <span>#{tag}</span>
+                        <Hash className="w-3 h-3 text-[#B88E3E]/70" />
+                        <span>{tag}</span>
                         <button
                           type="button"
                           onClick={() => handleRemoveTag(tag)}
-                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded cursor-pointer transition-colors"
-                          title="Видалити тег"
+                          className="p-0.5 hover:bg-[#B88E3E]/25 rounded-md cursor-pointer transition-colors text-[#B88E3E]"
+                          title={`Видалити хештег #${tag}`}
                         >
                           <X className="w-3 h-3" />
                         </button>
                       </span>
                     ))}
                   </div>
+                ) : (
+                  <div className="text-[11px] text-neutral-400 italic py-0.5">
+                    Хештегів ще не додано. Введіть один або декілька хештегів (наприклад: #козак #полтавщина #хлібороб) або скористайтеся підказками.
+                  </div>
                 )}
 
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={tagsStr}
-                    onChange={(e) => setTagsStr(e.target.value)}
-                    placeholder="#козак, #ветеран, #полтавщина, #дворянин, #галичина"
-                    className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                  />
+                {/* Quick Add Row */}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Hash className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={newTagDraft}
+                      onChange={(e) => setNewTagDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          handleAddHashtagsFromDraft();
+                        }
+                      }}
+                      placeholder="Введіть хештег (наприклад: #козак #полтавщина) та натисніть Enter або кнопку..."
+                      className={`w-full pl-8 pr-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddHashtagsFromDraft}
+                    disabled={!newTagDraft.trim()}
+                    className="px-3.5 py-2 rounded-xl bg-[#B88E3E] hover:bg-[#a07b34] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-all flex items-center gap-1 shrink-0 shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>Додати</span>
+                  </button>
                 </div>
+
+                {/* Direct Text Editor (Collapsible) */}
+                <details className="text-xs group">
+                  <summary className="text-[11px] text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-[#B88E3E] font-medium flex items-center gap-1">
+                    <span>✏️ Пряме текстове редагування хештегів</span>
+                  </summary>
+                  <div className="pt-2">
+                    <input
+                      type="text"
+                      value={tagsStr}
+                      onChange={(e) => setTagsStr(e.target.value)}
+                      placeholder="#козак, #ветеран, #полтавщина, #дворянин, #галичина"
+                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                    />
+                    <p className="text-[10px] text-neutral-400 mt-1">
+                      Можна вставляти або писати декілька хештегів через пробіл або кому. Всі теги автоматично синхронізуються.
+                    </p>
+                  </div>
+                </details>
 
                 {/* Popular Hashtag Suggestions */}
                 {popularHashtags.length > 0 && (
                   <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                     <span className="text-[10px] text-neutral-400 flex items-center gap-0.5 font-medium">
-                      <Hash className="w-3 h-3 text-[#B88E3E]" /> Популярні теги в дереві:
+                      <Hash className="w-3 h-3 text-[#B88E3E]" /> Популярні в дереві:
                     </span>
                     {popularHashtags.map((h) => {
                       const isSelected = currentTagsList.some((t) => t.toLowerCase() === h.tag.toLowerCase());
@@ -2098,6 +2177,33 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     })}
                   </div>
                 )}
+
+                {/* Presets */}
+                <div className="pt-0.5 space-y-1">
+                  <div className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider">
+                    Швидкі варіанти:
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {COMMON_GENEALOGY_HASHTAG_PRESETS.flatMap((c) => c.tags).slice(0, 14).map((pt) => {
+                      const isSelected = currentTagsList.some((t) => t.toLowerCase() === pt.toLowerCase());
+                      return (
+                        <button
+                          key={pt}
+                          type="button"
+                          onClick={() => handleAddHashtagSuggestion(pt)}
+                          disabled={isSelected}
+                          className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-neutral-200/50 dark:bg-neutral-800/50 text-neutral-400 border-transparent opacity-40 cursor-default'
+                              : 'bg-stone-50 dark:bg-neutral-800/60 hover:bg-[#B88E3E]/15 text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] border-neutral-200/80 dark:border-neutral-700/80'
+                          }`}
+                        >
+                          +{pt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -3553,24 +3659,36 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   <div className="flex items-center justify-between">
                     <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
                       <Tag className="w-3.5 h-3.5 text-[#B88E3E]" />
-                      <span>Хештеги та мітки</span>
+                      <span>Хештеги та мітки {currentTagsList.length > 0 && `(${currentTagsList.length})`}</span>
                     </label>
-                    <span className="text-[10px] text-neutral-400">розділяйте комою або #</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-neutral-400">розділяйте комою або #</span>
+                      {currentTagsList.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearAllTags}
+                          className="text-[10px] text-rose-500 hover:text-rose-600 hover:underline cursor-pointer font-medium"
+                        >
+                          Очистити всі
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {currentTagsList.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 py-1">
+                    <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5">
                       {currentTagsList.map((tag) => (
                         <span
                           key={tag}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30"
                         >
-                          <span>#{tag}</span>
+                          <Hash className="w-3 h-3 text-[#B88E3E]/70" />
+                          <span>{tag}</span>
                           <button
                             type="button"
                             onClick={() => handleRemoveTag(tag)}
-                            className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded cursor-pointer transition-colors"
-                            title="Видалити тег"
+                            className="p-0.5 hover:bg-[#B88E3E]/25 rounded-md cursor-pointer transition-colors text-[#B88E3E]"
+                            title={`Видалити хештег #${tag}`}
                           >
                             <X className="w-3 h-3" />
                           </button>
@@ -3583,13 +3701,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     type="text"
                     value={tagsStr}
                     onChange={(e) => setTagsStr(e.target.value)}
-                    placeholder="#козак, #ветеран, #полтавщина, #дворянин"
+                    placeholder="#козак, #ветеран, #полтавщина, #дворянин, #хлібороб"
                     className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
                   />
                   {popularHashtags.length > 0 && (
                     <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                       <span className="text-[10px] text-neutral-400 flex items-center gap-0.5 font-medium">
-                        <Hash className="w-3 h-3 text-[#B88E3E]" /> часті в дереві:
+                        <Hash className="w-3 h-3 text-[#B88E3E]" /> Популярні в дереві:
                       </span>
                       {popularHashtags.map((h) => {
                         const isSelected = currentTagsList.some((t) => t.toLowerCase() === h.tag.toLowerCase());

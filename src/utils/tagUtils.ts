@@ -16,7 +16,7 @@ export function extractHashtagsFromText(text?: string): string[] {
 }
 
 /**
- * Parses user tag input (supports comma-separated, space-separated with #, or array)
+ * Parses user tag input (supports comma-separated, space-separated with #, adjacent #tags, or array)
  * and returns clean, unique list of tag names without leading '#'.
  */
 export function parseAndNormalizeTags(
@@ -25,23 +25,46 @@ export function parseAndNormalizeTags(
 ): string[] {
   const result = new Set<string>();
 
-  if (Array.isArray(input)) {
-    input.forEach((t) => {
-      if (typeof t === 'string') {
-        const cleaned = t.trim().replace(/^#+/, '');
-        if (cleaned) result.add(cleaned);
+  const addTag = (val: string) => {
+    const cleaned = val.trim().replace(/^#+/, '').trim();
+    if (cleaned.length > 0) {
+      result.add(cleaned);
+    }
+  };
+
+  const processString = (str: string) => {
+    if (!str || typeof str !== 'string') return;
+
+    // Check if the string contains explicit hashtags (#tag)
+    const hashMatches = str.match(/#([\p{L}\p{N}_-]+)/gu);
+    if (hashMatches && hashMatches.length > 0) {
+      hashMatches.forEach((m) => addTag(m));
+      // Remove all matched #tag patterns and process any remaining text
+      const remainder = str.replace(/#([\p{L}\p{N}_-]+)/gu, ' ').trim();
+      if (remainder) {
+        remainder.split(/[,;\n\r\t]+/).forEach((part) => {
+          part.split(/\s+/).forEach((w) => addTag(w));
+        });
       }
+    } else {
+      // No explicit '#' in the string:
+      // Split by commas, semicolons, or newlines first
+      const parts = str.split(/[,;\n\r\t]+/);
+      if (parts.length > 1) {
+        parts.forEach((p) => addTag(p));
+      } else {
+        // Single segment without commas: split by whitespace to allow multiple words
+        str.split(/\s+/).forEach((w) => addTag(w));
+      }
+    }
+  };
+
+  if (Array.isArray(input)) {
+    input.forEach((item) => {
+      if (typeof item === 'string') processString(item);
     });
   } else if (typeof input === 'string') {
-    // If input contains commas, split by comma. Otherwise if it has hashtags, split by whitespace
-    const tokens = input.includes(',')
-      ? input.split(',')
-      : input.split(/\s+/);
-
-    tokens.forEach((token) => {
-      const cleaned = token.trim().replace(/^#+/, '');
-      if (cleaned) result.add(cleaned);
-    });
+    processString(input);
   }
 
   // Also extract hashtags written in notes or bio if provided
@@ -49,13 +72,31 @@ export function parseAndNormalizeTags(
     extraTextSources.forEach((src) => {
       if (src) {
         const extracted = extractHashtagsFromText(src);
-        extracted.forEach((tag) => result.add(tag));
+        extracted.forEach((tag) => addTag(tag));
       }
     });
   }
 
   return Array.from(result);
 }
+
+/**
+ * Common preset hashtags grouped by genealogy categories
+ */
+export const COMMON_GENEALOGY_HASHTAG_PRESETS = [
+  {
+    category: 'Стан / Фах',
+    tags: ['козак', 'шляхта', 'селянин', 'священник', 'купець', 'міщанин', 'ветеран', 'хлібороб']
+  },
+  {
+    category: 'Регіон / Земля',
+    tags: ['полтавщина', 'київщина', 'галичина', 'поділля', 'волинь', 'чернігівщина', 'слобожанщина', 'запоріжжя']
+  },
+  {
+    category: 'Дослідження',
+    tags: ['метрика', 'сповідний_розпис', 'ревізька_казка', 'архів', 'перевірено', 'пошук_батьків']
+  }
+];
 
 /**
  * Ensures hashtag is formatted with '#' prefix for display

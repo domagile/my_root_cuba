@@ -40,14 +40,22 @@ import {
   CheckCircle,
   XCircle,
   Archive,
-  FolderGit2
+  FolderGit2,
+  Plus
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { ThemePalette, UserRole } from '../types';
 import { getAllSnapshots, saveSnapshot, deleteSnapshot, DataSnapshot } from '../utils/persistentBackup';
-import { getGitHubConfig, saveGitHubConfig, testGitHubConnection } from '../services/githubService';
+import { 
+  getGitHubConfig, 
+  saveGitHubConfig, 
+  testGitHubConnection,
+  fetchGitHubProfile,
+  fetchUserRepositories,
+  createGitHubRepository
+} from '../services/githubService';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -134,26 +142,188 @@ export const SettingsView: React.FC = () => {
   // GitHub Integration state
   const [githubConfig, setGithubConfigState] = useState(getGitHubConfig());
   const [isTestingGitHub, setIsTestingGitHub] = useState(false);
+  const [isDiscoveringGitHub, setIsDiscoveringGitHub] = useState(false);
+  const [isCreatingRepo, setIsCreatingRepo] = useState(false);
+  const [availableRepos, setAvailableRepos] = useState<Array<{ name: string; full_name: string; private: boolean }>>([]);
   const [gitHubTestResult, setGitHubTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const handleSaveGitHubConfig = () => {
     const saved = saveGitHubConfig(githubConfig);
     setGithubConfigState(saved);
-    setGitHubTestResult({ success: true, message: 'Налаштування GitHub успішно збережено!' });
+    if (saved.isConfigured) {
+      setGitHubTestResult({ success: true, message: 'Налаштування GitHub успішно збережено!' });
+    } else {
+      setGitHubTestResult({ success: true, message: 'Налаштування збережено (заповніть усі поля для активації вивантаження).' });
+    }
     setTimeout(() => setGitHubTestResult(null), 4000);
   };
 
+  const handleAutoDiscoverFromToken = async (explicitToken?: string) => {
+    const tokenToUse = (explicitToken || githubConfig.token || '').trim();
+    if (!tokenToUse) {
+      setGitHubTestResult({
+        success: false,
+        message: 'Будь ласка, вставте ваш GitHub Personal Access Token у поле нижче.'
+      });
+      return;
+    }
+
+    setIsDiscoveringGitHub(true);
+    setGitHubTestResult(null);
+
+    try {
+      const profileRes = await fetchGitHubProfile(tokenToUse);
+      if (!profileRes.success || !profileRes.login) {
+        setIsDiscoveringGitHub(false);
+        setGitHubTestResult({
+          success: false,
+          message: profileRes.error || 'Недійсний токен. Перевірте, чи токен скопійовано повністю і чи активний він на GitHub.'
+        });
+        return;
+      }
+
+      const autoOwner = profileRes.login;
+
+      // Fetch user repositories
+      const reposRes = await fetchUserRepositories(tokenToUse);
+      const reposList = reposRes.success && reposRes.repos ? reposRes.repos : [];
+      setAvailableRepos(reposList);
+
+      let selectedRepo = githubConfig.repo.trim();
+      if (!selectedRepo && reposList.length > 0) {
+        const match = reposList.find((r) => /rodovid|archive|genealogy|family|scan/i.test(r.name));
+        if (match) {
+          selectedRepo = match.name;
+        } else if (reposList.length > 0) {
+          selectedRepo = reposList[0].name;
+        }
+      }
+
+      const updated = {
+        ...githubConfig,
+        token: tokenToUse,
+        owner: autoOwner,
+        repo: selectedRepo || githubConfig.repo
+      };
+      setGithubConfigState(updated);
+      saveGitHubConfig(updated);
+
+      setIsDiscoveringGitHub(false);
+      setGitHubTestResult({
+        success: true,
+        message: `Успішно! Знайдено GitHub акаунт: @${autoOwner}${reposList.length > 0 ? ` (знайдено ${reposList.length} репозиторіїв)` : ''}. Логін власника автоматично підставлено.`
+      });
+    } catch (err: any) {
+      setIsDiscoveringGitHub(false);
+      setGitHubTestResult({
+        success: false,
+        message: `Помилка визначення акаунта: ${err.message || String(err)}`
+      });
+    }
+  };
+
+  const handleCreateNewArchiveRepo = async (repoName: string = 'rodovid-archive') => {
+    const tokenToUse = githubConfig.token.trim();
+    if (!tokenToUse) {
+      setGitHubTestResult({
+        success: false,
+        message: 'Спочатку вкажіть GitHub Personal Access Token.'
+      });
+      return;
+    }
+
+    setIsCreatingRepo(true);
+    setGitHubTestResult(null);
+
+    const res = await createGitHubRepository(tokenToUse, repoName, true);
+    setIsCreatingRepo(false);
+
+    if (res.success && res.repo) {
+      const updatedConfig = {
+        ...githubConfig,
+        owner: res.repo.owner?.login || githubConfig.owner,
+        repo: res.repo.name,
+        branch: res.repo.default_branch || 'main'
+      };
+      const saved = saveGitHubConfig(updatedConfig);
+      setGithubConfigState(saved);
+      setAvailableRepos((prev) => [
+        { name: res.repo.name, full_name: res.repo.full_name, private: res.repo.private },
+        ...prev
+      ]);
+      setGitHubTestResult({
+        success: true,
+        message: `Приватний репозиторій «${res.repo.full_name}» успішно створено на GitHub та підключено!`
+      });
+    } else {
+      setGitHubTestResult({
+        success: false,
+        message: res.error || 'Не вдалося створити репозиторій на GitHub.'
+      });
+    }
+  };
+
   const handleTestGitHub = async () => {
+    if (!githubConfig.token?.trim()) {
+      setGitHubTestResult({
+        success: false,
+        message: 'Будь ласка, вставте ваш GitHub Personal Access Token.'
+      });
+      return;
+    }
+
+    // Auto-fix if owner has spaces or Cyrillic or is empty
+    let ownerToUse = githubConfig.owner.trim();
+    if (!ownerToUse || /[^\w\-\.]/.test(ownerToUse)) {
+      setIsTestingGitHub(true);
+      setGitHubTestResult({
+        success: false,
+        message: 'Визначаємо дійсний логін GitHub через ваш токен...'
+      });
+      const profile = await fetchGitHubProfile(githubConfig.token.trim());
+      if (profile.success && profile.login) {
+        ownerToUse = profile.login;
+        const updated = { ...githubConfig, owner: profile.login };
+        setGithubConfigState(updated);
+        saveGitHubConfig(updated);
+      } else {
+        setIsTestingGitHub(false);
+        setGitHubTestResult({
+          success: false,
+          message: profile.error || `Значення «${ownerToUse}» некоректне. Логін GitHub має складатись з латинських літер.`
+        });
+        return;
+      }
+    }
+
+    if (!githubConfig.repo?.trim()) {
+      setIsTestingGitHub(false);
+      setGitHubTestResult({
+        success: false,
+        message: 'Вкажіть назву репозиторію на GitHub або натисніть «Створити репозиторій rodovid-archive» нижче.'
+      });
+      return;
+    }
+
     setIsTestingGitHub(true);
     setGitHubTestResult(null);
     const res = await testGitHubConnection({
-      owner: githubConfig.owner,
-      repo: githubConfig.repo,
-      branch: githubConfig.branch,
-      token: githubConfig.token
+      owner: ownerToUse,
+      repo: githubConfig.repo.trim(),
+      branch: githubConfig.branch.trim() || 'main',
+      token: githubConfig.token.trim()
     });
     setIsTestingGitHub(false);
     setGitHubTestResult(res);
+
+    if (res.success) {
+      const saved = saveGitHubConfig({
+        ...githubConfig,
+        owner: ownerToUse,
+        isConfigured: true
+      });
+      setGithubConfigState(saved);
+    }
   };
 
   const loadSnapshotsList = async () => {
@@ -634,32 +804,141 @@ export const SettingsView: React.FC = () => {
 
           {/* GitHub Form */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {/* GitHub PAT Input First or Prominent */}
+            <div className="md:col-span-2 p-4 rounded-xl bg-purple-600/5 border border-purple-500/20 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className={`font-bold block ${theme.cardTitle}`}>
+                  GitHub Personal Access Token (PAT): <span className="text-rose-500">*</span>
+                </label>
+                <a
+                  href="https://github.com/settings/tokens/new?scopes=repo&description=Rodovid%20Archive%20Storage"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline font-medium"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Створити токен на GitHub (з правами «repo»)</span>
+                </a>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="password"
+                  value={githubConfig.token}
+                  onChange={(e) => setGithubConfigState({ ...githubConfig, token: e.target.value })}
+                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  className={`flex-1 p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAutoDiscoverFromToken()}
+                  disabled={isDiscoveringGitHub || !githubConfig.token?.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50 shrink-0"
+                  title="Автоматично прочитати ваш GitHub логін та знайти доступні репозиторії"
+                >
+                  <Sparkles className={`w-4 h-4 ${isDiscoveringGitHub ? 'animate-spin' : ''}`} />
+                  <span>{isDiscoveringGitHub ? 'Визначення...' : 'Автоматично заповнити через токен'}</span>
+                </button>
+              </div>
+
+              <p className={`text-[10px] ${theme.cardSubtext} leading-normal`}>
+                Створіть Personal Access Token (classic) на GitHub з позначкою <code>repo</code>. Токен зберігається виключно локально у вашому браузері.
+              </p>
+            </div>
+
+            {/* Owner (Username / Org) */}
             <div>
               <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
-                Власник репозиторію (Username / Org):
+                Власник репозиторію (GitHub Username або Організація): <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
                 value={githubConfig.owner}
                 onChange={(e) => setGithubConfigState({ ...githubConfig, owner: e.target.value })}
-                placeholder="наприклад: TararaFamily або ваш нікнейм"
-                className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                placeholder="наприклад: CubaTarara400 (ваш логін на github.com)"
+                className={`w-full p-2.5 rounded-xl border ${
+                  githubConfig.owner && /[^\w\-\.]/.test(githubConfig.owner.trim())
+                    ? 'border-amber-500 ring-2 ring-amber-500/20'
+                    : theme.cardBorder
+                } ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
               />
+              {/* Cyrillic / spaces warning */}
+              {Boolean(githubConfig.owner && /[^\w\-\.]/.test(githubConfig.owner.trim())) && (
+                <div className="mt-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                  <div>
+                    <strong>«{githubConfig.owner}»</strong> містить пробіли або кирилицю. Логін на GitHub складається з англійських літер. 
+                    {githubConfig.token?.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => handleAutoDiscoverFromToken()}
+                        className="ml-1 underline font-bold hover:text-purple-600 cursor-pointer"
+                      >
+                        Визначити мій логін за токеном
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* Repository Name */}
             <div>
-              <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
-                Назва репозиторію:
-              </label>
-              <input
-                type="text"
-                value={githubConfig.repo}
-                onChange={(e) => setGithubConfigState({ ...githubConfig, repo: e.target.value })}
-                placeholder="наприклад: rodovid-archive"
-                className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
-              />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className={`font-bold ${theme.cardTitle}`}>
+                  Назва репозиторію на GitHub: <span className="text-rose-500">*</span>
+                </label>
+                {availableRepos.length > 0 && (
+                  <span className="text-[10px] text-purple-600 dark:text-purple-400 font-medium">
+                    Знайдено {availableRepos.length} репозиторіїв
+                  </span>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={githubConfig.repo}
+                  onChange={(e) => setGithubConfigState({ ...githubConfig, repo: e.target.value })}
+                  placeholder="наприклад: rodovid-archive"
+                  className={`flex-1 p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                />
+                {availableRepos.length > 0 && (
+                  <select
+                    value={githubConfig.repo}
+                    onChange={(e) => setGithubConfigState({ ...githubConfig, repo: e.target.value })}
+                    className={`p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500 max-w-[150px]`}
+                  >
+                    <option value="">Обрати зі списку...</option>
+                    {availableRepos.map((r) => (
+                      <option key={r.full_name} value={r.name}>
+                        {r.name} {r.private ? '🔒' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Quick 1-click create button if repo is empty */}
+              {!githubConfig.repo?.trim() && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCreateNewArchiveRepo('rodovid-archive')}
+                    disabled={isCreatingRepo || !githubConfig.token?.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/15 hover:bg-purple-600/25 text-purple-700 dark:text-purple-300 font-bold text-[11px] border border-purple-500/30 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{isCreatingRepo ? 'Створення на GitHub...' : 'Створити репозиторій «rodovid-archive» в 1 клік'}</span>
+                  </button>
+                  <span className={`text-[10px] ${theme.cardSubtext}`}>
+                    або введіть назву вашого існуючого репозиторію
+                  </span>
+                </div>
+              )}
             </div>
 
+            {/* Branch */}
             <div>
               <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
                 Гілка (Branch):
@@ -673,9 +952,10 @@ export const SettingsView: React.FC = () => {
               />
             </div>
 
+            {/* Base folder */}
             <div>
               <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
-                Базова коренева папка:
+                Базова коренева папка у репозиторії:
               </label>
               <input
                 type="text"
@@ -685,22 +965,6 @@ export const SettingsView: React.FC = () => {
                 className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} focus:outline-none focus:ring-2 focus:ring-purple-500`}
               />
             </div>
-
-            <div className="md:col-span-2">
-              <label className={`font-bold block mb-1.5 ${theme.cardTitle}`}>
-                GitHub Personal Access Token (PAT):
-              </label>
-              <input
-                type="password"
-                value={githubConfig.token}
-                onChange={(e) => setGithubConfigState({ ...githubConfig, token: e.target.value })}
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                className={`w-full p-2.5 rounded-xl border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-              />
-              <p className={`text-[10px] ${theme.cardSubtext} mt-1`}>
-                Створіть токен на GitHub (Settings → Developer Settings → Personal Access Tokens → Tokens (classic) з дозволом <code>repo</code>). Токен зберігається лише локально у вашому браузері.
-              </p>
-            </div>
           </div>
 
           {/* Test & Save buttons */}
@@ -709,7 +973,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={handleTestGitHub}
-                disabled={isTestingGitHub || !githubConfig.owner || !githubConfig.repo || !githubConfig.token}
+                disabled={isTestingGitHub || !githubConfig.token?.trim()}
                 className="px-4 py-2.5 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 text-purple-700 dark:text-purple-300 font-bold text-xs border border-purple-500/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 <FolderGit2 className={`w-4 h-4 ${isTestingGitHub ? 'animate-spin' : ''}`} />
@@ -727,8 +991,9 @@ export const SettingsView: React.FC = () => {
             </div>
 
             {githubConfig.isConfigured ? (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 className="w-4 h-4" /> GitHub налаштовано та готовий до вивантаження
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" /> 
+                <span>GitHub сховище активне ({githubConfig.owner}/{githubConfig.repo})</span>
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-xs text-neutral-500">
@@ -738,17 +1003,19 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {gitHubTestResult && (
-            <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+            <div className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 ${
               gitHubTestResult.success
-                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
-                : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'
+                ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30'
+                : 'bg-rose-500/10 text-rose-800 dark:text-rose-200 border border-rose-500/30'
             }`}>
               {gitHubTestResult.success ? (
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-500" />
               ) : (
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
               )}
-              <span>{gitHubTestResult.message}</span>
+              <div className="flex-1 leading-relaxed">
+                <span>{gitHubTestResult.message}</span>
+              </div>
             </div>
           )}
         </div>

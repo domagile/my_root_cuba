@@ -343,16 +343,130 @@ export function calculateClassicFamilyTreeLayout(
     return collapsedSiblings.has(pId);
   };
 
+  // Helper to check if a person's children/descendants are marked as collapsed (including via spouse)
+  const isPersonChildrenCollapsed = (pId: string): boolean => {
+    if (!showDescendants) return true;
+    if (collapsedChildren.has(pId)) return true;
+    const p = database.persons[pId];
+    if (!p) return false;
+    if (p.spouseIds && p.spouseIds.some(sId => collapsedChildren.has(sId))) {
+      return true;
+    }
+    if (p.spouseFamilyIds && database.families) {
+      for (const fId of p.spouseFamilyIds) {
+        const fam = database.families[fId];
+        if (fam) {
+          if (fam.husbandId && collapsedChildren.has(fam.husbandId)) return true;
+          if (fam.wifeId && collapsedChildren.has(fam.wifeId)) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  // Helper to collect all direct children of a person across all database relationship formats
+  const getDirectChildrenIds = (pId: string): string[] => {
+    const p = database.persons[pId];
+    if (!p) return [];
+    const childIds = new Set<string>();
+    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
+    if (p.spouseFamilyIds && database.families) {
+      p.spouseFamilyIds.forEach(fId => {
+        const fam = database.families[fId];
+        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
+      });
+    }
+    Object.values(database.persons).forEach(cand => {
+      if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
+    });
+    return Array.from(childIds).filter(cId => Boolean(database.persons[cId]));
+  };
+
+  // Collect all persons that must be hidden because their parent or ancestor has collapsed children
+  const collapsedDescendantIds = new Set<string>();
+  const collapsedParentsList = Object.keys(database.persons).filter(pId => isPersonChildrenCollapsed(pId));
+  
+  if (collapsedParentsList.length > 0) {
+    const q: string[] = [];
+    collapsedParentsList.forEach(parId => {
+      getDirectChildrenIds(parId).forEach(cId => {
+        if (!collapsedDescendantIds.has(cId)) {
+          collapsedDescendantIds.add(cId);
+          q.push(cId);
+        }
+      });
+    });
+
+    while (q.length > 0) {
+      const curId = q.shift()!;
+      getDirectChildrenIds(curId).forEach(cId => {
+        if (!collapsedDescendantIds.has(cId)) {
+          collapsedDescendantIds.add(cId);
+          q.push(cId);
+        }
+      });
+    }
+
+    // Also include spouses of collapsed descendants if they are only in the tree through the collapsed branch
+    collapsedDescendantIds.forEach(dId => {
+      const d = database.persons[dId];
+      if (d?.spouseIds) {
+        d.spouseIds.forEach(sId => {
+          if (!directAncestors.has(sId) && !isPersonChildrenCollapsed(sId)) {
+            collapsedDescendantIds.add(sId);
+          }
+        });
+      }
+    });
+  }
+
+  // If root person itself is cut off by an ancestor having collapsed children,
+  // find the closest cut ancestor to serve as the effective root for the visible tree
+  let effectiveRoot = root;
+  if (collapsedDescendantIds.has(root.id)) {
+    const visited = new Set<string>();
+    const findCutAncestor = (pId: string): Person | null => {
+      const p = database.persons[pId];
+      if (!p) return null;
+      const parents: string[] = [];
+      if (p.fatherId) parents.push(p.fatherId);
+      if (p.motherId) parents.push(p.motherId);
+      if (p.parentFamilyId && database.families) {
+        const fam = database.families[p.parentFamilyId];
+        if (fam?.husbandId) parents.push(fam.husbandId);
+        if (fam?.wifeId) parents.push(fam.wifeId);
+      }
+      for (const parId of parents) {
+        if (visited.has(parId)) continue;
+        visited.add(parId);
+        if (isPersonChildrenCollapsed(parId)) {
+          return database.persons[parId] || null;
+        }
+        const higher = findCutAncestor(parId);
+        if (higher) return higher;
+      }
+      return null;
+    };
+    const cutAncestor = findCutAncestor(root.id);
+    if (cutAncestor) {
+      effectiveRoot = cutAncestor;
+    }
+  }
+
   // 1. Calculate relative generation level for all ancestors, descendants, siblings and spouses
   const personGen = new Map<string, number>();
-  personGen.set(root.id, 0);
+  personGen.set(effectiveRoot.id, 0);
 
   // BFS Queue to expand lineage and connections
-  const queue: { id: string; gen: number }[] = [{ id: root.id, gen: 0 }];
+  const queue: { id: string; gen: number }[] = [{ id: effectiveRoot.id, gen: 0 }];
   const processedPersons = new Set<string>();
 
   const enqueuePerson = (pId: string, pGen: number) => {
     if (!pId || !database.persons[pId]) return;
+    // If this person is marked as a collapsed descendant, do not enqueue!
+    if (collapsedDescendantIds.has(pId)) {
+      return;
+    }
     // If showSiblings is false: only allow direct backbone or spouses of backbone
     if (!showSiblings && !isDirectBackbone(pId) && !isSpouseOfBackbone(pId)) {
       return;
@@ -418,19 +532,13 @@ export function calculateClassicFamilyTreeLayout(
     }
 
     // 3. Descendants (Gen + 1, Gen + 2...) - expandable for ANY person in the tree
-    if (showDescendants && !collapsedChildren.has(id) && !isPersonACollapsedSibling(id)) {
+    if (showDescendants && !isPersonChildrenCollapsed(id) && !isPersonACollapsedSibling(id)) {
       if (maxGenerations === 0 || (gen + 1) <= maxGenerations) {
-        const childIds = new Set<string>();
-        if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-        if (p.spouseFamilyIds) {
-          p.spouseFamilyIds.forEach(fId => {
-            const fam = database.families[fId];
-            if (fam?.children) fam.children.forEach(c => childIds.add(c.personId || (c as any).id));
-          });
-        }
+        const childIds = getDirectChildrenIds(id);
         childIds.forEach(cId => {
+          if (collapsedDescendantIds.has(cId)) return;
           // If in direct mode without siblings, only enqueue the direct line child
-          if (!showSiblings && directAncestors.has(id) && !directAncestors.has(cId) && cId !== root.id) {
+          if (!showSiblings && directAncestors.has(id) && !directAncestors.has(cId) && cId !== effectiveRoot.id) {
             return;
           }
           if (isPersonACollapsedSibling(cId)) {
@@ -973,19 +1081,11 @@ export function calculateClassicFamilyTreeLayout(
     const hasSiblings = siblingCount > 0;
     const isSiblingsCollapsed = collapsedSiblings.has(p.id) || !showSiblings || (hasSiblings && !areSiblingsVisible) || isPersonACollapsedSibling(p.id);
 
-    const childIds = new Set<string>();
-    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-    if (p.spouseFamilyIds) {
-      p.spouseFamilyIds.forEach(fId => {
-        const fam = database.families[fId];
-        if (fam?.children) fam.children.forEach(c => childIds.add(c.personId));
-      });
-    }
-    const validChildren = Array.from(childIds).filter(cId => database.persons[cId]);
+    const validChildren = getDirectChildrenIds(p.id);
     const childrenCount = validChildren.length;
     const hasChildren = childrenCount > 0;
     const areChildrenVisible = validChildren.some(cId => personGen.has(cId));
-    const isChildrenCollapsed = collapsedChildren.has(p.id) || !showDescendants || (hasChildren && !areChildrenVisible);
+    const isChildrenCollapsed = isPersonChildrenCollapsed(p.id) || !showDescendants || (hasChildren && !areChildrenVisible);
 
     return {
       hasParents,
