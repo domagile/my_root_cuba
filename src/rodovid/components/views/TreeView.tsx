@@ -10,6 +10,7 @@ import {
   Maximize2,
   GitFork,
   ArrowDownUp,
+  ArrowLeftRight,
   User,
   Plus,
   Minus,
@@ -41,7 +42,10 @@ import {
   Lock,
   Pencil,
   Zap,
-  Target
+  Target,
+  Minimize2,
+  GitCommit,
+  SlidersHorizontal
 } from 'lucide-react';
 import {
   GenealogyDatabase,
@@ -142,6 +146,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const canvasTheme = useUIStore((s) => s.treeCanvasTheme);
   const setCanvasTheme = useUIStore((s) => s.setTreeCanvasTheme);
+  const isLightCanvas = canvasTheme === 'parchment' || canvasTheme === 'light';
 
   const [layoutType, setLayoutType] = useState<TreeLayoutType>('ancestors');
   // Default to 0 = ALL generations (or restore saved user preference)
@@ -150,6 +155,14 @@ export const TreeView: React.FC<TreeViewProps> = ({
       return initialUserState.generations;
     }
     return 0;
+  });
+
+  // Tree orientation: Vertical (top-down) or Horizontal (16:9 widescreen: Left-to-Right)
+  const [orientation, setOrientation] = useState<'vertical' | 'horizontal'>(() => {
+    if (initialUserState?.orientation === 'horizontal' || initialUserState?.orientation === 'vertical') {
+      return initialUserState.orientation;
+    }
+    return 'vertical';
   });
 
   // Generation options list: 1 to 4 in dropdown, plus custom if selected
@@ -188,9 +201,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
   const [isFocusMenuOpen, setIsFocusMenuOpen] = useState<boolean>(false);
+  const [isViewOptionsMenuOpen, setIsViewOptionsMenuOpen] = useState<boolean>(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
   const focusMenuRef = useRef<HTMLDivElement>(null);
+  const viewOptionsMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -202,6 +217,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
       }
       if (focusMenuRef.current && !focusMenuRef.current.contains(event.target as Node)) {
         setIsFocusMenuOpen(false);
+      }
+      if (viewOptionsMenuRef.current && !viewOptionsMenuRef.current.contains(event.target as Node)) {
+        setIsViewOptionsMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -248,6 +266,19 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [selectedClanId, setSelectedClanId] = useState<string | null>(null);
   const [dimOthers, setDimOthers] = useState<boolean>(true);
   const [colorLinksByClan, setColorLinksByClan] = useState<boolean>(false);
+  const [enableBloodlineHover, setEnableBloodlineHover] = useState<boolean>(() => {
+    if (typeof initialUserState?.enableBloodlineHover === 'boolean') {
+      return initialUserState.enableBloodlineHover;
+    }
+    return true;
+  });
+  const [isCompact, setIsCompact] = useState<boolean>(() => {
+    if (typeof initialUserState?.isCompact === 'boolean') {
+      return initialUserState.isCompact;
+    }
+    return false;
+  });
+  const [directAncestorsOnly, setDirectAncestorsOnly] = useState<boolean>(false);
 
   useEffect(() => {
     if (focusType !== 'clan') {
@@ -281,7 +312,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
       showDescendants,
       collapsedParents,
       collapsedSiblings,
-      collapsedChildren
+      collapsedChildren,
+      orientation,
+      isCompact,
+      directAncestorsOnly
     });
   }, [
     database,
@@ -292,7 +326,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
     showDescendants,
     collapsedParents,
     collapsedSiblings,
-    collapsedChildren
+    collapsedChildren,
+    orientation,
+    isCompact,
+    directAncestorsOnly
   ]);
 
   const setAnchorForPerson = useCallback((personId: string) => {
@@ -606,6 +643,170 @@ export const TreeView: React.FC<TreeViewProps> = ({
       .map(id => database.persons[id])
       .filter(Boolean) as Person[];
   }, [database.persons, database.families]);
+
+  // Helper to find all direct ancestors of a person (parents, grandparents, etc.)
+  const getDirectAncestorIds = useCallback((personId: string): Set<string> => {
+    const ancestors = new Set<string>();
+    const queue: string[] = [personId];
+    while (queue.length > 0) {
+      const curId = queue.shift()!;
+      const p = database.persons[curId];
+      if (!p) continue;
+      let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+      let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+      if (!fId && !mId && database.families) {
+        const matchingFam = Object.values(database.families).find(
+          f => f.children && f.children.some((c: any) => (c.personId || c.id) === p.id)
+        );
+        if (matchingFam) {
+          fId = matchingFam.husbandId;
+          mId = matchingFam.wifeId;
+        }
+      }
+      if (fId && !ancestors.has(fId)) {
+        ancestors.add(fId);
+        queue.push(fId);
+      }
+      if (mId && !ancestors.has(mId)) {
+        ancestors.add(mId);
+        queue.push(mId);
+      }
+    }
+    return ancestors;
+  }, [database.persons, database.families]);
+
+  // Helper to find all direct descendants of a person (children, grandchildren, etc.)
+  const getDirectDescendantIds = useCallback((personId: string): Set<string> => {
+    const descendants = new Set<string>();
+    const queue: string[] = [personId];
+    while (queue.length > 0) {
+      const curId = queue.shift()!;
+      const p = database.persons[curId];
+      if (!p) continue;
+      const childIds = new Set<string>();
+      if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
+      if (p.spouseFamilyIds && database.families) {
+        p.spouseFamilyIds.forEach(fId => {
+          const fam = database.families[fId];
+          if (fam?.children) {
+            fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
+          }
+        });
+      }
+      Object.values(database.persons).forEach(cand => {
+        if (cand.fatherId === curId || cand.motherId === curId) {
+          childIds.add(cand.id);
+        }
+      });
+      childIds.forEach(cId => {
+        if (!descendants.has(cId)) {
+          descendants.add(cId);
+          queue.push(cId);
+        }
+      });
+    }
+    return descendants;
+  }, [database.persons, database.families]);
+
+  // Hover Bloodline Highlighting: computes direct ancestors & descendants with connections
+  const bloodlineData = useMemo(() => {
+    if (!enableBloodlineHover || !hoveredPersonId) {
+      return {
+        isActive: false,
+        bloodlinePersonIds: new Set<string>(),
+        ancestorIds: new Set<string>(),
+        descendantIds: new Set<string>(),
+        bloodlineLinkIds: new Set<string>(),
+        bloodlineColor: '#f59e0b'
+      };
+    }
+
+    const targetPerson = database.persons[hoveredPersonId];
+    if (!targetPerson) {
+      return {
+        isActive: false,
+        bloodlinePersonIds: new Set<string>(),
+        ancestorIds: new Set<string>(),
+        descendantIds: new Set<string>(),
+        bloodlineLinkIds: new Set<string>(),
+        bloodlineColor: '#f59e0b'
+      };
+    }
+
+    const ancestors = getDirectAncestorIds(hoveredPersonId);
+    const descendants = getDirectDescendantIds(hoveredPersonId);
+    const personIds = new Set<string>([hoveredPersonId, ...ancestors, ...descendants]);
+
+    // Clan color of the bloodline root/target or warm golden amber
+    const clanCol = getPersonClanColor(targetPerson, lineageColorMap);
+    const bloodlineColor = clanCol || '#f59e0b';
+
+    const linkIds = new Set<string>();
+
+    layout.links.forEach((link) => {
+      if (link.type === 'marriage') {
+        const sId = link.sourcePersonId;
+        const tId = link.targetPersonId;
+        if (sId && tId) {
+          if (personIds.has(sId) && personIds.has(tId)) {
+            linkIds.add(link.id);
+          } else {
+            const famId = link.familyId;
+            const fam = famId ? database.families?.[famId] : undefined;
+            if (fam?.children && fam.children.some((c: any) => personIds.has(c.personId || c.id))) {
+              linkIds.add(link.id);
+            }
+          }
+        }
+      } else if (link.type === 'drop') {
+        if (link.childPersonId && personIds.has(link.childPersonId)) {
+          linkIds.add(link.id);
+        }
+      } else if (link.type === 'stem') {
+        const sId = link.sourcePersonId;
+        const tId = link.targetPersonId;
+        const famId = link.familyId;
+        const fam = famId ? database.families?.[famId] : undefined;
+        const hasChildInBlood = fam?.children?.some((c: any) => personIds.has(c.personId || c.id));
+        if (hasChildInBlood || (sId && personIds.has(sId) && (!tId || personIds.has(tId)))) {
+          linkIds.add(link.id);
+        }
+      } else if (link.type === 'bus') {
+        const famId = link.familyId;
+        const fam = famId ? database.families?.[famId] : undefined;
+        const hasChildInBlood = fam?.children?.some((c: any) => personIds.has(c.personId || c.id));
+        const sId = link.sourcePersonId;
+        if (hasChildInBlood || (sId && personIds.has(sId))) {
+          linkIds.add(link.id);
+        }
+      } else {
+        const isChildIn = link.childPersonId && personIds.has(link.childPersonId);
+        const isSourceIn = link.sourcePersonId && personIds.has(link.sourcePersonId);
+        const isTargetIn = link.targetPersonId && personIds.has(link.targetPersonId);
+        if (isChildIn || (isSourceIn && isTargetIn)) {
+          linkIds.add(link.id);
+        }
+      }
+    });
+
+    return {
+      isActive: true,
+      bloodlinePersonIds: personIds,
+      ancestorIds: ancestors,
+      descendantIds: descendants,
+      bloodlineLinkIds: linkIds,
+      bloodlineColor
+    };
+  }, [
+    enableBloodlineHover,
+    hoveredPersonId,
+    database.persons,
+    database.families,
+    layout.links,
+    lineageColorMap,
+    getDirectAncestorIds,
+    getDirectDescendantIds
+  ]);
 
   // Toggle all collateral siblings for this person's family branch (e.g. all on right for female line, all on left for male line)
   const toggleCollapseSiblings = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
@@ -967,11 +1168,49 @@ export const TreeView: React.FC<TreeViewProps> = ({
         scale,
         selectedPersonId: activePersonId,
         generations,
-        showSiblings
+        showSiblings,
+        orientation,
+        enableBloodlineHover,
+        isCompact
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [pan, scale, activePersonId, generations, showSiblings, isWhitelisted, currentUser?.email]);
+  }, [pan, scale, activePersonId, generations, showSiblings, orientation, enableBloodlineHover, isCompact, isWhitelisted, currentUser?.email]);
+
+  const hasCustomFilters = useMemo(() => {
+    return (
+      orientation === 'horizontal' ||
+      !showSiblings ||
+      isCompact ||
+      directAncestorsOnly ||
+      !enableBloodlineHover ||
+      focusType !== 'none' ||
+      collapsedSiblings.size > 0
+    );
+  }, [orientation, showSiblings, isCompact, directAncestorsOnly, enableBloodlineHover, focusType, collapsedSiblings.size]);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (orientation === 'horizontal') count++;
+    if (!showSiblings) count++;
+    if (isCompact) count++;
+    if (directAncestorsOnly) count++;
+    if (focusType !== 'none') count++;
+    if (collapsedSiblings.size > 0) count++;
+    return count;
+  }, [orientation, showSiblings, isCompact, directAncestorsOnly, focusType, collapsedSiblings.size]);
+
+  const resetViewOptions = useCallback(() => {
+    setOrientation('vertical');
+    setShowSiblings(true);
+    setCollapsedSiblings(new Set());
+    setIsCompact(false);
+    setDirectAncestorsOnly(false);
+    setEnableBloodlineHover(true);
+    setFocusType('none');
+    setSelectedClanId(null);
+    setTimeout(() => focusOnPerson(activePersonId), 50);
+  }, [activePersonId, focusOnPerson]);
 
   const touchStateRef = useRef<{
     initialDist: number;
@@ -1337,261 +1576,413 @@ export const TreeView: React.FC<TreeViewProps> = ({
               )}
             </div>
 
-            {/* Sibling Toggle: Всі родичі / Прямі */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowSiblings((prev) => {
-                  const next = !prev;
-                  if (!next) {
-                    setCollapsedSiblings(new Set());
-                  }
-                  return next;
-                });
-              }}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-xs shrink-0 ${
-                showSiblings
-                  ? 'bg-sky-950/70 text-sky-300 border-sky-700/60 hover:bg-sky-900/80'
-                  : 'bg-amber-950/70 text-amber-300 border-amber-700/60 hover:bg-amber-900/80'
-              }`}
-              title={showSiblings ? "Сховати братів та сестер (прямі)" : "Показати братів та сестер (всі родичі)"}
-            >
-              <Users className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <span>{showSiblings ? 'Всі родичі' : 'Прямі'}</span>
-            </button>
-
-            {/* Quick Unfold All Collapsed Branches Button */}
-            {collapsedSiblings.size > 0 && (
+            {/* View Options & Filters Dropdown List */}
+            <div className="relative shrink-0" ref={viewOptionsMenuRef}>
               <button
                 type="button"
-                onClick={() => setCollapsedSiblings(new Set())}
-                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border bg-amber-950/80 text-amber-300 border-amber-600/70 hover:bg-amber-900 transition-all cursor-pointer shadow-xs shrink-0 animate-in fade-in"
-                title="Розгорнути всі згорнуті бічні гілки"
-              >
-                <Plus className="w-3.5 h-3.5 stroke-[2.5] text-amber-400" />
-                <span>Розгорнути гілки ({collapsedSiblings.size})</span>
-              </button>
-            )}
-
-            {/* Focus Lines & Clans Button */}
-            <div className="relative shrink-0" ref={focusMenuRef}>
-              <button
-                type="button"
-                onClick={() => setIsFocusMenuOpen((prev) => !prev)}
+                onClick={() => setIsViewOptionsMenuOpen((prev) => !prev)}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-xs ${
-                  focusType !== 'none'
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/70 shadow-amber-500/10'
-                    : isFocusMenuOpen
-                    ? 'bg-slate-700 text-white border-slate-600'
+                  isViewOptionsMenuOpen
+                    ? 'bg-amber-600 text-white border-amber-500 shadow-amber-600/20'
+                    : hasCustomFilters
+                    ? 'bg-amber-950/70 text-amber-300 border-amber-600/70 hover:bg-amber-900/80 shadow-xs'
                     : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
                 }`}
-                title="Фокусна підсвітка: виділити рід, прямих предків, нащадків чи Y/mt лінію із затемненням решти дерева"
+                title="Параметри відображення та фільтри дерева родоводу"
               >
-                <Target className={`w-3.5 h-3.5 ${focusType !== 'none' ? 'text-amber-400 animate-pulse' : 'text-amber-400'}`} />
-                <span>
-                  {focusType === 'none'
-                    ? 'Фокус ліній'
-                    : focusType === 'clan'
-                    ? `Рід: ${availableClans.find((c) => c.id === selectedClanId)?.name || selectedClanId}`
-                    : focusType === 'direct-ancestors'
-                    ? 'Прямі предки'
-                    : focusType === 'direct-descendants'
-                    ? 'Прямі нащадки'
-                    : focusType === 'patrilineal'
-                    ? 'Чоловіча лінія'
-                    : 'Жіноча лінія'}
-                </span>
-                {focusType !== 'none' && (
-                  <span
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setFocusType('none');
-                      setSelectedClanId(null);
-                    }}
-                    className="ml-0.5 p-0.5 hover:bg-amber-500/40 rounded text-amber-200 hover:text-white cursor-pointer"
-                    title="Скинути фокус"
-                  >
-                    <X className="w-3 h-3" />
+                <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Параметри дерева</span>
+                {activeFiltersCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-amber-500/30 text-amber-300 text-[10px] font-bold leading-none">
+                    {activeFiltersCount}
                   </span>
                 )}
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 ${
+                    isViewOptionsMenuOpen ? 'rotate-180 text-white' : ''
+                  }`}
+                />
               </button>
 
-              {isFocusMenuOpen && (
-                <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-80 bg-[#1b1f24] border border-[#383e46] rounded-xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150 max-h-[85vh] overflow-y-auto">
-                  {/* Header */}
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#2d3238]">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-white">
-                      <Target className="w-4 h-4 text-amber-400" />
-                      <span>Фокусна підсвітка родоводу</span>
+              {isViewOptionsMenuOpen && (
+                <div className="absolute left-0 top-full mt-2 w-80 sm:w-88 bg-[#1b1f24] border border-[#383e46] rounded-xl shadow-2xl p-3 z-50 animate-in fade-in zoom-in-95 duration-150 max-h-[85vh] overflow-y-auto custom-scrollbar">
+                  {/* Dropdown Header */}
+                  <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-[#2d3238]">
+                    <div className="flex items-center gap-2">
+                      <SlidersHorizontal className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-bold text-white">Параметри та вигляд</span>
                     </div>
-                    {focusType !== 'none' && (
+                    {hasCustomFilters && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setFocusType('none');
-                          setSelectedClanId(null);
-                        }}
-                        className="text-[11px] text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                        onClick={resetViewOptions}
+                        className="text-[11px] font-medium text-amber-400 hover:text-amber-300 underline cursor-pointer"
                       >
-                        Скинути
+                        Скинути всі
                       </button>
                     )}
                   </div>
 
-                  {/* Target Person Info */}
-                  <div className="text-[11px] text-slate-300 mb-2 px-1">
-                    Фокус для особи:{' '}
-                    <span className="font-bold text-white">
-                      {database.persons[focusPersonId]
-                        ? getFullName(database.persons[focusPersonId])
-                        : getFullName(database.persons[activePersonId])}
-                    </span>
-                  </div>
-
-                  {/* Direct Line Options */}
-                  <div className="space-y-1 mb-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFocusType('direct-ancestors');
-                        setIsFocusMenuOpen(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        focusType === 'direct-ancestors'
-                          ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50'
-                          : 'text-slate-200 hover:bg-[#252a30] hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-amber-400">👑</span>
-                        <span>Прямі предки (батьки, діди...)</span>
-                      </div>
-                      {focusType === 'direct-ancestors' && <Check className="w-3.5 h-3.5 text-amber-400" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFocusType('direct-descendants');
-                        setIsFocusMenuOpen(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        focusType === 'direct-descendants'
-                          ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/50'
-                          : 'text-slate-200 hover:bg-[#252a30] hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-emerald-400">👶</span>
-                        <span>Прямі нащадки (діти, онуки...)</span>
-                      </div>
-                      {focusType === 'direct-descendants' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFocusType('patrilineal');
-                        setIsFocusMenuOpen(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        focusType === 'patrilineal'
-                          ? 'bg-sky-500/20 text-sky-300 font-bold border border-sky-500/50'
-                          : 'text-slate-200 hover:bg-[#252a30] hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sky-400">♂️</span>
-                        <span>Чоловіча лінія (Y-DNA: по батьках)</span>
-                      </div>
-                      {focusType === 'patrilineal' && <Check className="w-3.5 h-3.5 text-sky-400" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFocusType('matrilineal');
-                        setIsFocusMenuOpen(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        focusType === 'matrilineal'
-                          ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/50'
-                          : 'text-slate-200 hover:bg-[#252a30] hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-rose-400">♀️</span>
-                        <span>Жіноча лінія (mtDNA: по матерях)</span>
-                      </div>
-                      {focusType === 'matrilineal' && <Check className="w-3.5 h-3.5 text-rose-400" />}
-                    </button>
-                  </div>
-
-                  {/* Clan / Rod Section */}
-                  {availableClans.length > 0 && (
-                    <div className="pt-2 border-t border-[#2d3238]">
-                      <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1.5 px-1">
-                        Виділити рід (кольоровий зв'язок)
-                      </div>
-                      <div className="max-h-36 overflow-y-auto space-y-0.5 pr-1">
-                        {availableClans.map((clan) => {
-                          const isSelected = focusType === 'clan' && selectedClanId === clan.id;
-                          return (
-                            <button
-                              key={clan.id}
-                              type="button"
-                              onClick={() => {
-                                setFocusType('clan');
-                                setSelectedClanId(clan.id);
-                                setIsFocusMenuOpen(false);
-                              }}
-                              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
-                                isSelected
-                                  ? 'bg-[#252a30] text-white font-bold border border-slate-600'
-                                  : 'text-slate-300 hover:bg-[#252a30] hover:text-white'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2 truncate min-w-0">
-                                <span
-                                  className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs"
-                                  style={{ backgroundColor: clan.color }}
-                                />
-                                <span className="truncate">{clan.name}</span>
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-400 shrink-0 ml-1.5">
-                                {clan.count} осіб
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                  {/* 1. Tree Orientation */}
+                  <div className="mb-3">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 px-0.5">
+                      Орієнтація дерева
                     </div>
-                  )}
+                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#14171a] rounded-lg border border-[#2d3238]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (orientation !== 'vertical') {
+                            setOrientation('vertical');
+                            setTimeout(() => focusOnPerson(activePersonId), 40);
+                          }
+                        }}
+                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                          orientation === 'vertical'
+                            ? 'bg-amber-600 text-white shadow-xs font-bold'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                        }`}
+                        title="Класичне вертикальне дерево (Зверху вниз)"
+                      >
+                        <ArrowDownUp className="w-3.5 h-3.5" />
+                        <span>Вертикальне</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (orientation !== 'horizontal') {
+                            setOrientation('horizontal');
+                            setTimeout(() => focusOnPerson(activePersonId), 40);
+                          }
+                        }}
+                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                          orientation === 'horizontal'
+                            ? 'bg-amber-600 text-white shadow-xs font-bold'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                        }`}
+                        title="Широкоформатне горизонтальне дерево 16:9 (Зліва направо)"
+                      >
+                        <ArrowLeftRight className="w-3.5 h-3.5 text-amber-300" />
+                        <span>Горизонтальне 16:9</span>
+                      </button>
+                    </div>
+                  </div>
 
-                  {/* Visual Toggles */}
-                  <div className="pt-2 mt-2 border-t border-[#2d3238] space-y-1.5">
-                    <label className="flex items-center justify-between px-1 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
-                      <span>Затемнювати решту дерева</span>
-                      <input
-                        type="checkbox"
-                        checked={dimOthers}
-                        onChange={(e) => setDimOthers(e.target.checked)}
-                        className="rounded bg-[#22262a] border-slate-600 text-amber-500 focus:ring-0 cursor-pointer"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between px-1 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
-                      <span>Кольорові зв'язки за родами</span>
-                      <input
-                        type="checkbox"
-                        checked={colorLinksByClan}
-                        onChange={(e) => setColorLinksByClan(e.target.checked)}
-                        className="rounded bg-[#22262a] border-slate-600 text-emerald-500 focus:ring-0 cursor-pointer"
-                      />
-                    </label>
+                  {/* 2. Relatives & Composition */}
+                  <div className="mb-3">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 px-0.5">
+                      Склад родоводу
+                    </div>
+                    <div className="space-y-1.5">
+                      {/* Sibling Toggle: Всі родичі / Прямі */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSiblings((prev) => {
+                            const next = !prev;
+                            if (!next) {
+                              setCollapsedSiblings(new Set());
+                            }
+                            return next;
+                          });
+                        }}
+                        className={`w-full flex items-center justify-between p-2 rounded-lg text-xs border transition-all cursor-pointer ${
+                          showSiblings
+                            ? 'bg-sky-950/40 text-sky-200 border-sky-800/50 hover:bg-sky-900/50'
+                            : 'bg-[#14171a] text-slate-400 border-[#2d3238] hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Users className={`w-4 h-4 shrink-0 ${showSiblings ? 'text-sky-400' : 'text-slate-400'}`} />
+                          <div className="text-left">
+                            <div className="font-semibold text-white">
+                              {showSiblings ? 'Всі родичі' : 'Тільки пряма лінія'}
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              {showSiblings ? 'Показувати братів, сестер та кузенів' : 'Приховано бічні гілки'}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          className={`w-8 h-4 rounded-full p-0.5 transition-colors shrink-0 ${
+                            showSiblings ? 'bg-sky-600' : 'bg-slate-700'
+                          }`}
+                        >
+                          <div
+                            className={`w-3 h-3 rounded-full bg-white transition-transform ${
+                              showSiblings ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </div>
+                      </button>
+
+                      {/* Pedigree Mode: Тільки предки */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDirectAncestorsOnly((prev) => !prev);
+                          setTimeout(() => focusOnPerson(activePersonId), 50);
+                        }}
+                        className={`w-full flex items-center justify-between p-2 rounded-lg text-xs border transition-all cursor-pointer ${
+                          directAncestorsOnly
+                            ? 'bg-indigo-950/40 text-indigo-200 border-indigo-800/50 hover:bg-indigo-900/50'
+                            : 'bg-[#14171a] text-slate-400 border-[#2d3238] hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <GitCommit className={`w-4 h-4 shrink-0 ${directAncestorsOnly ? 'text-indigo-400' : 'text-slate-400'}`} />
+                          <div className="text-left">
+                            <div className="font-semibold text-white">Тільки предки (Pedigree)</div>
+                            <div className="text-[10px] text-slate-400">
+                              {directAncestorsOnly ? 'Лише прямі висхідні предки' : 'Висхідна та низхідна лінії'}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          className={`w-8 h-4 rounded-full p-0.5 transition-colors shrink-0 ${
+                            directAncestorsOnly ? 'bg-indigo-600' : 'bg-slate-700'
+                          }`}
+                        >
+                          <div
+                            className={`w-3 h-3 rounded-full bg-white transition-transform ${
+                              directAncestorsOnly ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </div>
+                      </button>
+
+                      {/* Unfold Collapsed Branches */}
+                      {collapsedSiblings.size > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setCollapsedSiblings(new Set())}
+                          className="w-full flex items-center justify-between p-2 rounded-lg text-xs border bg-amber-950/60 text-amber-300 border-amber-600/70 hover:bg-amber-900/70 transition-all cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Plus className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span className="font-semibold">Розгорнути згорнуті гілки</span>
+                          </div>
+                          <span className="px-1.5 py-0.5 rounded bg-amber-600 text-white font-bold text-[10px]">
+                            {collapsedSiblings.size}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 3. Display Modes */}
+                  <div className="mb-3">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 px-0.5">
+                      Режим відображення
+                    </div>
+                    <div className="space-y-1.5">
+                      {/* Compact Mode: Компактно */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCompact((prev) => !prev);
+                          setTimeout(() => focusOnPerson(activePersonId), 50);
+                        }}
+                        className={`w-full flex items-center justify-between p-2 rounded-lg text-xs border transition-all cursor-pointer ${
+                          isCompact
+                            ? 'bg-emerald-950/40 text-emerald-200 border-emerald-800/50 hover:bg-emerald-900/50'
+                            : 'bg-[#14171a] text-slate-400 border-[#2d3238] hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Minimize2 className={`w-4 h-4 shrink-0 ${isCompact ? 'text-emerald-400' : 'text-slate-400'}`} />
+                          <div className="text-left">
+                            <div className="font-semibold text-white">Компактні картки</div>
+                            <div className="text-[10px] text-slate-400">
+                              {isCompact ? 'Картки стиснуто (~70px замість ~175px)' : 'Повний вигляд карток'}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          className={`w-8 h-4 rounded-full p-0.5 transition-colors shrink-0 ${
+                            isCompact ? 'bg-emerald-600' : 'bg-slate-700'
+                          }`}
+                        >
+                          <div
+                            className={`w-3 h-3 rounded-full bg-white transition-transform ${
+                              isCompact ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </div>
+                      </button>
+
+                      {/* Hover Bloodline: Лінія роду */}
+                      <button
+                        type="button"
+                        onClick={() => setEnableBloodlineHover((prev) => !prev)}
+                        className={`w-full flex items-center justify-between p-2 rounded-lg text-xs border transition-all cursor-pointer ${
+                          enableBloodlineHover
+                            ? 'bg-amber-950/40 text-amber-200 border-amber-800/50 hover:bg-amber-900/50'
+                            : 'bg-[#14171a] text-slate-400 border-[#2d3238] hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Zap
+                            className={`w-4 h-4 shrink-0 ${
+                              enableBloodlineHover ? 'text-amber-400 fill-amber-400/40' : 'text-slate-400'
+                            }`}
+                          />
+                          <div className="text-left">
+                            <div className="font-semibold text-white">Підсвітка лінії роду (Hover)</div>
+                            <div className="text-[10px] text-slate-400">
+                              {enableBloodlineHover ? 'Виділяє предків та нащадків при наведенні' : 'Підсвітка вимкнена'}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          className={`w-8 h-4 rounded-full p-0.5 transition-colors shrink-0 ${
+                            enableBloodlineHover ? 'bg-amber-600' : 'bg-slate-700'
+                          }`}
+                        >
+                          <div
+                            className={`w-3 h-3 rounded-full bg-white transition-transform ${
+                              enableBloodlineHover ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 4. Focus Lines & Clans */}
+                  <div className="pt-2.5 border-t border-[#2d3238]">
+                    <div className="flex items-center justify-between mb-1.5 px-0.5">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Фокус ліній та родів
+                      </div>
+                      {focusType !== 'none' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFocusType('none');
+                            setSelectedClanId(null);
+                          }}
+                          className="text-[10px] text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                        >
+                          Скинути фокус
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFocusType(focusType === 'direct-ancestors' ? 'none' : 'direct-ancestors')
+                        }
+                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs transition-colors cursor-pointer border ${
+                          focusType === 'direct-ancestors'
+                            ? 'bg-amber-500/20 text-amber-300 font-bold border-amber-500/60'
+                            : 'bg-[#14171a] text-slate-300 border-[#2d3238] hover:bg-[#252a30] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-amber-400">👑</span>
+                        <span className="truncate">Прямі предки</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFocusType(focusType === 'direct-descendants' ? 'none' : 'direct-descendants')
+                        }
+                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs transition-colors cursor-pointer border ${
+                          focusType === 'direct-descendants'
+                            ? 'bg-emerald-500/20 text-emerald-300 font-bold border-emerald-500/60'
+                            : 'bg-[#14171a] text-slate-300 border-[#2d3238] hover:bg-[#252a30] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-emerald-400">👶</span>
+                        <span className="truncate">Прямі нащадки</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFocusType(focusType === 'patrilineal' ? 'none' : 'patrilineal')
+                        }
+                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs transition-colors cursor-pointer border ${
+                          focusType === 'patrilineal'
+                            ? 'bg-sky-500/20 text-sky-300 font-bold border-sky-500/60'
+                            : 'bg-[#14171a] text-slate-300 border-[#2d3238] hover:bg-[#252a30] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-sky-400">♂️</span>
+                        <span className="truncate">Чоловіча лінія</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFocusType(focusType === 'matrilineal' ? 'none' : 'matrilineal')
+                        }
+                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs transition-colors cursor-pointer border ${
+                          focusType === 'matrilineal'
+                            ? 'bg-rose-500/20 text-rose-300 font-bold border-rose-500/60'
+                            : 'bg-[#14171a] text-slate-300 border-[#2d3238] hover:bg-[#252a30] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-rose-400">♀️</span>
+                        <span className="truncate">Жіноча лінія</span>
+                      </button>
+                    </div>
+
+                    {availableClans.length > 0 && (
+                      <div className="mb-2">
+                        <div className="text-[10px] text-slate-400 mb-1 px-0.5">Виділити рід (прізвище):</div>
+                        <select
+                          value={selectedClanId || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val) {
+                              setSelectedClanId(val);
+                              setFocusType('clan');
+                            } else {
+                              setSelectedClanId(null);
+                              if (focusType === 'clan') setFocusType('none');
+                            }
+                          }}
+                          className="w-full bg-[#14171a] border border-[#2d3238] text-xs text-slate-200 rounded-lg p-1.5 focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">Без вибору роду</option>
+                          {availableClans.map((clan) => (
+                            <option key={clan.id} value={clan.id}>
+                              {clan.name} ({clan.count} осіб)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="pt-2 border-t border-[#2d3238] space-y-1.5">
+                      <label className="flex items-center justify-between px-1 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
+                        <span>Затемнювати решту дерева</span>
+                        <input
+                          type="checkbox"
+                          checked={dimOthers}
+                          onChange={(e) => setDimOthers(e.target.checked)}
+                          className="rounded bg-[#22262a] border-slate-600 text-amber-500 focus:ring-0 cursor-pointer"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between px-1 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
+                        <span>Кольорові зв'язки за родами</span>
+                        <input
+                          type="checkbox"
+                          checked={colorLinksByClan}
+                          onChange={(e) => setColorLinksByClan(e.target.checked)}
+                          className="rounded bg-[#22262a] border-slate-600 text-emerald-500 focus:ring-0 cursor-pointer"
+                        />
+                      </label>
+                    </div>
                   </div>
                 </div>
               )}
             </div>
+
+
+
+
           </div>
 
           {/* Right cluster of Row 1: Theme, Export, Person Report */}
@@ -1945,7 +2336,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             {visibleLinks.map((link) => {
               const pathData = link.path || `M ${link.sourceX} ${link.sourceY} L ${link.targetX} ${link.targetY}`;
               const isMarriage = link.type === 'marriage';
-              const isHovered = Boolean(
+              const isDirectHovered = Boolean(
                 hoveredPersonId && (
                   link.sourcePersonId === hoveredPersonId ||
                   link.targetPersonId === hoveredPersonId ||
@@ -1954,11 +2345,44 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 )
               );
 
-              const isLinkFocused = focusType !== 'none' && focusedLinkIds.has(link.id);
-              const isDimmed = focusType !== 'none' && !isLinkFocused && dimOthers;
+              const isLinkInBloodline = bloodlineData.isActive && bloodlineData.bloodlineLinkIds.has(link.id);
+              const isLinkFocused = (focusType !== 'none' && focusedLinkIds.has(link.id)) || isLinkInBloodline;
+              const isDimmed = bloodlineData.isActive
+                ? !isLinkInBloodline
+                : (focusType !== 'none' && !isLinkFocused && dimOthers);
 
-              // Color resolution
-              let defaultColor = link.color || (isMarriage ? '#a1a1aa' : '#0284c7');
+              // Distinct Marriage styling vs Descent Lineage styling
+              const isDivorced = Boolean(
+                link.marriageStatus && (
+                  link.marriageStatus.toLowerCase().includes('divorc') ||
+                  link.marriageStatus.toLowerCase().includes('розлуч')
+                )
+              );
+
+              // Marriage double-line calculation with exact perpendicular offset
+              const dx = link.targetX - link.sourceX;
+              const dy = link.targetY - link.sourceY;
+              const len = Math.hypot(dx, dy) || 1;
+              const offsetX = (-dy / len) * 2.2;
+              const offsetY = (dx / len) * 2.2;
+              const doublePathA = `M ${link.sourceX + offsetX} ${link.sourceY + offsetY} L ${link.targetX + offsetX} ${link.targetY + offsetY}`;
+              const doublePathB = `M ${link.sourceX - offsetX} ${link.sourceY - offsetY} L ${link.targetX - offsetX} ${link.targetY - offsetY}`;
+              const midX = (link.sourceX + link.targetX) / 2;
+              const midY = (link.sourceY + link.targetY) / 2;
+
+              // Marriage stroke color (warm romantic burgundy/rose gold, or golden bloodline)
+              const marriageColor = (isLinkFocused || isLinkInBloodline)
+                ? (bloodlineData.isActive ? bloodlineData.bloodlineColor : focusColor)
+                : isDirectHovered
+                ? '#f43f5e'
+                : isDivorced
+                ? '#9f1239'
+                : isLightCanvas
+                ? '#be123c'
+                : '#fb7185';
+
+              // Descent line color (stem, bus, drop, orthogonal)
+              let defaultDescentColor = link.color || (isLightCanvas ? '#0284c7' : '#38bdf8');
               if (colorLinksByClan) {
                 const pTarget = link.childPersonId
                   ? database.persons[link.childPersonId]
@@ -1966,80 +2390,127 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   ? database.persons[link.targetPersonId]
                   : null;
                 if (pTarget) {
-                  defaultColor = getPersonClanColor(pTarget, lineageColorMap);
+                  defaultDescentColor = getPersonClanColor(pTarget, lineageColorMap);
                 }
               }
-              const strokeColor = isLinkFocused ? focusColor : isHovered ? '#38bdf8' : defaultColor;
-              const strokeWidth = isLinkFocused
-                ? (isMarriage ? 4.0 : 3.6)
-                : isHovered
-                ? (isMarriage ? 3.5 : 3.2)
-                : (isMarriage ? 2 : 2.2);
 
-              const opacity = isDimmed
-                ? 0.14
-                : isLinkFocused
-                ? 1.0
-                : hoveredPersonId
-                ? (isHovered ? 1 : 0.35)
-                : 0.95;
+              const descentColor = (isLinkFocused || isLinkInBloodline)
+                ? (bloodlineData.isActive ? bloodlineData.bloodlineColor : focusColor)
+                : isDirectHovered
+                ? '#38bdf8'
+                : defaultDescentColor;
+
+              const descentStrokeWidth = (isLinkFocused || isLinkInBloodline)
+                ? 3.8
+                : isDirectHovered
+                ? 3.2
+                : 2.2;
+
+              // Bloodline dimming: exactly 30% (0.30) opacity when bloodline hover is active!
+              const opacity = bloodlineData.isActive
+                ? (isLinkInBloodline ? 1.0 : 0.30)
+                : (isDimmed ? 0.14 : isLinkFocused ? 1.0 : 0.95);
 
               return (
                 <g key={link.id} opacity={opacity} className="transition-opacity duration-200">
-                  {/* Glowing halo background on focused link or hovered link */}
-                  {(isLinkFocused || isHovered) && (
-                    <path
-                      d={pathData}
-                      fill="none"
-                      stroke={isLinkFocused ? focusColor : '#38bdf8'}
-                      strokeWidth={strokeWidth + 5}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      opacity={isLinkFocused ? 0.45 : 0.35}
-                    />
-                  )}
-                  <path
-                    d={pathData}
-                    fill="none"
-                    stroke={strokeColor}
-                    strokeWidth={strokeWidth}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  {/* Marriage central connector badge */}
-                  {/* Marriage link midpoint symbol / indicator */}
-                  {isMarriage && (
+                  {isMarriage ? (
                     <g>
-                      <circle
-                        cx={(link.sourceX + link.targetX) / 2}
-                        cy={link.sourceY}
-                        r={isLinkFocused ? 8.5 : 7}
-                        fill="#1e2226"
-                        stroke={isLinkFocused ? focusColor : '#a1a1aa'}
-                        strokeWidth={isLinkFocused ? 2.5 : 1.5}
+                      {/* Marriage glowing halo when highlighted */}
+                      {(isLinkFocused || isLinkInBloodline || isDirectHovered) && (
+                        <path
+                          d={pathData}
+                          fill="none"
+                          stroke={marriageColor}
+                          strokeWidth={10}
+                          strokeLinecap="round"
+                          opacity={isLinkInBloodline ? 0.55 : 0.38}
+                        />
+                      )}
+                      {/* Double parallel line for marriage (distinct wedding bond) */}
+                      <path
+                        d={doublePathA}
+                        fill="none"
+                        stroke={marriageColor}
+                        strokeWidth={isLinkInBloodline ? 2.6 : 1.8}
+                        strokeDasharray={isDivorced ? '4 3' : undefined}
+                        strokeLinecap="round"
                       />
-                      <text
-                        x={(link.sourceX + link.targetX) / 2}
-                        y={link.sourceY + 3}
-                        fontSize="8"
-                        textAnchor="middle"
-                        fill={isLinkFocused ? '#ffffff' : '#cbd5e1'}
-                        fontWeight="bold"
-                      >
-                        {link.marriageOrder || '1'}
-                      </text>
+                      <path
+                        d={doublePathB}
+                        fill="none"
+                        stroke={marriageColor}
+                        strokeWidth={isLinkInBloodline ? 2.6 : 1.8}
+                        strokeDasharray={isDivorced ? '4 3' : undefined}
+                        strokeLinecap="round"
+                      />
+                      {/* Marriage midpoint emblem / rings badge */}
+                      <g>
+                        <circle
+                          cx={midX}
+                          cy={midY}
+                          r={isLinkInBloodline ? 8.5 : 7.5}
+                          fill={isLightCanvas ? '#ffffff' : '#1e2226'}
+                          stroke={marriageColor}
+                          strokeWidth={isLinkInBloodline ? 2.4 : 1.6}
+                          className="shadow-xs"
+                        />
+                        <text
+                          x={midX}
+                          y={midY + 2.5}
+                          fontSize="7.5"
+                          textAnchor="middle"
+                          fill={isLinkInBloodline ? '#f59e0b' : (isLightCanvas ? '#be123c' : '#fda4af')}
+                          fontWeight="bold"
+                        >
+                          {isDivorced ? '≠' : (link.marriageOrder && link.marriageOrder > 1 ? `№${link.marriageOrder}` : '💍')}
+                        </text>
+                      </g>
                     </g>
-                  )}
-                  {/* Matching arrowhead in family lineage color */}
-                  {link.arrow === 'down' && (
-                    <path
-                      d={`M ${link.targetX - 4.5} ${link.targetY - 7} L ${link.targetX} ${link.targetY - 0.5} L ${link.targetX + 4.5} ${link.targetY - 7}`}
-                      fill="none"
-                      stroke={strokeColor}
-                      strokeWidth={strokeWidth}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
+                  ) : (
+                    <g>
+                      {/* Descent glowing halo background on focused link or bloodline */}
+                      {(isLinkFocused || isLinkInBloodline || isDirectHovered) && (
+                        <path
+                          d={pathData}
+                          fill="none"
+                          stroke={descentColor}
+                          strokeWidth={descentStrokeWidth + 6}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          opacity={isLinkInBloodline ? 0.60 : 0.40}
+                        />
+                      )}
+                      {/* Descent single solid lineage branch */}
+                      <path
+                        d={pathData}
+                        fill="none"
+                        stroke={descentColor}
+                        strokeWidth={descentStrokeWidth}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {/* Matching arrowhead pointing to child */}
+                      {link.arrow === 'down' && (
+                        <path
+                          d={`M ${link.targetX - 4.5} ${link.targetY - 7} L ${link.targetX} ${link.targetY - 0.5} L ${link.targetX + 4.5} ${link.targetY - 7}`}
+                          fill="none"
+                          stroke={descentColor}
+                          strokeWidth={descentStrokeWidth}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      )}
+                      {link.arrow === 'right' && (
+                        <path
+                          d={`M ${link.targetX - 7} ${link.targetY - 4.5} L ${link.targetX - 0.5} ${link.targetY} L ${link.targetX - 7} ${link.targetY + 4.5}`}
+                          fill="none"
+                          stroke={descentColor}
+                          strokeWidth={descentStrokeWidth}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      )}
+                    </g>
                   )}
                 </g>
               );
@@ -2091,8 +2562,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
               return lifespanStr;
             })();
 
-            const isNodeFocused = focusType === 'none' || focusedPersonIds.has(p.id);
-            const isDimmed = focusType !== 'none' && !isNodeFocused && dimOthers;
+            const isNodeInBloodline = bloodlineData.isActive && bloodlineData.bloodlinePersonIds.has(p.id);
+            const isHoveredTarget = bloodlineData.isActive && hoveredPersonId === p.id;
+            const isAncestorOfHovered = bloodlineData.isActive && bloodlineData.ancestorIds.has(p.id);
+            const isDescendantOfHovered = bloodlineData.isActive && bloodlineData.descendantIds.has(p.id);
+
+            const isNodeFocused = (focusType === 'none' || focusedPersonIds.has(p.id)) || isNodeInBloodline;
+            const isDimmed = bloodlineData.isActive
+              ? !isNodeInBloodline
+              : (focusType !== 'none' && !isNodeFocused && dimOthers);
 
             // LOD Tier 2: Ultra-distant zoom (< 28%) - Micro Marker Panorama
             if (isMicroLOD) {
@@ -2106,7 +2584,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     width: `${node.width}px`,
                     height: `${node.height}px`,
                     contain: 'paint layout',
-                    opacity: isDimmed ? 0.18 : 1,
+                    opacity: bloodlineData.isActive ? (isNodeInBloodline ? 1 : 0.30) : (isDimmed ? 0.18 : 1),
                     filter: isDimmed ? 'grayscale(50%)' : 'none',
                     transition: 'opacity 0.25s ease'
                   }}
@@ -2119,8 +2597,14 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   {/* Micro Pill Marker */}
                   <div
                     style={{
-                      backgroundColor: clanColor || (isMale ? '#0284c7' : isFemale ? '#e11d48' : '#475569'),
-                      boxShadow: isNodeFocused && focusType !== 'none' ? `0 0 16px ${focusColor}` : undefined
+                      backgroundColor: isNodeInBloodline
+                        ? bloodlineData.bloodlineColor
+                        : (clanColor || (isMale ? '#0284c7' : isFemale ? '#e11d48' : '#475569')),
+                      boxShadow: isNodeInBloodline
+                        ? `0 0 18px ${bloodlineData.bloodlineColor}`
+                        : isNodeFocused && focusType !== 'none'
+                        ? `0 0 16px ${focusColor}`
+                        : undefined
                     }}
                     onMouseEnter={() => setHoveredPersonId(p.id)}
                     onMouseLeave={() => setHoveredPersonId(null)}
@@ -2135,7 +2619,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       onSelectPerson(p.id);
                     }}
                     className={`pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[142px] h-[34px] rounded-full px-2.5 shadow-lg flex items-center justify-between gap-1 cursor-pointer transition-transform duration-100 hover:scale-110 hover:z-30 text-white border ${
-                      isNodeFocused && focusType !== 'none'
+                      isNodeInBloodline
+                        ? 'ring-4 ring-white border-amber-300 scale-105 z-20 font-bold'
+                        : isNodeFocused && focusType !== 'none'
                         ? 'ring-4 ring-white border-amber-300 scale-105'
                         : isRoot
                         ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/70 border-white/30'
@@ -2175,7 +2661,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     width: `${node.width}px`,
                     height: `${node.height}px`,
                     contain: 'paint layout',
-                    opacity: isDimmed ? 0.20 : 1,
+                    opacity: bloodlineData.isActive ? (isNodeInBloodline ? 1 : 0.30) : (isDimmed ? 0.20 : 1),
                     filter: isDimmed ? 'grayscale(45%)' : 'none',
                     transition: 'opacity 0.25s ease'
                   }}
@@ -2188,14 +2674,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   {/* Compact Colored Capsule Card */}
                   <div
                     style={{
-                      borderColor: isNodeFocused && focusType !== 'none'
+                      borderColor: isNodeInBloodline
+                        ? bloodlineData.bloodlineColor
+                        : isNodeFocused && focusType !== 'none'
                         ? focusColor
                         : isRoot
                         ? '#f59e0b'
                         : (isMale ? '#38bdf8' : isFemale ? '#f472b6' : cardBorderColor),
                       borderLeftWidth: '4px',
-                      borderLeftColor: clanColor || (isMale ? '#0284c7' : '#e11d48'),
-                      boxShadow: isNodeFocused && focusType !== 'none' ? `0 0 16px ${focusColor}60` : undefined
+                      borderLeftColor: isNodeInBloodline
+                        ? bloodlineData.bloodlineColor
+                        : (clanColor || (isMale ? '#0284c7' : '#e11d48')),
+                      boxShadow: isNodeInBloodline
+                        ? `0 0 18px ${bloodlineData.bloodlineColor}80`
+                        : isNodeFocused && focusType !== 'none'
+                        ? `0 0 16px ${focusColor}60`
+                        : undefined
                     }}
                     onMouseEnter={() => setHoveredPersonId(p.id)}
                     onMouseLeave={() => setHoveredPersonId(null)}
@@ -2222,7 +2716,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         ? 'bg-gradient-to-r from-[#3e132c] to-[#541a3c] text-rose-100 hover:border-rose-400'
                         : 'bg-[#22262a] text-slate-100 hover:border-slate-400'
                     } ${
-                      isNodeFocused && focusType !== 'none'
+                      isNodeInBloodline
+                        ? 'ring-2 ring-amber-300 scale-105 z-20'
+                        : isNodeFocused && focusType !== 'none'
                         ? 'ring-2 ring-white scale-105'
                         : isRoot
                         ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/40 shadow-lg'
@@ -2307,22 +2803,30 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   top: `${node.y}px`,
                   width: `${node.width}px`,
                   height: `${node.height}px`,
-                  borderColor: isNodeFocused && focusType !== 'none' ? focusColor : cardBorderColor,
-                  borderWidth: isNodeFocused && focusType !== 'none' ? '2px' : '1px',
+                  borderColor: isNodeInBloodline
+                    ? bloodlineData.bloodlineColor
+                    : isNodeFocused && focusType !== 'none'
+                    ? focusColor
+                    : cardBorderColor,
+                  borderWidth: isNodeInBloodline ? '2.5px' : (isNodeFocused && focusType !== 'none' ? '2px' : '1px'),
                   borderStyle: 'solid',
-                  opacity: isDimmed ? 0.22 : 1,
+                  opacity: bloodlineData.isActive ? (isNodeInBloodline ? 1 : 0.30) : (isDimmed ? 0.22 : 1),
                   filter: isDimmed ? 'grayscale(45%)' : 'none',
-                  boxShadow: isNodeFocused && focusType !== 'none' ? `0 0 20px ${focusColor}40` : undefined,
+                  boxShadow: isNodeInBloodline
+                    ? `0 0 22px ${bloodlineData.bloodlineColor}80`
+                    : (isNodeFocused && focusType !== 'none' ? `0 0 20px ${focusColor}40` : undefined),
                   transition: 'opacity 0.25s ease, filter 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease'
                 }}
                 onMouseEnter={() => setHoveredPersonId(p.id)}
                 onMouseLeave={() => setHoveredPersonId(null)}
-                className={`group rounded-xl transition-all cursor-pointer flex flex-col justify-between p-3 select-none relative shadow-xl ${
+                className={`group rounded-xl transition-all cursor-pointer flex flex-col justify-between ${isCompact ? 'p-2' : 'p-3'} select-none relative shadow-xl ${
                   isLightCanvas
                     ? 'bg-white text-neutral-900 shadow-md hover:shadow-lg'
                     : 'bg-[#22262a] text-white shadow-black/40'
                 } ${
-                  isNodeFocused && focusType !== 'none'
+                  isNodeInBloodline
+                    ? 'ring-2 ring-amber-300 shadow-amber-500/30'
+                    : isNodeFocused && focusType !== 'none'
                     ? 'ring-2 ring-white/70'
                     : isRoot
                     ? isFemale
@@ -2338,6 +2842,25 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 }}
                 title={p.id === activePersonId ? 'Поточна особа' : 'Зробити фокусом дерева'}
               >
+                {/* Bloodline highlight role badge on hover */}
+                {bloodlineData.isActive && isNodeInBloodline && (
+                  <span
+                    className="absolute -top-2.5 right-3 z-10 px-2 py-0.5 rounded-full font-bold text-[9.5px] flex items-center gap-1 shadow-md border border-white/60 ring-1 select-none animate-in fade-in"
+                    style={{
+                      backgroundColor: bloodlineData.bloodlineColor,
+                      color: '#000000'
+                    }}
+                    title={
+                      isHoveredTarget
+                        ? 'Особа у фокусі наведення'
+                        : isAncestorOfHovered
+                        ? 'Прямий предок вибраної особи'
+                        : 'Прямий нащадок вибраної особи'
+                    }
+                  >
+                    <span>{isHoveredTarget ? '⭐ Фокус' : isAncestorOfHovered ? '▲ Предок' : '▼ Нащадок'}</span>
+                  </span>
+                )}
                 {/* Root Person Indicator Badge */}
                 {isTreeRoot && (
                   <span
@@ -2364,8 +2887,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   </span>
                 )}
 
-                {/* Clan / Rod tag pill at top-left (if not root badge) */}
-                {canonicalRod && canonicalRod !== 'Рід' && !isTreeRoot && (
+                {/* Clan / Rod tag pill at top-left (if not root badge) - hidden in compact mode to preserve space */}
+                {canonicalRod && canonicalRod !== 'Рід' && !isTreeRoot && !isCompact && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -2414,8 +2937,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   </button>
                 )}
 
-                {/* Top Quick-Add (+) Button in corner (Hidden in read-only mode) */}
-                {!isReadOnly && (
+                {/* Top Quick-Add (+) Button in corner (Hidden in read-only mode or compact mode) */}
+                {!isReadOnly && !isCompact && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -2436,7 +2959,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   </button>
                 )}
 
-                {/* Top Collapse/Expand Parents Branch Badge ([-]/[+]) */}
+                {/* Top/Left Collapse/Expand Parents Branch Badge ([-]/[+]) */}
                 {node.hasParents && (
                   <button
                     type="button"
@@ -2444,7 +2967,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       e.stopPropagation();
                       toggleCollapseParents(p.id, node.isParentsCollapsed);
                     }}
-                    className={`absolute -top-2.5 left-1/2 -translate-x-1/2 z-10 h-5 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
+                    className={`absolute ${
+                      orientation === 'horizontal'
+                        ? '-left-2.5 top-1/2 -translate-y-1/2'
+                        : '-top-2.5 left-1/2 -translate-x-1/2'
+                    } z-10 h-5 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
                       node.isParentsCollapsed
                         ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 scale-105'
                         : isLightCanvas
@@ -2465,212 +2992,317 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   </button>
                 )}
 
-                {/* Centered Avatar (Image 2 style) */}
-                <div className="flex flex-col items-center mt-1">
-                  <div className="relative">
-                    {isMasked ? (
-                      <div
-                        className={`w-12 h-12 rounded-full flex items-center justify-center border shadow-inner ${
-                          isLightCanvas
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                            : 'bg-emerald-950/80 border-emerald-700/60 text-emerald-400'
-                        }`}
-                        title="Дані живої особи захищено (доступно для білого списку)"
-                      >
-                        <Lock className="w-5 h-5" />
-                      </div>
-                    ) : p.avatarUrl || p.photoUrl ? (
-                      <img
-                        src={p.avatarUrl || p.photoUrl}
-                        alt={firstName}
-                        className="w-12 h-12 rounded-full object-cover border-2 border-[#47515c] shadow-md"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div
-                        className={`w-12 h-12 rounded-full flex items-center justify-center border shadow-inner ${
-                          isMale
-                            ? 'bg-[#0f4f6e] border-[#0284c7]/50 text-[#38bdf8]'
-                            : isFemale
-                            ? 'bg-[#6d1b4a] border-[#e11d48]/50 text-[#f472b6]'
-                            : isLightCanvas
-                            ? 'bg-slate-200 border-slate-300 text-slate-700'
-                            : 'bg-slate-700 border-slate-600 text-slate-300'
-                        }`}
-                      >
-                        <User className="w-6 h-6 stroke-[1.8]" />
-                      </div>
-                    )}
-                    {isRoot && (
-                      <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#22262a]" />
-                    )}
-                  </div>
-
-                  {/* Spouse Status Indicator (if divorced or widowed) */}
-                  {node.isSpouseNode && (node.marriageStatus === 'Divorced' || node.marriageStatus === 'Widowed') && (
-                    <div className="flex items-center justify-center gap-1 mt-1 flex-wrap">
-                      {node.marriageStatus === 'Divorced' && (
-                        <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-rose-950/80 border border-rose-800 text-rose-300">
-                          💔 Розлучення
-                        </span>
-                      )}
-                      {node.marriageStatus === 'Widowed' && (
-                        <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-stone-800 border border-stone-600 text-stone-300">
-                          ✝️ Вдівство
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Name & Genealogical Information */}
-                <div className="text-center my-auto px-0.5">
-                  {/* First Name */}
-                  <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
-                    isLightCanvas
-                      ? 'text-neutral-900 group-hover:text-emerald-700 font-bold'
-                      : 'text-white group-hover:text-emerald-400 font-bold'
-                  }`}>
-                    {firstName}
-                  </h4>
-                  {/* Last Name */}
-                  <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
-                    isLightCanvas
-                      ? 'text-neutral-900 group-hover:text-emerald-700 font-bold'
-                      : 'text-white group-hover:text-emerald-400 font-bold'
-                  }`}>
-                    {lastName}
-                  </h4>
-
-                  {/* Lifespan */}
-                  <div className={`text-[11px] mt-1.5 font-medium tracking-tight ${
-                    isLightCanvas ? 'text-neutral-700 font-semibold' : 'text-[#94a3b8]'
-                  }`}>
-                    {lifespanStr}
-                  </div>
-
-                  {/* FamilySearch-style unique ID code */}
-                  <div className={`text-[10px] font-mono tracking-wider mt-0.5 ${
-                    isLightCanvas ? 'text-neutral-600 font-medium' : 'text-[#64748b]'
-                  }`}>
-                    {fsCode}
-                  </div>
-
-                  {/* Multiple Hashtags Pill List */}
-                  {p.tags && p.tags.length > 0 && (
-                    <div className="flex items-center justify-center gap-1 mt-1 flex-wrap overflow-hidden max-h-[36px]">
-                      {p.tags.slice(0, 2).map((tag, tIdx) => {
-                        const clean = tag.replace(/^#+/, '');
-                        return (
-                          <span
-                            key={tIdx}
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-semibold truncate max-w-[70px] ${
-                              isLightCanvas
-                                ? 'bg-amber-100 text-amber-900 border border-amber-300/80'
-                                : 'bg-amber-950/50 text-amber-300 border border-amber-800/60'
-                            }`}
-                            title={`#${clean}`}
-                          >
-                            #{clean}
-                          </span>
-                        );
-                      })}
-                      {p.tags.length > 2 && (
-                        <span
-                          className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                {isCompact ? (
+                  /* Compact / Dense View: ПІБ, роки життя, стать, без надлишкових ID-кодів і великих відступів */
+                  <div className="flex items-center gap-2 h-full my-auto px-1 min-w-0">
+                    {/* Small avatar or gender badge */}
+                    <div className="relative shrink-0">
+                      {isMasked ? (
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center border shadow-xs ${
                             isLightCanvas
-                              ? 'bg-stone-200 text-stone-700'
-                              : 'bg-slate-800 text-slate-400'
+                              ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                              : 'bg-emerald-950/80 border-emerald-700/60 text-emerald-400'
                           }`}
-                          title={p.tags.map((t) => `#${t.replace(/^#+/, '')}`).join(', ')}
+                          title="Дані живої особи захищено"
                         >
-                          +{p.tags.length - 2}
-                        </span>
+                          <Lock className="w-3.5 h-3.5" />
+                        </div>
+                      ) : p.avatarUrl || p.photoUrl ? (
+                        <img
+                          src={p.avatarUrl || p.photoUrl}
+                          alt={firstName}
+                          className="w-7 h-7 rounded-full object-cover border border-[#47515c] shadow-xs"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center border shadow-xs ${
+                            isMale
+                              ? 'bg-[#0f4f6e] border-[#0284c7]/50 text-[#38bdf8]'
+                              : isFemale
+                              ? 'bg-[#6d1b4a] border-[#e11d48]/50 text-[#f472b6]'
+                              : isLightCanvas
+                              ? 'bg-slate-200 border-slate-300 text-slate-700'
+                              : 'bg-slate-700 border-slate-600 text-slate-300'
+                          }`}
+                        >
+                          <User className="w-3.5 h-3.5 stroke-[1.8]" />
+                        </div>
+                      )}
+                      {isRoot && (
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full border border-[#22262a]" />
                       )}
                     </div>
-                  )}
-                </div>
 
-                {/* Bottom Source & Document Badges (Image 2 style) */}
-                <div className={`flex items-center justify-center gap-1.5 pt-1.5 border-t ${
-                  isLightCanvas ? 'border-stone-200' : 'border-[#2e343c]'
-                }`}>
-                  {isMasked ? (
-                    <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold py-0.5">
-                      <Shield className="w-3.5 h-3.5" />
-                      <span>Захищено</span>
+                    {/* Full Name + Lifespan + Sex */}
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <div className="flex items-center justify-between gap-1 min-w-0">
+                        <h4
+                          className={`font-bold text-[12px] leading-tight truncate transition-colors ${
+                            isLightCanvas
+                              ? 'text-neutral-900 group-hover:text-emerald-700'
+                              : 'text-white group-hover:text-emerald-400'
+                          }`}
+                          title={`${lastName} ${firstName}`}
+                        >
+                          {lastName} {firstName !== '—' ? firstName : ''}
+                        </h4>
+                        {!isMasked && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelectPerson(p.id);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-opacity shrink-0 cursor-pointer"
+                            title="Редагувати особу"
+                          >
+                            <Pencil className="w-2.5 h-2.5 text-slate-400 hover:text-white" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-1 mt-0.5 min-w-0">
+                        <span
+                          className={`text-[10px] font-mono truncate font-medium ${
+                            isLightCanvas ? 'text-neutral-700' : 'text-[#94a3b8]'
+                          }`}
+                        >
+                          {shortLifespan || lifespanStr}
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {node.isSpouseNode && node.marriageStatus === 'Divorced' && (
+                            <span title="Розлучення" className="text-[9px]">💔</span>
+                          )}
+                          {node.isSpouseNode && node.marriageStatus === 'Widowed' && (
+                            <span title="Вдівство" className="text-[9px]">✝️</span>
+                          )}
+                          <span
+                            className={`text-[9px] font-semibold px-1 rounded shrink-0 ${
+                              isMale
+                                ? 'text-sky-400 bg-sky-950/40 border border-sky-800/40'
+                                : isFemale
+                                ? 'text-rose-400 bg-rose-950/40 border border-rose-800/40'
+                                : 'text-slate-400'
+                            }`}
+                          >
+                            {isMale ? 'чол.' : isFemale ? 'жін.' : ''}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                  ) : (
-                    <>
-                      {/* Person Card / Edit Badge (Pencil icon to open/edit person card) */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectPerson(p.id);
-                        }}
-                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
-                          isLightCanvas
-                            ? 'bg-sky-50 hover:bg-sky-600 text-sky-800 hover:text-white border-sky-300'
-                            : 'bg-[#0e7490]/30 hover:bg-sky-600 text-[#38bdf8] hover:text-white border-[#0e7490]/50'
-                        }`}
-                        title="Картка особи (редагування)"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Centered Avatar (Image 2 style) */}
+                    <div className="flex flex-col items-center mt-1">
+                      <div className="relative">
+                        {isMasked ? (
+                          <div
+                            className={`w-12 h-12 rounded-full flex items-center justify-center border shadow-inner ${
+                              isLightCanvas
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                                : 'bg-emerald-950/80 border-emerald-700/60 text-emerald-400'
+                            }`}
+                            title="Дані живої особи захищено (доступно для білого списку)"
+                          >
+                            <Lock className="w-5 h-5" />
+                          </div>
+                        ) : p.avatarUrl || p.photoUrl ? (
+                          <img
+                            src={p.avatarUrl || p.photoUrl}
+                            alt={firstName}
+                            className="w-12 h-12 rounded-full object-cover border-2 border-[#47515c] shadow-md"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div
+                            className={`w-12 h-12 rounded-full flex items-center justify-center border shadow-inner ${
+                              isMale
+                                ? 'bg-[#0f4f6e] border-[#0284c7]/50 text-[#38bdf8]'
+                                : isFemale
+                                ? 'bg-[#6d1b4a] border-[#e11d48]/50 text-[#f472b6]'
+                                : isLightCanvas
+                                ? 'bg-slate-200 border-slate-300 text-slate-700'
+                                : 'bg-slate-700 border-slate-600 text-slate-300'
+                            }`}
+                          >
+                            <User className="w-6 h-6 stroke-[1.8]" />
+                          </div>
+                        )}
+                        {isRoot && (
+                          <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#22262a]" />
+                        )}
+                      </div>
 
-                      {/* Estate / Confession / Relatives Badge */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (onOpenRelationManager) {
-                            onOpenRelationManager(p.id);
-                          }
-                        }}
-                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
-                          isLightCanvas
-                            ? 'bg-stone-100 hover:bg-emerald-600 text-stone-700 hover:text-white border-stone-300'
-                            : 'bg-[#334155]/60 hover:bg-emerald-700/80 text-slate-300 hover:text-white border-slate-600/50'
-                        }`}
-                        title="Родинні зв'язки"
-                      >
-                        <GitFork className="w-3 h-3 rotate-90" />
-                      </button>
+                      {/* Spouse Status Indicator (if divorced or widowed) */}
+                      {node.isSpouseNode && (node.marriageStatus === 'Divorced' || node.marriageStatus === 'Widowed') && (
+                        <div className="flex items-center justify-center gap-1 mt-1 flex-wrap">
+                          {node.marriageStatus === 'Divorced' && (
+                            <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-rose-950/80 border border-rose-800 text-rose-300">
+                              💔 Розлучення
+                            </span>
+                          )}
+                          {node.marriageStatus === 'Widowed' && (
+                            <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-stone-800 border border-stone-600 text-stone-300">
+                              ✝️ Вдівство
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
 
-                      {/* Focus Line / Highlights Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (focusPersonId === p.id && focusType !== 'none') {
-                            setFocusType('none');
-                            setSelectedClanId(null);
-                          } else {
-                            setFocusPersonId(p.id);
-                            setFocusType('direct-ancestors');
-                          }
-                        }}
-                        className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
-                          focusPersonId === p.id && focusType !== 'none'
-                            ? 'bg-amber-500 text-stone-950 border-amber-300 ring-1 ring-amber-400'
-                            : isLightCanvas
-                            ? 'bg-amber-50 hover:bg-amber-600 text-amber-800 hover:text-white border-amber-300'
-                            : 'bg-amber-950/40 hover:bg-amber-600 text-amber-400 hover:text-white border-amber-800/60'
-                        }`}
-                        title={
-                          focusPersonId === p.id && focusType !== 'none'
-                            ? 'Вимкнути фокус лінії'
-                            : 'Сфокусувати пряму лінію предків'
-                        }
-                      >
-                        <Target className="w-3 h-3" />
-                      </button>
-                    </>
-                  )}
-                </div>
+                    {/* Name & Genealogical Information */}
+                    <div className="text-center my-auto px-0.5">
+                      {/* First Name */}
+                      <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
+                        isLightCanvas
+                          ? 'text-neutral-900 group-hover:text-emerald-700 font-bold'
+                          : 'text-white group-hover:text-emerald-400 font-bold'
+                      }`}>
+                        {firstName}
+                      </h4>
+                      {/* Last Name */}
+                      <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
+                        isLightCanvas
+                          ? 'text-neutral-900 group-hover:text-emerald-700 font-bold'
+                          : 'text-white group-hover:text-emerald-400 font-bold'
+                      }`}>
+                        {lastName}
+                      </h4>
 
-                {/* Bottom Collapse/Expand Children Branch Badge ([-]/[+]) */}
+                      {/* Lifespan */}
+                      <div className={`text-[11px] mt-1.5 font-medium tracking-tight ${
+                        isLightCanvas ? 'text-neutral-700 font-semibold' : 'text-[#94a3b8]'
+                      }`}>
+                        {lifespanStr}
+                      </div>
+
+                      {/* FamilySearch-style unique ID code */}
+                      <div className={`text-[10px] font-mono tracking-wider mt-0.5 ${
+                        isLightCanvas ? 'text-neutral-600 font-medium' : 'text-[#64748b]'
+                      }`}>
+                        {fsCode}
+                      </div>
+
+                      {/* Multiple Hashtags Pill List */}
+                      {p.tags && p.tags.length > 0 && (
+                        <div className="flex items-center justify-center gap-1 mt-1 flex-wrap overflow-hidden max-h-[36px]">
+                          {p.tags.slice(0, 2).map((tag, tIdx) => {
+                            const clean = tag.replace(/^#+/, '');
+                            return (
+                              <span
+                                key={tIdx}
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold truncate max-w-[70px] ${
+                                  isLightCanvas
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300/80'
+                                    : 'bg-amber-950/50 text-amber-300 border border-amber-800/60'
+                                }`}
+                                title={`#${clean}`}
+                              >
+                                #{clean}
+                              </span>
+                            );
+                          })}
+                          {p.tags.length > 2 && (
+                            <span
+                              className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                                isLightCanvas
+                                  ? 'bg-stone-200 text-stone-700'
+                                  : 'bg-slate-800 text-slate-400'
+                              }`}
+                              title={p.tags.map((t) => `#${t.replace(/^#+/, '')}`).join(', ')}
+                            >
+                              +{p.tags.length - 2}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bottom Source & Document Badges (Image 2 style) */}
+                    <div className={`flex items-center justify-center gap-1.5 pt-1.5 border-t ${
+                      isLightCanvas ? 'border-stone-200' : 'border-[#2e343c]'
+                    }`}>
+                      {isMasked ? (
+                        <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold py-0.5">
+                          <Shield className="w-3.5 h-3.5" />
+                          <span>Захищено</span>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Person Card / Edit Badge (Pencil icon to open/edit person card) */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelectPerson(p.id);
+                            }}
+                            className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
+                              isLightCanvas
+                                ? 'bg-sky-50 hover:bg-sky-600 text-sky-800 hover:text-white border-sky-300'
+                                : 'bg-[#0e7490]/30 hover:bg-sky-600 text-[#38bdf8] hover:text-white border-[#0e7490]/50'
+                            }`}
+                            title="Картка особи (редагування)"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+
+                          {/* Estate / Confession / Relatives Badge */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onOpenRelationManager) {
+                                onOpenRelationManager(p.id);
+                              }
+                            }}
+                            className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
+                              isLightCanvas
+                                ? 'bg-stone-100 hover:bg-emerald-600 text-stone-700 hover:text-white border-stone-300'
+                                : 'bg-[#334155]/60 hover:bg-emerald-700/80 text-slate-300 hover:text-white border-slate-600/50'
+                            }`}
+                            title="Родинні зв'язки"
+                          >
+                            <GitFork className="w-3 h-3 rotate-90" />
+                          </button>
+
+                          {/* Focus Line / Highlights Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (focusPersonId === p.id && focusType !== 'none') {
+                                setFocusType('none');
+                                setSelectedClanId(null);
+                              } else {
+                                setFocusPersonId(p.id);
+                                setFocusType('direct-ancestors');
+                              }
+                            }}
+                            className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
+                              focusPersonId === p.id && focusType !== 'none'
+                                ? 'bg-amber-500 text-stone-950 border-amber-300 ring-1 ring-amber-400'
+                                : isLightCanvas
+                                ? 'bg-amber-50 hover:bg-amber-600 text-amber-800 hover:text-white border-amber-300'
+                                : 'bg-amber-950/40 hover:bg-amber-600 text-amber-400 hover:text-white border-amber-800/60'
+                            }`}
+                            title={
+                              focusPersonId === p.id && focusType !== 'none'
+                                ? 'Вимкнути фокус лінії'
+                                : 'Сфокусувати пряму лінію предків'
+                            }
+                          >
+                            <Target className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* Bottom/Right Collapse/Expand Children Branch Badge ([-]/[+]) */}
                 {node.hasChildren && (
                   <button
                     type="button"
@@ -2678,20 +3310,24 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       e.stopPropagation();
                       toggleCollapseChildren(p.id, node.isChildrenCollapsed);
                     }}
-                    className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 z-10 h-5 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
+                    className={`absolute ${
+                      orientation === 'horizontal'
+                        ? '-right-2.5 top-1/2 -translate-y-1/2'
+                        : '-bottom-2.5 left-1/2 -translate-x-1/2'
+                    } z-10 h-5 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
                       node.isChildrenCollapsed
                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 scale-105'
                         : isLightCanvas
                         ? 'bg-[#ece5d8] hover:bg-[#ded5c5] text-stone-900 border-[#cfc3af]'
                         : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
                     }`}
-                    title={node.isChildrenCollapsed ? `Розгорнути нащадків (+${node.childrenCount})` : 'Сховати нащадків'}
+                    title={node.isChildrenCollapsed ? `Розгорнути нащадків (+${node.descendantsCount || node.childrenCount})` : 'Сховати нащадків'}
                     aria-label="Перемикач нащадків"
                   >
                     {node.isChildrenCollapsed ? (
                       <>
                         <Plus className="w-2.5 h-2.5 stroke-[3] text-white" />
-                        <span className="text-[9px] leading-none">{node.childrenCount}</span>
+                        <span className="text-[9px] leading-none">{node.descendantsCount || node.childrenCount}</span>
                       </>
                     ) : (
                       <Minus className="w-2.5 h-2.5 stroke-[3] text-emerald-500" />
@@ -2741,8 +3377,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   return (
                     <div
                       className={`absolute ${
-                        siblingSide === 'left' ? '-left-3.5' : '-right-3.5'
-                      } top-1/2 -translate-y-1/2 z-30 flex items-center shadow-md rounded-full`}
+                        orientation === 'horizontal'
+                          ? (siblingSide === 'left' ? '-top-3 left-1/2 -translate-x-1/2' : '-bottom-3 left-1/2 -translate-x-1/2')
+                          : (siblingSide === 'left' ? '-left-3.5 top-1/2 -translate-y-1/2' : '-right-3.5 top-1/2 -translate-y-1/2')
+                      } z-30 flex items-center shadow-md rounded-full`}
                     >
                       {/* Main Branch Toggle (Collapse all / Expand all) */}
                       <button
@@ -2820,8 +3458,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           ref={selectiveMenuRef}
                           onClick={(e) => e.stopPropagation()}
                           className={`absolute ${
-                            siblingSide === 'left' ? 'right-full mr-2' : 'left-full ml-2'
-                          } top-1/2 -translate-y-1/2 w-64 bg-[#1b1f24] border border-[#383e46] rounded-xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 select-none text-left`}
+                            orientation === 'horizontal'
+                              ? (siblingSide === 'left' ? 'bottom-full mb-2 left-1/2 -translate-x-1/2' : 'top-full mt-2 left-1/2 -translate-x-1/2')
+                              : (siblingSide === 'left' ? 'right-full mr-2 top-1/2 -translate-y-1/2' : 'left-full ml-2 top-1/2 -translate-y-1/2')
+                          } w-64 bg-[#1b1f24] border border-[#383e46] rounded-xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 select-none text-left`}
                         >
                           <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-[#2d3238]">
                             <div className="flex items-center gap-1.5 text-xs font-bold text-white">

@@ -28,12 +28,18 @@ export interface TreeNodeLayout {
   parentsCount?: number;
   siblingsCount?: number;
   childrenCount?: number;
+  descendantsCount?: number;
+  isDirectAncestor?: boolean;
   isParentsCollapsed?: boolean;
+  isPaternalCollapsed?: boolean;
+  isMaternalCollapsed?: boolean;
   isSiblingsCollapsed?: boolean;
   isChildrenCollapsed?: boolean;
   areParentsVisible?: boolean;
   areSiblingsVisible?: boolean;
   areChildrenVisible?: boolean;
+  fatherId?: string;
+  motherId?: string;
 }
 
 export interface TreeLayoutFilterOptions {
@@ -43,6 +49,9 @@ export interface TreeLayoutFilterOptions {
   collapsedParents?: Set<string>;
   collapsedSiblings?: Set<string>;
   collapsedChildren?: Set<string>;
+  orientation?: 'vertical' | 'horizontal';
+  isCompact?: boolean;
+  directAncestorsOnly?: boolean;
 }
 
 export interface TreeLinkLayout {
@@ -53,7 +62,7 @@ export interface TreeLinkLayout {
   targetY: number;
   type?: 'marriage' | 'child' | 'orthogonal' | 'bezier' | 'stem' | 'bus' | 'drop';
   path?: string;
-  arrow?: 'up' | 'down' | 'none';
+  arrow?: 'up' | 'down' | 'right' | 'none';
   arrowX?: number;
   arrowY?: number;
   color?: string;
@@ -105,6 +114,55 @@ export const SPOUSE_GAP = 20;
 export const SIBLING_GAP = 54;
 export const FAMILY_GAP = 96;
 export const VERTICAL_GENERATION_GAP = 148;
+export const HORIZONTAL_GENERATION_GAP = 148;
+export const HORIZONTAL_SIBLING_GAP = 40;
+export const HORIZONTAL_FAMILY_GAP = 76;
+
+// Compact / Dense View Card Dimensions (50% card height for 2.5x more visual density)
+export const COMPACT_CARD_WIDTH = 176;
+export const COMPACT_CARD_HEIGHT = 68;
+export const COMPACT_VERTICAL_GENERATION_GAP = 68;
+export const COMPACT_HORIZONTAL_GENERATION_GAP = 72;
+
+/**
+ * Calculates total direct descendants count under a person (children, grandchildren, etc.)
+ */
+export function getTotalDescendantsCount(personId: string, database: GenealogyDatabase): number {
+  if (!personId || !database?.persons?.[personId]) return 0;
+  const visited = new Set<string>([personId]);
+  const queue: string[] = [personId];
+  let count = 0;
+
+  while (queue.length > 0) {
+    const curId = queue.shift()!;
+    const p = database.persons[curId];
+    if (!p) continue;
+
+    const childIds = new Set<string>();
+    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
+    if (p.spouseFamilyIds && database.families) {
+      p.spouseFamilyIds.forEach(fId => {
+        const fam = database.families[fId];
+        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
+      });
+    }
+    Object.values(database.persons).forEach(cand => {
+      if (cand.fatherId === curId || cand.motherId === curId) {
+        childIds.add(cand.id);
+      }
+    });
+
+    childIds.forEach(cId => {
+      if (!visited.has(cId) && database.persons[cId]) {
+        visited.add(cId);
+        count++;
+        queue.push(cId);
+      }
+    });
+  }
+
+  return count;
+}
 
 /**
  * Format FamilySearch-style 7-character unique genealogy code
@@ -251,12 +309,22 @@ export function calculateClassicFamilyTreeLayout(
   maxGenerations: number = 0,
   options?: TreeLayoutFilterOptions
 ): TreeLayoutResult {
+  if (options?.orientation === 'horizontal') {
+    return calculateHorizontalFamilyTreeLayout(database, rootPersonId, maxGenerations, options);
+  }
+
+  const isCompact = options?.isCompact ?? false;
+  const directAncestorsOnly = options?.directAncestorsOnly ?? false;
+  const cardWidth = isCompact ? COMPACT_CARD_WIDTH : CLASSIC_CARD_WIDTH;
+  const cardHeight = isCompact ? COMPACT_CARD_HEIGHT : CLASSIC_CARD_HEIGHT;
+  const verticalGenGap = isCompact ? COMPACT_VERTICAL_GENERATION_GAP : VERTICAL_GENERATION_GAP;
+
   const nodes: TreeNodeLayout[] = [];
   const links: TreeLinkLayout[] = [];
 
   const showParents = options?.showParents ?? true;
-  const showSiblings = options?.showSiblings ?? true;
-  const showDescendants = options?.showDescendants ?? true;
+  const showSiblings = directAncestorsOnly ? false : (options?.showSiblings ?? true);
+  const showDescendants = directAncestorsOnly ? false : (options?.showDescendants ?? true);
   const collapsedParents = options?.collapsedParents || new Set<string>();
   const collapsedSiblings = options?.collapsedSiblings || new Set<string>();
   const collapsedChildren = options?.collapsedChildren || new Set<string>();
@@ -382,13 +450,37 @@ export function calculateClassicFamilyTreeLayout(
     return Array.from(childIds).filter(cId => Boolean(database.persons[cId]));
   };
 
+  // Helper to collect all direct parents of a person across all database relationship formats
+  const getDirectParentIds = (pId: string): string[] => {
+    const p = database.persons[pId];
+    if (!p) return [];
+    const parents = new Set<string>();
+    if (p.fatherId && database.persons[p.fatherId]) parents.add(p.fatherId);
+    if (p.motherId && database.persons[p.motherId]) parents.add(p.motherId);
+    if (p.parentFamilyId && database.families) {
+      const fam = database.families[p.parentFamilyId];
+      if (fam?.husbandId && database.persons[fam.husbandId]) parents.add(fam.husbandId);
+      if (fam?.wifeId && database.persons[fam.wifeId]) parents.add(fam.wifeId);
+    }
+    if (parents.size === 0 && database.families) {
+      const matchingFam = Object.values(database.families).find(fam =>
+        fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
+      );
+      if (matchingFam) {
+        if (matchingFam.husbandId && database.persons[matchingFam.husbandId]) parents.add(matchingFam.husbandId);
+        if (matchingFam.wifeId && database.persons[matchingFam.wifeId]) parents.add(matchingFam.wifeId);
+      }
+    }
+    return Array.from(parents);
+  };
+
   // Collect all persons that must be hidden because their parent or ancestor has collapsed children
   const collapsedDescendantIds = new Set<string>();
-  const collapsedParentsList = Object.keys(database.persons).filter(pId => isPersonChildrenCollapsed(pId));
+  const collapsedChildrenParentsList = Object.keys(database.persons).filter(pId => isPersonChildrenCollapsed(pId));
   
-  if (collapsedParentsList.length > 0) {
+  if (collapsedChildrenParentsList.length > 0) {
     const q: string[] = [];
-    collapsedParentsList.forEach(parId => {
+    collapsedChildrenParentsList.forEach(parId => {
       getDirectChildrenIds(parId).forEach(cId => {
         if (!collapsedDescendantIds.has(cId)) {
           collapsedDescendantIds.add(cId);
@@ -414,6 +506,73 @@ export function calculateClassicFamilyTreeLayout(
         d.spouseIds.forEach(sId => {
           if (!directAncestors.has(sId) && !isPersonChildrenCollapsed(sId)) {
             collapsedDescendantIds.add(sId);
+          }
+        });
+      }
+    });
+  }
+
+  // Collect all persons that must be hidden because their child or descendant has collapsed parents
+  const collapsedAncestorIds = new Set<string>();
+  if (collapsedParents.size > 0) {
+    const q: string[] = [];
+    collapsedParents.forEach(entry => {
+      if (entry.startsWith('pat_')) {
+        const childId = entry.replace('pat_', '');
+        const p = database.persons[childId];
+        const fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+        if (fId && !collapsedAncestorIds.has(fId)) {
+          collapsedAncestorIds.add(fId);
+          q.push(fId);
+        }
+      } else if (entry.startsWith('mat_')) {
+        const childId = entry.replace('mat_', '');
+        const p = database.persons[childId];
+        const mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+        if (mId && !collapsedAncestorIds.has(mId)) {
+          collapsedAncestorIds.add(mId);
+          q.push(mId);
+        }
+      } else {
+        getDirectParentIds(entry).forEach(parId => {
+          if (!collapsedAncestorIds.has(parId)) {
+            collapsedAncestorIds.add(parId);
+            q.push(parId);
+          }
+        });
+      }
+    });
+
+    while (q.length > 0) {
+      const curId = q.shift()!;
+      getDirectParentIds(curId).forEach(parId => {
+        if (!collapsedAncestorIds.has(parId)) {
+          collapsedAncestorIds.add(parId);
+          q.push(parId);
+        }
+      });
+    }
+
+    // Also include spouses of collapsed ancestors if they are only in the tree through the collapsed branch
+    collapsedAncestorIds.forEach(aId => {
+      const a = database.persons[aId];
+      if (a?.spouseIds) {
+        a.spouseIds.forEach(sId => {
+          if (!directDescendants.has(sId) && !collapsedParents.has(sId) && sId !== root.id) {
+            collapsedAncestorIds.add(sId);
+          }
+        });
+      }
+      if (a?.spouseFamilyIds && database.families) {
+        a.spouseFamilyIds.forEach(fId => {
+          const fam = database.families[fId];
+          if (fam) {
+            if (fam.husbandId && !directDescendants.has(fam.husbandId) && !collapsedParents.has(fam.husbandId) && fam.husbandId !== root.id) {
+              collapsedAncestorIds.add(fam.husbandId);
+            }
+            if (fam.wifeId && !directDescendants.has(fam.wifeId) && !collapsedParents.has(fam.wifeId) && fam.wifeId !== root.id) {
+              collapsedAncestorIds.add(fam.wifeId);
+            }
           }
         });
       }
@@ -453,6 +612,29 @@ export function calculateClassicFamilyTreeLayout(
     }
   }
 
+  // If effectiveRoot itself is cut off by a descendant having collapsed parents,
+  // find the closest cut descendant to serve as the effective root for the visible tree
+  if (collapsedAncestorIds.has(effectiveRoot.id)) {
+    const visited = new Set<string>();
+    const findCutDescendant = (pId: string): Person | null => {
+      const children = getDirectChildrenIds(pId);
+      for (const cId of children) {
+        if (visited.has(cId)) continue;
+        visited.add(cId);
+        if (collapsedParents.has(cId)) {
+          return database.persons[cId] || null;
+        }
+        const lower = findCutDescendant(cId);
+        if (lower) return lower;
+      }
+      return null;
+    };
+    const cutDescendant = findCutDescendant(effectiveRoot.id);
+    if (cutDescendant) {
+      effectiveRoot = cutDescendant;
+    }
+  }
+
   // 1. Calculate relative generation level for all ancestors, descendants, siblings and spouses
   const personGen = new Map<string, number>();
   personGen.set(effectiveRoot.id, 0);
@@ -463,8 +645,16 @@ export function calculateClassicFamilyTreeLayout(
 
   const enqueuePerson = (pId: string, pGen: number) => {
     if (!pId || !database.persons[pId]) return;
+    // If directAncestorsOnly: only allow direct ancestors of root person (or root itself)
+    if (directAncestorsOnly && !directAncestors.has(pId) && pId !== effectiveRoot.id && pId !== root.id) {
+      return;
+    }
     // If this person is marked as a collapsed descendant, do not enqueue!
     if (collapsedDescendantIds.has(pId)) {
+      return;
+    }
+    // If this person is marked as a collapsed ancestor, do not enqueue!
+    if (collapsedAncestorIds.has(pId)) {
       return;
     }
     // If showSiblings is false: only allow direct backbone or spouses of backbone
@@ -504,13 +694,20 @@ export function calculateClassicFamilyTreeLayout(
       }
       spouseIds.forEach(sId => {
         if (!isPersonACollapsedSibling(sId)) {
+          if (directAncestorsOnly && !directAncestors.has(sId) && sId !== effectiveRoot.id && sId !== root.id) {
+            return;
+          }
           enqueuePerson(sId, gen);
         }
       });
     }
 
     // 2. Ancestors (Gen - 1, Gen - 2...) - expandable for ANY person in the tree
-    if (showParents && !collapsedParents.has(id) && !isPersonACollapsedSibling(id)) {
+    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${id}`);
+    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${id}`);
+    const isBothCollapsed = collapsedParents.has(id) || (isPaternalDirectlyCollapsed && isMaternalDirectlyCollapsed);
+
+    if (showParents && !isBothCollapsed && !collapsedAncestorIds.has(id) && !isPersonACollapsedSibling(id)) {
       if (maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations) {
         let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
         let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
@@ -526,13 +723,17 @@ export function calculateClassicFamilyTreeLayout(
           }
         }
 
-        if (fId && database.persons[fId]) enqueuePerson(fId, gen - 1);
-        if (mId && database.persons[mId]) enqueuePerson(mId, gen - 1);
+        if (fId && database.persons[fId] && !isPaternalDirectlyCollapsed && !collapsedAncestorIds.has(fId)) {
+          enqueuePerson(fId, gen - 1);
+        }
+        if (mId && database.persons[mId] && !isMaternalDirectlyCollapsed && !collapsedAncestorIds.has(mId)) {
+          enqueuePerson(mId, gen - 1);
+        }
       }
     }
 
     // 3. Descendants (Gen + 1, Gen + 2...) - expandable for ANY person in the tree
-    if (showDescendants && !isPersonChildrenCollapsed(id) && !isPersonACollapsedSibling(id)) {
+    if (showDescendants && !directAncestorsOnly && !isPersonChildrenCollapsed(id) && !isPersonACollapsedSibling(id)) {
       if (maxGenerations === 0 || (gen + 1) <= maxGenerations) {
         const childIds = getDirectChildrenIds(id);
         childIds.forEach(cId => {
@@ -550,7 +751,7 @@ export function calculateClassicFamilyTreeLayout(
     }
 
     // 4. Siblings (at same generation) - expandable when showSiblings is active
-    if (showSiblings && !collapsedSiblings.has(id) && !isPersonACollapsedSibling(id)) {
+    if (showSiblings && !directAncestorsOnly && !collapsedSiblings.has(id) && !isPersonACollapsedSibling(id)) {
       let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
       let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
 
@@ -695,7 +896,7 @@ export function calculateClassicFamilyTreeLayout(
         });
 
         const validUnionChildren = Array.from(unionChildren).filter(
-          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
+          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId) && !collapsedParents.has(cId)
         );
         // Sort children by age: oldest to the left, younger to the right
         validUnionChildren.sort((idA, idB) => 
@@ -739,7 +940,7 @@ export function calculateClassicFamilyTreeLayout(
         });
       }
       const validAllChildren = Array.from(allChildren).filter(
-        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
+        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId) && !collapsedParents.has(cId)
       );
       // Sort all children by age: oldest to the left, younger to the right
       validAllChildren.sort((idA, idB) => 
@@ -747,7 +948,7 @@ export function calculateClassicFamilyTreeLayout(
       );
 
       const totalMembers = 1 + spousesInfo.length;
-      const unitWidth = CLASSIC_CARD_WIDTH * totalMembers + SPOUSE_GAP * (totalMembers - 1);
+      const unitWidth = cardWidth * totalMembers + SPOUSE_GAP * (totalMembers - 1);
 
       processed.add(p.id);
       spousesInfo.forEach(s => processed.add(s.spouse.id));
@@ -757,9 +958,9 @@ export function calculateClassicFamilyTreeLayout(
           type: 'single',
           primary: p,
           spouses: [],
-          width: CLASSIC_CARD_WIDTH,
+          width: cardWidth,
           x: 0,
-          y: gen * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 80,
+          y: gen * (cardHeight + verticalGenGap) + 80,
           childrenIds: validAllChildren
         });
       } else if (spousesInfo.length === 1) {
@@ -783,9 +984,9 @@ export function calculateClassicFamilyTreeLayout(
           type: 'couple',
           primary: primaryPerson,
           spouses: [spousePerson],
-          width: CLASSIC_CARD_WIDTH * 2 + SPOUSE_GAP,
+          width: cardWidth * 2 + SPOUSE_GAP,
           x: 0,
-          y: gen * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 80,
+          y: gen * (cardHeight + verticalGenGap) + 80,
           childrenIds: validAllChildren
         });
       } else {
@@ -796,7 +997,7 @@ export function calculateClassicFamilyTreeLayout(
           spouses: spousesInfo,
           width: unitWidth,
           x: 0,
-          y: gen * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 80,
+          y: gen * (cardHeight + verticalGenGap) + 80,
           childrenIds: validAllChildren
         });
       }
@@ -807,7 +1008,7 @@ export function calculateClassicFamilyTreeLayout(
 
   // Position units across generations with family sorting and multi-pass alignment
   let maxTreeWidth = 1600;
-  let maxTreeHeight = totalGens * (CLASSIC_CARD_HEIGHT + VERTICAL_GENERATION_GAP) + 200;
+  let maxTreeHeight = totalGens * (cardHeight + verticalGenGap) + 200;
 
   // Helpers for sibling detection and accurate person coordinate calculations
   const getParentsOfPerson = (pId: string) => {
@@ -844,12 +1045,12 @@ export function calculateClassicFamilyTreeLayout(
   const getPersonCenterXInUnits = (personId: string, uList: Unit[]): number | undefined => {
     for (const u of uList) {
       if (u.primary.id === personId) {
-        return u.x + CLASSIC_CARD_WIDTH / 2;
+        return u.x + cardWidth / 2;
       }
       if (u.spouses) {
         for (let sIdx = 0; sIdx < u.spouses.length; sIdx++) {
           if (u.spouses[sIdx].spouse.id === personId) {
-            return u.x + (sIdx + 1) * (CLASSIC_CARD_WIDTH + SPOUSE_GAP) + CLASSIC_CARD_WIDTH / 2;
+            return u.x + (sIdx + 1) * (cardWidth + SPOUSE_GAP) + cardWidth / 2;
           }
         }
       }
@@ -1087,6 +1288,9 @@ export function calculateClassicFamilyTreeLayout(
     const areChildrenVisible = validChildren.some(cId => personGen.has(cId));
     const isChildrenCollapsed = isPersonChildrenCollapsed(p.id) || !showDescendants || (hasChildren && !areChildrenVisible);
 
+    const descendantsCount = getTotalDescendantsCount(p.id, database);
+    const isDirectAncestor = directAncestors.has(p.id) || p.id === root.id;
+
     return {
       hasParents,
       hasSiblings,
@@ -1094,6 +1298,8 @@ export function calculateClassicFamilyTreeLayout(
       parentsCount,
       siblingsCount: siblingCount,
       childrenCount,
+      descendantsCount,
+      isDirectAncestor,
       isParentsCollapsed,
       isSiblingsCollapsed,
       isChildrenCollapsed,
@@ -1116,8 +1322,8 @@ export function calculateClassicFamilyTreeLayout(
           person: unit.primary,
           x: hX,
           y: hY,
-          width: CLASSIC_CARD_WIDTH,
-          height: CLASSIC_CARD_HEIGHT,
+          width: cardWidth,
+          height: cardHeight,
           generation: gen,
           spouseId: unit.spouses[0].spouse.id,
           ...hFlags
@@ -1125,15 +1331,15 @@ export function calculateClassicFamilyTreeLayout(
         nodeMap.set(unit.primary.id, {
           x: hX,
           y: hY,
-          width: CLASSIC_CARD_WIDTH,
-          height: CLASSIC_CARD_HEIGHT,
-          centerX: hX + CLASSIC_CARD_WIDTH / 2,
-          centerY: hY + CLASSIC_CARD_HEIGHT / 2
+          width: cardWidth,
+          height: cardHeight,
+          centerX: hX + cardWidth / 2,
+          centerY: hY + cardHeight / 2
         });
 
         // Wife / Spouse (right)
         const spInfo = unit.spouses[0];
-        const wX = unit.x + CLASSIC_CARD_WIDTH + SPOUSE_GAP;
+        const wX = unit.x + cardWidth + SPOUSE_GAP;
         const wY = unit.y;
         const wFlags = getNodeFlags(spInfo.spouse);
         nodes.push({
@@ -1141,8 +1347,8 @@ export function calculateClassicFamilyTreeLayout(
           person: spInfo.spouse,
           x: wX,
           y: wY,
-          width: CLASSIC_CARD_WIDTH,
-          height: CLASSIC_CARD_HEIGHT,
+          width: cardWidth,
+          height: cardHeight,
           generation: gen,
           spouseId: unit.primary.id,
           isSpouseNode: true,
@@ -1157,10 +1363,10 @@ export function calculateClassicFamilyTreeLayout(
         nodeMap.set(spInfo.spouse.id, {
           x: wX,
           y: wY,
-          width: CLASSIC_CARD_WIDTH,
-          height: CLASSIC_CARD_HEIGHT,
-          centerX: wX + CLASSIC_CARD_WIDTH / 2,
-          centerY: wY + CLASSIC_CARD_HEIGHT / 2
+          width: cardWidth,
+          height: cardHeight,
+          centerX: wX + cardWidth / 2,
+          centerY: wY + cardHeight / 2
         });
       } else if (unit.type === 'multi_spouse') {
         // Multi-spouse family unit: Primary person followed by 1st wife/husband, 2nd wife/husband etc.
@@ -1172,8 +1378,8 @@ export function calculateClassicFamilyTreeLayout(
           person: unit.primary,
           x: curX,
           y: pY,
-          width: CLASSIC_CARD_WIDTH,
-          height: CLASSIC_CARD_HEIGHT,
+          width: cardWidth,
+          height: cardHeight,
           generation: gen,
           spouseId: unit.spouses[0]?.spouse.id,
           ...pFlags
@@ -1181,12 +1387,12 @@ export function calculateClassicFamilyTreeLayout(
         nodeMap.set(unit.primary.id, {
           x: curX,
           y: pY,
-          width: CLASSIC_CARD_WIDTH,
-          height: CLASSIC_CARD_HEIGHT,
-          centerX: curX + CLASSIC_CARD_WIDTH / 2,
-          centerY: pY + CLASSIC_CARD_HEIGHT / 2
+          width: cardWidth,
+          height: cardHeight,
+          centerX: curX + cardWidth / 2,
+          centerY: pY + cardHeight / 2
         });
-        curX += CLASSIC_CARD_WIDTH + SPOUSE_GAP;
+        curX += cardWidth + SPOUSE_GAP;
 
         unit.spouses.forEach((spInfo) => {
           const sFlags = getNodeFlags(spInfo.spouse);
@@ -1195,8 +1401,8 @@ export function calculateClassicFamilyTreeLayout(
             person: spInfo.spouse,
             x: curX,
             y: pY,
-            width: CLASSIC_CARD_WIDTH,
-            height: CLASSIC_CARD_HEIGHT,
+            width: cardWidth,
+            height: cardHeight,
             generation: gen,
             spouseId: unit.primary.id,
             isSpouseNode: true,
@@ -1211,12 +1417,12 @@ export function calculateClassicFamilyTreeLayout(
           nodeMap.set(spInfo.spouse.id, {
             x: curX,
             y: pY,
-            width: CLASSIC_CARD_WIDTH,
-            height: CLASSIC_CARD_HEIGHT,
-            centerX: curX + CLASSIC_CARD_WIDTH / 2,
-            centerY: pY + CLASSIC_CARD_HEIGHT / 2
+            width: cardWidth,
+            height: cardHeight,
+            centerX: curX + cardWidth / 2,
+            centerY: pY + cardHeight / 2
           });
-          curX += CLASSIC_CARD_WIDTH + SPOUSE_GAP;
+          curX += cardWidth + SPOUSE_GAP;
         });
       } else {
         // Single person
@@ -1228,18 +1434,18 @@ export function calculateClassicFamilyTreeLayout(
           person: unit.primary,
           x: pX,
           y: pY,
-          width: CLASSIC_CARD_WIDTH,
-          height: CLASSIC_CARD_HEIGHT,
+          width: cardWidth,
+          height: cardHeight,
           generation: gen,
           ...sFlags
         });
         nodeMap.set(unit.primary.id, {
           x: pX,
           y: pY,
-          width: CLASSIC_CARD_WIDTH,
-          height: CLASSIC_CARD_HEIGHT,
-          centerX: pX + CLASSIC_CARD_WIDTH / 2,
-          centerY: pY + CLASSIC_CARD_HEIGHT / 2
+          width: cardWidth,
+          height: cardHeight,
+          centerX: pX + cardWidth / 2,
+          centerY: pY + cardHeight / 2
         });
       }
     });
@@ -1252,8 +1458,8 @@ export function calculateClassicFamilyTreeLayout(
       const unitColor = FAMILY_LINE_COLORS[(gen * 3 + unitIdx) % FAMILY_LINE_COLORS.length];
       const pY = unit.y;
       // Stagger horizontal junction Y levels so neighboring family bus bars NEVER overlap horizontally
-      const baseJunctionY = pY + CLASSIC_CARD_HEIGHT + 36;
-      const junctionY = baseJunctionY + (unitIdx % 4) * 22;
+      const baseJunctionY = pY + cardHeight + (isCompact ? 18 : 36);
+      const junctionY = baseJunctionY + (unitIdx % 4) * (isCompact ? 12 : 22);
 
       if ((unit.type === 'couple' || unit.type === 'multi_spouse') && unit.spouses.length > 0) {
         unit.spouses.forEach((spInfo, spIdx) => {
@@ -1261,10 +1467,10 @@ export function calculateClassicFamilyTreeLayout(
           const sNode = nodeMap.get(spInfo.spouse.id);
           if (!pNode || !sNode) return;
 
-          const leftCardRightEdge = Math.min(pNode.x, sNode.x) + CLASSIC_CARD_WIDTH;
+          const leftCardRightEdge = Math.min(pNode.x, sNode.x) + cardWidth;
           const rightCardLeftEdge = Math.max(pNode.x, sNode.x);
           const marriageMidX = (leftCardRightEdge + rightCardLeftEdge) / 2;
-          const marriageMidY = pNode.y + CLASSIC_CARD_HEIGHT / 2;
+          const marriageMidY = pNode.y + cardHeight / 2;
 
           // Marriage link between primary and this spouse
           links.push({
@@ -1283,7 +1489,7 @@ export function calculateClassicFamilyTreeLayout(
           });
 
           // Children born from this specific union
-          const unionChildren = spInfo.childrenIds.length > 0 ? spInfo.childrenIds : (unit.spouses.length === 1 ? unit.childrenIds : []);
+          const unionChildren = (spInfo.childrenIds.length > 0 ? spInfo.childrenIds : (unit.spouses.length === 1 ? unit.childrenIds : [])).filter(cId => !collapsedParents.has(cId));
           if (unionChildren.length > 0) {
             const childCoords = unionChildren
               .map(cId => ({ id: cId, ...nodeMap.get(cId)! }))
@@ -1357,7 +1563,7 @@ export function calculateClassicFamilyTreeLayout(
         const pNode = nodeMap.get(unit.primary.id);
         if (!pNode) return;
         const stemX = pNode.centerX;
-        const stemY = pNode.y + CLASSIC_CARD_HEIGHT;
+        const stemY = pNode.y + cardHeight;
 
         if (unit.childrenIds.length > 0) {
           const childCoords = unit.childrenIds
@@ -1429,6 +1635,1215 @@ export function calculateClassicFamilyTreeLayout(
   nodes.forEach(n => {
     finalMaxX = Math.max(finalMaxX, n.x + n.width + 120);
     finalMaxY = Math.max(finalMaxY, n.y + n.height + 120);
+  });
+
+  return {
+    nodes,
+    links,
+    width: finalMaxX,
+    height: finalMaxY
+  };
+}
+
+/**
+ * Build widescreen 16:9 horizontal family tree layout (Left-to-right: Ancestors on the Left ➔ Descendants on the Right)
+ * Optimized for computer monitors with wide aspect ratios and natural vertical scrolling.
+ */
+export function calculateHorizontalFamilyTreeLayout(
+  database: GenealogyDatabase,
+  rootPersonId: string,
+  maxGenerations: number = 0,
+  options?: TreeLayoutFilterOptions
+): TreeLayoutResult {
+  const nodes: TreeNodeLayout[] = [];
+  const links: TreeLinkLayout[] = [];
+
+  const isCompact = options?.isCompact ?? false;
+  const directAncestorsOnly = options?.directAncestorsOnly ?? false;
+  const cardWidth = isCompact ? COMPACT_CARD_WIDTH : CLASSIC_CARD_WIDTH;
+  const cardHeight = isCompact ? COMPACT_CARD_HEIGHT : CLASSIC_CARD_HEIGHT;
+  const horizontalGenGap = isCompact ? COMPACT_HORIZONTAL_GENERATION_GAP : HORIZONTAL_GENERATION_GAP;
+
+  const showParents = options?.showParents ?? true;
+  const showSiblings = directAncestorsOnly ? false : (options?.showSiblings ?? true);
+  const showDescendants = directAncestorsOnly ? false : (options?.showDescendants ?? true);
+  const collapsedParents = options?.collapsedParents || new Set<string>();
+  const collapsedSiblings = options?.collapsedSiblings || new Set<string>();
+  const collapsedChildren = options?.collapsedChildren || new Set<string>();
+
+  let root = database.persons[rootPersonId];
+  if (!root) {
+    const allPersons = Object.values(database.persons);
+    if (allPersons.length === 0) {
+      return { nodes: [], links: [], width: 1200, height: 800 };
+    }
+    root = allPersons[0];
+  }
+
+  // 1. Collect direct backbone (ancestors & descendants of root)
+  const directAncestors = new Set<string>();
+  const collectAncestors = (pId: string) => {
+    const p = database.persons[pId];
+    if (!p) return;
+    const parents: string[] = [];
+    if (p.fatherId) parents.push(p.fatherId);
+    if (p.motherId) parents.push(p.motherId);
+    if (p.parentFamilyId && database.families) {
+      const fam = database.families[p.parentFamilyId];
+      if (fam?.husbandId) parents.push(fam.husbandId);
+      if (fam?.wifeId) parents.push(fam.wifeId);
+    }
+    parents.forEach(parId => {
+      if (!directAncestors.has(parId) && database.persons[parId]) {
+        directAncestors.add(parId);
+        collectAncestors(parId);
+      }
+    });
+  };
+  collectAncestors(root.id);
+
+  const directDescendants = new Set<string>();
+  const collectDescendants = (pId: string) => {
+    const p = database.persons[pId];
+    if (!p) return;
+    const childIds = new Set<string>();
+    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
+    if (p.spouseFamilyIds && database.families) {
+      p.spouseFamilyIds.forEach(fId => {
+        const fam = database.families[fId];
+        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
+      });
+    }
+    Object.values(database.persons).forEach(cand => {
+      if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
+    });
+    childIds.forEach(cId => {
+      if (database.persons[cId]) collectDescendants(cId);
+    });
+  };
+  collectDescendants(root.id);
+
+  const isDirectBackbone = (pId: string): boolean => {
+    return pId === root.id || directAncestors.has(pId) || directDescendants.has(pId);
+  };
+
+  const isSpouseOfBackbone = (pId: string): boolean => {
+    const p = database.persons[pId];
+    if (!p) return false;
+    if (p.spouseIds?.some(sId => isDirectBackbone(sId))) return true;
+    if (p.spouseFamilyIds && database.families) {
+      for (const fId of p.spouseFamilyIds) {
+        const fam = database.families[fId];
+        if (fam) {
+          if (fam.husbandId && fam.husbandId !== pId && isDirectBackbone(fam.husbandId)) return true;
+          if (fam.wifeId && fam.wifeId !== pId && isDirectBackbone(fam.wifeId)) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const isPersonACollapsedSibling = (pId: string): boolean => {
+    if (!pId) return false;
+    if (isDirectBackbone(pId) || isSpouseOfBackbone(pId)) return false;
+    return collapsedSiblings.has(pId);
+  };
+
+  const isPersonChildrenCollapsed = (pId: string): boolean => {
+    if (!showDescendants) return true;
+    if (collapsedChildren.has(pId)) return true;
+    const p = database.persons[pId];
+    if (!p) return false;
+    if (p.spouseIds && p.spouseIds.some(sId => collapsedChildren.has(sId))) {
+      return true;
+    }
+    if (p.spouseFamilyIds && database.families) {
+      for (const fId of p.spouseFamilyIds) {
+        const fam = database.families[fId];
+        if (fam) {
+          if (fam.husbandId && collapsedChildren.has(fam.husbandId)) return true;
+          if (fam.wifeId && collapsedChildren.has(fam.wifeId)) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const getDirectChildrenIds = (pId: string): string[] => {
+    const p = database.persons[pId];
+    if (!p) return [];
+    const childIds = new Set<string>();
+    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
+    if (p.spouseFamilyIds && database.families) {
+      p.spouseFamilyIds.forEach(fId => {
+        const fam = database.families[fId];
+        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
+      });
+    }
+    Object.values(database.persons).forEach(cand => {
+      if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
+    });
+    return Array.from(childIds).filter(cId => Boolean(database.persons[cId]));
+  };
+
+  // Helper to collect all direct parents of a person across all database relationship formats
+  const getDirectParentIds = (pId: string): string[] => {
+    const p = database.persons[pId];
+    if (!p) return [];
+    const parents = new Set<string>();
+    if (p.fatherId && database.persons[p.fatherId]) parents.add(p.fatherId);
+    if (p.motherId && database.persons[p.motherId]) parents.add(p.motherId);
+    if (p.parentFamilyId && database.families) {
+      const fam = database.families[p.parentFamilyId];
+      if (fam?.husbandId && database.persons[fam.husbandId]) parents.add(fam.husbandId);
+      if (fam?.wifeId && database.persons[fam.wifeId]) parents.add(fam.wifeId);
+    }
+    if (parents.size === 0 && database.families) {
+      const matchingFam = Object.values(database.families).find(fam =>
+        fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
+      );
+      if (matchingFam) {
+        if (matchingFam.husbandId && database.persons[matchingFam.husbandId]) parents.add(matchingFam.husbandId);
+        if (matchingFam.wifeId && database.persons[matchingFam.wifeId]) parents.add(matchingFam.wifeId);
+      }
+    }
+    return Array.from(parents);
+  };
+
+  // Collect collapsed descendants
+  const collapsedDescendantIds = new Set<string>();
+  const collapsedParentsList = Object.keys(database.persons).filter(pId => isPersonChildrenCollapsed(pId));
+  if (collapsedParentsList.length > 0) {
+    const q: string[] = [];
+    collapsedParentsList.forEach(parId => {
+      getDirectChildrenIds(parId).forEach(cId => {
+        if (!collapsedDescendantIds.has(cId)) {
+          collapsedDescendantIds.add(cId);
+          q.push(cId);
+        }
+      });
+    });
+    while (q.length > 0) {
+      const curId = q.shift()!;
+      getDirectChildrenIds(curId).forEach(cId => {
+        if (!collapsedDescendantIds.has(cId)) {
+          collapsedDescendantIds.add(cId);
+          q.push(cId);
+        }
+      });
+    }
+    collapsedDescendantIds.forEach(dId => {
+      const d = database.persons[dId];
+      if (d?.spouseIds) {
+        d.spouseIds.forEach(sId => {
+          if (!directAncestors.has(sId) && !isPersonChildrenCollapsed(sId)) {
+            collapsedDescendantIds.add(sId);
+          }
+        });
+      }
+    });
+  }
+
+  // Collect all persons that must be hidden because their child or descendant has collapsed parents
+  const collapsedAncestorIds = new Set<string>();
+  if (collapsedParents.size > 0) {
+    const q: string[] = [];
+    collapsedParents.forEach(childId => {
+      getDirectParentIds(childId).forEach(parId => {
+        if (!collapsedAncestorIds.has(parId)) {
+          collapsedAncestorIds.add(parId);
+          q.push(parId);
+        }
+      });
+    });
+
+    while (q.length > 0) {
+      const curId = q.shift()!;
+      getDirectParentIds(curId).forEach(parId => {
+        if (!collapsedAncestorIds.has(parId)) {
+          collapsedAncestorIds.add(parId);
+          q.push(parId);
+        }
+      });
+    }
+
+    // Also include spouses of collapsed ancestors if they are only in the tree through the collapsed branch
+    collapsedAncestorIds.forEach(aId => {
+      const a = database.persons[aId];
+      if (a?.spouseIds) {
+        a.spouseIds.forEach(sId => {
+          if (!directDescendants.has(sId) && !collapsedParents.has(sId) && sId !== root.id) {
+            collapsedAncestorIds.add(sId);
+          }
+        });
+      }
+      if (a?.spouseFamilyIds && database.families) {
+        a.spouseFamilyIds.forEach(fId => {
+          const fam = database.families[fId];
+          if (fam) {
+            if (fam.husbandId && !directDescendants.has(fam.husbandId) && !collapsedParents.has(fam.husbandId) && fam.husbandId !== root.id) {
+              collapsedAncestorIds.add(fam.husbandId);
+            }
+            if (fam.wifeId && !directDescendants.has(fam.wifeId) && !collapsedParents.has(fam.wifeId) && fam.wifeId !== root.id) {
+              collapsedAncestorIds.add(fam.wifeId);
+            }
+          }
+        });
+      }
+    });
+  }
+
+  let effectiveRoot = root;
+  if (collapsedDescendantIds.has(root.id)) {
+    const visited = new Set<string>();
+    const findCutAncestor = (pId: string): Person | null => {
+      const p = database.persons[pId];
+      if (!p) return null;
+      const parents: string[] = [];
+      if (p.fatherId) parents.push(p.fatherId);
+      if (p.motherId) parents.push(p.motherId);
+      if (p.parentFamilyId && database.families) {
+        const fam = database.families[p.parentFamilyId];
+        if (fam?.husbandId) parents.push(fam.husbandId);
+        if (fam?.wifeId) parents.push(fam.wifeId);
+      }
+      for (const parId of parents) {
+        if (visited.has(parId)) continue;
+        visited.add(parId);
+        if (isPersonChildrenCollapsed(parId)) {
+          return database.persons[parId] || null;
+        }
+        const higher = findCutAncestor(parId);
+        if (higher) return higher;
+      }
+      return null;
+    };
+    const cutAncestor = findCutAncestor(root.id);
+    if (cutAncestor) effectiveRoot = cutAncestor;
+  }
+
+  // If effectiveRoot itself is cut off by a descendant having collapsed parents,
+  // find the closest cut descendant to serve as the effective root for the visible tree
+  if (collapsedAncestorIds.has(effectiveRoot.id)) {
+    const visited = new Set<string>();
+    const findCutDescendant = (pId: string): Person | null => {
+      const children = getDirectChildrenIds(pId);
+      for (const cId of children) {
+        if (visited.has(cId)) continue;
+        visited.add(cId);
+        if (collapsedParents.has(cId)) {
+          return database.persons[cId] || null;
+        }
+        const lower = findCutDescendant(cId);
+        if (lower) return lower;
+      }
+      return null;
+    };
+    const cutDescendant = findCutDescendant(effectiveRoot.id);
+    if (cutDescendant) effectiveRoot = cutDescendant;
+  }
+
+  // BFS generation assignment
+  const personGen = new Map<string, number>();
+  const queue: { id: string; gen: number }[] = [{ id: effectiveRoot.id, gen: 0 }];
+  personGen.set(effectiveRoot.id, 0);
+
+  const enqueuePerson = (id: string, gen: number) => {
+    if (directAncestorsOnly && !directAncestors.has(id) && id !== effectiveRoot.id && id !== root.id) {
+      return;
+    }
+    if (collapsedDescendantIds.has(id)) {
+      return;
+    }
+    if (collapsedAncestorIds.has(id)) {
+      return;
+    }
+    if (!personGen.has(id)) {
+      personGen.set(id, gen);
+      queue.push({ id, gen });
+    }
+  };
+
+  while (queue.length > 0) {
+    const { id, gen } = queue.shift()!;
+    const p = database.persons[id];
+    if (!p) continue;
+
+    // Spouses at same generation
+    const spouseIds = new Set<string>();
+    if (p.spouseIds) p.spouseIds.forEach(s => spouseIds.add(s));
+    if (p.spouseFamilyIds && database.families) {
+      p.spouseFamilyIds.forEach(fId => {
+        const fam = database.families[fId];
+        if (fam) {
+          const partnerId = fam.husbandId === id ? fam.wifeId : fam.husbandId;
+          if (partnerId) spouseIds.add(partnerId);
+        }
+      });
+    }
+    spouseIds.forEach(sId => {
+      if (database.persons[sId] && !collapsedDescendantIds.has(sId)) {
+        if (directAncestorsOnly && !directAncestors.has(sId) && sId !== effectiveRoot.id && sId !== root.id) {
+          return;
+        }
+        enqueuePerson(sId, gen);
+      }
+    });
+
+    // Ancestors (Gen - 1)
+    if (showParents && !collapsedParents.has(id) && !collapsedAncestorIds.has(id)) {
+      if (maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations) {
+        let fId = p.fatherId;
+        let mId = p.motherId;
+        if (p.parentFamilyId && database.families) {
+          const fam = database.families[p.parentFamilyId];
+          if (fam) {
+            if (fam.husbandId) fId = fam.husbandId;
+            if (fam.wifeId) mId = fam.wifeId;
+          }
+        }
+        if (!fId && !mId && database.families) {
+          const matchingFam = Object.values(database.families).find(fam =>
+            fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
+          );
+          if (matchingFam) {
+            fId = matchingFam.husbandId;
+            mId = matchingFam.wifeId;
+          }
+        }
+        if (fId && database.persons[fId]) enqueuePerson(fId, gen - 1);
+        if (mId && database.persons[mId]) enqueuePerson(mId, gen - 1);
+      }
+    }
+
+    // Descendants (Gen + 1)
+    if (showDescendants && !directAncestorsOnly && !isPersonChildrenCollapsed(id) && !isPersonACollapsedSibling(id)) {
+      if (maxGenerations === 0 || (gen + 1) <= maxGenerations) {
+        const childIds = getDirectChildrenIds(id);
+        childIds.forEach(cId => {
+          if (collapsedDescendantIds.has(cId)) return;
+          if (collapsedParents.has(cId)) return;
+          if (!showSiblings && directAncestors.has(id) && !directAncestors.has(cId) && cId !== effectiveRoot.id) {
+            return;
+          }
+          if (isPersonACollapsedSibling(cId)) return;
+          enqueuePerson(cId, gen + 1);
+        });
+      }
+    }
+
+    // Siblings (Gen)
+    if (showSiblings && !directAncestorsOnly && !collapsedSiblings.has(id) && !isPersonACollapsedSibling(id)) {
+      let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+      let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+      if (!fId && !mId && database.families) {
+        const matchingFam = Object.values(database.families).find(fam =>
+          fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
+        );
+        if (matchingFam) {
+          fId = matchingFam.husbandId;
+          mId = matchingFam.wifeId;
+        }
+      }
+      if (p.siblingIds) {
+        p.siblingIds.forEach(sId => {
+          if (!isPersonACollapsedSibling(sId)) enqueuePerson(sId, gen);
+        });
+      }
+      Object.values(database.persons).forEach(cand => {
+        if (cand.id !== p.id && !personGen.has(cand.id)) {
+          const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
+          const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
+          const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id)) || (p.siblingIds && p.siblingIds.includes(cand.id));
+          if (isSibling && !isPersonACollapsedSibling(cand.id)) {
+            enqueuePerson(cand.id, gen);
+          }
+        }
+      });
+    }
+  }
+
+  // Normalize generations: Gen 0 = Oldest Ancestors (Left side)
+  const minGen = Math.min(...Array.from(personGen.values()));
+  const normalizedGen = new Map<string, number>();
+  personGen.forEach((g, pId) => {
+    normalizedGen.set(pId, g - minGen);
+  });
+  const totalGens = Math.max(...Array.from(normalizedGen.values()), 0) + 1;
+
+  // Group persons by generation
+  const genGroups: Map<number, Person[]> = new Map();
+  for (let g = 0; g < totalGens; g++) {
+    genGroups.set(g, []);
+  }
+  normalizedGen.forEach((gen, pId) => {
+    const p = database.persons[pId];
+    if (p) genGroups.get(gen)?.push(p);
+  });
+
+  interface SpouseInfo {
+    spouse: Person;
+    family?: any;
+    marriageOrder?: number;
+    relationshipType?: string;
+    marriageDate?: string;
+    marriageYear?: number;
+    divorceDate?: string;
+    divorceYear?: number;
+    childrenIds: string[];
+  }
+
+  interface Unit {
+    type: 'single' | 'couple' | 'multi_spouse';
+    primary: Person;
+    spouses: SpouseInfo[];
+    width: number;
+    height: number;
+    x: number;
+    y: number;
+    childrenIds: string[];
+  }
+
+  const genUnits: Map<number, Unit[]> = new Map();
+
+  genGroups.forEach((personsInGen, gen) => {
+    const units: Unit[] = [];
+    const processed = new Set<string>();
+
+    const genX = 80 + gen * (cardWidth + horizontalGenGap);
+
+    personsInGen.forEach(p => {
+      if (processed.has(p.id)) return;
+
+      const spouseIdsSet = new Set<string>();
+      if (p.spouseIds) p.spouseIds.forEach(s => spouseIdsSet.add(s));
+      if (p.spouseFamilyIds) {
+        p.spouseFamilyIds.forEach(fId => {
+          const fam = database.families[fId];
+          if (fam) {
+            const partnerId = fam.husbandId === p.id ? fam.wifeId : fam.husbandId;
+            if (partnerId) spouseIdsSet.add(partnerId);
+          }
+        });
+      }
+
+      const rawSpouses: Person[] = [];
+      spouseIdsSet.forEach(sId => {
+        const sp = database.persons[sId];
+        if (sp && normalizedGen.get(sId) === gen && !processed.has(sId)) {
+          rawSpouses.push(sp);
+        }
+      });
+
+      const spousesInfo: SpouseInfo[] = rawSpouses.map((sp, idx) => {
+        let matchedFam: any = undefined;
+        if (p.spouseFamilyIds) {
+          for (const fId of p.spouseFamilyIds) {
+            const fam = database.families[fId];
+            if (fam && ((fam.husbandId === p.id && fam.wifeId === sp.id) || (fam.husbandId === sp.id && fam.wifeId === p.id))) {
+              matchedFam = fam;
+              break;
+            }
+          }
+        }
+        if (!matchedFam && database.families) {
+          matchedFam = Object.values(database.families).find((fam: any) =>
+            (fam.husbandId === p.id && fam.wifeId === sp.id) || (fam.husbandId === sp.id && fam.wifeId === p.id)
+          );
+        }
+
+        const unionChildren = new Set<string>();
+        if (matchedFam?.children) {
+          matchedFam.children.forEach((c: any) => unionChildren.add(c.personId || c.id));
+        }
+        Object.values(database.persons).forEach(candChild => {
+          if (
+            (candChild.fatherId === p.id && candChild.motherId === sp.id) ||
+            (candChild.fatherId === sp.id && candChild.motherId === p.id)
+          ) {
+            unionChildren.add(candChild.id);
+          }
+        });
+
+        const validUnionChildren = Array.from(unionChildren).filter(
+          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId) && !collapsedParents.has(cId)
+        );
+        validUnionChildren.sort((idA, idB) =>
+          comparePersonsByAge(database.persons[idA], database.persons[idB])
+        );
+
+        return {
+          spouse: sp,
+          family: matchedFam,
+          marriageOrder: idx + 1,
+          relationshipType: matchedFam?.relationshipType || 'Married',
+          marriageDate: matchedFam?.marriageDate,
+          marriageYear: matchedFam?.marriageYear,
+          divorceDate: matchedFam?.divorceDate,
+          divorceYear: matchedFam?.divorceYear,
+          childrenIds: validUnionChildren
+        };
+      });
+
+      spousesInfo.sort((a, b) => {
+        const yearA = a.marriageYear || (a.marriageDate ? parseInt(a.marriageDate.match(/\d{4}/)?.[0] || '0', 10) : 0);
+        const yearB = b.marriageYear || (b.marriageDate ? parseInt(b.marriageDate.match(/\d{4}/)?.[0] || '0', 10) : 0);
+        if (yearA && yearB) return yearA - yearB;
+        return 0;
+      });
+      spousesInfo.forEach((s, idx) => {
+        s.marriageOrder = idx + 1;
+      });
+
+      const allChildren = new Set<string>();
+      if (p.childrenIds) p.childrenIds.forEach(c => allChildren.add(c));
+      spousesInfo.forEach(s => s.childrenIds.forEach(c => allChildren.add(c)));
+      if (p.spouseFamilyIds) {
+        p.spouseFamilyIds.forEach(fId => {
+          const fam = database.families[fId];
+          if (fam?.children) fam.children.forEach((c: any) => allChildren.add(c.personId || c.id));
+        });
+      }
+      Object.values(database.persons).forEach(candChild => {
+        if (candChild.fatherId === p.id || candChild.motherId === p.id) {
+          allChildren.add(candChild.id);
+        }
+      });
+      const validAllChildren = Array.from(allChildren).filter(
+        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId) && !collapsedParents.has(cId)
+      );
+      validAllChildren.sort((idA, idB) =>
+        comparePersonsByAge(database.persons[idA], database.persons[idB])
+      );
+
+      const totalMembers = 1 + spousesInfo.length;
+      // In horizontal layout, spouses in couple are stacked vertically along Y
+      const unitHeight = cardHeight * totalMembers + SPOUSE_GAP * (totalMembers - 1);
+
+      processed.add(p.id);
+      spousesInfo.forEach(s => processed.add(s.spouse.id));
+
+      if (spousesInfo.length === 0) {
+        units.push({
+          type: 'single',
+          primary: p,
+          spouses: [],
+          width: cardWidth,
+          height: cardHeight,
+          x: genX,
+          y: 0,
+          childrenIds: validAllChildren
+        });
+      } else if (spousesInfo.length === 1) {
+        const isMale = p.gender === 'male' || p.gender === 'M';
+        const spouse = spousesInfo[0].spouse;
+        const spouseIsMale = spouse.gender === 'male' || spouse.gender === 'M';
+
+        let primaryPerson = p;
+        let spousePerson = spousesInfo[0];
+        if (!isMale && spouseIsMale) {
+          primaryPerson = spouse;
+          spousePerson = { ...spousesInfo[0], spouse: p };
+        }
+
+        units.push({
+          type: 'couple',
+          primary: primaryPerson,
+          spouses: [spousePerson],
+          width: cardWidth,
+          height: unitHeight,
+          x: genX,
+          y: 0,
+          childrenIds: validAllChildren
+        });
+      } else {
+        units.push({
+          type: 'multi_spouse',
+          primary: p,
+          spouses: spousesInfo,
+          width: cardWidth,
+          height: unitHeight,
+          x: genX,
+          y: 0,
+          childrenIds: validAllChildren
+        });
+      }
+    });
+
+    genUnits.set(gen, units);
+  });
+
+  // Helpers for sibling detection
+  const getParentsOfPerson = (pId: string) => {
+    const p = database.persons[pId];
+    if (!p) return { fatherId: undefined, motherId: undefined };
+    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    if (!fId && !mId && database.families) {
+      const matchingFam = Object.values(database.families).find(fam =>
+        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
+      );
+      if (matchingFam) {
+        fId = matchingFam.husbandId;
+        mId = matchingFam.wifeId;
+      }
+    }
+    return { fatherId: fId, motherId: mId };
+  };
+
+  const areSiblings = (pId1: string, pId2: string): boolean => {
+    if (!pId1 || !pId2 || pId1 === pId2) return false;
+    const p1 = database.persons[pId1];
+    const p2 = database.persons[pId2];
+    if (!p1 || !p2) return false;
+    if (p1.siblingIds?.includes(pId2) || p2.siblingIds?.includes(pId1)) return true;
+    const par1 = getParentsOfPerson(pId1);
+    const par2 = getParentsOfPerson(pId2);
+    return Boolean(
+      (par1.fatherId && par1.fatherId === par2.fatherId) ||
+      (par1.motherId && par1.motherId === par2.motherId)
+    );
+  };
+
+  const getPersonCenterYInUnits = (personId: string, uList: Unit[]): number | undefined => {
+    for (const u of uList) {
+      if (u.primary.id === personId) {
+        return u.y + CLASSIC_CARD_HEIGHT / 2;
+      }
+      if (u.spouses) {
+        for (let sIdx = 0; sIdx < u.spouses.length; sIdx++) {
+          if (u.spouses[sIdx].spouse.id === personId) {
+            return u.y + (sIdx + 1) * (CLASSIC_CARD_HEIGHT + SPOUSE_GAP) + CLASSIC_CARD_HEIGHT / 2;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+
+  // Initial vertical placement per generation with family-aware clustering
+  genUnits.forEach((units) => {
+    const orderedUnits: Unit[] = [];
+    const usedUnitPrimaries = new Set<string>();
+
+    const getUnitPersonIds = (u: Unit): string[] => {
+      const ids = [u.primary.id];
+      if (u.spouses) {
+        u.spouses.forEach(s => ids.push(s.spouse.id));
+      }
+      return ids;
+    };
+
+    const findSiblingUnitsOf = (personId: string, exclude: Unit[]): Unit[] => {
+      return units.filter(u => {
+        if (usedUnitPrimaries.has(u.primary.id)) return false;
+        if (exclude.some(ex => ex.primary.id === u.primary.id)) return false;
+        const pIds = getUnitPersonIds(u);
+        return pIds.some(pId => areSiblings(pId, personId));
+      });
+    };
+
+    const coupleUnits = units.filter(u => (u.type === 'couple' || u.type === 'multi_spouse') && u.spouses.length > 0);
+
+    coupleUnits.forEach(cUnit => {
+      if (usedUnitPrimaries.has(cUnit.primary.id)) return;
+      const primarySiblings = findSiblingUnitsOf(cUnit.primary.id, [cUnit]);
+      primarySiblings.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
+
+      const spouseSiblings: Unit[] = [];
+      cUnit.spouses.forEach(sp => {
+        const sibs = findSiblingUnitsOf(sp.spouse.id, [cUnit, ...primarySiblings, ...spouseSiblings]);
+        sibs.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
+        spouseSiblings.push(...sibs);
+      });
+
+      primarySiblings.forEach(u => usedUnitPrimaries.add(u.primary.id));
+      usedUnitPrimaries.add(cUnit.primary.id);
+      spouseSiblings.forEach(u => usedUnitPrimaries.add(u.primary.id));
+
+      orderedUnits.push(...primarySiblings, cUnit, ...spouseSiblings);
+    });
+
+    const remainingUnits = units.filter(u => !usedUnitPrimaries.has(u.primary.id));
+    remainingUnits.sort((uA, uB) => {
+      const share = areSiblings(uA.primary.id, uB.primary.id);
+      if (share) return comparePersonsByAge(uA.primary, uB.primary);
+      return 0;
+    });
+    orderedUnits.push(...remainingUnits);
+    units.splice(0, units.length, ...orderedUnits);
+
+    let currentY = 80;
+    units.forEach((unit, idx) => {
+      unit.y = currentY;
+      const isNextDifferentFamily = idx < units.length - 1 && units[idx + 1].primary.parentFamilyId !== unit.primary.parentFamilyId;
+      currentY += unit.height + (isNextDifferentFamily ? HORIZONTAL_FAMILY_GAP : HORIZONTAL_SIBLING_GAP);
+    });
+  });
+
+  // Vertical Centering & Alignment passes
+  for (let pass = 0; pass < 3; pass++) {
+    // Bottom-up pass: align parents to children's vertical center
+    for (let gen = totalGens - 2; gen >= 0; gen--) {
+      const parentUnits = genUnits.get(gen) || [];
+      const childUnits = genUnits.get(gen + 1) || [];
+
+      parentUnits.forEach((pUnit) => {
+        if (pUnit.childrenIds.length > 0) {
+          const childCenters: number[] = [];
+          pUnit.childrenIds.forEach(cId => {
+            const cy = getPersonCenterYInUnits(cId, childUnits);
+            if (cy !== undefined) childCenters.push(cy);
+          });
+          if (childCenters.length > 0) {
+            const minCy = Math.min(...childCenters);
+            const maxCy = Math.max(...childCenters);
+            const childrenCenterY = (minCy + maxCy) / 2;
+            pUnit.y = childrenCenterY - pUnit.height / 2;
+          }
+        }
+      });
+
+      // Prevent overlapping along Y
+      parentUnits.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < parentUnits.length; i++) {
+        const prev = parentUnits[i - 1];
+        const curr = parentUnits[i];
+        const gap = (prev.primary.parentFamilyId && curr.primary.parentFamilyId && prev.primary.parentFamilyId === curr.primary.parentFamilyId)
+          ? HORIZONTAL_SIBLING_GAP
+          : HORIZONTAL_FAMILY_GAP;
+        if (curr.y < prev.y + prev.height + gap) {
+          curr.y = prev.y + prev.height + gap;
+        }
+      }
+    }
+
+    // Top-down pass: align children under parents
+    for (let gen = 0; gen < totalGens - 1; gen++) {
+      const parentUnits = genUnits.get(gen) || [];
+      const childUnits = genUnits.get(gen + 1) || [];
+
+      parentUnits.forEach((pUnit) => {
+        if (pUnit.childrenIds.length > 0) {
+          const parentCenterY = pUnit.y + pUnit.height / 2;
+          const directChildUnits = childUnits.filter(cu => pUnit.childrenIds.includes(cu.primary.id));
+          if (directChildUnits.length > 0) {
+            const childCenters = directChildUnits.map(cu => cu.y + cu.height / 2);
+            const minCy = Math.min(...childCenters);
+            const maxCy = Math.max(...childCenters);
+            const currChildrenCenterY = (minCy + maxCy) / 2;
+            const shiftY = parentCenterY - currChildrenCenterY;
+            directChildUnits.forEach(cu => {
+              cu.y += shiftY;
+            });
+          }
+        }
+      });
+
+      // Prevent overlapping along Y
+      childUnits.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < childUnits.length; i++) {
+        const prev = childUnits[i - 1];
+        const curr = childUnits[i];
+        const gap = (prev.primary.parentFamilyId && curr.primary.parentFamilyId && prev.primary.parentFamilyId === curr.primary.parentFamilyId)
+          ? HORIZONTAL_SIBLING_GAP
+          : HORIZONTAL_FAMILY_GAP;
+        if (curr.y < prev.y + prev.height + gap) {
+          curr.y = prev.y + prev.height + gap;
+        }
+      }
+    }
+  }
+
+  // Ensure minimum top margin of 80px
+  let globalMinY = Infinity;
+  genUnits.forEach(units => {
+    units.forEach(u => {
+      globalMinY = Math.min(globalMinY, u.y);
+    });
+  });
+  if (globalMinY < 80) {
+    const shift = 80 - globalMinY;
+    genUnits.forEach(units => {
+      units.forEach(u => {
+        u.y += shift;
+      });
+    });
+  }
+
+  // Node Map for recording absolute positions
+  const nodeMap = new Map<string, { x: number; y: number; width: number; height: number; centerX: number; centerY: number }>();
+
+  const getNodeFlags = (p: Person) => {
+    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+
+    if (!fId && !mId && database.families) {
+      const matchingFam = Object.values(database.families).find(fam =>
+        fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
+      );
+      if (matchingFam) {
+        fId = matchingFam.husbandId;
+        mId = matchingFam.wifeId;
+      }
+    }
+
+    const parentsCount = (fId && database.persons[fId] ? 1 : 0) + (mId && database.persons[mId] ? 1 : 0);
+    const hasParents = parentsCount > 0;
+    const areParentsVisible = (fId && personGen.has(fId)) || (mId && personGen.has(mId));
+    const isParentsCollapsed = collapsedParents.has(p.id) || !showParents || (hasParents && !areParentsVisible);
+
+    let siblingCount = 0;
+    let areSiblingsVisible = false;
+    const sibs = Object.values(database.persons).filter(cand =>
+      cand.id !== p.id && (
+        (fId && (cand.fatherId === fId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.husbandId === fId))) ||
+        (mId && (cand.motherId === mId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.wifeId === mId))) ||
+        (p.siblingIds && p.siblingIds.includes(cand.id)) ||
+        (cand.siblingIds && cand.siblingIds.includes(p.id))
+      )
+    );
+    siblingCount = sibs.length;
+    areSiblingsVisible = sibs.some(s => personGen.has(s.id));
+    const hasSiblings = siblingCount > 0;
+    const isSiblingsCollapsed = collapsedSiblings.has(p.id) || !showSiblings || (hasSiblings && !areSiblingsVisible) || isPersonACollapsedSibling(p.id);
+
+    const validChildren = getDirectChildrenIds(p.id);
+    const childrenCount = validChildren.length;
+    const hasChildren = childrenCount > 0;
+    const areChildrenVisible = validChildren.some(cId => personGen.has(cId));
+    const isChildrenCollapsed = isPersonChildrenCollapsed(p.id) || !showDescendants || (hasChildren && !areChildrenVisible);
+
+    const descendantsCount = getTotalDescendantsCount(p.id, database);
+    const isDirectAncestor = directAncestors.has(p.id) || p.id === root.id;
+
+    return {
+      hasParents,
+      hasSiblings,
+      hasChildren,
+      parentsCount,
+      siblingsCount: siblingCount,
+      childrenCount,
+      descendantsCount,
+      isDirectAncestor,
+      isParentsCollapsed,
+      isSiblingsCollapsed,
+      isChildrenCollapsed,
+      areParentsVisible: Boolean(areParentsVisible),
+      areSiblingsVisible,
+      areChildrenVisible
+    };
+  };
+
+  // 1. First Pass: Create nodes
+  genUnits.forEach((units, gen) => {
+    units.forEach((unit) => {
+      if (unit.type === 'couple' && unit.spouses.length === 1) {
+        // Husband / Primary
+        const hX = unit.x;
+        const hY = unit.y;
+        const hFlags = getNodeFlags(unit.primary);
+        nodes.push({
+          id: unit.primary.id,
+          person: unit.primary,
+          x: hX,
+          y: hY,
+          width: cardWidth,
+          height: cardHeight,
+          generation: gen,
+          spouseId: unit.spouses[0].spouse.id,
+          ...hFlags
+        });
+        nodeMap.set(unit.primary.id, {
+          x: hX,
+          y: hY,
+          width: cardWidth,
+          height: cardHeight,
+          centerX: hX + cardWidth / 2,
+          centerY: hY + cardHeight / 2
+        });
+
+        // Wife / Spouse (stacked vertically below husband)
+        const spInfo = unit.spouses[0];
+        const wX = unit.x;
+        const wY = unit.y + cardHeight + SPOUSE_GAP;
+        const wFlags = getNodeFlags(spInfo.spouse);
+        nodes.push({
+          id: spInfo.spouse.id,
+          person: spInfo.spouse,
+          x: wX,
+          y: wY,
+          width: cardWidth,
+          height: cardHeight,
+          generation: gen,
+          spouseId: unit.primary.id,
+          isSpouseNode: true,
+          marriageOrder: spInfo.marriageOrder,
+          marriageStatus: spInfo.relationshipType,
+          marriageDate: spInfo.marriageDate,
+          marriageYear: spInfo.marriageYear,
+          divorceDate: spInfo.divorceDate,
+          divorceYear: spInfo.divorceYear,
+          ...wFlags
+        });
+        nodeMap.set(spInfo.spouse.id, {
+          x: wX,
+          y: wY,
+          width: cardWidth,
+          height: cardHeight,
+          centerX: wX + cardWidth / 2,
+          centerY: wY + cardHeight / 2
+        });
+      } else if (unit.type === 'multi_spouse') {
+        let curY = unit.y;
+        const pFlags = getNodeFlags(unit.primary);
+        nodes.push({
+          id: unit.primary.id,
+          person: unit.primary,
+          x: unit.x,
+          y: curY,
+          width: cardWidth,
+          height: cardHeight,
+          generation: gen,
+          spouseId: unit.spouses[0]?.spouse.id,
+          ...pFlags
+        });
+        nodeMap.set(unit.primary.id, {
+          x: unit.x,
+          y: curY,
+          width: cardWidth,
+          height: cardHeight,
+          centerX: unit.x + cardWidth / 2,
+          centerY: curY + cardHeight / 2
+        });
+        curY += cardHeight + SPOUSE_GAP;
+
+        unit.spouses.forEach((spInfo) => {
+          const sFlags = getNodeFlags(spInfo.spouse);
+          nodes.push({
+            id: spInfo.spouse.id,
+            person: spInfo.spouse,
+            x: unit.x,
+            y: curY,
+            width: cardWidth,
+            height: cardHeight,
+            generation: gen,
+            spouseId: unit.primary.id,
+            isSpouseNode: true,
+            marriageOrder: spInfo.marriageOrder,
+            marriageStatus: spInfo.relationshipType,
+            marriageDate: spInfo.marriageDate,
+            marriageYear: spInfo.marriageYear,
+            divorceDate: spInfo.divorceDate,
+            divorceYear: spInfo.divorceYear,
+            ...sFlags
+          });
+          nodeMap.set(spInfo.spouse.id, {
+            x: unit.x,
+            y: curY,
+            width: cardWidth,
+            height: cardHeight,
+            centerX: unit.x + cardWidth / 2,
+            centerY: curY + cardHeight / 2
+          });
+          curY += cardHeight + SPOUSE_GAP;
+        });
+      } else {
+        // Single person
+        const sFlags = getNodeFlags(unit.primary);
+        nodes.push({
+          id: unit.primary.id,
+          person: unit.primary,
+          x: unit.x,
+          y: unit.y,
+          width: cardWidth,
+          height: cardHeight,
+          generation: gen,
+          ...sFlags
+        });
+        nodeMap.set(unit.primary.id, {
+          x: unit.x,
+          y: unit.y,
+          width: cardWidth,
+          height: cardHeight,
+          centerX: unit.x + cardWidth / 2,
+          centerY: unit.y + cardHeight / 2
+        });
+      }
+    });
+  });
+
+  // 2. Second Pass: Generate orthogonal links (Ancestors Left ➔ Descendants Right)
+  genUnits.forEach((units, gen) => {
+    units.forEach((unit, unitIdx) => {
+      const unitColor = FAMILY_LINE_COLORS[(gen * 3 + unitIdx) % FAMILY_LINE_COLORS.length];
+
+      if ((unit.type === 'couple' || unit.type === 'multi_spouse') && unit.spouses.length > 0) {
+        unit.spouses.forEach((spInfo, spIdx) => {
+          const pNode = nodeMap.get(unit.primary.id);
+          const sNode = nodeMap.get(spInfo.spouse.id);
+          if (!pNode || !sNode) return;
+
+          // Vertical marriage link connecting husband bottom to wife top
+          const topCard = pNode.y < sNode.y ? pNode : sNode;
+          const bottomCard = pNode.y < sNode.y ? sNode : pNode;
+          const marriageMidY = (topCard.y + topCard.height + bottomCard.y) / 2;
+
+          links.push({
+            id: `marriage_${unit.primary.id}_${spInfo.spouse.id}`,
+            sourceX: topCard.centerX,
+            sourceY: topCard.y + topCard.height,
+            targetX: bottomCard.centerX,
+            targetY: bottomCard.y,
+            type: 'marriage',
+            marriageOrder: spInfo.marriageOrder,
+            marriageStatus: spInfo.relationshipType,
+            familyId: spInfo.family?.id,
+            sourcePersonId: unit.primary.id,
+            targetPersonId: spInfo.spouse.id,
+            path: `M ${topCard.centerX} ${topCard.y + topCard.height} L ${bottomCard.centerX} ${bottomCard.y}`
+          });
+
+          // Children branching to the right
+          if (spInfo.childrenIds.length > 0) {
+            const unionColor = FAMILY_LINE_COLORS[(gen * 3 + unitIdx + spIdx) % FAMILY_LINE_COLORS.length];
+            const stemStartX = Math.max(pNode.x, sNode.x) + cardWidth;
+            const stemStartY = marriageMidY;
+            const junctionX = stemStartX + (isCompact ? 20 : 36) + ((unitIdx + spIdx) % 4) * (isCompact ? 12 : 20);
+
+            const childNodes = spInfo.childrenIds
+              .filter(cId => !collapsedParents.has(cId))
+              .map(cId => ({ id: cId, ...nodeMap.get(cId)! }))
+              .filter(c => c && c.centerY !== undefined);
+
+            if (childNodes.length > 0) {
+              const minChildY = Math.min(...childNodes.map(c => c.centerY));
+              const maxChildY = Math.max(...childNodes.map(c => c.centerY));
+              const busTop = Math.min(stemStartY, minChildY);
+              const busBottom = Math.max(stemStartY, maxChildY);
+
+              // Horizontal stem going right
+              links.push({
+                id: `stem_${unit.primary.id}_${spInfo.spouse.id}`,
+                sourceX: stemStartX,
+                sourceY: stemStartY,
+                targetX: junctionX,
+                targetY: stemStartY,
+                type: 'stem',
+                color: unionColor,
+                sourcePersonId: unit.primary.id,
+                targetPersonId: spInfo.spouse.id,
+                path: `M ${stemStartX} ${stemStartY} L ${junctionX} ${stemStartY}`
+              });
+
+              // Vertical bus bar
+              links.push({
+                id: `bus_${unit.primary.id}_${spInfo.spouse.id}`,
+                sourceX: junctionX,
+                sourceY: busTop,
+                targetX: junctionX,
+                targetY: busBottom,
+                type: 'bus',
+                color: unionColor,
+                sourcePersonId: unit.primary.id,
+                targetPersonId: spInfo.spouse.id,
+                path: `M ${junctionX} ${busTop} L ${junctionX} ${busBottom}`
+              });
+
+              // Horizontal drop into each child card
+              childNodes.forEach((child) => {
+                links.push({
+                  id: `drop_${spInfo.family?.id || 'f'}_${child.id}`,
+                  sourceX: junctionX,
+                  sourceY: child.centerY,
+                  targetX: child.x,
+                  targetY: child.centerY,
+                  type: 'drop',
+                  color: unionColor,
+                  arrow: 'right',
+                  arrowX: child.x,
+                  arrowY: child.centerY,
+                  familyId: spInfo.family?.id,
+                  childPersonId: child.id,
+                  sourcePersonId: unit.primary.id,
+                  targetPersonId: spInfo.spouse.id,
+                  path: `M ${junctionX} ${child.centerY} L ${child.x} ${child.centerY}`
+                });
+              });
+            }
+          }
+        });
+      } else {
+        // Single parent children branching right
+        const pNode = nodeMap.get(unit.primary.id);
+        if (pNode && unit.childrenIds.length > 0) {
+          const stemStartX = pNode.x + cardWidth;
+          const stemStartY = pNode.centerY;
+          const junctionX = stemStartX + (isCompact ? 20 : 36) + (unitIdx % 4) * (isCompact ? 12 : 20);
+
+          const childNodes = unit.childrenIds
+            .map(cId => ({ id: cId, ...nodeMap.get(cId)! }))
+            .filter(c => c && c.centerY !== undefined);
+
+          if (childNodes.length > 0) {
+            const minChildY = Math.min(...childNodes.map(c => c.centerY));
+            const maxChildY = Math.max(...childNodes.map(c => c.centerY));
+            const busTop = Math.min(stemStartY, minChildY);
+            const busBottom = Math.max(stemStartY, maxChildY);
+
+            links.push({
+              id: `stem_single_${unit.primary.id}`,
+              sourceX: stemStartX,
+              sourceY: stemStartY,
+              targetX: junctionX,
+              targetY: stemStartY,
+              type: 'stem',
+              color: unitColor,
+              sourcePersonId: unit.primary.id,
+              path: `M ${stemStartX} ${stemStartY} L ${junctionX} ${stemStartY}`
+            });
+
+            links.push({
+              id: `bus_single_${unit.primary.id}`,
+              sourceX: junctionX,
+              sourceY: busTop,
+              targetX: junctionX,
+              targetY: busBottom,
+              type: 'bus',
+              color: unitColor,
+              sourcePersonId: unit.primary.id,
+              path: `M ${junctionX} ${busTop} L ${junctionX} ${busBottom}`
+            });
+
+            childNodes.forEach((child) => {
+              links.push({
+                id: `drop_single_${unit.primary.id}_${child.id}`,
+                sourceX: junctionX,
+                sourceY: child.centerY,
+                targetX: child.x,
+                targetY: child.centerY,
+                type: 'drop',
+                color: unitColor,
+                arrow: 'right',
+                arrowX: child.x,
+                arrowY: child.centerY,
+                childPersonId: child.id,
+                sourcePersonId: unit.primary.id,
+                path: `M ${junctionX} ${child.centerY} L ${child.x} ${child.centerY}`
+              });
+            });
+          }
+        }
+      }
+    });
+  });
+
+  // Calculate full dimensions
+  let finalMaxX = 1400;
+  let finalMaxY = 900;
+  nodes.forEach(n => {
+    finalMaxX = Math.max(finalMaxX, n.x + n.width + 160);
+    finalMaxY = Math.max(finalMaxY, n.y + n.height + 160);
   });
 
   return {

@@ -13,6 +13,9 @@ export interface UserTreeState {
   scale?: number;
   generations?: number;
   showSiblings?: boolean;
+  orientation?: 'vertical' | 'horizontal';
+  enableBloodlineHover?: boolean;
+  isCompact?: boolean;
   updatedAt: string;
 }
 
