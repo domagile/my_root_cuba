@@ -36,6 +36,7 @@ import {
   Search,
   ExternalLink,
   ChevronDown,
+  ChevronUp,
   GitFork,
   Compass,
   Mail,
@@ -65,6 +66,18 @@ import {
   getWitnessOtherWitnessed,
   getMergedGodparents
 } from '../../utils/spiritualRelations';
+import {
+  ModalSection,
+  ModalAccordionState,
+  DEFAULT_MODAL_ACCORDION_SECTIONS
+} from '../../utils/accordionState';
+import { useUIStore } from '../../stores/useUIStore';
+import {
+  validatePersonFormDates,
+  validateLifeEventDate
+} from '../../utils/dateValidation';
+
+export type { ModalSection, ModalAccordionState };
 
 export interface AddPersonModalProps {
   personId?: string | null;
@@ -81,16 +94,6 @@ export interface AddPersonModalProps {
   onSelectPerson?: (personId: string) => void;
   isReadOnly?: boolean;
 }
-
-type ModalSection =
-  | 'basic'
-  | 'names'
-  | 'parents'
-  | 'dates-places'
-  | 'bio-notes'
-  | 'events'
-  | 'photos'
-  | 'custom-fields';
 
 const MODAL_SECTIONS: { id: ModalSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'basic', label: 'Основне та теги', icon: User },
@@ -119,7 +122,17 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const theme = getThemeConfig(themePalette);
   const isDark = themePalette.includes('dark');
 
-  const [activeSection, setActiveSection] = useState<ModalSection>('basic');
+  // Persistent Accordion & Active Section state from useUIStore
+  const openSections = useUIStore((s) => s.personModalOpenSections);
+  const activeSection = useUIStore((s) => s.personModalActiveSection);
+  const initPersonModalAccordion = useUIStore((s) => s.initPersonModalAccordion);
+  const togglePersonModalSection = useUIStore((s) => s.togglePersonModalSection);
+  const setPersonModalOpenSections = useUIStore((s) => s.setPersonModalOpenSections);
+  const setPersonModalActiveSection = useUIStore((s) => s.setPersonModalActiveSection);
+  const expandAllPersonModalSections = useUIStore((s) => s.expandAllPersonModalSections);
+  const collapseAllPersonModalSections = useUIStore((s) => s.collapseAllPersonModalSections);
+  const resetPersonModalSectionsToDefault = useUIStore((s) => s.resetPersonModalSectionsToDefault);
+
   const [isMobileNavCollapsed, setIsMobileNavCollapsed] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return window.innerWidth < 768;
@@ -160,6 +173,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [fullNameOverride, setFullNameOverride] = useState('');
   const [nameVariants, setNameVariants] = useState((effectivePerson?.nameVariants || []).join(', '));
   const [surnameVariants, setSurnameVariants] = useState((effectivePerson?.surnameVariants || []).join(', '));
+  const [showNameExtras, setShowNameExtras] = useState<boolean>(() => {
+    return Boolean(
+      initialPrefix ||
+      (effectivePerson?.nameVariants && effectivePerson.nameVariants.length > 0) ||
+      (effectivePerson?.surnameVariants && effectivePerson.surnameVariants.length > 0)
+    );
+  });
 
   // Gender
   const [gender, setGender] = useState<Gender>(() => {
@@ -205,9 +225,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   // Sibling IDs
   const [siblingIds, setSiblingIds] = useState<string[]>(effectivePerson?.siblingIds || []);
 
-  // Godparents list
+  // Godparents & Spiritual relations
   const [godparents, setGodparents] = useState<GodparentItem[]>(effectivePerson?.godparents || []);
-  const [godparentMode, setGodparentMode] = useState<'create_new' | 'select_existing'>('create_new');
+  const [spiritualTab, setSpiritualTab] = useState<'godparents' | 'godchildren' | 'witnesses'>('godparents');
+  const [godparentMode, setGodparentMode] = useState<'select_existing' | 'create_new'>('select_existing');
   const [newGodparentName, setNewGodparentName] = useState('');
   const [newGodparentRole, setNewGodparentRole] = useState<'godfather' | 'godmother' | 'witness'>('godfather');
   const [newGodparentNotes, setNewGodparentNotes] = useState('');
@@ -228,6 +249,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [newGodchildBirthYear, setNewGodchildBirthYear] = useState('');
   const [newGodchildNotes, setNewGodchildNotes] = useState('');
   const [godchildFeedbackMsg, setGodchildFeedbackMsg] = useState<{ text: string; type: 'success' | 'info' } | null>(null);
+  const [tempGodchildren, setTempGodchildren] = useState<Array<{ id: string; person: Person; notes?: string }>>([]);
 
   // Witnessed persons states (де дана особа була свідком / поручителем)
   const [showAddWitnessedForm, setShowAddWitnessedForm] = useState(false);
@@ -235,6 +257,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [selectedExistingWitnessedId, setSelectedExistingWitnessedId] = useState('');
   const [newWitnessedNotes, setNewWitnessedNotes] = useState('');
   const [witnessedFeedbackMsg, setWitnessedFeedbackMsg] = useState<{ text: string; type: 'success' | 'info' } | null>(null);
+  const [tempWitnessedPersons, setTempWitnessedPersons] = useState<Array<{ id: string; person: Person; notes?: string }>>([]);
 
   // 4. Dates & Places (Map locations)
   const [birthDate, setBirthDate] = useState(effectivePerson?.birthDate || '');
@@ -319,6 +342,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [mergeModalPair, setMergeModalPair] = useState<{ idA?: string; idB?: string } | null>(null);
   const [duplicateWarningDismissedForSave, setDuplicateWarningDismissedForSave] = useState<boolean>(false);
   const [showDuplicateSaveDialog, setShowDuplicateSaveDialog] = useState<boolean>(false);
+  const [dateValidationDismissedForSave, setDateValidationDismissedForSave] = useState<boolean>(false);
+  const [showDateValidationDialog, setShowDateValidationDialog] = useState<boolean>(false);
 
   const draftPersonForDuplicates = useMemo<Person>(() => {
     return {
@@ -474,6 +499,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     setPrefix(effectivePerson.name?.prefix || effectivePerson.prefix || '');
     setNameVariants((effectivePerson.nameVariants || []).join(', '));
     setSurnameVariants((effectivePerson.surnameVariants || []).join(', '));
+    if (
+      effectivePerson.name?.prefix ||
+      effectivePerson.prefix ||
+      (effectivePerson.nameVariants && effectivePerson.nameVariants.length > 0) ||
+      (effectivePerson.surnameVariants && effectivePerson.surnameVariants.length > 0)
+    ) {
+      setShowNameExtras(true);
+    }
     setGender(() => {
       if (isPersonFemale(effectivePerson)) return 'female';
       if (isPersonMale(effectivePerson)) return 'male';
@@ -641,58 +674,58 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     return `${bYear} — ${dYear}`;
   }, [birthDate, deathDate, isLiving]);
 
-  // Accordion state for right-hand content sections
-  const [openSections, setOpenSections] = useState<Record<ModalSection, boolean>>({
-    'basic': true,
-    'names': true,
-    'parents': false,
-    'dates-places': false,
-    'bio-notes': false,
-    'events': false,
-    'photos': false,
-    'custom-fields': false,
-  });
+  // Real-time Date validation calculations
+  const personDateValidation = useMemo(() => {
+    return validatePersonFormDates(birthDate, deathDate, marriageDate, isLiving);
+  }, [birthDate, deathDate, marriageDate, isLiving]);
+
+  const lifeEventsValidation = useMemo(() => {
+    return lifeEvents.map((evt) => ({
+      event: evt,
+      ...validateLifeEventDate(evt.date, birthDate, deathDate, isLiving)
+    }));
+  }, [lifeEvents, birthDate, deathDate, isLiving]);
+
+  const hasFutureLifeEvents = useMemo(() => {
+    return lifeEventsValidation.some((v) => v.isFuture);
+  }, [lifeEventsValidation]);
+
+  const newEventValidation = useMemo(() => {
+    return validateLifeEventDate(newEvent.date, birthDate, deathDate, isLiving);
+  }, [newEvent.date, birthDate, deathDate, isLiving]);
+
+  // Sync persistent accordion state when person changes or modal opens
+  useEffect(() => {
+    initPersonModalAccordion(effectivePerson?.id);
+  }, [effectivePerson?.id, initPersonModalAccordion]);
+
+  // Count of currently expanded accordion sections
+  const openSectionsCount = useMemo(() => {
+    return Object.values(openSections).filter(Boolean).length;
+  }, [openSections]);
 
   const toggleSectionAccordion = (sectionId: ModalSection) => {
-    setOpenSections((prev) => {
-      const nextOpen = !prev[sectionId];
-      if (nextOpen) {
-        setActiveSection(sectionId);
-      }
-      return { ...prev, [sectionId]: nextOpen };
-    });
+    togglePersonModalSection(sectionId, effectivePerson?.id);
   };
 
   const handleExpandAllSections = () => {
-    setOpenSections({
-      'basic': true,
-      'names': true,
-      'parents': true,
-      'dates-places': true,
-      'bio-notes': true,
-      'events': true,
-      'photos': true,
-      'custom-fields': true,
-    });
+    expandAllPersonModalSections(effectivePerson?.id);
   };
 
   const handleCollapseAllSections = () => {
-    setOpenSections({
-      'basic': false,
-      'names': false,
-      'parents': false,
-      'dates-places': false,
-      'bio-notes': false,
-      'events': false,
-      'photos': false,
-      'custom-fields': false,
-    });
+    collapseAllPersonModalSections(effectivePerson?.id);
+  };
+
+  const handleResetSectionsToDefault = () => {
+    resetPersonModalSectionsToDefault(effectivePerson?.id);
   };
 
   // Scroll to section handler (opens accordion section and scrolls)
   const scrollToSection = (sectionId: ModalSection) => {
-    setActiveSection(sectionId);
-    setOpenSections((prev) => ({ ...prev, [sectionId]: true }));
+    setPersonModalActiveSection(sectionId, effectivePerson?.id);
+    if (!openSections[sectionId]) {
+      setPersonModalOpenSections((prev) => ({ ...prev, [sectionId]: true }), effectivePerson?.id);
+    }
     setTimeout(() => {
       const el = document.getElementById(`sec-${sectionId}`);
       if (el) {
@@ -897,8 +930,110 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     return getMergedGodparents(effectivePerson, godparents, persons);
   }, [effectivePerson, godparents, persons]);
 
+  // Select existing godparent with auto-detected gender role
+  const handleSelectExistingGodparent = (pId: string) => {
+    setSelectedExistingGodparentId(pId);
+    const p = persons.find((item) => item.id === pId);
+    if (p) {
+      if (p.gender === 'female' || p.gender === 'F') {
+        setNewGodparentRole('godmother');
+      } else if (p.gender === 'male' || p.gender === 'M') {
+        setNewGodparentRole('godfather');
+      }
+    }
+  };
+
+  // Alphabetically sorted & filtered persons for godparents
+  const filteredGodparentPersons = useMemo(() => {
+    const q = godparentSearchQuery.trim().toLowerCase();
+    return persons
+      .filter((p) => {
+        if (p.id === currentPersonId) return false;
+        if (godparents.some((gp) => gp.personId === p.id)) return false;
+        if (!q) return true;
+        const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.toLowerCase();
+        return name.includes(q);
+      })
+      .sort((a, b) => {
+        const nameA = `${a.name?.surname || a.lastName || ''} ${a.name?.given || a.firstName || ''}`.trim().toLowerCase();
+        const nameB = `${b.name?.surname || b.lastName || ''} ${b.name?.given || b.firstName || ''}`.trim().toLowerCase();
+        return nameA.localeCompare(nameB, 'uk');
+      });
+  }, [persons, currentPersonId, godparents, godparentSearchQuery]);
+
+  // Alphabetically sorted & filtered persons for godchildren
+  const filteredGodchildPersons = useMemo(() => {
+    const q = godchildSearchQuery.trim().toLowerCase();
+    return persons
+      .filter((p) => {
+        if (p.id === currentPersonId) return false;
+        if (linkedGodchildren.some((g) => g.person.id === p.id)) return false;
+        if (tempGodchildren.some((t) => t.id === p.id)) return false;
+        if (!q) return true;
+        const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.toLowerCase();
+        return name.includes(q);
+      })
+      .sort((a, b) => {
+        const nameA = `${a.name?.surname || a.lastName || ''} ${a.name?.given || a.firstName || ''}`.trim().toLowerCase();
+        const nameB = `${b.name?.surname || b.lastName || ''} ${b.name?.given || b.firstName || ''}`.trim().toLowerCase();
+        return nameA.localeCompare(nameB, 'uk');
+      });
+  }, [persons, currentPersonId, linkedGodchildren, tempGodchildren, godchildSearchQuery]);
+
+  // Alphabetically sorted & filtered persons for witnesses
+  const filteredWitnessPersons = useMemo(() => {
+    const q = witnessedSearchQuery.trim().toLowerCase();
+    return persons
+      .filter((p) => {
+        if (p.id === currentPersonId) return false;
+        if (linkedWitnessedPersons.some((w) => w.person.id === p.id)) return false;
+        if (tempWitnessedPersons.some((t) => t.id === p.id)) return false;
+        if (!q) return true;
+        const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.toLowerCase();
+        return name.includes(q);
+      })
+      .sort((a, b) => {
+        const nameA = `${a.name?.surname || a.lastName || ''} ${a.name?.given || a.firstName || ''}`.trim().toLowerCase();
+        const nameB = `${b.name?.surname || b.lastName || ''} ${b.name?.given || b.firstName || ''}`.trim().toLowerCase();
+        return nameA.localeCompare(nameB, 'uk');
+      });
+  }, [persons, currentPersonId, linkedWitnessedPersons, tempWitnessedPersons, witnessedSearchQuery]);
+
+  // Combined godchildren (saved + temp for new person)
+  const allDisplayGodchildren = useMemo(() => {
+    const list = [...linkedGodchildren];
+    tempGodchildren.forEach((tg) => {
+      if (!list.some((item) => item.person.id === tg.id)) {
+        list.push({
+          person: tg.person,
+          roleLabel: tg.person.gender === 'female' ? 'Хрещениця' : 'Хрещеник',
+          notes: tg.notes,
+          parentsLabel: undefined,
+          coGodparents: undefined
+        });
+      }
+    });
+    return list;
+  }, [linkedGodchildren, tempGodchildren]);
+
+  // Combined witnessed persons (saved + temp for new person)
+  const allDisplayWitnessedPersons = useMemo(() => {
+    const list = [...linkedWitnessedPersons];
+    tempWitnessedPersons.forEach((tw) => {
+      if (!list.some((item) => item.person.id === tw.id)) {
+        list.push({
+          person: tw.person,
+          roleLabel: 'Свідок / Поручитель',
+          eventLabel: undefined,
+          notes: tw.notes,
+          coWitnesses: undefined
+        });
+      }
+    });
+    return list;
+  }, [linkedWitnessedPersons, tempWitnessedPersons]);
+
   const handleAddGodchild = () => {
-    if (!effectivePerson) return;
     if (godchildMode === 'select_existing') {
       if (!selectedExistingGodchildId) {
         setGodchildFeedbackMsg({ text: 'Будь ласка, оберіть особу зі списку.', type: 'info' });
@@ -906,6 +1041,26 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       }
       const childPerson = persons.find((p) => p.id === selectedExistingGodchildId);
       if (!childPerson) return;
+
+      const childFullName = `${childPerson.name?.surname || childPerson.lastName || ''} ${childPerson.name?.given || childPerson.firstName || ''}`.trim() || 'Особу';
+
+      if (!effectivePerson) {
+        setTempGodchildren((prev) => [...prev, {
+          id: childPerson.id,
+          person: childPerson,
+          notes: newGodchildNotes.trim()
+        }]);
+        setSelectedExistingGodchildId('');
+        setGodchildSearchQuery('');
+        setNewGodchildNotes('');
+        setShowAddGodchildForm(false);
+        setGodchildFeedbackMsg({
+          text: `Особу «${childFullName}» додано як хрещеника!`,
+          type: 'success'
+        });
+        setTimeout(() => setGodchildFeedbackMsg(null), 5000);
+        return;
+      }
 
       const isFem = gender === 'female' || gender === 'F';
       const selfName = `${lastName || ''} ${firstName || ''}`.trim() || 'Хрещений';
@@ -933,7 +1088,6 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         godchildrenIds: updatedMyGodchildren
       });
 
-      const childFullName = `${childPerson.name?.surname || childPerson.lastName || ''} ${childPerson.name?.given || childPerson.firstName || ''}`.trim() || 'Особу';
       setSelectedExistingGodchildId('');
       setGodchildSearchQuery('');
       setNewGodchildNotes('');
@@ -976,25 +1130,31 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       researchBranch: researchBranch && researchBranch !== 'Без прив\'язки' ? researchBranch : 'Без прив\'язки',
       notes: newGodchildNotes.trim() || undefined,
       isLiving: false,
-      godparents: [
-        {
-          id: crypto.randomUUID(),
-          personId: effectivePerson.id,
-          name: selfName,
-          role: isFem ? 'godmother' : 'godfather',
-          notes: isFem ? 'Хрещена мати' : 'Хрещений батько'
-        }
-      ],
-      godparentIds: [effectivePerson.id]
+      godparents: currentPersonId
+        ? [
+            {
+              id: crypto.randomUUID(),
+              personId: currentPersonId,
+              name: selfName,
+              role: isFem ? 'godmother' : 'godfather',
+              notes: isFem ? 'Хрещена мати' : 'Хрещений батько'
+            }
+          ]
+        : undefined,
+      godparentIds: currentPersonId ? [currentPersonId] : undefined
     };
 
     addPerson(newChildPerson);
 
-    const updatedMyGodchildren = Array.from(new Set([...(effectivePerson.godchildrenIds || []), newChildId]));
-    updatePerson({
-      ...effectivePerson,
-      godchildrenIds: updatedMyGodchildren
-    });
+    if (effectivePerson) {
+      const updatedMyGodchildren = Array.from(new Set([...(effectivePerson.godchildrenIds || []), newChildId]));
+      updatePerson({
+        ...effectivePerson,
+        godchildrenIds: updatedMyGodchildren
+      });
+    } else {
+      setTempGodchildren((prev) => [...prev, { id: newChildId, person: newChildPerson, notes: newGodchildNotes.trim() }]);
+    }
 
     setNewGodchildName('');
     setNewGodchildBirthYear('');
@@ -1008,6 +1168,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   };
 
   const handleUnlinkGodchild = (childPersonId: string) => {
+    if (!effectivePerson) {
+      setTempGodchildren((prev) => prev.filter((t) => t.id !== childPersonId));
+      return;
+    }
     const child = persons.find((p) => p.id === childPersonId);
     if (child) {
       const updatedGps = (child.godparents || []).filter((g) => g.personId !== currentPersonId);
@@ -1018,23 +1182,40 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         godparentIds: updatedGpIds.length > 0 ? updatedGpIds : undefined
       });
     }
-    if (effectivePerson) {
-      const updatedGchildren = (effectivePerson.godchildrenIds || []).filter((id) => id !== childPersonId);
-      updatePerson({
-        ...effectivePerson,
-        godchildrenIds: updatedGchildren.length > 0 ? updatedGchildren : undefined
-      });
-    }
+    const updatedGchildren = (effectivePerson.godchildrenIds || []).filter((id) => id !== childPersonId);
+    updatePerson({
+      ...effectivePerson,
+      godchildrenIds: updatedGchildren.length > 0 ? updatedGchildren : undefined
+    });
   };
 
   const handleAddWitnessedPerson = () => {
-    if (!effectivePerson) return;
     if (!selectedExistingWitnessedId) {
       setWitnessedFeedbackMsg({ text: 'Будь ласка, оберіть особу зі списку.', type: 'info' });
       return;
     }
     const target = persons.find((p) => p.id === selectedExistingWitnessedId);
     if (!target) return;
+
+    const targetFullName = `${target.name?.surname || target.lastName || ''} ${target.name?.given || target.firstName || ''}`.trim() || 'Особу';
+
+    if (!effectivePerson) {
+      setTempWitnessedPersons((prev) => [...prev, {
+        id: target.id,
+        person: target,
+        notes: newWitnessedNotes.trim()
+      }]);
+      setSelectedExistingWitnessedId('');
+      setWitnessedSearchQuery('');
+      setNewWitnessedNotes('');
+      setShowAddWitnessedForm(false);
+      setWitnessedFeedbackMsg({
+        text: `Особу «${targetFullName}» прив'язано до свідчень!`,
+        type: 'success'
+      });
+      setTimeout(() => setWitnessedFeedbackMsg(null), 5000);
+      return;
+    }
 
     const selfName = `${lastName || ''} ${firstName || ''}`.trim() || 'Свідок';
 
@@ -1063,7 +1244,6 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       witnessedPersonIds: updatedMyWitnessed
     });
 
-    const targetFullName = `${target.name?.surname || target.lastName || ''} ${target.name?.given || target.firstName || ''}`.trim() || 'Особу';
     setSelectedExistingWitnessedId('');
     setWitnessedSearchQuery('');
     setNewWitnessedNotes('');
@@ -1076,6 +1256,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   };
 
   const handleUnlinkWitnessedPerson = (witnessedPersonId: string) => {
+    if (!effectivePerson) {
+      setTempWitnessedPersons((prev) => prev.filter((t) => t.id !== witnessedPersonId));
+      return;
+    }
     const target = persons.find((p) => p.id === witnessedPersonId);
     if (target) {
       const updatedGps = (target.godparents || []).filter(
@@ -1090,18 +1274,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         witnessIds: updatedWitnessIds.length > 0 ? updatedWitnessIds : undefined
       });
     }
-    if (effectivePerson) {
-      const updatedMyWitnessed = (effectivePerson.witnessedPersonIds || []).filter((id) => id !== witnessedPersonId);
-      updatePerson({
-        ...effectivePerson,
-        witnessedPersonIds: updatedMyWitnessed.length > 0 ? updatedMyWitnessed : undefined
-      });
-    }
+    const updatedMyWitnessed = (effectivePerson.witnessedPersonIds || []).filter((id) => id !== witnessedPersonId);
+    updatePerson({
+      ...effectivePerson,
+      witnessedPersonIds: updatedMyWitnessed.length > 0 ? updatedMyWitnessed : undefined
+    });
   };
 
   // Add Life Event
   const handleAddLifeEvent = () => {
     if (!newEvent.title && !newEvent.type) return;
+    if (newEventValidation.isFuture) {
+      alert(`Неможливо додати подію: ${newEventValidation.message || 'дата події вказує на майбутній час'}.`);
+      return;
+    }
     const item: PersonLifeEventItem = {
       id: `evt-${Date.now()}`,
       ...newEvent,
@@ -1180,6 +1366,15 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       !duplicateWarningDismissedForSave
     ) {
       setShowDuplicateSaveDialog(true);
+      return;
+    }
+
+    // Chronological and future date validation check
+    if (
+      (personDateValidation.hasErrors || hasFutureLifeEvents) &&
+      !dateValidationDismissedForSave
+    ) {
+      setShowDateValidationDialog(true);
       return;
     }
 
@@ -1304,6 +1499,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         childrenIds: [],
         siblingIds: siblingIds.length > 0 ? siblingIds : undefined,
         godparents: godparents.length > 0 ? godparents : undefined,
+        godparentIds: godparents.map((gp) => gp.personId).filter(Boolean) as string[],
+        godchildrenIds: tempGodchildren.length > 0 ? tempGodchildren.map((t) => t.id) : undefined,
+        witnessedPersonIds: tempWitnessedPersons.length > 0 ? tempWitnessedPersons.map((t) => t.id) : undefined,
         occupation: occupation.trim() || undefined,
         estate: estate.trim() || undefined,
         estateOrSocialStatus: estate.trim() || undefined,
@@ -1488,6 +1686,57 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               }
             }
           }
+        }
+      });
+    }
+
+    // Synchronize temp godchildren when saving newly created person
+    if (!effectivePerson && tempGodchildren.length > 0) {
+      tempGodchildren.forEach((tg) => {
+        const childPerson = persons.find((p) => p.id === tg.id);
+        if (childPerson) {
+          const isFem = gender === 'female' || gender === 'F';
+          const selfName = `${lastName || ''} ${firstName || ''}`.trim() || 'Хрещений';
+          const newGp: GodparentItem = {
+            id: crypto.randomUUID(),
+            personId: savedPersonId,
+            name: selfName,
+            role: isFem ? 'godmother' : 'godfather',
+            notes: tg.notes || (isFem ? 'Хрещена мати' : 'Хрещений батько')
+          };
+          const updatedChildGps = [...(childPerson.godparents || []).filter((g) => g.personId !== savedPersonId), newGp];
+          const updatedChildGpIds = Array.from(new Set([...(childPerson.godparentIds || []), savedPersonId]));
+          updatePerson({
+            ...childPerson,
+            godparents: updatedChildGps,
+            godparentIds: updatedChildGpIds
+          });
+        }
+      });
+    }
+
+    // Synchronize temp witnesses when saving newly created person
+    if (!effectivePerson && tempWitnessedPersons.length > 0) {
+      tempWitnessedPersons.forEach((tw) => {
+        const target = persons.find((p) => p.id === tw.id);
+        if (target) {
+          const selfName = `${lastName || ''} ${firstName || ''}`.trim() || 'Свідок';
+          const newGp: GodparentItem = {
+            id: crypto.randomUUID(),
+            personId: savedPersonId,
+            name: selfName,
+            role: 'witness',
+            notes: tw.notes || 'Свідок / поручитель'
+          };
+          const updatedGps = [...(target.godparents || []).filter((g) => g.personId !== savedPersonId), newGp];
+          const updatedGpIds = Array.from(new Set([...(target.godparentIds || []), savedPersonId]));
+          const updatedWitnessIds = Array.from(new Set([...(target.witnessIds || []), savedPersonId]));
+          updatePerson({
+            ...target,
+            godparents: updatedGps,
+            godparentIds: updatedGpIds,
+            witnessIds: updatedWitnessIds
+          });
         }
       });
     }
@@ -1739,6 +1988,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 {MODAL_SECTIONS.map((item) => {
                   const isActive = activeSection === item.id;
                   const Icon = item.icon;
+                  const hasSectionError =
+                    (item.id === 'dates-places' && personDateValidation.hasErrors) ||
+                    (item.id === 'events' && hasFutureLifeEvents);
                   return (
                     <button
                       key={`quick-${item.id}`}
@@ -1747,11 +1999,16 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                         isActive
                           ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                          : hasSectionError
+                          ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-400/50'
                           : 'bg-white dark:bg-slate-900 text-neutral-600 dark:text-neutral-300 border border-black/10 dark:border-white/10'
                       }`}
                     >
                       <Icon className="w-3 h-3" />
                       <span>{item.label}</span>
+                      {hasSectionError && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                      )}
                     </button>
                   );
                 })}
@@ -1832,6 +2089,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 {MODAL_SECTIONS.map((item) => {
                   const Icon = item.icon;
                   const isActive = activeSection === item.id;
+                  const hasSectionError =
+                    (item.id === 'dates-places' && personDateValidation.hasErrors) ||
+                    (item.id === 'events' && hasFutureLifeEvents);
                   return (
                     <button
                       key={item.id}
@@ -1840,14 +2100,30 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       className={`w-full px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
                         isActive
                           ? 'bg-emerald-500/15 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 shadow-xs'
+                          : hasSectionError
+                          ? 'bg-rose-50/70 dark:bg-rose-950/30 text-rose-800 dark:text-rose-300 border border-rose-300/60 dark:border-rose-800/40 hover:bg-rose-100/60'
                           : 'text-neutral-600 dark:text-neutral-400 hover:bg-black/5 dark:hover:bg-white/5'
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
-                        <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-400'}`} />
+                        <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : hasSectionError ? 'text-rose-500' : 'text-neutral-400'}`} />
                         <span>{item.label}</span>
                       </div>
-                      {isActive && <ChevronRight className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
+                      <div className="flex items-center gap-1.5">
+                        {item.id === 'dates-places' && personDateValidation.hasErrors && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-0.5">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            <span>Помилка</span>
+                          </span>
+                        )}
+                        {item.id === 'events' && hasFutureLifeEvents && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-0.5">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            <span>Майбутнє</span>
+                          </span>
+                        )}
+                        {isActive && <ChevronRight className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
+                      </div>
                     </button>
                   );
                 })}
@@ -1997,14 +2273,33 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               </div>
             )}
 
-            {/* Accordion Controls Bar */}
-            <div className="flex items-center justify-between py-1 px-1 text-xs">
+            {/* Accordion Controls Bar with persistence indicator & quick controls */}
+            <div className="flex flex-wrap items-center justify-between gap-2 py-1 px-1 text-xs">
               <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400 font-medium">
                 <span className="text-xs uppercase tracking-wider font-bold text-[#B88E3E]">Анкета особи</span>
                 <span>•</span>
-                <span className="text-[11px]">8 розділів</span>
+                <span className="text-[11px] font-semibold text-neutral-700 dark:text-neutral-300">
+                  {openSectionsCount} з 8 відкрито
+                </span>
+                <span
+                  className="hidden sm:inline-flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400 font-medium bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20"
+                  title="Стан розгорнутих секцій автоматично зберігається при закритті чи переході"
+                >
+                  <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                  <span>Стан збережено</span>
+                </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {openSectionsCount !== 2 && (
+                  <button
+                    type="button"
+                    onClick={handleResetSectionsToDefault}
+                    className="px-2 py-1 rounded-lg text-[11px] font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                    title="Скинути розкриття секцій до початкового стану (Основне + Імена)"
+                  >
+                    За замовчуванням
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleExpandAllSections}
@@ -2281,8 +2576,50 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               {openSections.names && (
                 <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
                   <div className="space-y-3.5 text-xs">
-                {/* Row 1: Прізвище & Дівоче прізвище */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {/* Row 1: Прізвище (+ Дівоче прізвище лише для жіночої статі) */}
+                {gender === 'female' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div className="space-y-1">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
+                        Прізвище <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={lastName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setLastName(val);
+                          if (!genderManuallyChanged) {
+                            const detected = detectGenderFromName(firstName, val, patronymic, maidenName);
+                            if (detected) setGender(detected);
+                          }
+                        }}
+                        placeholder="Шевченко"
+                        className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        autoFocus
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
+                        Дівоче прізвище
+                      </label>
+                      <input
+                        type="text"
+                        value={maidenName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setMaidenName(val);
+                          if (!genderManuallyChanged && val.trim()) {
+                            setGender('female');
+                          }
+                        }}
+                        placeholder="Дівоче прізвище до шлюбу"
+                        className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                      />
+                    </div>
+                  </div>
+                ) : (
                   <div className="space-y-1">
                     <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
                       Прізвище <span className="text-rose-500">*</span>
@@ -2303,26 +2640,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       autoFocus
                     />
                   </div>
-
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Дівоче прізвище
-                    </label>
-                    <input
-                      type="text"
-                      value={maidenName}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setMaidenName(val);
-                        if (!genderManuallyChanged && val.trim()) {
-                          setGender('female');
-                        }
-                      }}
-                      placeholder={gender === 'female' ? 'Дівоче прізвище до шлюбу' : 'Доступне після вибору жіночої статі'}
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
-                </div>
+                )}
 
                 {/* Row 2: Ім'я & По батькові */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -2367,63 +2685,94 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                 </div>
 
-                {/* Row 3: Повне ім'я preview & Титул/Префікс */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Повне ім'я (відображення у дереві)
-                    </label>
-                    <input
-                      type="text"
-                      value={fullNameOverride || computedFullName}
-                      onChange={(e) => setFullNameOverride(e.target.value)}
-                      placeholder="Заповніть прізвище, ім'я та по батькові"
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Титул / Префікс / Прізвисько
-                    </label>
-                    <input
-                      type="text"
-                      value={prefix}
-                      onChange={(e) => setPrefix(e.target.value)}
-                      placeholder="козак, шляхтич, вуличне прізвисько"
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
+                {/* Spoiler link button for secondary fields */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowNameExtras(!showNameExtras)}
+                    className="inline-flex items-center gap-2 text-xs font-semibold text-[#B88E3E] hover:text-[#9c752c] dark:hover:text-[#d4af37] transition-colors cursor-pointer select-none py-1 group"
+                  >
+                    {showNameExtras ? (
+                      <>
+                        <ChevronUp className="w-3.5 h-3.5" />
+                        <span>− Згорнути додаткові варіанти імен, титул та примітки</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>+ Додаткові варіанти імен, титул та примітки</span>
+                      </>
+                    )}
+                    {!showNameExtras && (prefix || nameVariants || surnameVariants || (fullNameOverride && fullNameOverride !== computedFullName)) && (
+                      <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-[#B88E3E]/10 dark:bg-[#B88E3E]/20 text-[#B88E3E] font-medium border border-[#B88E3E]/30">
+                        Заповнено
+                      </span>
+                    )}
+                  </button>
                 </div>
 
-                {/* Row 4: Варіанти імені та прізвища */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Варіанти імені
-                    </label>
-                    <input
-                      type="text"
-                      value={nameVariants}
-                      onChange={(e) => setNameVariants(e.target.value)}
-                      placeholder="напр. Тарасій, Тараско, Taras"
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
+                {/* Secondary fields when expanded */}
+                {showNameExtras && (
+                  <div className="pt-2 space-y-3.5 border-t border-black/5 dark:border-white/5">
+                    {/* Row 3: Повне ім'я preview & Титул/Префікс */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      <div className="space-y-1">
+                        <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
+                          Повне ім'я (відображення у дереві)
+                        </label>
+                        <input
+                          type="text"
+                          value={fullNameOverride || computedFullName}
+                          onChange={(e) => setFullNameOverride(e.target.value)}
+                          placeholder="Заповніть прізвище, ім'я та по батькові"
+                          className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        />
+                      </div>
 
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Варіанти прізвища
-                    </label>
-                    <input
-                      type="text"
-                      value={surnameVariants}
-                      onChange={(e) => setSurnameVariants(e.target.value)}
-                      placeholder="напр. Шевченко, Шевчуков, Szewczenko"
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
+                      <div className="space-y-1">
+                        <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
+                          Титул / Префікс / Прізвисько
+                        </label>
+                        <input
+                          type="text"
+                          value={prefix}
+                          onChange={(e) => setPrefix(e.target.value)}
+                          placeholder="козак, шляхтич, вуличне прізвисько"
+                          className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 4: Варіанти імені та прізвища */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      <div className="space-y-1">
+                        <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
+                          Варіанти імені
+                        </label>
+                        <input
+                          type="text"
+                          value={nameVariants}
+                          onChange={(e) => setNameVariants(e.target.value)}
+                          placeholder="напр. Тарасій, Тараско, Taras"
+                          className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
+                          Варіанти прізвища
+                        </label>
+                        <input
+                          type="text"
+                          value={surnameVariants}
+                          onChange={(e) => setSurnameVariants(e.target.value)}
+                          placeholder="напр. Шевченко, Шевчуков, Szewczenko"
+                          className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
                 </div>
               )}
@@ -2521,873 +2870,666 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </select>
                 </div>
 
-                {/* Godparents (Хрещені батьки / Куми) */}
-                <div className="p-4 rounded-2xl border border-purple-500/20 bg-purple-500/[0.02] dark:bg-purple-500/[0.03] space-y-3.5">
-                  <div className="flex items-start justify-between gap-3">
+                {/* Unified Spiritual Relations Section: Хрещені, хресники та свідки */}
+                <div className="rounded-xl border border-black/10 dark:border-white/10 bg-black/[0.015] dark:bg-white/[0.015] p-3 sm:p-3.5 space-y-3">
+                  {/* Section Title & Segmented Tab Switcher */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-black/5 dark:border-white/5">
                     <div>
-                      <h4 className="font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5 text-xs">
-                        <Church className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                        <span>Хрещені батьки, куми та восприємники</span>
+                      <h4 className="font-bold text-xs text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                        <Church className="w-3.5 h-3.5 text-[#B88E3E]" />
+                        <span>Хрещені, хресники та свідки</span>
                       </h4>
-                      <p className="text-[11px] text-neutral-500 mt-0.5">
-                        При додаванні хрещених створюються окремі особи в дереві з автоматичним визначенням статі та зв'язків.
-                      </p>
+                      <p className="text-[10px] text-neutral-500">Швидкий вибір із наявних осіб дерева або створення нових</p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddGodparentForm(!showAddGodparentForm);
-                        setGodparentFeedbackMsg(null);
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{showAddGodparentForm ? 'Закрити форму' : '+ Додати хрещеного'}</span>
-                    </button>
+                    {/* Segmented Switcher */}
+                    <div className="inline-flex p-0.5 rounded-lg bg-black/5 dark:bg-white/5 text-xs font-semibold self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSpiritualTab('godparents');
+                          setShowAddGodparentForm(false);
+                        }}
+                        className={`px-2.5 py-1 rounded-md text-[11px] transition-all cursor-pointer flex items-center gap-1.5 ${
+                          spiritualTab === 'godparents'
+                            ? 'bg-white dark:bg-slate-800 text-neutral-900 dark:text-white shadow-xs font-bold'
+                            : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <span>Хрещені</span>
+                        <span className={`px-1.5 py-0.2 rounded-full text-[9px] ${spiritualTab === 'godparents' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : 'bg-black/5 dark:bg-white/10'}`}>
+                          {(displayGodparents.length || godparents.length)}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSpiritualTab('godchildren');
+                          setShowAddGodchildForm(false);
+                        }}
+                        className={`px-2.5 py-1 rounded-md text-[11px] transition-all cursor-pointer flex items-center gap-1.5 ${
+                          spiritualTab === 'godchildren'
+                            ? 'bg-white dark:bg-slate-800 text-neutral-900 dark:text-white shadow-xs font-bold'
+                            : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <span>Хресники</span>
+                        <span className={`px-1.5 py-0.2 rounded-full text-[9px] ${spiritualTab === 'godchildren' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : 'bg-black/5 dark:bg-white/10'}`}>
+                          {allDisplayGodchildren.length}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSpiritualTab('witnesses');
+                          setShowAddWitnessedForm(false);
+                        }}
+                        className={`px-2.5 py-1 rounded-md text-[11px] transition-all cursor-pointer flex items-center gap-1.5 ${
+                          spiritualTab === 'witnesses'
+                            ? 'bg-white dark:bg-slate-800 text-neutral-900 dark:text-white shadow-xs font-bold'
+                            : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <span>Свідки</span>
+                        <span className={`px-1.5 py-0.2 rounded-full text-[9px] ${spiritualTab === 'witnesses' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : 'bg-black/5 dark:bg-white/10'}`}>
+                          {allDisplayWitnessedPersons.length}
+                        </span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Feedback Message */}
-                  {godparentFeedbackMsg && (
-                    <div
-                      className={`p-2.5 rounded-xl text-xs flex items-center gap-2 animate-in fade-in duration-200 ${
-                        godparentFeedbackMsg.type === 'success'
-                          ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                          : 'bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                      <span>{godparentFeedbackMsg.text}</span>
+                  {(godparentFeedbackMsg || godchildFeedbackMsg || witnessedFeedbackMsg) && (
+                    <div className="p-2 rounded-lg text-xs flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 animate-in fade-in duration-150">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <span>{godparentFeedbackMsg?.text || godchildFeedbackMsg?.text || witnessedFeedbackMsg?.text}</span>
                     </div>
                   )}
 
-                  {/* Add Godparent Form */}
-                  {showAddGodparentForm && (
-                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-purple-500/30 shadow-sm space-y-3.5 animate-in fade-in duration-150">
-                      {/* Mode toggle */}
-                      <div className="flex items-center gap-1 p-1 bg-black/5 dark:bg-white/5 rounded-xl text-xs font-semibold">
-                        <button
-                          type="button"
-                          onClick={() => setGodparentMode('create_new')}
-                          className={`flex-1 py-1.5 px-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                            godparentMode === 'create_new'
-                              ? 'bg-purple-600 text-white shadow-xs'
-                              : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                          }`}
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          <span>Створити нову особу</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setGodparentMode('select_existing')}
-                          className={`flex-1 py-1.5 px-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                            godparentMode === 'select_existing'
-                              ? 'bg-purple-600 text-white shadow-xs'
-                              : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                          }`}
-                        >
-                          <Search className="w-3.5 h-3.5" />
-                          <span>Обрати з наявних у дереві</span>
-                        </button>
-                      </div>
-
-                      {godparentMode === 'create_new' ? (
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            <div className="sm:col-span-2 space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                ПІБ або Ім'я хрещеного <span className="text-rose-500">*</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={newGodparentName}
-                                onChange={(e) => setNewGodparentName(e.target.value)}
-                                placeholder="напр. Шевченко Іван Григорович або Іван Шевченко"
-                                className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                                autoFocus
-                              />
-                            </div>
-
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Роль у хрещенні <span className="text-rose-500">*</span>
-                              </label>
-                              <select
-                                value={newGodparentRole}
-                                onChange={(e) => setNewGodparentRole(e.target.value as any)}
-                                className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                              >
-                                <option value="godfather">Хрещений батько (чол.)</option>
-                                <option value="godmother">Хрещена мати (жін.)</option>
-                                <option value="witness">Восприємник / Свідок</option>
-                              </select>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Стан / Чин / Парафія
-                              </label>
-                              <input
-                                type="text"
-                                value={newGodparentNotes}
-                                onChange={(e) => setNewGodparentNotes(e.target.value)}
-                                placeholder="напр. козак с. Моринці, шляхтич"
-                                className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                              />
-                            </div>
-
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Місце проживання
-                              </label>
-                              <input
-                                type="text"
-                                value={newGodparentPlace}
-                                onChange={(e) => setNewGodparentPlace(e.target.value)}
-                                placeholder="напр. с. Моринці"
-                                className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                              />
-                            </div>
-
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Приблизний рік народж.
-                              </label>
-                              <input
-                                type="text"
-                                value={newGodparentYear}
-                                onChange={(e) => setNewGodparentYear(e.target.value)}
-                                placeholder="напр. 1790"
-                                className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="p-2.5 rounded-xl bg-purple-500/5 border border-purple-500/20 text-[11px] text-purple-800 dark:text-purple-300 flex items-center gap-2">
-                            <Sparkles className="w-4 h-4 text-purple-500 shrink-0" />
-                            <span>Буде створено повноцінну картку особи зі статтю <strong>{newGodparentRole === 'godmother' ? '«жіноча»' : newGodparentRole === 'godfather' ? '«чоловіча»' : 'автоматично за іменем'}</strong> та внесено до родоводу.</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                              Пошук та вибір особи з дерева <span className="text-rose-500">*</span>
-                            </label>
+                  {/* TAB 1: GODPARENTS (Хрещені батьки) */}
+                  {spiritualTab === 'godparents' && (
+                    <div className="space-y-3">
+                      {/* Direct Compact Selector from Existing Persons */}
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 space-y-2">
+                        {persons.length > 5 && (
+                          <div className="relative">
+                            <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
                             <input
                               type="text"
                               value={godparentSearchQuery}
                               onChange={(e) => setGodparentSearchQuery(e.target.value)}
-                              placeholder="Почніть вводити прізвище або ім'я для фільтру..."
-                              className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs mb-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                              placeholder="Фільтр за ім'ям чи прізвищем..."
+                              className={`w-full pl-7 pr-2.5 py-1 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
                             />
-                            <select
-                              value={selectedExistingGodparentId}
-                              onChange={(e) => setSelectedExistingGodparentId(e.target.value)}
-                              className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                              size={4}
-                            >
-                              <option value="" disabled>-- Оберіть особу зі списку нижче --</option>
-                              {persons
-                                .filter((p) => {
-                                  if (!godparentSearchQuery.trim()) return true;
-                                  const q = godparentSearchQuery.toLowerCase();
-                                  const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.toLowerCase();
-                                  return name.includes(q);
-                                })
-                                .map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.name?.patronymic || p.patronymic || ''} {p.birthYear ? `(${p.birthYear})` : ''} — {p.gender === 'female' ? 'жіноча' : 'чоловіча'}
-                                  </option>
-                                ))}
-                            </select>
                           </div>
+                        )}
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Роль у хрещенні <span className="text-rose-500">*</span>
-                              </label>
-                              <select
-                                value={newGodparentRole}
-                                onChange={(e) => setNewGodparentRole(e.target.value as any)}
-                                className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                              >
-                                <option value="godfather">Хрещений батько</option>
-                                <option value="godmother">Хрещена мати</option>
-                                <option value="witness">Восприємник / Свідок</option>
-                              </select>
-                            </div>
-
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Додаткові примітки
-                              </label>
-                              <input
-                                type="text"
-                                value={newGodparentNotes}
-                                onChange={(e) => setNewGodparentNotes(e.target.value)}
-                                placeholder="напр. записаний у метриці як свідок"
-                                className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-black/5 dark:border-white/5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowAddGodparentForm(false);
-                            setGodparentFeedbackMsg(null);
-                          }}
-                          className="px-3.5 py-1.5 text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 font-medium cursor-pointer"
-                        >
-                          Скасувати
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleAddGodparent}
-                          className="px-4 py-1.5 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          <span>{godparentMode === 'create_new' ? 'Створити особу та додати' : 'Прив\'язати особу як хрещеного'}</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* List of Godparents */}
-                  {(displayGodparents.length > 0 || godparents.length > 0) ? (
-                    <div className="space-y-2">
-                      {(displayGodparents.length > 0 ? displayGodparents : godparents).map((gp, idx) => {
-                        const isWitnessRole = gp.role === 'witness' || /свідок|поручитель/i.test(gp.role || '');
-                        const otherGodchildren = !isWitnessRole
-                          ? getGodparentOtherGodchildren(gp.personId, gp.name, currentPersonId, persons)
-                          : [];
-                        const otherWitnessed = isWitnessRole
-                          ? getWitnessOtherWitnessed(gp.personId, gp.name, currentPersonId, persons)
-                          : [];
-
-                        return (
-                          <div
-                            key={gp.id || idx}
-                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-purple-500/20 flex flex-col gap-2 text-xs shadow-2xs hover:border-purple-500/40 transition-all"
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <select
+                            value={selectedExistingGodparentId}
+                            onChange={(e) => handleSelectExistingGodparent(e.target.value)}
+                            className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] truncate`}
                           >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
-                                  <User className="w-4 h-4" />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    {gp.personId && onSelectPerson ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => onSelectPerson(gp.personId!)}
-                                        className="font-bold text-neutral-800 dark:text-neutral-200 hover:text-purple-600 dark:hover:text-purple-400 hover:underline transition-colors flex items-center gap-1 cursor-pointer truncate text-left"
-                                        title="Відкрити картку цієї особи"
-                                      >
-                                        <span>{gp.name}</span>
-                                        <ExternalLink className="w-3 h-3 text-neutral-400 shrink-0" />
-                                      </button>
-                                    ) : (
-                                      <span className="font-bold text-neutral-800 dark:text-neutral-200 truncate">
-                                        {gp.name}
-                                      </span>
-                                    )}
-                                    <span className="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-300 font-semibold text-[10px]">
-                                      {gp.role === 'godmother' ? 'Хрещена мати' : gp.role === 'witness' ? 'Восприємник / Свідок' : 'Хрещений батько'}
-                                    </span>
-                                    {gp.personId && (
-                                      <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium text-[9px] flex items-center gap-0.5">
-                                        <Check className="w-2.5 h-2.5" />
-                                        <span>Особа в дереві</span>
-                                      </span>
-                                    )}
-                                  </div>
-                                  {gp.notes && (
-                                    <p className="text-[11px] text-neutral-500 truncate mt-0.5">
-                                      {gp.notes}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
+                            <option value="">-- Оберіть особу з дерева ({filteredGodparentPersons.length}) --</option>
+                            {filteredGodparentPersons.map((p) => {
+                              const genderSym = p.gender === 'female' ? '♀' : p.gender === 'male' ? '♂' : '?';
+                              const lifespan = p.birthYear ? `(${p.birthYear})` : '';
+                              const pName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.trim() || 'Без імені';
+                              return (
+                                <option key={p.id} value={p.id}>
+                                  {genderSym} {pName} {lifespan}
+                                </option>
+                              );
+                            })}
+                          </select>
 
+                          <select
+                            value={newGodparentRole}
+                            onChange={(e) => setNewGodparentRole(e.target.value as any)}
+                            className={`p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] w-full sm:w-40 shrink-0`}
+                          >
+                            <option value="godfather">Хрещений батько</option>
+                            <option value="godmother">Хрещена мати</option>
+                            <option value="witness">Восприємник / Свідок</option>
+                          </select>
+
+                          <button
+                            type="button"
+                            disabled={!selectedExistingGodparentId}
+                            onClick={() => {
+                              setGodparentMode('select_existing');
+                              handleAddGodparent();
+                            }}
+                            className="px-3 py-2 rounded-lg bg-[#B88E3E] hover:bg-[#a37c33] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Прив'язати</span>
+                          </button>
+                        </div>
+
+                        {/* Inline toggle for creating a brand new person */}
+                        <div className="flex items-center justify-between pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowAddGodparentForm(!showAddGodparentForm);
+                              setGodparentMode('create_new');
+                            }}
+                            className="text-[11px] text-[#B88E3E] hover:underline font-medium cursor-pointer flex items-center gap-1"
+                          >
+                            <UserPlus className="w-3 h-3" />
+                            <span>{showAddGodparentForm ? 'Сховати форму нової особи' : '+ Немає в дереві? Створити нову особу'}</span>
+                          </button>
+                        </div>
+
+                        {/* Expandable Form to Create New Person as Godparent */}
+                        {showAddGodparentForm && (
+                          <div className="pt-2.5 mt-2 border-t border-black/5 dark:border-white/5 space-y-2 animate-in fade-in duration-150">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div className="sm:col-span-2">
+                                <input
+                                  type="text"
+                                  value={newGodparentName}
+                                  onChange={(e) => setNewGodparentName(e.target.value)}
+                                  placeholder="ПІБ або ім'я нового хрещеного *"
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
+                              </div>
+                              <div>
+                                <select
+                                  value={newGodparentRole}
+                                  onChange={(e) => setNewGodparentRole(e.target.value as any)}
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                >
+                                  <option value="godfather">Хрещений батько</option>
+                                  <option value="godmother">Хрещена мати</option>
+                                  <option value="witness">Восприємник / Свідок</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div>
+                                <input
+                                  type="text"
+                                  value={newGodparentYear}
+                                  onChange={(e) => setNewGodparentYear(e.target.value)}
+                                  placeholder="Рік народження (напр. 1880)"
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
+                              </div>
+                              <div>
+                                <input
+                                  type="text"
+                                  value={newGodparentPlace}
+                                  onChange={(e) => setNewGodparentPlace(e.target.value)}
+                                  placeholder="Місце проживання"
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
+                              </div>
+                              <div>
+                                <input
+                                  type="text"
+                                  value={newGodparentNotes}
+                                  onChange={(e) => setNewGodparentNotes(e.target.value)}
+                                  placeholder="Стан / парафія / примітки"
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex justify-end gap-2 pt-1">
                               <button
                                 type="button"
-                                onClick={() => handleRemoveGodparent(gp.id)}
-                                className="text-neutral-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0"
-                                title="Видалити зв'язок з хрещеним"
+                                onClick={() => setShowAddGodparentForm(false)}
+                                className="px-2.5 py-1 text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 cursor-pointer"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                Скасувати
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGodparentMode('create_new');
+                                  handleAddGodparent();
+                                }}
+                                className="px-3 py-1 bg-[#B88E3E] hover:bg-[#a37c33] text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+                              >
+                                Створити особу та додати
                               </button>
                             </div>
-
-                            {/* Show godchildren for this godparent */}
-                            {otherGodchildren.length > 0 && (
-                              <div className="pt-2 border-t border-purple-500/10 dark:border-purple-500/20 flex flex-col gap-1">
-                                <span className="text-[10px] font-semibold text-purple-700 dark:text-purple-300 flex items-center gap-1">
-                                  <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
-                                  <span>Хресники цієї особи ({otherGodchildren.length}):</span>
-                                </span>
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  {otherGodchildren.map((ch) => (
-                                    <button
-                                      key={ch.id}
-                                      type="button"
-                                      onClick={() => onSelectPerson && onSelectPerson(ch.id)}
-                                      className="px-2 py-0.5 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/20 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
-                                      title={`Відкрити картку хресника: ${ch.fullName}`}
-                                    >
-                                      <span>{ch.fullName}</span>
-                                      {ch.lifespan && <span className="text-neutral-400 text-[9px]">{ch.lifespan}</span>}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Show witnessed individuals for this witness */}
-                            {otherWitnessed.length > 0 && (
-                              <div className="pt-2 border-t border-sky-500/10 dark:border-sky-500/20 flex flex-col gap-1">
-                                <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 flex items-center gap-1">
-                                  <FileText className="w-3 h-3 text-sky-500 shrink-0" />
-                                  <span>Також свідок / поручитель для ({otherWitnessed.length}):</span>
-                                </span>
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  {otherWitnessed.map((w) => (
-                                    <button
-                                      key={w.id}
-                                      type="button"
-                                      onClick={() => onSelectPerson && onSelectPerson(w.id)}
-                                      className="px-2 py-0.5 rounded-md bg-sky-500/10 hover:bg-sky-500/20 text-sky-900 dark:text-sky-200 border border-sky-500/20 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
-                                      title={`Відкрити картку особи: ${w.fullName}`}
-                                    >
-                                      <span>{w.fullName}</span>
-                                      {w.lifespan && <span className="text-neutral-400 text-[9px]">{w.lifespan}</span>}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="p-3 text-center rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10">
-                      <p className="text-[11px] text-neutral-400 italic">
-                        Хрещених батьків поки не додано. Натисніть «+ Додати хрещеного», щоб створити особу або прив'язати наявну.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Godchildren (Хресники / Похресники) */}
-                <div className="p-4 rounded-2xl border border-amber-500/20 bg-amber-500/[0.02] dark:bg-amber-500/[0.03] space-y-3.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5 text-xs">
-                        <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                        <span>Хресники (кого хрестила дана особа)</span>
-                        {linkedGodchildren.length > 0 && (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold text-[10px]">
-                            {linkedGodchildren.length}
-                          </span>
                         )}
-                      </h4>
-                      <p className="text-[11px] text-neutral-500 mt-0.5">
-                        Особи з дерева, для яких дана особа є хрещеним батьком або хрещеною матір'ю (похресники).
-                      </p>
-                    </div>
-
-                    {!isReadOnly && effectivePerson && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAddGodchildForm(!showAddGodchildForm);
-                          setGodchildFeedbackMsg(null);
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>{showAddGodchildForm ? 'Закрити форму' : '+ Додати хрещеника'}</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Feedback Message */}
-                  {godchildFeedbackMsg && (
-                    <div
-                      className={`p-2.5 rounded-xl text-xs flex items-center gap-2 animate-in fade-in duration-200 ${
-                        godchildFeedbackMsg.type === 'success'
-                          ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                          : 'bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                      <span>{godchildFeedbackMsg.text}</span>
-                    </div>
-                  )}
-
-                  {/* Add Godchild Form */}
-                  {showAddGodchildForm && (
-                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-amber-500/30 shadow-sm space-y-3.5 animate-in fade-in duration-150">
-                      <div className="flex items-center gap-1 p-1 bg-black/5 dark:bg-white/5 rounded-xl text-xs font-semibold">
-                        <button
-                          type="button"
-                          onClick={() => setGodchildMode('select_existing')}
-                          className={`flex-1 py-1.5 px-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                            godchildMode === 'select_existing'
-                              ? 'bg-amber-600 text-white shadow-xs'
-                              : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                          }`}
-                        >
-                          <Search className="w-3.5 h-3.5" />
-                          <span>Обрати особу з дерева</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setGodchildMode('create_new')}
-                          className={`flex-1 py-1.5 px-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                            godchildMode === 'create_new'
-                              ? 'bg-amber-600 text-white shadow-xs'
-                              : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                          }`}
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          <span>Створити нову особу</span>
-                        </button>
                       </div>
 
-                      {godchildMode === 'select_existing' ? (
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                              Пошук та вибір хрещеника з дерева <span className="text-rose-500">*</span>
-                            </label>
+                      {/* Compact List of Linked Godparents */}
+                      {(displayGodparents.length > 0 || godparents.length > 0) ? (
+                        <div className="space-y-1.5">
+                          {(displayGodparents.length > 0 ? displayGodparents : godparents).map((gp, idx) => {
+                            const isWitnessRole = gp.role === 'witness' || /свідок|поручитель/i.test(gp.role || '');
+                            const otherGodchildren = !isWitnessRole
+                              ? getGodparentOtherGodchildren(gp.personId, gp.name, currentPersonId, persons)
+                              : [];
+                            const otherWitnessed = isWitnessRole
+                              ? getWitnessOtherWitnessed(gp.personId, gp.name, currentPersonId, persons)
+                              : [];
+
+                            return (
+                              <div
+                                key={gp.id || idx}
+                                className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 flex items-center justify-between gap-2 text-xs hover:border-[#B88E3E]/40 transition-colors"
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                                  <span className="w-5 h-5 rounded-md bg-[#B88E3E]/10 text-[#B88E3E] flex items-center justify-center shrink-0 text-[11px] font-bold">
+                                    {gp.role === 'godmother' ? '♀' : '♂'}
+                                  </span>
+
+                                  {gp.personId && onSelectPerson ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => onSelectPerson(gp.personId!)}
+                                      className="font-bold text-neutral-800 dark:text-neutral-200 hover:text-[#B88E3E] hover:underline transition-colors cursor-pointer truncate max-w-[180px] sm:max-w-none text-left"
+                                      title="Відкрити картку цієї особи"
+                                    >
+                                      {gp.name}
+                                    </button>
+                                  ) : (
+                                    <span className="font-bold text-neutral-800 dark:text-neutral-200 truncate">
+                                      {gp.name}
+                                    </span>
+                                  )}
+
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#B88E3E]/10 text-[#B88E3E]">
+                                    {gp.role === 'godmother' ? 'Хрещена мати' : gp.role === 'witness' ? 'Восприємник / Свідок' : 'Хрещений батько'}
+                                  </span>
+
+                                  {gp.notes && (
+                                    <span className="text-[10px] text-neutral-400 truncate max-w-[150px]">
+                                      ({gp.notes})
+                                    </span>
+                                  )}
+
+                                  {otherGodchildren.length > 0 && (
+                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                                      • кум({otherGodchildren.length})
+                                    </span>
+                                  )}
+
+                                  {otherWitnessed.length > 0 && (
+                                    <span className="text-[10px] text-sky-600 dark:text-sky-400 font-medium">
+                                      • свідок({otherWitnessed.length})
+                                    </span>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveGodparent(gp.id)}
+                                  className="text-neutral-400 hover:text-rose-500 p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0"
+                                  title="Видалити зв'язок з хрещеним"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-neutral-400 italic text-center py-2">
+                          Хрещених батьків поки не додано. Оберіть особу зі списку вище.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 2: GODCHILDREN (Хресники) */}
+                  {spiritualTab === 'godchildren' && (
+                    <div className="space-y-3">
+                      {/* Direct Compact Selector from Existing Persons */}
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 space-y-2">
+                        {persons.length > 5 && (
+                          <div className="relative">
+                            <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
                             <input
                               type="text"
                               value={godchildSearchQuery}
                               onChange={(e) => setGodchildSearchQuery(e.target.value)}
-                              placeholder="Почніть вводити прізвище або ім'я хрещеника..."
-                              className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs mb-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500`}
-                            />
-                            <select
-                              value={selectedExistingGodchildId}
-                              onChange={(e) => setSelectedExistingGodchildId(e.target.value)}
-                              className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 max-h-40`}
-                              size={4}
-                            >
-                              <option value="" disabled>-- Оберіть особу зі списку нижче --</option>
-                              {persons
-                                .filter((p) => {
-                                  if (p.id === currentPersonId) return false;
-                                  if (linkedGodchildren.some((g) => g.person.id === p.id)) return false;
-                                  if (!godchildSearchQuery.trim()) return true;
-                                  const q = godchildSearchQuery.toLowerCase();
-                                  const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.toLowerCase();
-                                  return name.includes(q);
-                                })
-                                .map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.name?.patronymic || p.patronymic || ''} {p.birthYear ? `(${p.birthYear})` : ''}
-                                  </option>
-                                ))}
-                            </select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                              Примітки до хрещення / Церква / Рік
-                            </label>
-                            <input
-                              type="text"
-                              value={newGodchildNotes}
-                              onChange={(e) => setNewGodchildNotes(e.target.value)}
-                              placeholder="напр. Охрещено у церкві Св. Миколая, 1895 р."
-                              className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-amber-500`}
+                              placeholder="Фільтр за ім'ям чи прізвищем хресника..."
+                              className={`w-full pl-7 pr-2.5 py-1 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
                             />
                           </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            <div className="sm:col-span-2 space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                ПІБ або Ім'я хрещеника <span className="text-rose-500">*</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={newGodchildName}
-                                onChange={(e) => setNewGodchildName(e.target.value)}
-                                placeholder="напр. Шевченко Василь Григорович"
-                                className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-amber-500`}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Стать хрещеника
-                              </label>
-                              <select
-                                value={newGodchildGender}
-                                onChange={(e) => setNewGodchildGender(e.target.value as Gender)}
-                                className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-amber-500`}
-                              >
-                                <option value="male">Чоловіча (хрещеник)</option>
-                                <option value="female">Жіноча (хрещениця)</option>
-                              </select>
-                            </div>
-                          </div>
+                        )}
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Рік народження (хрещення)
-                              </label>
-                              <input
-                                type="text"
-                                value={newGodchildBirthYear}
-                                onChange={(e) => setNewGodchildBirthYear(e.target.value)}
-                                placeholder="напр. 1892"
-                                className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-amber-500`}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                                Нотатки / Парафія
-                              </label>
-                              <input
-                                type="text"
-                                value={newGodchildNotes}
-                                onChange={(e) => setNewGodchildNotes(e.target.value)}
-                                placeholder="напр. Восприємник у метричній книзі"
-                                className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-amber-500`}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex justify-end gap-2 pt-2 border-t border-black/5 dark:border-white/5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowAddGodchildForm(false);
-                            setGodchildFeedbackMsg(null);
-                          }}
-                          className="px-3 py-1.5 text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 cursor-pointer"
-                        >
-                          Скасувати
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleAddGodchild}
-                          className="px-4 py-1.5 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          <span>{godchildMode === 'create_new' ? 'Створити особу та додати' : 'Прив\'язати як хрещеника'}</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* List of Godchildren */}
-                  {linkedGodchildren.length > 0 ? (
-                    <div className="space-y-2">
-                      {linkedGodchildren.map(({ person: ch, roleLabel, notes: chNotes, parentsLabel, coGodparents }) => {
-                        const fullName = `${ch.name?.surname || ch.lastName || ''} ${ch.name?.given || ch.firstName || ''} ${ch.name?.patronymic || ch.patronymic || ''}`.trim() || 'Без імені';
-                        const lifespan = ch.birthDate || ch.birthYear ? `(нар. ${ch.birthDate || ch.birthYear})` : '';
-
-                        return (
-                          <div
-                            key={ch.id}
-                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-500/20 flex items-center justify-between gap-3 text-xs shadow-2xs hover:border-amber-500/40 transition-all"
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <select
+                            value={selectedExistingGodchildId}
+                            onChange={(e) => setSelectedExistingGodchildId(e.target.value)}
+                            className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] truncate`}
                           >
-                            <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                              <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-                                <User className="w-4 h-4" />
+                            <option value="">-- Оберіть хресника з дерева ({filteredGodchildPersons.length}) --</option>
+                            {filteredGodchildPersons.map((p) => {
+                              const genderSym = p.gender === 'female' ? '♀' : p.gender === 'male' ? '♂' : '?';
+                              const lifespan = p.birthYear ? `(${p.birthYear})` : '';
+                              const pName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.trim() || 'Без імені';
+                              return (
+                                <option key={p.id} value={p.id}>
+                                  {genderSym} {pName} {lifespan}
+                                </option>
+                              );
+                            })}
+                          </select>
+
+                          <input
+                            type="text"
+                            value={newGodchildNotes}
+                            onChange={(e) => setNewGodchildNotes(e.target.value)}
+                            placeholder="Рік / церква (необов'язково)"
+                            className={`p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] w-full sm:w-44 shrink-0`}
+                          />
+
+                          <button
+                            type="button"
+                            disabled={!selectedExistingGodchildId}
+                            onClick={() => {
+                              setGodchildMode('select_existing');
+                              handleAddGodchild();
+                            }}
+                            className="px-3 py-2 rounded-lg bg-[#B88E3E] hover:bg-[#a37c33] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Прив'язати</span>
+                          </button>
+                        </div>
+
+                        {/* Inline toggle for creating a new godchild */}
+                        <div className="flex items-center justify-between pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowAddGodchildForm(!showAddGodchildForm);
+                              setGodchildMode('create_new');
+                            }}
+                            className="text-[11px] text-[#B88E3E] hover:underline font-medium cursor-pointer flex items-center gap-1"
+                          >
+                            <UserPlus className="w-3 h-3" />
+                            <span>{showAddGodchildForm ? 'Сховати форму нової особи' : '+ Немає в дереві? Створити нову дитину-хресника'}</span>
+                          </button>
+                        </div>
+
+                        {/* Expandable Form to Create New Godchild */}
+                        {showAddGodchildForm && (
+                          <div className="pt-2.5 mt-2 border-t border-black/5 dark:border-white/5 space-y-2 animate-in fade-in duration-150">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div className="sm:col-span-2">
+                                <input
+                                  type="text"
+                                  value={newGodchildName}
+                                  onChange={(e) => setNewGodchildName(e.target.value)}
+                                  placeholder="ПІБ або ім'я хресника *"
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
                               </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 flex-wrap">
+                              <div>
+                                <select
+                                  value={newGodchildGender}
+                                  onChange={(e) => setNewGodchildGender(e.target.value as Gender)}
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                >
+                                  <option value="male">Чоловіча (хрещеник)</option>
+                                  <option value="female">Жіноча (хрещениця)</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <input
+                                  type="text"
+                                  value={newGodchildBirthYear}
+                                  onChange={(e) => setNewGodchildBirthYear(e.target.value)}
+                                  placeholder="Рік народження (напр. 1895)"
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
+                              </div>
+                              <div>
+                                <input
+                                  type="text"
+                                  value={newGodchildNotes}
+                                  onChange={(e) => setNewGodchildNotes(e.target.value)}
+                                  placeholder="Парафія / церква / нотатки"
+                                  className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex justify-end gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setShowAddGodchildForm(false)}
+                                className="px-2.5 py-1 text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 cursor-pointer"
+                              >
+                                Скасувати
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGodchildMode('create_new');
+                                  handleAddGodchild();
+                                }}
+                                className="px-3 py-1 bg-[#B88E3E] hover:bg-[#a37c33] text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+                              >
+                                Створити особу та додати
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Compact List of Linked Godchildren */}
+                      {allDisplayGodchildren.length > 0 ? (
+                        <div className="space-y-1.5">
+                          {allDisplayGodchildren.map(({ person: ch, roleLabel, notes: chNotes, parentsLabel }) => {
+                            const fullName = `${ch.name?.surname || ch.lastName || ''} ${ch.name?.given || ch.firstName || ''} ${ch.name?.patronymic || ch.patronymic || ''}`.trim() || 'Без імені';
+                            const lifespan = ch.birthDate || ch.birthYear ? `(${ch.birthDate || ch.birthYear})` : '';
+
+                            return (
+                              <div
+                                key={ch.id}
+                                className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 flex items-center justify-between gap-2 text-xs hover:border-[#B88E3E]/40 transition-colors"
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                                  <span className="w-5 h-5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 text-[11px] font-bold">
+                                    {ch.gender === 'female' ? '♀' : '♂'}
+                                  </span>
+
                                   {onSelectPerson ? (
                                     <button
                                       type="button"
                                       onClick={() => onSelectPerson(ch.id)}
-                                      className="font-bold text-neutral-800 dark:text-neutral-200 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors flex items-center gap-1 cursor-pointer truncate text-left"
+                                      className="font-bold text-neutral-800 dark:text-neutral-200 hover:text-[#B88E3E] hover:underline transition-colors cursor-pointer truncate max-w-[180px] sm:max-w-none text-left"
                                       title="Відкрити картку цієї особи"
                                     >
-                                      <span>{fullName}</span>
-                                      <ExternalLink className="w-3 h-3 text-neutral-400 shrink-0" />
+                                      {fullName}
                                     </button>
                                   ) : (
                                     <span className="font-bold text-neutral-800 dark:text-neutral-200 truncate">
                                       {fullName}
                                     </span>
                                   )}
+
                                   {lifespan && (
-                                    <span className="text-[11px] text-neutral-400 font-medium">
+                                    <span className="text-[10px] text-neutral-400 font-medium">
                                       {lifespan}
                                     </span>
                                   )}
-                                  <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300 font-semibold text-[10px]">
-                                    {roleLabel}
+
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                                    {roleLabel || 'Хрещеник'}
                                   </span>
-                                  <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium text-[9px] flex items-center gap-0.5">
-                                    <Check className="w-2.5 h-2.5" />
-                                    <span>Особа в дереві</span>
-                                  </span>
+
+                                  {parentsLabel && (
+                                    <span className="text-[10px] text-neutral-400 truncate max-w-[160px]">
+                                      (батьки: {parentsLabel})
+                                    </span>
+                                  )}
+
+                                  {chNotes && (
+                                    <span className="text-[10px] text-neutral-400 truncate max-w-[140px]">
+                                      • {chNotes}
+                                    </span>
+                                  )}
                                 </div>
-                                {parentsLabel && (
-                                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate mt-0.5">
-                                    <span className="font-semibold text-neutral-600 dark:text-neutral-300">Батьки (куми):</span> {parentsLabel}
-                                  </p>
-                                )}
-                                {coGodparents && coGodparents.length > 0 && (
-                                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate mt-0.5">
-                                    <span className="font-semibold text-neutral-600 dark:text-neutral-300">Спільні хрещені (куми):</span> {coGodparents.join(', ')}
-                                  </p>
-                                )}
-                                {chNotes && (
-                                  <p className="text-[11px] text-neutral-500 truncate mt-0.5">
-                                    {chNotes}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
 
-                            {!isReadOnly && (
-                              <button
-                                type="button"
-                                onClick={() => handleUnlinkGodchild(ch.id)}
-                                className="text-neutral-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0"
-                                title="Від'єднати хрещеника від цієї особи"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnlinkGodchild(ch.id)}
+                                  className="text-neutral-400 hover:text-rose-500 p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0"
+                                  title="Від'єднати хрещеника"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-neutral-400 italic text-center py-2">
+                          Хресників поки не вказано. Оберіть особу зі списку вище.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 3: WITNESSES (Свідчення та поручительства) */}
+                  {spiritualTab === 'witnesses' && (
+                    <div className="space-y-3">
+                      {/* Direct Compact Selector from Existing Persons */}
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 space-y-2">
+                        {persons.length > 5 && (
+                          <div className="relative">
+                            <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+                            <input
+                              type="text"
+                              value={witnessedSearchQuery}
+                              onChange={(e) => setWitnessedSearchQuery(e.target.value)}
+                              placeholder="Фільтр за ім'ям чи прізвищем особи..."
+                              className={`w-full pl-7 pr-2.5 py-1 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="p-3 text-center rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10">
-                      <p className="text-[11px] text-neutral-400 italic">
-                        Хресників поки не вказано. Якщо дана особа хрестила дітей у роді, натисніть «+ Додати хрещеника».
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Witnessed Persons (Свідчення та поручительства) */}
-                <div className="p-4 rounded-2xl border border-sky-500/20 bg-sky-500/[0.02] dark:bg-sky-500/[0.03] space-y-3.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5 text-xs">
-                        <FileText className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-                        <span>Свідчення та поручительства (де виступав(ла) свідком)</span>
-                        {linkedWitnessedPersons.length > 0 && (
-                          <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-700 dark:text-sky-300 font-bold text-[10px]">
-                            {linkedWitnessedPersons.length}
-                          </span>
                         )}
-                      </h4>
-                      <p className="text-[11px] text-neutral-500 mt-0.5">
-                        Особи з дерева, у записах яких (вінчання, хрещення, поручительство) дана особа зазначена свідком або поручителем.
-                      </p>
-                    </div>
 
-                    {!isReadOnly && effectivePerson && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAddWitnessedForm(!showAddWitnessedForm);
-                          setWitnessedFeedbackMsg(null);
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>{showAddWitnessedForm ? 'Закрити форму' : '+ Додати запис свідка'}</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Feedback Message */}
-                  {witnessedFeedbackMsg && (
-                    <div
-                      className={`p-2.5 rounded-xl text-xs flex items-center gap-2 animate-in fade-in duration-200 ${
-                        witnessedFeedbackMsg.type === 'success'
-                          ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                          : 'bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                      <span>{witnessedFeedbackMsg.text}</span>
-                    </div>
-                  )}
-
-                  {/* Add Witnessed Person Form */}
-                  {showAddWitnessedForm && (
-                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-sky-500/30 shadow-sm space-y-3.5 animate-in fade-in duration-150">
-                      <div className="space-y-1">
-                        <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                          Пошук та вибір особи з дерева <span className="text-rose-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={witnessedSearchQuery}
-                          onChange={(e) => setWitnessedSearchQuery(e.target.value)}
-                          placeholder="Почніть вводити прізвище або ім'я особи..."
-                          className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs mb-1.5 focus:outline-none focus:ring-2 focus:ring-sky-500`}
-                        />
-                        <select
-                          value={selectedExistingWitnessedId}
-                          onChange={(e) => setSelectedExistingWitnessedId(e.target.value)}
-                          className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 max-h-40`}
-                          size={4}
-                        >
-                          <option value="" disabled>-- Оберіть особу зі списку нижче --</option>
-                          {persons
-                            .filter((p) => {
-                              if (p.id === currentPersonId) return false;
-                              if (linkedWitnessedPersons.some((w) => w.person.id === p.id)) return false;
-                              if (!witnessedSearchQuery.trim()) return true;
-                              const q = witnessedSearchQuery.toLowerCase();
-                              const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.toLowerCase();
-                              return name.includes(q);
-                            })
-                            .map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.name?.patronymic || p.patronymic || ''} {p.birthYear ? `(${p.birthYear})` : ''}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                          Подія / Роль / Примітки
-                        </label>
-                        <input
-                          type="text"
-                          value={newWitnessedNotes}
-                          onChange={(e) => setNewWitnessedNotes(e.target.value)}
-                          placeholder="напр. Поручитель з боку нареченого на вінчанні 1898 р."
-                          className={`w-full p-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-sky-500`}
-                        />
-                      </div>
-
-                      <div className="flex justify-end gap-2 pt-2 border-t border-black/5 dark:border-white/5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowAddWitnessedForm(false);
-                            setWitnessedFeedbackMsg(null);
-                          }}
-                          className="px-3 py-1.5 text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 cursor-pointer"
-                        >
-                          Скасувати
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleAddWitnessedPerson}
-                          className="px-4 py-1.5 text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Прив'язати як свідка</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* List of Witnessed Persons */}
-                  {linkedWitnessedPersons.length > 0 ? (
-                    <div className="space-y-2">
-                      {linkedWitnessedPersons.map(({ person: wp, notes: wNotes, roleLabel, eventLabel, coWitnesses }) => {
-                        const fullName = `${wp.name?.surname || wp.lastName || ''} ${wp.name?.given || wp.firstName || ''} ${wp.name?.patronymic || wp.patronymic || ''}`.trim() || 'Без імені';
-                        const lifespan = wp.birthDate || wp.birthYear ? `(нар. ${wp.birthDate || wp.birthYear})` : '';
-
-                        return (
-                          <div
-                            key={wp.id}
-                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-sky-500/20 flex items-center justify-between gap-3 text-xs shadow-2xs hover:border-sky-500/40 transition-all"
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <select
+                            value={selectedExistingWitnessedId}
+                            onChange={(e) => setSelectedExistingWitnessedId(e.target.value)}
+                            className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] truncate`}
                           >
-                            <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                              <div className="w-7 h-7 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
-                                <FileText className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 flex-wrap">
+                            <option value="">-- Оберіть особу, для якої була свідком ({filteredWitnessPersons.length}) --</option>
+                            {filteredWitnessPersons.map((p) => {
+                              const genderSym = p.gender === 'female' ? '♀' : p.gender === 'male' ? '♂' : '?';
+                              const lifespan = p.birthYear ? `(${p.birthYear})` : '';
+                              const pName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.trim() || 'Без імені';
+                              return (
+                                <option key={p.id} value={p.id}>
+                                  {genderSym} {pName} {lifespan}
+                                </option>
+                              );
+                            })}
+                          </select>
+
+                          <input
+                            type="text"
+                            value={newWitnessedNotes}
+                            onChange={(e) => setNewWitnessedNotes(e.target.value)}
+                            placeholder="Подія / запис (напр. вінчання 1895 р.)"
+                            className={`p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] w-full sm:w-48 shrink-0`}
+                          />
+
+                          <button
+                            type="button"
+                            disabled={!selectedExistingWitnessedId}
+                            onClick={handleAddWitnessedPerson}
+                            className="px-3 py-2 rounded-lg bg-[#B88E3E] hover:bg-[#a37c33] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Прив'язати</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Compact List of Witnessed Persons */}
+                      {allDisplayWitnessedPersons.length > 0 ? (
+                        <div className="space-y-1.5">
+                          {allDisplayWitnessedPersons.map(({ person: wp, notes: wNotes, roleLabel, eventLabel }) => {
+                            const fullName = `${wp.name?.surname || wp.lastName || ''} ${wp.name?.given || wp.firstName || ''} ${wp.name?.patronymic || wp.patronymic || ''}`.trim() || 'Без імені';
+                            const lifespan = wp.birthDate || wp.birthYear ? `(${wp.birthDate || wp.birthYear})` : '';
+
+                            return (
+                              <div
+                                key={wp.id}
+                                className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 flex items-center justify-between gap-2 text-xs hover:border-[#B88E3E]/40 transition-colors"
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                                  <span className="w-5 h-5 rounded-md bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0 text-[11px] font-bold">
+                                    ✍
+                                  </span>
+
                                   {onSelectPerson ? (
                                     <button
                                       type="button"
                                       onClick={() => onSelectPerson(wp.id)}
-                                      className="font-bold text-neutral-800 dark:text-neutral-200 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors flex items-center gap-1 cursor-pointer truncate text-left"
+                                      className="font-bold text-neutral-800 dark:text-neutral-200 hover:text-[#B88E3E] hover:underline transition-colors cursor-pointer truncate max-w-[180px] sm:max-w-none text-left"
                                       title="Відкрити картку цієї особи"
                                     >
-                                      <span>{fullName}</span>
-                                      <ExternalLink className="w-3 h-3 text-neutral-400 shrink-0" />
+                                      {fullName}
                                     </button>
                                   ) : (
                                     <span className="font-bold text-neutral-800 dark:text-neutral-200 truncate">
                                       {fullName}
                                     </span>
                                   )}
+
                                   {lifespan && (
-                                    <span className="text-[11px] text-neutral-400 font-medium">
+                                    <span className="text-[10px] text-neutral-400 font-medium">
                                       {lifespan}
                                     </span>
                                   )}
-                                  <span className="px-2 py-0.5 rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-300 font-semibold text-[10px]">
-                                    {roleLabel || 'Свідок / Поручитель'}
+
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-500/10 text-sky-700 dark:text-sky-300">
+                                    {roleLabel || 'Свідок'}
                                   </span>
+
                                   {eventLabel && (
-                                    <span className="px-1.5 py-0.5 rounded-md bg-sky-500/5 text-sky-600 dark:text-sky-400 font-medium text-[9px] border border-sky-500/20">
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] bg-black/5 dark:bg-white/10 text-neutral-600 dark:text-neutral-400">
                                       {eventLabel}
                                     </span>
                                   )}
-                                  <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium text-[9px] flex items-center gap-0.5">
-                                    <Check className="w-2.5 h-2.5" />
-                                    <span>Особа в дереві</span>
-                                  </span>
-                                </div>
-                                {coWitnesses && coWitnesses.length > 0 && (
-                                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate mt-0.5">
-                                    <span className="font-semibold text-neutral-600 dark:text-neutral-300">Інші свідки / поручителі:</span> {coWitnesses.join(', ')}
-                                  </p>
-                                )}
-                                {wNotes && (
-                                  <p className="text-[11px] text-neutral-500 truncate mt-0.5">
-                                    {wNotes}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
 
-                            {!isReadOnly && (
-                              <button
-                                type="button"
-                                onClick={() => handleUnlinkWitnessedPerson(wp.id)}
-                                className="text-neutral-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0"
-                                title="Від'єднати запис свідка"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="p-3 text-center rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10">
-                      <p className="text-[11px] text-neutral-400 italic">
-                        Записів про свідчення поки немає. Натисніть «+ Додати запис свідка», щоб зазначити, для кого дана особа була свідком чи поручителем.
-                      </p>
+                                  {wNotes && (
+                                    <span className="text-[10px] text-neutral-400 truncate max-w-[160px]">
+                                      • {wNotes}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnlinkWitnessedPerson(wp.id)}
+                                  className="text-neutral-400 hover:text-rose-500 p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0"
+                                  title="Від'єднати запис свідка"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-neutral-400 italic text-center py-2">
+                          Записів про свідчення поки немає. Оберіть особу зі списку вище.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3413,6 +3555,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {personDateValidation.hasErrors && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-600 dark:text-rose-400 text-[10px] font-bold border border-rose-500/30 animate-pulse">
+                      <AlertTriangle className="w-3 h-3" />
+                      <span>Помилка дат</span>
+                    </span>
+                  )}
                   {!openSections['dates-places'] && (
                     <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
                       {[birthDate, deathDate].filter(Boolean).join(' — ') || 'Дати не вказані'}
@@ -3424,6 +3572,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
               {openSections['dates-places'] && (
                 <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
+                  {personDateValidation.hasErrors && (
+                    <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-800 flex items-start gap-2.5 text-xs text-rose-800 dark:text-rose-200 animate-in fade-in duration-150">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
+                      <div className="space-y-1">
+                        <span className="font-bold">Виявлено хронологічні невідповідності дат:</span>
+                        <ul className="list-disc list-inside space-y-0.5 text-[11px] text-rose-700 dark:text-rose-300">
+                          {personDateValidation.errorsList.map((err, i) => (
+                            <li key={i}>{err}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-5 text-xs">
                 {/* 4a. Народження */}
                 <div className="space-y-2">
@@ -3439,10 +3601,23 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       <input
                         type="text"
                         value={birthDate}
-                        onChange={(e) => setBirthDate(e.target.value)}
+                        onChange={(e) => {
+                          setBirthDate(e.target.value);
+                          setDateValidationDismissedForSave(false);
+                        }}
                         placeholder="дд.мм.рррр або рррр (напр. 1814)"
-                        className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        className={`w-full p-2.5 rounded-xl border text-xs focus:outline-none focus:ring-2 transition-colors ${
+                          personDateValidation.birthDateError
+                            ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100 ring-1 ring-rose-500 focus:ring-rose-500'
+                            : `${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:ring-[#B88E3E]`
+                        }`}
                       />
+                      {personDateValidation.birthDateError && (
+                        <div className="flex items-start gap-1.5 mt-1.5 p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[11px] font-semibold animate-in fade-in duration-150">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-500" />
+                          <span>{personDateValidation.birthDateError}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="md:col-span-2 flex gap-2">
                       <input
@@ -3491,10 +3666,23 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       <input
                         type="text"
                         value={marriageDate}
-                        onChange={(e) => setMarriageDate(e.target.value)}
+                        onChange={(e) => {
+                          setMarriageDate(e.target.value);
+                          setDateValidationDismissedForSave(false);
+                        }}
                         placeholder="дд.мм.рррр або рррр"
-                        className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        className={`w-full p-2.5 rounded-xl border text-xs focus:outline-none focus:ring-2 transition-colors ${
+                          personDateValidation.marriageDateError
+                            ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100 ring-1 ring-rose-500 focus:ring-rose-500'
+                            : `${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:ring-[#B88E3E]`
+                        }`}
                       />
+                      {personDateValidation.marriageDateError && (
+                        <div className="flex items-start gap-1.5 mt-1.5 p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[11px] font-semibold animate-in fade-in duration-150">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-500" />
+                          <span>{personDateValidation.marriageDateError}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="md:col-span-2 flex gap-2">
                       <input
@@ -3543,10 +3731,23 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                         <input
                           type="text"
                           value={deathDate}
-                          onChange={(e) => setDeathDate(e.target.value)}
+                          onChange={(e) => {
+                            setDeathDate(e.target.value);
+                            setDateValidationDismissedForSave(false);
+                          }}
                           placeholder="дд.мм.рррр або рррр"
-                          className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                          className={`w-full p-2.5 rounded-xl border text-xs focus:outline-none focus:ring-2 transition-colors ${
+                            personDateValidation.deathDateError
+                              ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100 ring-1 ring-rose-500 focus:ring-rose-500'
+                              : `${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:ring-[#B88E3E]`
+                          }`}
                         />
+                        {personDateValidation.deathDateError && (
+                          <div className="flex items-start gap-1.5 mt-1.5 p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[11px] font-semibold animate-in fade-in duration-150">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-500" />
+                            <span>{personDateValidation.deathDateError}</span>
+                          </div>
+                        )}
                       </div>
                       <div className="md:col-span-2 flex gap-2">
                         <input
@@ -3943,6 +4144,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {hasFutureLifeEvents && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-600 dark:text-rose-400 text-[10px] font-bold border border-rose-500/30 animate-pulse">
+                      <AlertTriangle className="w-3 h-3" />
+                      <span>Майбутня дата</span>
+                    </span>
+                  )}
                   {!openSections.events && (
                     <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
                       {lifeEvents.length > 0 ? `${lifeEvents.length} подій` : '0 подій'}
@@ -4027,8 +4234,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                             value={newEvent.date || ''}
                             onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
                             placeholder="1858 або 15.04.1858"
-                            className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
+                            className={`w-full p-2 rounded-lg border text-xs transition-colors ${
+                              newEventValidation.isFuture
+                                ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100 ring-1 ring-rose-500'
+                                : `${theme.inputBg} ${theme.inputBorder} ${theme.inputText}`
+                            }`}
                           />
+                          {newEventValidation.message && (
+                            <div className={`flex items-start gap-1 mt-1 text-[11px] font-semibold ${
+                              newEventValidation.isFuture ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
+                            }`}>
+                              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                              <span>{newEventValidation.message}</span>
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -4079,33 +4298,66 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
                   {lifeEvents.length > 0 ? (
                     <div className="space-y-2">
-                      {lifeEvents.map((evt, idx) => (
-                        <div
-                          key={evt.id || idx}
-                          className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 flex items-start justify-between gap-3 text-xs"
-                        >
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded-md bg-[#B88E3E]/15 text-[#B88E3E] font-bold text-[10px]">
-                                {getEventTypeName(evt.type)}
-                              </span>
-                              <span className="font-bold text-neutral-800 dark:text-neutral-200">{evt.title}</span>
-                              {evt.date && <span className="text-neutral-500 font-medium">({evt.date})</span>}
-                            </div>
-                            {evt.place && <div className="text-neutral-500 text-[11px]">📍 {evt.place}</div>}
-                            {evt.description && <div className="text-neutral-600 dark:text-neutral-400 text-[11px] mt-1">{evt.description}</div>}
-                          </div>
+                      {lifeEvents.map((evt, idx) => {
+                        const evtValidation = lifeEventsValidation[idx] || validateLifeEventDate(evt.date, birthDate, deathDate, isLiving);
+                        const isInvalid = evtValidation.isFuture;
+                        const hasWarning = !isInvalid && Boolean(evtValidation.isBeforeBirth || evtValidation.isAfterDeath);
 
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveLifeEvent(evt.id)}
-                            className="text-neutral-400 hover:text-rose-500 p-1 cursor-pointer"
-                            title="Видалити подію"
+                        return (
+                          <div
+                            key={evt.id || idx}
+                            className={`p-3 rounded-xl border flex items-start justify-between gap-3 text-xs transition-all ${
+                              isInvalid
+                                ? 'bg-rose-50/70 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800'
+                                : hasWarning
+                                ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300/60 dark:border-amber-800/40'
+                                : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5'
+                            }`}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
+                            <div className="space-y-0.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="px-2 py-0.5 rounded-md bg-[#B88E3E]/15 text-[#B88E3E] font-bold text-[10px]">
+                                  {getEventTypeName(evt.type)}
+                                </span>
+                                <span className="font-bold text-neutral-800 dark:text-neutral-200">{evt.title}</span>
+                                {evt.date && (
+                                  <span className={`font-medium ${isInvalid ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-neutral-500'}`}>
+                                    ({evt.date})
+                                  </span>
+                                )}
+                                {isInvalid && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    <span>У майбутньому</span>
+                                  </span>
+                                )}
+                                {hasWarning && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    <span>{evtValidation.message}</span>
+                                  </span>
+                                )}
+                              </div>
+                              {evt.place && <div className="text-neutral-500 text-[11px]">📍 {evt.place}</div>}
+                              {evt.description && <div className="text-neutral-600 dark:text-neutral-400 text-[11px] mt-1">{evt.description}</div>}
+                              {isInvalid && evtValidation.message && (
+                                <div className="text-rose-600 dark:text-rose-400 text-[11px] font-semibold mt-1">
+                                  ⚠️ {evtValidation.message}
+                                </div>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveLifeEvent(evt.id)}
+                              className="text-neutral-400 hover:text-rose-500 p-1 cursor-pointer shrink-0"
+                              title="Видалити подію"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-[11px] text-neutral-400 italic">Додаткових подій поки немає.</p>
@@ -4601,6 +4853,66 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
               >
                 Все одно створити окремо
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Date Validation Warning Confirmation Dialog */}
+      {showDateValidationDialog && (
+        <div className="fixed inset-0 z-60 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 border border-rose-500/40 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-neutral-900 dark:text-white">
+                  Невідповідність або помилка у датах
+                </h3>
+                <p className="text-xs text-neutral-600 dark:text-neutral-300">
+                  У формі виявлено хронологічні конфлікти або дати в майбутньому. Рекомендується перевірити введені значення:
+                </p>
+              </div>
+            </div>
+
+            <div className="max-h-56 overflow-y-auto space-y-2 border border-rose-200 dark:border-rose-900/50 rounded-xl p-3 bg-rose-50/50 dark:bg-rose-950/20 text-xs">
+              <ul className="list-disc list-inside space-y-1.5 text-rose-800 dark:text-rose-200 font-medium">
+                {personDateValidation.errorsList.map((err, i) => (
+                  <li key={`pv-${i}`}>{err}</li>
+                ))}
+                {lifeEventsValidation
+                  .filter((v) => v.isFuture)
+                  .map((v, i) => (
+                    <li key={`lev-${i}`}>
+                      Подія «{v.event.title}» ({v.event.date}): {v.message}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDateValidationDialog(false);
+                  scrollToSection('dates-places');
+                }}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer transition-colors shadow-sm"
+              >
+                Виправити дати
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDateValidationDismissedForSave(true);
+                  setShowDateValidationDialog(false);
+                  setTimeout(() => handleSave(false), 50);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+              >
+                Все одно зберегти
               </button>
             </div>
           </div>

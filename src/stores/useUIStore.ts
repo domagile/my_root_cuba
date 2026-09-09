@@ -1,6 +1,17 @@
 import { create } from 'zustand';
 import { ThemePalette, AccessLockConfig, ViewMode, AuthUser } from '../types';
 import { encodeSessionToken } from '../utils/crossTabAuth';
+import {
+  ModalSection,
+  ModalAccordionState,
+  DEFAULT_MODAL_ACCORDION_SECTIONS,
+  getSavedAccordionSections,
+  getSavedActiveSection,
+  saveAccordionSections
+} from '../utils/accordionState';
+
+export type { ModalSection, ModalAccordionState };
+export { DEFAULT_MODAL_ACCORDION_SECTIONS };
 
 const STORAGE_KEY = 'genealogy_workstation_data_v2';
 
@@ -98,6 +109,20 @@ export interface UIState {
   authModalFeature?: string;
   isContactModalOpen: boolean;
   
+  // Person Modal Accordion State (Persistent across modal closes & returns)
+  personModalOpenSections: ModalAccordionState;
+  personModalActiveSection: ModalSection;
+  setPersonModalOpenSections: (
+    sections: ModalAccordionState | ((prev: ModalAccordionState) => ModalAccordionState),
+    personId?: string | null
+  ) => void;
+  togglePersonModalSection: (sectionId: ModalSection, personId?: string | null) => void;
+  setPersonModalActiveSection: (sectionId: ModalSection, personId?: string | null) => void;
+  expandAllPersonModalSections: (personId?: string | null) => void;
+  collapseAllPersonModalSections: (personId?: string | null) => void;
+  resetPersonModalSectionsToDefault: (personId?: string | null) => void;
+  initPersonModalAccordion: (personId?: string | null) => void;
+
   // Actions
   setActiveTab: (tab: string) => void;
   setRodovidView: (view: ViewMode) => void;
@@ -125,6 +150,77 @@ export const useUIStore = create<UIState>((set, get) => ({
   isAuthModalOpen: false,
   authModalFeature: undefined,
   isContactModalOpen: false,
+  
+  personModalOpenSections: getSavedAccordionSections(),
+  personModalActiveSection: getSavedActiveSection(),
+
+  initPersonModalAccordion: (personId) => {
+    const loaded = getSavedAccordionSections(personId);
+    set({ personModalOpenSections: loaded });
+  },
+
+  setPersonModalOpenSections: (updater, personId) => {
+    const prev = get().personModalOpenSections;
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    saveAccordionSections(next, personId, get().personModalActiveSection);
+    set({ personModalOpenSections: next });
+  },
+
+  togglePersonModalSection: (sectionId, personId) => {
+    const prev = get().personModalOpenSections;
+    const nextOpen = !prev[sectionId];
+    const next = { ...prev, [sectionId]: nextOpen };
+    const nextActive = nextOpen ? sectionId : get().personModalActiveSection;
+    saveAccordionSections(next, personId, nextActive);
+    set({
+      personModalOpenSections: next,
+      personModalActiveSection: nextActive
+    });
+  },
+
+  setPersonModalActiveSection: (sectionId, personId) => {
+    saveAccordionSections(get().personModalOpenSections, personId, sectionId);
+    set({ personModalActiveSection: sectionId });
+  },
+
+  expandAllPersonModalSections: (personId) => {
+    const allOpen: ModalAccordionState = {
+      'basic': true,
+      'names': true,
+      'parents': true,
+      'dates-places': true,
+      'bio-notes': true,
+      'events': true,
+      'photos': true,
+      'custom-fields': true,
+    };
+    saveAccordionSections(allOpen, personId, get().personModalActiveSection);
+    set({ personModalOpenSections: allOpen });
+  },
+
+  collapseAllPersonModalSections: (personId) => {
+    const allClosed: ModalAccordionState = {
+      'basic': false,
+      'names': false,
+      'parents': false,
+      'dates-places': false,
+      'bio-notes': false,
+      'events': false,
+      'photos': false,
+      'custom-fields': false,
+    };
+    saveAccordionSections(allClosed, personId, get().personModalActiveSection);
+    set({ personModalOpenSections: allClosed });
+  },
+
+  resetPersonModalSectionsToDefault: (personId) => {
+    const defaultState = { ...DEFAULT_MODAL_ACCORDION_SECTIONS };
+    saveAccordionSections(defaultState, personId, 'basic');
+    set({
+      personModalOpenSections: defaultState,
+      personModalActiveSection: 'basic'
+    });
+  },
   
   themePalette: (() => {
     try {
