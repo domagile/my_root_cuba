@@ -554,11 +554,22 @@ export function calculateClassicFamilyTreeLayout(
     }
 
     // Also include spouses of collapsed ancestors if they are only in the tree through the collapsed branch
+    const isUncollapsedParentOfSomeone = (sId: string): boolean => {
+      return Object.values(database.persons).some(cand => {
+        if (collapsedAncestorIds.has(cand.id)) return false;
+        const fId = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
+        const mId = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
+        if (fId === sId) return !collapsedParents.has(cand.id) && !collapsedParents.has(`pat_${cand.id}`);
+        if (mId === sId) return !collapsedParents.has(cand.id) && !collapsedParents.has(`mat_${cand.id}`);
+        return false;
+      });
+    };
+
     collapsedAncestorIds.forEach(aId => {
       const a = database.persons[aId];
       if (a?.spouseIds) {
         a.spouseIds.forEach(sId => {
-          if (!directDescendants.has(sId) && !collapsedParents.has(sId) && sId !== root.id) {
+          if (!directDescendants.has(sId) && !collapsedParents.has(sId) && sId !== root.id && !isUncollapsedParentOfSomeone(sId)) {
             collapsedAncestorIds.add(sId);
           }
         });
@@ -567,10 +578,10 @@ export function calculateClassicFamilyTreeLayout(
         a.spouseFamilyIds.forEach(fId => {
           const fam = database.families[fId];
           if (fam) {
-            if (fam.husbandId && !directDescendants.has(fam.husbandId) && !collapsedParents.has(fam.husbandId) && fam.husbandId !== root.id) {
+            if (fam.husbandId && !directDescendants.has(fam.husbandId) && !collapsedParents.has(fam.husbandId) && fam.husbandId !== root.id && !isUncollapsedParentOfSomeone(fam.husbandId)) {
               collapsedAncestorIds.add(fam.husbandId);
             }
-            if (fam.wifeId && !directDescendants.has(fam.wifeId) && !collapsedParents.has(fam.wifeId) && fam.wifeId !== root.id) {
+            if (fam.wifeId && !directDescendants.has(fam.wifeId) && !collapsedParents.has(fam.wifeId) && fam.wifeId !== root.id && !isUncollapsedParentOfSomeone(fam.wifeId)) {
               collapsedAncestorIds.add(fam.wifeId);
             }
           }
@@ -703,9 +714,9 @@ export function calculateClassicFamilyTreeLayout(
     }
 
     // 2. Ancestors (Gen - 1, Gen - 2...) - expandable for ANY person in the tree
-    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${id}`);
-    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${id}`);
-    const isBothCollapsed = collapsedParents.has(id) || (isPaternalDirectlyCollapsed && isMaternalDirectlyCollapsed);
+    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${id}`) || collapsedParents.has(id);
+    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${id}`) || collapsedParents.has(id);
+    const isBothCollapsed = isPaternalDirectlyCollapsed && isMaternalDirectlyCollapsed;
 
     if (showParents && !isBothCollapsed && !collapsedAncestorIds.has(id) && !isPersonACollapsedSibling(id)) {
       if (maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations) {
@@ -896,7 +907,7 @@ export function calculateClassicFamilyTreeLayout(
         });
 
         const validUnionChildren = Array.from(unionChildren).filter(
-          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId) && !collapsedParents.has(cId)
+          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
         );
         // Sort children by age: oldest to the left, younger to the right
         validUnionChildren.sort((idA, idB) => 
@@ -940,7 +951,7 @@ export function calculateClassicFamilyTreeLayout(
         });
       }
       const validAllChildren = Array.from(allChildren).filter(
-        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId) && !collapsedParents.has(cId)
+        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
       );
       // Sort all children by age: oldest to the left, younger to the right
       validAllChildren.sort((idA, idB) => 
@@ -1264,8 +1275,21 @@ export function calculateClassicFamilyTreeLayout(
 
     const parentsCount = (fId && database.persons[fId] ? 1 : 0) + (mId && database.persons[mId] ? 1 : 0);
     const hasParents = parentsCount > 0;
-    const areParentsVisible = (fId && personGen.has(fId)) || (mId && personGen.has(mId));
-    const isParentsCollapsed = collapsedParents.has(p.id) || !showParents || (hasParents && !areParentsVisible);
+    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${p.id}`) || collapsedParents.has(p.id);
+    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${p.id}`) || collapsedParents.has(p.id);
+    const isPaternalVisible = Boolean(fId && personGen.has(fId));
+    const isMaternalVisible = Boolean(mId && personGen.has(mId));
+
+    const isPaternalCollapsed = Boolean(fId && (isPaternalDirectlyCollapsed || !showParents || !isPaternalVisible));
+    const isMaternalCollapsed = Boolean(mId && (isMaternalDirectlyCollapsed || !showParents || !isMaternalVisible));
+
+    const areParentsVisible = (fId && isPaternalVisible) || (mId && isMaternalVisible);
+    const isParentsCollapsed = collapsedParents.has(p.id) ||
+      (hasParents && (
+        (fId && mId ? isPaternalCollapsed && isMaternalCollapsed : (fId ? isPaternalCollapsed : isMaternalCollapsed))
+      )) ||
+      !showParents ||
+      (hasParents && !areParentsVisible);
 
     let siblingCount = 0;
     let areSiblingsVisible = false;
@@ -1301,11 +1325,15 @@ export function calculateClassicFamilyTreeLayout(
       descendantsCount,
       isDirectAncestor,
       isParentsCollapsed,
+      isPaternalCollapsed,
+      isMaternalCollapsed,
       isSiblingsCollapsed,
       isChildrenCollapsed,
       areParentsVisible: Boolean(areParentsVisible),
       areSiblingsVisible,
-      areChildrenVisible
+      areChildrenVisible,
+      fatherId: fId,
+      motherId: mId
     };
   };
 
@@ -1489,7 +1517,7 @@ export function calculateClassicFamilyTreeLayout(
           });
 
           // Children born from this specific union
-          const unionChildren = (spInfo.childrenIds.length > 0 ? spInfo.childrenIds : (unit.spouses.length === 1 ? unit.childrenIds : [])).filter(cId => !collapsedParents.has(cId));
+          const unionChildren = (spInfo.childrenIds.length > 0 ? spInfo.childrenIds : (unit.spouses.length === 1 ? unit.childrenIds : [])).filter(cId => nodeMap.has(cId));
           if (unionChildren.length > 0) {
             const childCoords = unionChildren
               .map(cId => ({ id: cId, ...nodeMap.get(cId)! }))
@@ -1848,13 +1876,31 @@ export function calculateHorizontalFamilyTreeLayout(
   const collapsedAncestorIds = new Set<string>();
   if (collapsedParents.size > 0) {
     const q: string[] = [];
-    collapsedParents.forEach(childId => {
-      getDirectParentIds(childId).forEach(parId => {
-        if (!collapsedAncestorIds.has(parId)) {
-          collapsedAncestorIds.add(parId);
-          q.push(parId);
+    collapsedParents.forEach(entry => {
+      if (entry.startsWith('pat_')) {
+        const childId = entry.replace('pat_', '');
+        const p = database.persons[childId];
+        const fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+        if (fId && !collapsedAncestorIds.has(fId)) {
+          collapsedAncestorIds.add(fId);
+          q.push(fId);
         }
-      });
+      } else if (entry.startsWith('mat_')) {
+        const childId = entry.replace('mat_', '');
+        const p = database.persons[childId];
+        const mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+        if (mId && !collapsedAncestorIds.has(mId)) {
+          collapsedAncestorIds.add(mId);
+          q.push(mId);
+        }
+      } else {
+        getDirectParentIds(entry).forEach(parId => {
+          if (!collapsedAncestorIds.has(parId)) {
+            collapsedAncestorIds.add(parId);
+            q.push(parId);
+          }
+        });
+      }
     });
 
     while (q.length > 0) {
@@ -1868,11 +1914,22 @@ export function calculateHorizontalFamilyTreeLayout(
     }
 
     // Also include spouses of collapsed ancestors if they are only in the tree through the collapsed branch
+    const isUncollapsedParentOfSomeone = (sId: string): boolean => {
+      return Object.values(database.persons).some(cand => {
+        if (collapsedAncestorIds.has(cand.id)) return false;
+        const fId = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
+        const mId = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
+        if (fId === sId) return !collapsedParents.has(cand.id) && !collapsedParents.has(`pat_${cand.id}`);
+        if (mId === sId) return !collapsedParents.has(cand.id) && !collapsedParents.has(`mat_${cand.id}`);
+        return false;
+      });
+    };
+
     collapsedAncestorIds.forEach(aId => {
       const a = database.persons[aId];
       if (a?.spouseIds) {
         a.spouseIds.forEach(sId => {
-          if (!directDescendants.has(sId) && !collapsedParents.has(sId) && sId !== root.id) {
+          if (!directDescendants.has(sId) && !collapsedParents.has(sId) && sId !== root.id && !isUncollapsedParentOfSomeone(sId)) {
             collapsedAncestorIds.add(sId);
           }
         });
@@ -1881,10 +1938,10 @@ export function calculateHorizontalFamilyTreeLayout(
         a.spouseFamilyIds.forEach(fId => {
           const fam = database.families[fId];
           if (fam) {
-            if (fam.husbandId && !directDescendants.has(fam.husbandId) && !collapsedParents.has(fam.husbandId) && fam.husbandId !== root.id) {
+            if (fam.husbandId && !directDescendants.has(fam.husbandId) && !collapsedParents.has(fam.husbandId) && fam.husbandId !== root.id && !isUncollapsedParentOfSomeone(fam.husbandId)) {
               collapsedAncestorIds.add(fam.husbandId);
             }
-            if (fam.wifeId && !directDescendants.has(fam.wifeId) && !collapsedParents.has(fam.wifeId) && fam.wifeId !== root.id) {
+            if (fam.wifeId && !directDescendants.has(fam.wifeId) && !collapsedParents.has(fam.wifeId) && fam.wifeId !== root.id && !isUncollapsedParentOfSomeone(fam.wifeId)) {
               collapsedAncestorIds.add(fam.wifeId);
             }
           }
@@ -1991,7 +2048,11 @@ export function calculateHorizontalFamilyTreeLayout(
     });
 
     // Ancestors (Gen - 1)
-    if (showParents && !collapsedParents.has(id) && !collapsedAncestorIds.has(id)) {
+    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${id}`) || collapsedParents.has(id);
+    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${id}`) || collapsedParents.has(id);
+    const isBothCollapsed = isPaternalDirectlyCollapsed && isMaternalDirectlyCollapsed;
+
+    if (showParents && !isBothCollapsed && !collapsedAncestorIds.has(id)) {
       if (maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations) {
         let fId = p.fatherId;
         let mId = p.motherId;
@@ -2011,8 +2072,12 @@ export function calculateHorizontalFamilyTreeLayout(
             mId = matchingFam.wifeId;
           }
         }
-        if (fId && database.persons[fId]) enqueuePerson(fId, gen - 1);
-        if (mId && database.persons[mId]) enqueuePerson(mId, gen - 1);
+        if (fId && database.persons[fId] && !isPaternalDirectlyCollapsed && !collapsedAncestorIds.has(fId)) {
+          enqueuePerson(fId, gen - 1);
+        }
+        if (mId && database.persons[mId] && !isMaternalDirectlyCollapsed && !collapsedAncestorIds.has(mId)) {
+          enqueuePerson(mId, gen - 1);
+        }
       }
     }
 
@@ -2022,7 +2087,6 @@ export function calculateHorizontalFamilyTreeLayout(
         const childIds = getDirectChildrenIds(id);
         childIds.forEach(cId => {
           if (collapsedDescendantIds.has(cId)) return;
-          if (collapsedParents.has(cId)) return;
           if (!showSiblings && directAncestors.has(id) && !directAncestors.has(cId) && cId !== effectiveRoot.id) {
             return;
           }
@@ -2166,7 +2230,7 @@ export function calculateHorizontalFamilyTreeLayout(
         });
 
         const validUnionChildren = Array.from(unionChildren).filter(
-          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId) && !collapsedParents.has(cId)
+          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
         );
         validUnionChildren.sort((idA, idB) =>
           comparePersonsByAge(database.persons[idA], database.persons[idB])
@@ -2210,7 +2274,7 @@ export function calculateHorizontalFamilyTreeLayout(
         }
       });
       const validAllChildren = Array.from(allChildren).filter(
-        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId) && !collapsedParents.has(cId)
+        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
       );
       validAllChildren.sort((idA, idB) =>
         comparePersonsByAge(database.persons[idA], database.persons[idB])
@@ -2490,8 +2554,21 @@ export function calculateHorizontalFamilyTreeLayout(
 
     const parentsCount = (fId && database.persons[fId] ? 1 : 0) + (mId && database.persons[mId] ? 1 : 0);
     const hasParents = parentsCount > 0;
-    const areParentsVisible = (fId && personGen.has(fId)) || (mId && personGen.has(mId));
-    const isParentsCollapsed = collapsedParents.has(p.id) || !showParents || (hasParents && !areParentsVisible);
+    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${p.id}`) || collapsedParents.has(p.id);
+    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${p.id}`) || collapsedParents.has(p.id);
+    const isPaternalVisible = Boolean(fId && personGen.has(fId));
+    const isMaternalVisible = Boolean(mId && personGen.has(mId));
+
+    const isPaternalCollapsed = Boolean(fId && (isPaternalDirectlyCollapsed || !showParents || !isPaternalVisible));
+    const isMaternalCollapsed = Boolean(mId && (isMaternalDirectlyCollapsed || !showParents || !isMaternalVisible));
+
+    const areParentsVisible = (fId && isPaternalVisible) || (mId && isMaternalVisible);
+    const isParentsCollapsed = collapsedParents.has(p.id) ||
+      (hasParents && (
+        (fId && mId ? isPaternalCollapsed && isMaternalCollapsed : (fId ? isPaternalCollapsed : isMaternalCollapsed))
+      )) ||
+      !showParents ||
+      (hasParents && !areParentsVisible);
 
     let siblingCount = 0;
     let areSiblingsVisible = false;
@@ -2527,11 +2604,15 @@ export function calculateHorizontalFamilyTreeLayout(
       descendantsCount,
       isDirectAncestor,
       isParentsCollapsed,
+      isPaternalCollapsed,
+      isMaternalCollapsed,
       isSiblingsCollapsed,
       isChildrenCollapsed,
       areParentsVisible: Boolean(areParentsVisible),
       areSiblingsVisible,
-      areChildrenVisible
+      areChildrenVisible,
+      fatherId: fId,
+      motherId: mId
     };
   };
 
@@ -2712,7 +2793,7 @@ export function calculateHorizontalFamilyTreeLayout(
             const junctionX = stemStartX + (isCompact ? 20 : 36) + ((unitIdx + spIdx) % 4) * (isCompact ? 12 : 20);
 
             const childNodes = spInfo.childrenIds
-              .filter(cId => !collapsedParents.has(cId))
+              .filter(cId => nodeMap.has(cId))
               .map(cId => ({ id: cId, ...nodeMap.get(cId)! }))
               .filter(c => c && c.centerY !== undefined);
 

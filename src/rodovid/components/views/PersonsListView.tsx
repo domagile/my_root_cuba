@@ -3,6 +3,7 @@ import {
   Search,
   Filter,
   User,
+  UserPlus,
   Plus,
   ArrowUpDown,
   BookOpen,
@@ -240,10 +241,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenAddPerson}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
-                title="Створити нову особу в родинному дереві"
+                id="rodovid-add-person-btn"
+                className="px-3.5 py-2 rounded-xl bg-[#B88E3E] hover:bg-[#A37B30] text-white font-semibold text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-md shrink-0 active:scale-95"
+                title="Додати особу"
+                aria-label="Додати особу"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <UserPlus className="w-4 h-4 text-white stroke-[2.2]" />
                 <span>Додати особу</span>
               </button>
             )}

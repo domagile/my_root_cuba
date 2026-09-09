@@ -259,6 +259,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [reportPersonId, setReportPersonId] = useState<string | null>(null);
   const [selectiveMenuPersonId, setSelectiveMenuPersonId] = useState<string | null>(null);
   const selectiveMenuRef = useRef<HTMLDivElement | null>(null);
+  const [selectiveParentsMenuPersonId, setSelectiveParentsMenuPersonId] = useState<string | null>(null);
+  const selectiveParentsMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Focus & Lineage Highlighting States (Focus Highlights)
   const [focusType, setFocusType] = useState<'none' | 'clan' | 'direct-ancestors' | 'direct-descendants' | 'patrilineal' | 'matrilineal'>('none');
@@ -286,20 +288,23 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }
   }, [activePersonId, focusType]);
 
-  // Close selective sibling menu on click outside
+  // Close selective sibling / parent menus on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (selectiveMenuRef.current && !selectiveMenuRef.current.contains(e.target as Node)) {
         setSelectiveMenuPersonId(null);
       }
+      if (selectiveParentsMenuRef.current && !selectiveParentsMenuRef.current.contains(e.target as Node)) {
+        setSelectiveParentsMenuPersonId(null);
+      }
     };
-    if (selectiveMenuPersonId) {
+    if (selectiveMenuPersonId || selectiveParentsMenuPersonId) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [selectiveMenuPersonId]);
+  }, [selectiveMenuPersonId, selectiveParentsMenuPersonId]);
 
   // Anchor tracking: preserve viewport screen position on the person card being expanded/collapsed
   const anchorRef = useRef<{ personId: string; screenX: number; screenY: number } | null>(null);
@@ -581,20 +586,84 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setShowParents(true);
     setCollapsedParents((prev) => {
       const next = new Set(prev);
-      const shouldCollapse = isCurrentlyCollapsed !== undefined ? !isCurrentlyCollapsed : !next.has(personId);
+      const shouldCollapse = isCurrentlyCollapsed !== undefined
+        ? !isCurrentlyCollapsed
+        : (!next.has(personId) && !next.has(`pat_${personId}`) && !next.has(`mat_${personId}`));
       if (shouldCollapse) {
         next.add(personId);
+        next.delete(`pat_${personId}`);
+        next.delete(`mat_${personId}`);
       } else {
         next.delete(personId);
+        next.delete(`pat_${personId}`);
+        next.delete(`mat_${personId}`);
         const p = database.persons[personId];
         if (p) {
-          if (p.fatherId) next.delete(p.fatherId);
-          if (p.motherId) next.delete(p.motherId);
+          if (p.fatherId) {
+            next.delete(p.fatherId);
+            next.delete(`pat_${p.fatherId}`);
+            next.delete(`mat_${p.fatherId}`);
+          }
+          if (p.motherId) {
+            next.delete(p.motherId);
+            next.delete(`pat_${p.motherId}`);
+            next.delete(`mat_${p.motherId}`);
+          }
         }
       }
       return next;
     });
   }, [setAnchorForPerson, database.persons]);
+
+  const toggleCollapseParentBranch = useCallback((personId: string, branch: 'paternal' | 'maternal') => {
+    setAnchorForPerson(personId);
+    setShowParents(true);
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      const key = branch === 'paternal' ? `pat_${personId}` : `mat_${personId}`;
+      const otherKey = branch === 'paternal' ? `mat_${personId}` : `pat_${personId}`;
+
+      if (next.has(personId)) {
+        // Both are currently collapsed: expand this branch, keep other branch collapsed
+        next.delete(personId);
+        next.add(otherKey);
+        next.delete(key);
+      } else if (next.has(key)) {
+        // This specific branch is collapsed: expand it
+        next.delete(key);
+      } else {
+        // This branch is visible: collapse it
+        next.add(key);
+        // If otherKey is also collapsed, combine to personId
+        if (next.has(otherKey)) {
+          next.delete(key);
+          next.delete(otherKey);
+          next.add(personId);
+        }
+      }
+      return next;
+    });
+  }, [setAnchorForPerson]);
+
+  const getParentsOfPerson = useCallback((personId: string) => {
+    const p = database.persons[personId];
+    if (!p) return { father: null, mother: null };
+    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
+    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    if (!fId && !mId && database.families) {
+      const matchingFam = Object.values(database.families).find(fam =>
+        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
+      );
+      if (matchingFam) {
+        fId = matchingFam.husbandId;
+        mId = matchingFam.wifeId;
+      }
+    }
+    return {
+      father: fId ? database.persons[fId] || null : null,
+      mother: mId ? database.persons[mId] || null : null
+    };
+  }, [database]);
 
   // Helper to fetch all siblings for a person
   const getSiblingsOfPerson = useCallback((personId: string): Person[] => {
@@ -2960,37 +3029,256 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 )}
 
                 {/* Top/Left Collapse/Expand Parents Branch Badge ([-]/[+]) */}
-                {node.hasParents && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleCollapseParents(p.id, node.isParentsCollapsed);
-                    }}
-                    className={`absolute ${
-                      orientation === 'horizontal'
-                        ? '-left-2.5 top-1/2 -translate-y-1/2'
-                        : '-top-2.5 left-1/2 -translate-x-1/2'
-                    } z-10 h-5 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center gap-0.5 shadow-md transition-all cursor-pointer border ${
-                      node.isParentsCollapsed
-                        ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 scale-105'
-                        : isLightCanvas
-                        ? 'bg-[#ece5d8] hover:bg-[#ded5c5] text-stone-900 border-[#cfc3af]'
-                        : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
-                    }`}
-                    title={node.isParentsCollapsed ? `Розгорнути предків (+${node.parentsCount})` : 'Сховати предків'}
-                    aria-label="Перемикач предків"
-                  >
-                    {node.isParentsCollapsed ? (
-                      <>
-                        <Plus className="w-2.5 h-2.5 stroke-[3] text-white" />
-                        <span className="text-[9px] leading-none">{node.parentsCount}</span>
-                      </>
-                    ) : (
-                      <Minus className="w-2.5 h-2.5 stroke-[3] text-amber-500" />
-                    )}
-                  </button>
-                )}
+                {node.hasParents && (() => {
+                  const { father, mother } = getParentsOfPerson(p.id);
+                  const parentsAvailableCount = (father ? 1 : 0) + (mother ? 1 : 0);
+                  const isBothCollapsed = node.isParentsCollapsed;
+                  const isPartiallyCollapsed = !isBothCollapsed && (node.isPaternalCollapsed || node.isMaternalCollapsed);
+                  const isMenuOpen = selectiveParentsMenuPersonId === p.id;
+
+                  return (
+                    <div
+                      className={`absolute ${
+                        orientation === 'horizontal'
+                          ? '-left-3.5 top-1/2 -translate-y-1/2'
+                          : '-top-3 left-1/2 -translate-x-1/2'
+                      } z-20 flex items-center shadow-md rounded-full`}
+                    >
+                      {/* Main Parents Toggle (Collapse all / Expand all) */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isBothCollapsed || isPartiallyCollapsed) {
+                            toggleCollapseParents(p.id, true);
+                          } else {
+                            toggleCollapseParents(p.id, false);
+                          }
+                        }}
+                        className={`h-5 px-1.5 transition-all duration-200 cursor-pointer flex items-center justify-center text-[10px] font-bold border ${
+                          parentsAvailableCount > 1 ? 'rounded-l-full' : 'rounded-full'
+                        } ${
+                          isBothCollapsed
+                            ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400'
+                            : isPartiallyCollapsed
+                            ? 'bg-amber-600/90 hover:bg-amber-500 text-white border-amber-300'
+                            : isLightCanvas
+                            ? 'bg-[#ece5d8] hover:bg-[#ded5c5] text-stone-900 border-[#cfc3af]'
+                            : 'bg-[#1e2329] hover:bg-slate-700 text-slate-300 border-[#3b434d]'
+                        }`}
+                        title={
+                          isBothCollapsed
+                            ? `Розгорнути предків (+${node.parentsCount})`
+                            : isPartiallyCollapsed
+                            ? `Розгорнути приховану лінію предків`
+                            : 'Сховати предків'
+                        }
+                        aria-label="Перемикач предків"
+                      >
+                        {isBothCollapsed ? (
+                          <>
+                            <Plus className="w-2.5 h-2.5 stroke-[3] text-white" />
+                            <span className="text-[9px] leading-none">{node.parentsCount}</span>
+                          </>
+                        ) : isPartiallyCollapsed ? (
+                          <>
+                            <Minus className="w-2.5 h-2.5 stroke-[2.5]" />
+                            <span className="text-[9px] leading-none">+1</span>
+                          </>
+                        ) : (
+                          <Minus className="w-2.5 h-2.5 stroke-[3] text-amber-500" />
+                        )}
+                      </button>
+
+                      {/* Selective Parents Menu Trigger (when both father and mother exist) */}
+                      {parentsAvailableCount > 1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectiveParentsMenuPersonId(isMenuOpen ? null : p.id);
+                          }}
+                          className={`h-5 w-4 flex items-center justify-center rounded-r-full border border-l-0 text-[9px] transition-colors cursor-pointer ${
+                            isBothCollapsed || isPartiallyCollapsed
+                              ? 'bg-amber-700 hover:bg-amber-600 text-white border-amber-400'
+                              : isLightCanvas
+                              ? 'bg-stone-100 hover:bg-stone-200 text-stone-700 border-stone-300'
+                              : 'bg-[#22272e] hover:bg-slate-700 text-slate-300 border-[#383e46]'
+                          }`}
+                          title="Вибірково обрати лінію предків (батьківська / материнська)"
+                          aria-label="Вибірково обрати лінію предків"
+                        >
+                          <ChevronDown className="w-2.5 h-2.5" />
+                        </button>
+                      )}
+
+                      {/* Selective Popover Dropdown for Parents */}
+                      {isMenuOpen && (
+                        <div
+                          ref={selectiveParentsMenuRef}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`absolute ${
+                            orientation === 'horizontal'
+                              ? 'right-full mr-2 top-1/2 -translate-y-1/2'
+                              : 'bottom-full mb-2 left-1/2 -translate-x-1/2'
+                          } w-64 ${
+                            isLightCanvas
+                              ? 'bg-[#fbf9f5] border-[#d8cfbf] text-stone-800 shadow-xl'
+                              : 'bg-[#1b1f24] border-[#383e46] text-slate-200 shadow-2xl'
+                          } border rounded-xl p-2.5 z-50 animate-in fade-in zoom-in-95 select-none text-left`}
+                        >
+                          <div
+                            className={`flex items-center justify-between pb-1.5 mb-1.5 border-b ${
+                              isLightCanvas ? 'border-[#e6ded0]' : 'border-[#2d3238]'
+                            }`}
+                          >
+                            <div
+                              className={`flex items-center gap-1.5 text-xs font-bold ${
+                                isLightCanvas ? 'text-stone-900' : 'text-white'
+                              }`}
+                            >
+                              <Users className="w-3.5 h-3.5 text-amber-500" />
+                              <span>Лінії предків ({parentsAvailableCount})</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectiveParentsMenuPersonId(null)}
+                              className={`text-xs p-0.5 cursor-pointer ${
+                                isLightCanvas ? 'text-stone-400 hover:text-stone-700' : 'text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <div
+                            className={`text-[10px] mb-2 leading-tight ${
+                              isLightCanvas ? 'text-stone-500' : 'text-slate-400'
+                            }`}
+                          >
+                            Керуйте показом батьківської та материнської гілок окремо:
+                          </div>
+
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                            {father && (
+                              <div
+                                className={`flex items-center justify-between p-1.5 rounded-lg border text-xs ${
+                                  isLightCanvas
+                                    ? 'bg-white border-[#e0d7c7]'
+                                    : 'bg-[#22272e] border-[#2d3238]'
+                                }`}
+                              >
+                                <div className="min-w-0 pr-1.5">
+                                  <div className="text-[10px] text-blue-500 font-semibold uppercase tracking-wider">Батько</div>
+                                  <div className={`font-medium truncate ${isLightCanvas ? 'text-stone-800' : 'text-white'}`}>
+                                    {father.lastName} {father.firstName}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCollapseParentBranch(p.id, 'paternal')}
+                                  className={`px-2 py-1 rounded text-[10px] font-semibold transition-colors shrink-0 cursor-pointer flex items-center gap-1 ${
+                                    node.isPaternalCollapsed
+                                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                                      : isLightCanvas
+                                      ? 'bg-stone-200 hover:bg-stone-300 text-stone-700'
+                                      : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                                  }`}
+                                >
+                                  {node.isPaternalCollapsed ? (
+                                    <>
+                                      <Eye className="w-2.5 h-2.5" />
+                                      Показати
+                                    </>
+                                  ) : (
+                                    <>
+                                      <EyeOff className="w-2.5 h-2.5" />
+                                      Сховати
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
+
+                            {mother && (
+                              <div
+                                className={`flex items-center justify-between p-1.5 rounded-lg border text-xs ${
+                                  isLightCanvas
+                                    ? 'bg-white border-[#e0d7c7]'
+                                    : 'bg-[#22272e] border-[#2d3238]'
+                                }`}
+                              >
+                                <div className="min-w-0 pr-1.5">
+                                  <div className="text-[10px] text-rose-500 font-semibold uppercase tracking-wider">Мати</div>
+                                  <div className={`font-medium truncate ${isLightCanvas ? 'text-stone-800' : 'text-white'}`}>
+                                    {mother.maidenName || mother.lastName} {mother.firstName}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCollapseParentBranch(p.id, 'maternal')}
+                                  className={`px-2 py-1 rounded text-[10px] font-semibold transition-colors shrink-0 cursor-pointer flex items-center gap-1 ${
+                                    node.isMaternalCollapsed
+                                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                                      : isLightCanvas
+                                      ? 'bg-stone-200 hover:bg-stone-300 text-stone-700'
+                                      : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                                  }`}
+                                >
+                                  {node.isMaternalCollapsed ? (
+                                    <>
+                                      <Eye className="w-2.5 h-2.5" />
+                                      Показати
+                                    </>
+                                  ) : (
+                                    <>
+                                      <EyeOff className="w-2.5 h-2.5" />
+                                      Сховати
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Quick Actions Footer */}
+                          <div
+                            className={`flex items-center justify-between gap-1.5 mt-2 pt-1.5 border-t ${
+                              isLightCanvas ? 'border-[#e6ded0]' : 'border-[#2d3238]'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                toggleCollapseParents(p.id, true);
+                              }}
+                              className={`flex-1 py-1 text-center text-[10px] font-semibold rounded transition-colors cursor-pointer ${
+                                isLightCanvas
+                                  ? 'bg-[#ede6d8] hover:bg-[#e2d9c8] text-amber-800'
+                                  : 'bg-[#282e36] hover:bg-[#323942] text-amber-300'
+                              }`}
+                            >
+                              Показати обох
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                toggleCollapseParents(p.id, false);
+                              }}
+                              className={`flex-1 py-1 text-center text-[10px] font-semibold rounded transition-colors cursor-pointer ${
+                                isLightCanvas
+                                  ? 'bg-[#ede6d8] hover:bg-[#e2d9c8] text-stone-700'
+                                  : 'bg-[#282e36] hover:bg-[#323942] text-slate-300'
+                              }`}
+                            >
+                              Сховати обох
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {isCompact ? (
                   /* Compact / Dense View: ПІБ, роки життя, стать, без надлишкових ID-кодів і великих відступів */

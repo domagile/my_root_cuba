@@ -470,7 +470,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
           <button
             onClick={isWhitelisted ? onOpenAddPerson : () => openAuthModal('Додавання особи')}
             id="add-person-btn"
-            className={`p-1.5 sm:p-2 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-xl text-xs transition-colors shadow-sm shrink-0 cursor-pointer ${!isWhitelisted ? 'opacity-90' : ''}`}
+            className={`p-1.5 sm:p-2 ${theme.accentBtn} ${theme.accentBtnText} font-medium rounded-2xl text-xs transition-colors shadow-sm shrink-0 cursor-pointer active:scale-95 ${!isWhitelisted ? 'opacity-90' : ''}`}
             title={!isWhitelisted ? 'Для редагування надішліть запит на доступ або увійдіть' : 'Додати особу'}
           >
             {isWhitelisted ? <UserPlus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}

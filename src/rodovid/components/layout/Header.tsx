@@ -433,10 +433,11 @@ export const Header: React.FC<HeaderProps> = ({
 
               <button
                 onClick={onOpenAddPersonModal}
-                className="p-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors shrink-0 cursor-pointer"
+                className="p-2 rounded-2xl text-xs font-semibold bg-[#B88E3E] hover:bg-[#A37B30] text-white shadow-sm transition-all shrink-0 cursor-pointer active:scale-95 flex items-center justify-center"
                 title="Додати особу"
+                aria-label="Додати особу"
               >
-                <UserPlus className="w-4 h-4" />
+                <UserPlus className="w-4 h-4 text-white stroke-[2.2]" />
               </button>
 
               {onLogout && (

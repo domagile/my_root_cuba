@@ -641,13 +641,64 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     return `${bYear} — ${dYear}`;
   }, [birthDate, deathDate, isLiving]);
 
-  // Scroll to section handler
+  // Accordion state for right-hand content sections
+  const [openSections, setOpenSections] = useState<Record<ModalSection, boolean>>({
+    'basic': true,
+    'names': true,
+    'parents': false,
+    'dates-places': false,
+    'bio-notes': false,
+    'events': false,
+    'photos': false,
+    'custom-fields': false,
+  });
+
+  const toggleSectionAccordion = (sectionId: ModalSection) => {
+    setOpenSections((prev) => {
+      const nextOpen = !prev[sectionId];
+      if (nextOpen) {
+        setActiveSection(sectionId);
+      }
+      return { ...prev, [sectionId]: nextOpen };
+    });
+  };
+
+  const handleExpandAllSections = () => {
+    setOpenSections({
+      'basic': true,
+      'names': true,
+      'parents': true,
+      'dates-places': true,
+      'bio-notes': true,
+      'events': true,
+      'photos': true,
+      'custom-fields': true,
+    });
+  };
+
+  const handleCollapseAllSections = () => {
+    setOpenSections({
+      'basic': false,
+      'names': false,
+      'parents': false,
+      'dates-places': false,
+      'bio-notes': false,
+      'events': false,
+      'photos': false,
+      'custom-fields': false,
+    });
+  };
+
+  // Scroll to section handler (opens accordion section and scrolls)
   const scrollToSection = (sectionId: ModalSection) => {
     setActiveSection(sectionId);
-    const el = document.getElementById(`sec-${sectionId}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    setOpenSections((prev) => ({ ...prev, [sectionId]: true }));
+    setTimeout(() => {
+      const el = document.getElementById(`sec-${sectionId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 40);
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setIsMobileNavCollapsed(true);
     }
@@ -1946,275 +1997,290 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               </div>
             )}
 
-            {/* SECTION 1: Основне */}
-            <div id="sec-basic" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
-              <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
-                <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Основне</h3>
-                <p className={`text-xs ${theme.textMuted}`}>Дослідження, статус картки, стать і життєвий статус особи.</p>
+            {/* Accordion Controls Bar */}
+            <div className="flex items-center justify-between py-1 px-1 text-xs">
+              <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400 font-medium">
+                <span className="text-xs uppercase tracking-wider font-bold text-[#B88E3E]">Анкета особи</span>
+                <span>•</span>
+                <span className="text-[11px]">8 розділів</span>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                {/* Дослідження */}
-                <div className="space-y-1.5">
-                  <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                    Дослідження
-                  </label>
-                  <select
-                    value={researchBranch}
-                    onChange={(e) => setResearchBranch(e.target.value)}
-                    className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                  >
-                    <option value="Без прив'язки">Без прив'язки</option>
-                    <option value="Головна гілка родоводу">Головна гілка родоводу</option>
-                    <option value="Батьківська лінія">Батьківська лінія</option>
-                    <option value="Материнська лінія">Материнська лінія</option>
-                    <option value="Шляхетська лінія">Шляхетська лінія</option>
-                    <option value="Селянська лінія">Селянська лінія</option>
-                  </select>
-                </div>
-
-                {/* Статус дослідження */}
-                <div className="space-y-1.5">
-                  <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                    Статус дослідження <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={researchStatus}
-                    onChange={(e) => setResearchStatus(e.target.value)}
-                    className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                  >
-                    <option value="hypothetical">гіпотетична</option>
-                    <option value="confirmed">підтверджена першоджерелами</option>
-                    <option value="in_progress">в процесі дослідження</option>
-                    <option value="needs_verification">потребує додаткової перевірки</option>
-                    <option value="archival_search">активний архівний пошук</option>
-                  </select>
-                </div>
-
-                {/* Стать */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Стать <span className="text-rose-500">*</span>
-                    </label>
-                    {!genderManuallyChanged && (
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Визначено авто</span>
-                    )}
-                  </div>
-                  <select
-                    value={gender}
-                    onChange={(e) => {
-                      setGenderManuallyChanged(true);
-                      setGender(e.target.value as Gender);
-                    }}
-                    className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                  >
-                    <option value="male">чоловіча</option>
-                    <option value="female">жіноча</option>
-                    <option value="other">невідомо</option>
-                  </select>
-                </div>
-
-                {/* Статус життя (Requested with our toggle switch) */}
-                <div className="space-y-1.5">
-                  <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] block">
-                    Статус життя <span className="text-rose-500">*</span>
-                  </label>
-                  
-                  <div className="flex items-center gap-4 py-1">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={isLiving}
-                      onClick={() => setIsLiving(!isLiving)}
-                      className="inline-flex items-center gap-2.5 cursor-pointer select-none group"
-                    >
-                      <span
-                        className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                          isLiving ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-700'
-                        }`}
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
-                            isLiving ? 'translate-x-5' : 'translate-x-0'
-                          }`}
-                        />
-                      </span>
-                      <span className={`text-xs font-bold ${isLiving ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-600 dark:text-neutral-400'}`}>
-                        {isLiving ? 'ЖИВА ОСОБА' : 'ПОМЕРЛА АБО СТАТУС НЕВІДОМИЙ'}
-                      </span>
-                    </button>
-                  </div>
-
-                  {isLiving && (
-                    <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] flex items-center gap-2">
-                      <Shield className="w-4 h-4 shrink-0 text-emerald-500" />
-                      <span>Дані живої особи будуть автоматично захищені приватністю для сторонніх користувачів.</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Tags & Hashtags (Хештеги та теги) */}
-              <div className="pt-3 border-t border-black/5 dark:border-white/5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
-                    <Tag className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>Хештеги особи {currentTagsList.length > 0 && `(${currentTagsList.length})`}</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-neutral-400">додавайте декілька через # або кому</span>
-                    {currentTagsList.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleClearAllTags}
-                        className="text-[10px] text-rose-500 hover:text-rose-600 hover:underline cursor-pointer font-medium"
-                      >
-                        Очистити всі
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Active Tag Badges */}
-                {currentTagsList.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5">
-                    {currentTagsList.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30 shadow-2xs group transition-all"
-                      >
-                        <Hash className="w-3 h-3 text-[#B88E3E]/70" />
-                        <span>{tag}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveTag(tag)}
-                          className="p-0.5 hover:bg-[#B88E3E]/25 rounded-md cursor-pointer transition-colors text-[#B88E3E]"
-                          title={`Видалити хештег #${tag}`}
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-neutral-400 italic py-0.5">
-                    Хештегів ще не додано. Введіть один або декілька хештегів (наприклад: #козак #полтавщина #хлібороб) або скористайтеся підказками.
-                  </div>
-                )}
-
-                {/* Quick Add Row */}
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Hash className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={newTagDraft}
-                      onChange={(e) => setNewTagDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ',') {
-                          e.preventDefault();
-                          handleAddHashtagsFromDraft();
-                        }
-                      }}
-                      placeholder="Введіть хештег (наприклад: #козак #полтавщина) та натисніть Enter або кнопку..."
-                      className={`w-full pl-8 pr-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleAddHashtagsFromDraft}
-                    disabled={!newTagDraft.trim()}
-                    className="px-3.5 py-2 rounded-xl bg-[#B88E3E] hover:bg-[#a07b34] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-all flex items-center gap-1 shrink-0 shadow-xs cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                    <span>Додати</span>
-                  </button>
-                </div>
-
-                {/* Direct Text Editor (Collapsible) */}
-                <details className="text-xs group">
-                  <summary className="text-[11px] text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-[#B88E3E] font-medium flex items-center gap-1">
-                    <span>✏️ Пряме текстове редагування хештегів</span>
-                  </summary>
-                  <div className="pt-2">
-                    <input
-                      type="text"
-                      value={tagsStr}
-                      onChange={(e) => setTagsStr(e.target.value)}
-                      placeholder="#козак, #ветеран, #полтавщина, #дворянин, #галичина"
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                    <p className="text-[10px] text-neutral-400 mt-1">
-                      Можна вставляти або писати декілька хештегів через пробіл або кому. Всі теги автоматично синхронізуються.
-                    </p>
-                  </div>
-                </details>
-
-                {/* Popular Hashtag Suggestions */}
-                {popularHashtags.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                    <span className="text-[10px] text-neutral-400 flex items-center gap-0.5 font-medium">
-                      <Hash className="w-3 h-3 text-[#B88E3E]" /> Популярні в дереві:
-                    </span>
-                    {popularHashtags.map((h) => {
-                      const isSelected = currentTagsList.some((t) => t.toLowerCase() === h.tag.toLowerCase());
-                      return (
-                        <button
-                          key={h.tag}
-                          type="button"
-                          onClick={() => handleAddHashtagSuggestion(h.tag)}
-                          disabled={isSelected}
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 opacity-60 cursor-default'
-                              : 'bg-neutral-100 dark:bg-neutral-800 hover:bg-[#B88E3E]/20 text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] border-neutral-200 dark:border-neutral-700'
-                          }`}
-                        >
-                          #{h.tag} {h.count > 1 && <span className="opacity-60 text-[9px]">({h.count})</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Presets */}
-                <div className="pt-0.5 space-y-1">
-                  <div className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider">
-                    Швидкі варіанти:
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {COMMON_GENEALOGY_HASHTAG_PRESETS.flatMap((c) => c.tags).slice(0, 14).map((pt) => {
-                      const isSelected = currentTagsList.some((t) => t.toLowerCase() === pt.toLowerCase());
-                      return (
-                        <button
-                          key={pt}
-                          type="button"
-                          onClick={() => handleAddHashtagSuggestion(pt)}
-                          disabled={isSelected}
-                          className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-neutral-200/50 dark:bg-neutral-800/50 text-neutral-400 border-transparent opacity-40 cursor-default'
-                              : 'bg-stone-50 dark:bg-neutral-800/60 hover:bg-[#B88E3E]/15 text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] border-neutral-200/80 dark:border-neutral-700/80'
-                          }`}
-                        >
-                          +{pt}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExpandAllSections}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-black/5 dark:hover:bg-white/5 border border-black/10 dark:border-white/10 transition-colors cursor-pointer"
+                >
+                  Розгорнути всі
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCollapseAllSections}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-black/5 dark:hover:bg-white/5 border border-black/10 dark:border-white/10 transition-colors cursor-pointer"
+                >
+                  Згорнути всі
+                </button>
               </div>
             </div>
 
-            {/* SECTION 2: Імена та варіанти */}
-            <div id="sec-names" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
-              <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
-                <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Імена та варіанти</h3>
-                <p className={`text-xs ${theme.textMuted}`}>Канонічне ім'я картки та написання, знайдені в інших джерелах.</p>
-              </div>
+            {/* SECTION 1: Основне (Accordion) */}
+            <div id="sec-basic" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('basic')}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections.basic ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
+                    <User className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Основне та теги</h3>
+                    <p className={`text-xs ${theme.textMuted}`}>Дослідження, статус, стать, статус життя та хештеги</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!openSections.basic && (
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
+                      {gender === 'male' ? '♂ Чол' : gender === 'female' ? '♀ Жін' : '?'} • {isLiving ? '🟢 Жива' : '✝ Померла'}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.basic ? 'rotate-180 text-[#B88E3E]' : ''}`} />
+                </div>
+              </button>
 
-              <div className="space-y-3.5 text-xs">
+              {openSections.basic && (
+                <div className="p-4 pt-2 border-t border-black/5 dark:border-white/5 space-y-3">
+                  {/* 4 compact controls in 1-2 rows */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                    {/* 1. Дослідження */}
+                    <div className="space-y-1">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
+                        <span>🌳</span>
+                        <span>Дослідження</span>
+                      </label>
+                      <select
+                        value={researchBranch}
+                        onChange={(e) => setResearchBranch(e.target.value)}
+                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                      >
+                        <option value="Без прив'язки">Без прив'язки</option>
+                        <option value="Головна гілка">Головна гілка</option>
+                        {researchBranch === 'Головна гілка родоводу' && (
+                          <option value="Головна гілка родоводу">Головна гілка</option>
+                        )}
+                        <option value="Батьківська лінія">Батьківська лінія</option>
+                        <option value="Материнська лінія">Материнська лінія</option>
+                        <option value="Шляхетська лінія">Шляхетська лінія</option>
+                        <option value="Селянська лінія">Селянська лінія</option>
+                      </select>
+                    </div>
+
+                    {/* 2. Статус дослідження */}
+                    <div className="space-y-1">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
+                        <span>📋</span>
+                        <span>Статус <span className="text-rose-500">*</span></span>
+                      </label>
+                      <select
+                        value={researchStatus}
+                        onChange={(e) => setResearchStatus(e.target.value)}
+                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                      >
+                        <option value="hypothetical">❓ Гіпотетична</option>
+                        <option value="confirmed">✅ Підтверджена</option>
+                        <option value="in_progress">⏳ В процесі</option>
+                        <option value="needs_verification">⚠️ Потребує перевірки</option>
+                        <option value="archival_search">🔍 Архівний пошук</option>
+                      </select>
+                    </div>
+
+                    {/* 3. Стать */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
+                          <span>👤</span>
+                          <span>Стать <span className="text-rose-500">*</span></span>
+                        </label>
+                        {!genderManuallyChanged && (
+                          <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">авто</span>
+                        )}
+                      </div>
+                      <select
+                        value={gender}
+                        onChange={(e) => {
+                          setGenderManuallyChanged(true);
+                          setGender(e.target.value as Gender);
+                        }}
+                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                      >
+                        <option value="male">♂ Чоловіча</option>
+                        <option value="female">♀ Жіноча</option>
+                        <option value="other">? Невідомо</option>
+                      </select>
+                    </div>
+
+                    {/* 4. Статус життя (Перемикач / Toggle Switch) */}
+                    <div className="space-y-1">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
+                        <span>Статус життя <span className="text-rose-500">*</span></span>
+                      </label>
+                      <div className={`flex items-center justify-between px-2.5 py-1 rounded-xl border ${theme.inputBg} ${theme.inputBorder} h-[34px]`}>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={isLiving}
+                          onClick={() => setIsLiving(!isLiving)}
+                          className="inline-flex items-center justify-between w-full cursor-pointer select-none group"
+                        >
+                          <span className={`text-xs font-semibold flex items-center gap-1.5 ${isLiving ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-600 dark:text-neutral-400'}`}>
+                            <span>{isLiving ? '🟢' : '✝'}</span>
+                            <span>{isLiving ? 'Жива особа' : 'Померла'}</span>
+                          </span>
+                          <span
+                            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                              isLiving ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-600'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                                isLiving ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Compact Tags & Hashtags */}
+                  <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1.5">
+                        <Tag className="w-3 h-3 text-[#B88E3E]" />
+                        <span>Хештеги {currentTagsList.length > 0 && `(${currentTagsList.length})`}</span>
+                      </label>
+                      {currentTagsList.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearAllTags}
+                          className="text-[10px] text-rose-500 hover:text-rose-600 hover:underline cursor-pointer font-medium"
+                        >
+                          Очистити
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Active Tag Badges */}
+                    {currentTagsList.length > 0 && (
+                      <div className="flex flex-wrap gap-1 p-1.5 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5">
+                        {currentTagsList.map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30"
+                          >
+                            <Hash className="w-2.5 h-2.5 text-[#B88E3E]/70" />
+                            <span>{tag}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveTag(tag)}
+                              className="p-0.5 hover:bg-[#B88E3E]/25 rounded cursor-pointer transition-colors text-[#B88E3E]"
+                              title={`Видалити #${tag}`}
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Quick Add Row */}
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative flex-1">
+                        <Hash className="w-3 h-3 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={newTagDraft}
+                          onChange={(e) => setNewTagDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ',') {
+                              e.preventDefault();
+                              handleAddHashtagsFromDraft();
+                            }
+                          }}
+                          placeholder="Введіть хештег..."
+                          className={`w-full pl-7 pr-2.5 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddHashtagsFromDraft}
+                        disabled={!newTagDraft.trim()}
+                        className="px-3 py-1.5 rounded-xl bg-[#B88E3E] hover:bg-[#a07b34] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Додати</span>
+                      </button>
+                    </div>
+
+                    {/* Only PREVIOUSLY entered hashtags from the tree */}
+                    {popularHashtags.length > 0 && (
+                      <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                        <span className="text-[10px] text-neutral-400 font-medium">Раніше вводилися:</span>
+                        {popularHashtags.map((h) => {
+                          const isSelected = currentTagsList.some((t) => t.toLowerCase() === h.tag.toLowerCase());
+                          return (
+                            <button
+                              key={h.tag}
+                              type="button"
+                              onClick={() => handleAddHashtagSuggestion(h.tag)}
+                              disabled={isSelected}
+                              className={`px-1.5 py-0.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer ${
+                                isSelected
+                                  ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 opacity-50 cursor-default'
+                                  : 'bg-black/[0.03] dark:bg-white/[0.04] hover:bg-[#B88E3E]/20 text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] border-black/5 dark:border-white/10'
+                              }`}
+                              title={isSelected ? 'Вже додано' : `Додати #${h.tag}`}
+                            >
+                              #{h.tag} {h.count > 1 && <span className="opacity-60 text-[9px]">({h.count})</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* SECTION 2: Імена та варіанти */}
+            <div id="sec-names" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('names')}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections.names ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Імена та варіанти</h3>
+                    <p className={`text-xs ${theme.textMuted}`}>Канонічне ім'я картки та варіанти написання</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!openSections.names && (
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block max-w-[220px] truncate">
+                      {[lastName, firstName, patronymic].filter(Boolean).join(' ') || 'Не вказано'}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.names ? 'rotate-180 text-[#B88E3E]' : ''}`} />
+                </div>
+              </button>
+
+              {openSections.names && (
+                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
+                  <div className="space-y-3.5 text-xs">
                 {/* Row 1: Прізвище & Дівоче прізвище */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   <div className="space-y-1">
@@ -2359,16 +2425,39 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                 </div>
               </div>
+                </div>
+              )}
             </div>
 
-            {/* SECTION 3: Батьки та зв'язки (User requirement 3) */}
-            <div id="sec-parents" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
-              <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
-                <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Батьки та родинні зв'язки</h3>
-                <p className={`text-xs ${theme.textMuted}`}>Встановлення зв'язків з батьками, подружжям, братами/сестрами та хрещеними батьками (кумами).</p>
-              </div>
+            {/* SECTION 3: Батьки та зв'язки */}
+            <div id="sec-parents" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('parents')}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections.parents ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Батьки та родинні зв'язки</h3>
+                    <p className={`text-xs ${theme.textMuted}`}>Батьки, подружжя, діти, брати/сестри та хрещені батьки (куми)</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!openSections.parents && (
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
+                      {fatherId || motherId ? 'Батьки вказані' : 'Батьки не обрані'}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.parents ? 'rotate-180 text-[#B88E3E]' : ''}`} />
+                </div>
+              </button>
 
-              <div className="space-y-4 text-xs">
+              {openSections.parents && (
+                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
+                  <div className="space-y-4 text-xs">
                 {/* Parents selectors */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Father */}
@@ -3303,16 +3392,39 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   )}
                 </div>
               </div>
+                </div>
+              )}
             </div>
 
-            {/* SECTION 4: Дати та події / Місця на карті (Screenshot 2) */}
-            <div id="sec-dates-places" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
-              <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
-                <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Місця подій на карті</h3>
-                <p className={`text-xs ${theme.textMuted}`}>Додайте позначки лише для подій, які потрібно показувати на карті.</p>
-              </div>
+            {/* SECTION 4: Дати та події / Місця на карті */}
+            <div id="sec-dates-places" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('dates-places')}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections['dates-places'] ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
+                    <MapPin className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Дати та місця подій</h3>
+                    <p className={`text-xs ${theme.textMuted}`}>Дати життя та локації на карті</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!openSections['dates-places'] && (
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
+                      {[birthDate, deathDate].filter(Boolean).join(' — ') || 'Дати не вказані'}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections['dates-places'] ? 'rotate-180 text-[#B88E3E]' : ''}`} />
+                </div>
+              </button>
 
-              <div className="space-y-5 text-xs">
+              {openSections['dates-places'] && (
+                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
+                  <div className="space-y-5 text-xs">
                 {/* 4a. Народження */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -3522,16 +3634,39 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                 </div>
               </div>
+                </div>
+              )}
             </div>
 
-            {/* SECTION 5: Біографія і нотатки (Screenshot 3) */}
-            <div id="sec-bio-notes" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
-              <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
-                <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Біографія, нотатки та коментарі</h3>
-                <p className={`text-xs ${theme.textMuted}`}>Життєпис предка, а також дослідницькі нотатки, коментарі та робочі гіпотези.</p>
-              </div>
+            {/* SECTION 5: Біографія і нотатки */}
+            <div id="sec-bio-notes" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('bio-notes')}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections['bio-notes'] ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
+                    <BookOpen className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Біографія, нотатки та коментарі</h3>
+                    <p className={`text-xs ${theme.textMuted}`}>Життєпис предка, дослідницькі нотатки та джерела</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!openSections['bio-notes'] && (
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
+                      {bio ? 'Є життєпис' : (notes ? 'Є нотатки' : 'Порожньо')}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections['bio-notes'] ? 'rotate-180 text-[#B88E3E]' : ''}`} />
+                </div>
+              </button>
 
-              <div className="space-y-4 text-xs">
+              {openSections['bio-notes'] && (
+                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
+                  <div className="space-y-4 text-xs">
                 {/* Large Textarea for Biography */}
                 <div className="space-y-1.5">
                   <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
@@ -3787,16 +3922,39 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                 </div>
               </div>
+                </div>
+              )}
             </div>
 
-            {/* SECTION 6: Події та факти (Screenshot 3) */}
-            <div id="sec-events" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
-              <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
-                <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Події</h3>
-                <p className={`text-xs ${theme.textMuted}`}>Додаткові життєві події та факти, крім основних дат вище.</p>
-              </div>
+            {/* SECTION 6: Події та факти */}
+            <div id="sec-events" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('events')}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections.events ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
+                    <Calendar className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Події та факти</h3>
+                    <p className={`text-xs ${theme.textMuted}`}>Додаткові життєві події, переписи, ревізії, служба</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!openSections.events && (
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
+                      {lifeEvents.length > 0 ? `${lifeEvents.length} подій` : '0 подій'}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.events ? 'rotate-180 text-[#B88E3E]' : ''}`} />
+                </div>
+              </button>
 
-              <div className="space-y-3.5 text-xs">
+              {openSections.events && (
+                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
+                  <div className="space-y-3.5 text-xs">
                 <div className="p-4 rounded-xl border border-black/10 dark:border-white/10 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
@@ -3954,16 +4112,39 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   )}
                 </div>
               </div>
+                </div>
+              )}
             </div>
 
-            {/* SECTION 7: Фотографії (User 1a: "Розділ фото розмістити внизу") */}
-            <div id="sec-photos" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
-              <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
-                <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Фото</h3>
-                <p className={`text-xs ${theme.textMuted}`}>Фотографії особи, вибір головного зображення та кадрування аватара.</p>
-              </div>
+            {/* SECTION 7: Фотографії */}
+            <div id="sec-photos" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('photos')}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections.photos ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
+                    <Camera className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Фотографії</h3>
+                    <p className={`text-xs ${theme.textMuted}`}>Світлини особи, вибір головного зображення та аватар</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!openSections.photos && (
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
+                      {photosList.length > 0 ? `${photosList.length} фото` : (avatarUrl ? 'Є аватар' : 'Без фото')}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.photos ? 'rotate-180 text-[#B88E3E]' : ''}`} />
+                </div>
+              </button>
 
-              <div className="space-y-4 text-xs">
+              {openSections.photos && (
+                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
+                  <div className="space-y-4 text-xs">
                 <div className="p-4 rounded-xl border border-black/10 dark:border-white/10 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
@@ -4071,16 +4252,39 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   )}
                 </div>
               </div>
+                </div>
+              )}
             </div>
 
-            {/* SECTION 8: Власні поля (Screenshot 4) */}
-            <div id="sec-custom-fields" className={`p-5 rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs space-y-4`}>
-              <div className="border-b border-black/5 dark:border-white/5 pb-2.5">
-                <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Власні поля</h3>
-                <p className={`text-xs ${theme.textMuted}`}>Додаткові поля, налаштовані для модуля осіб цього проекту.</p>
-              </div>
+            {/* SECTION 8: Власні поля */}
+            <div id="sec-custom-fields" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('custom-fields')}
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections['custom-fields'] ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Власні поля</h3>
+                    <p className={`text-xs ${theme.textMuted}`}>Користувацькі атрибути та архівні параметри</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!openSections['custom-fields'] && (
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
+                      {customFields.length > 0 ? `${customFields.length} полів` : '0 полів'}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections['custom-fields'] ? 'rotate-180 text-[#B88E3E]' : ''}`} />
+                </div>
+              </button>
 
-              <div className="space-y-3.5 text-xs">
+              {openSections['custom-fields'] && (
+                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
+                  <div className="space-y-3.5 text-xs">
                 {/* Notice banner */}
                 <div className="p-3.5 rounded-xl border border-black/10 dark:border-white/10 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -4234,6 +4438,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   )}
                 </div>
               </div>
+                </div>
+              )}
             </div>
 
           </div>

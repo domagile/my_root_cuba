@@ -4,6 +4,7 @@ import {
   Users, 
   Search, 
   Plus, 
+  UserPlus,
   Download, 
   Trash2, 
   List, 
@@ -472,10 +473,13 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
           <button
             onClick={onOpenAddPerson}
-            className="px-3.5 py-1.5 rounded-lg bg-[#B88E3E] hover:bg-[#A37B30] text-[#0F0F0F] font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+            id="add-person-btn-persons-tab"
+            className="px-3.5 py-2 rounded-xl bg-[#B88E3E] hover:bg-[#A37B30] active:scale-95 text-white font-semibold text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+            title="Додати особу"
+            aria-label="Додати особу"
           >
-            <Plus className="w-4 h-4" />
-            <span>+ Додати особу</span>
+            <UserPlus className="w-4 h-4 text-white stroke-[2.2]" />
+            <span>Додати особу</span>
           </button>
         </div>
       </div>

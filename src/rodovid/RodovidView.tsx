@@ -18,7 +18,6 @@ import { StatisticsView } from './components/views/StatisticsView';
 import { ReportsView } from './components/views/ReportsView';
 import { ConflictsView } from './components/views/ConflictsView';
 import { PersonDetailModal } from './components/modals/PersonDetailModal';
-import { EditPersonModal } from './components/modals/EditPersonModal';
 import { EditFamilyModal } from './components/modals/EditFamilyModal';
 import { EditSourceModal } from './components/modals/EditSourceModal';
 import { GedcomModal } from './components/modals/GedcomModal';
@@ -547,11 +546,17 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
       )}
 
       {editPersonTarget && (
-        <EditPersonModal
+        <AddPersonModal
           personId={editPersonTarget === 'NEW' ? null : editPersonTarget}
-          database={database}
           onClose={() => setEditPersonTarget(null)}
-          onSave={handleSavePerson}
+          onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
+          onChangeRoot={(id) => {
+            setSelectedPersonId(id);
+            setCurrentView('tree');
+          }}
+          onOpenKinshipWith={handleOpenKinshipWith}
+          onDeletePerson={handleDeletePerson}
+          isReadOnly={isReadOnly}
         />
       )}
 
