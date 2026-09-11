@@ -16,8 +16,8 @@ export type ModalSection =
 export type ModalAccordionState = Record<ModalSection, boolean>;
 
 export const DEFAULT_MODAL_ACCORDION_SECTIONS: ModalAccordionState = {
-  'basic': true,
-  'names': true,
+  'basic': false,
+  'names': false,
   'parents': false,
   'dates-places': false,
   'bio-notes': false,
@@ -37,9 +37,9 @@ export const MODAL_SECTION_KEYS: ModalSection[] = [
   'custom-fields'
 ];
 
-const GLOBAL_ACCORDION_KEY = 'rodovid_modal_accordion_sections_v1';
-const GLOBAL_ACTIVE_SECTION_KEY = 'rodovid_modal_active_section_v1';
-const PER_PERSON_KEY_PREFIX = 'rodovid_person_accordion_';
+const GLOBAL_ACCORDION_KEY = 'rodovid_modal_accordion_sections_v2';
+const GLOBAL_ACTIVE_SECTION_KEY = 'rodovid_modal_active_section_v2';
+const PER_PERSON_KEY_PREFIX = 'rodovid_person_accordion_v2_';
 
 /**
  * Sanitizes any raw object to ensure all 8 modal sections exist with boolean values.
@@ -59,26 +59,19 @@ export function sanitizeAccordionState(raw: unknown): ModalAccordionState {
 
 /**
  * Retrieves the saved accordion state.
- * If personId is provided, first tries to restore the person's specific layout.
- * Otherwise, falls back to the user's latest globally used layout.
+ * By default, all accordions are collapsed.
+ * If personId is provided, checks if the user customized the sections for that person.
  */
 export function getSavedAccordionSections(personId?: string | null): ModalAccordionState {
   if (typeof window === 'undefined') return { ...DEFAULT_MODAL_ACCORDION_SECTIONS };
   try {
-    // 1. If personId is provided, check per-person memory first
+    // 1. If personId is provided, check per-person memory
     if (personId) {
       const perPerson = localStorage.getItem(`${PER_PERSON_KEY_PREFIX}${personId}`);
       if (perPerson) {
         const parsed = JSON.parse(perPerson);
         return sanitizeAccordionState(parsed);
       }
-    }
-
-    // 2. Check global last-used memory
-    const globalSaved = localStorage.getItem(GLOBAL_ACCORDION_KEY);
-    if (globalSaved) {
-      const parsed = JSON.parse(globalSaved);
-      return sanitizeAccordionState(parsed);
     }
   } catch {}
 

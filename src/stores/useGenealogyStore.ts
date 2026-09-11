@@ -65,6 +65,7 @@ export interface GenealogyDataState {
   setSelectedPersonId: (id: string | null) => void;
   addPerson: (person: Person) => void;
   updatePerson: (person: Person) => void;
+  updatePersons: (persons: Person[]) => void;
   deletePerson: (id: string) => void;
   deletePersons: (ids: string[]) => void;
   restorePerson: (id: string) => void;
@@ -252,6 +253,21 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
       } catch {}
       savePersonDoc(normalized);
+      return { persons: next };
+    }),
+
+  updatePersons: (updatedPersons) =>
+    set((state) => {
+      const normalizedMap = new Map<string, Person>();
+      updatedPersons.forEach((p) => {
+        const norm = normalizePerson(p);
+        normalizedMap.set(norm.id, norm);
+        savePersonDoc(norm);
+      });
+      const next = state.persons.map((p) => normalizedMap.get(p.id) || p);
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
+      } catch {}
       return { persons: next };
     }),
 

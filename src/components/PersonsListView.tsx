@@ -26,7 +26,9 @@ import {
   Tag,
   Sparkles,
   ChevronDown,
-  Filter
+  Filter,
+  Heart,
+  SlidersHorizontal
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { Person } from '../types';
@@ -35,6 +37,7 @@ import { findRelationshipPath, getSummaryRelationTitle } from './Tree/Relationsh
 import { getTreeHashtagsWithCounts } from '../utils/tagUtils';
 import { isPersonMale, isPersonFemale } from '../utils/genderUtils';
 import { isPersonHypothesis, isPersonConfirmed } from '../utils/researchStatusUtils';
+import { BulkEditPersonsModal, BulkEditParams } from './modals/BulkEditPersonsModal';
 
 interface PersonsListViewProps {
   onInspectPerson?: (id: string) => void;
@@ -45,12 +48,13 @@ interface PersonsListViewProps {
 export const PersonsListView: React.FC<PersonsListViewProps> = ({
   onInspectPerson,
   onEditPerson,
-  onOpenAddPerson,
+  onOpenAddPerson
 }) => {
   const { 
     persons, 
     trashPersons,
     updatePerson,
+    updatePersons,
     deletePerson, 
     deletePersons,
     restorePerson,
@@ -87,6 +91,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   // Selection state for batch actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [isBulkEditModalOpen, setIsBulkEditModalOpen] = useState(false);
 
   // Hashtags list
   const availableHashtags = useMemo(() => {
@@ -218,8 +223,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       if (genderFilter === 'female' && !isPersonFemale(p, persons)) return false;
 
       // Life state filter
-      if (lifeStateFilter === 'alive' && p.deathDate) return false;
-      if (lifeStateFilter === 'deceased' && !p.deathDate) return false;
+      if (lifeStateFilter === 'alive') {
+        if (p.isLiving === false) return false;
+        if (p.deathDate || p.deathYear) return false;
+      }
+      if (lifeStateFilter === 'deceased') {
+        if (p.isLiving === true) return false;
+        if (!p.deathDate && !p.deathYear && p.isLiving !== false) return false;
+      }
 
       // Status filter
       if (statusFilter === 'confirmed' && isPersonHypothesis(p)) return false;
@@ -397,8 +408,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   // Format years display
   const formatDates = (p: Person) => {
     const getYear = (v?: string) => (v ? v.slice(0, 4) : '');
-    const b = getYear(p.birthDate);
-    const d = getYear(p.deathDate);
+    const b = getYear(p.birthDate) || (p.birthYear ? String(p.birthYear) : '');
+    const d = getYear(p.deathDate) || (p.deathYear ? String(p.deathYear) : '');
+    if (p.isLiving) {
+      return b ? `${b} — теп. час` : 'живий(а)';
+    }
     if (b && d) return `${b} — ${d}`;
     if (b) return `нар. ${b}`;
     if (d) return `пом. ${d}`;
@@ -421,22 +435,189 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
   // Batch set research status
   const handleBatchSetResearchStatus = (status: 'confirmed' | 'hypothetical') => {
+    if (selectedIds.size === 0) return;
     const isHypo = status === 'hypothetical';
-    let count = 0;
+    const targetPersons: Person[] = [];
+
     selectedIds.forEach((id) => {
       const p = persons.find((item) => item.id === id);
       if (p) {
-        updatePerson({
+        targetPersons.push({
           ...p,
           researchStatus: status,
           isHypothesis: isHypo,
         });
-        count++;
       }
     });
-    setToast({
-      message: `Статус дослідження змінено для ${count} осіб: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}`
+
+    if (targetPersons.length > 0) {
+      updatePersons(targetPersons);
+      setToast({
+        message: `Статус дослідження змінено для ${targetPersons.length} осіб: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}`
+      });
+    }
+  };
+
+  // Batch set living status (alive / deceased)
+  const handleBatchSetLiving = (isLiving: boolean) => {
+    if (selectedIds.size === 0) return;
+    const targetPersons: Person[] = [];
+
+    selectedIds.forEach((id) => {
+      const p = persons.find((item) => item.id === id);
+      if (p) {
+        const updated: Person = {
+          ...p,
+          isLiving,
+        };
+        if (isLiving) {
+          // If marking as living, clear death data to ensure record consistency
+          delete updated.deathDate;
+          delete updated.deathYear;
+          delete updated.deathPlace;
+          delete updated.deathReason;
+        }
+        targetPersons.push(updated);
+      }
     });
+
+    if (targetPersons.length > 0) {
+      updatePersons(targetPersons);
+      setToast({
+        message: `Встановлено статус «${isLiving ? 'Живий (🌱)' : 'Померлий (🕊️)'}» для ${targetPersons.length} осіб.`
+      });
+    }
+  };
+
+  // Batch add common tag
+  const handleBatchAddTag = (tagToAdd: string) => {
+    const cleanTag = tagToAdd.replace(/^#+/, '').trim();
+    if (!cleanTag || selectedIds.size === 0) return;
+    const targetPersons: Person[] = [];
+
+    selectedIds.forEach((id) => {
+      const p = persons.find((item) => item.id === id);
+      if (p) {
+        const existingTags = p.tags || [];
+        const hasTag = existingTags.some(
+          (t) => t.replace(/^#+/, '').toLowerCase() === cleanTag.toLowerCase()
+        );
+        if (!hasTag) {
+          targetPersons.push({
+            ...p,
+            tags: [...existingTags, cleanTag]
+          });
+        }
+      }
+    });
+
+    if (targetPersons.length > 0) {
+      updatePersons(targetPersons);
+      setToast({
+        message: `Спільний тег #${cleanTag} додано для ${targetPersons.length} осіб.`
+      });
+    } else {
+      setToast({
+        message: `Всі вибрані особи вже мають тег #${cleanTag}.`
+      });
+    }
+  };
+
+  // Comprehensive bulk edit handler from modal
+  const handleBulkEditApply = (params: BulkEditParams) => {
+    if (selectedIds.size === 0) return;
+    const targetPersons: Person[] = [];
+    let tagsCount = 0;
+    let livingCount = 0;
+    let statusCount = 0;
+
+    selectedIds.forEach((id) => {
+      const p = persons.find((item) => item.id === id);
+      if (!p) return;
+
+      let updated = { ...p };
+      let hasChange = false;
+
+      // 1. Tags handling
+      if (params.tagAction !== 'none' && params.tagValues.length > 0) {
+        const existingTags = p.tags || [];
+        if (params.tagAction === 'add') {
+          const newSet = new Set(existingTags.map((t) => t.replace(/^#+/, '').trim()));
+          params.tagValues.forEach((tv) => newSet.add(tv.replace(/^#+/, '').trim()));
+          updated.tags = Array.from(newSet);
+          hasChange = true;
+          tagsCount++;
+        } else if (params.tagAction === 'replace') {
+          updated.tags = [...params.tagValues];
+          hasChange = true;
+          tagsCount++;
+        } else if (params.tagAction === 'remove') {
+          const removeLower = new Set(
+            params.tagValues.map((tv) => tv.replace(/^#+/, '').trim().toLowerCase())
+          );
+          updated.tags = existingTags.filter(
+            (t) => !removeLower.has(t.replace(/^#+/, '').trim().toLowerCase())
+          );
+          hasChange = true;
+          tagsCount++;
+        }
+      }
+
+      // 2. Living Status
+      if (params.livingStatus === 'living') {
+        updated.isLiving = true;
+        if (params.clearDeathDataIfLiving) {
+          delete updated.deathDate;
+          delete updated.deathYear;
+          delete updated.deathPlace;
+          delete updated.deathReason;
+        }
+        hasChange = true;
+        livingCount++;
+      } else if (params.livingStatus === 'deceased') {
+        updated.isLiving = false;
+        hasChange = true;
+        livingCount++;
+      }
+
+      // 3. Research Status
+      if (params.researchStatus === 'confirmed') {
+        updated.researchStatus = 'confirmed';
+        updated.isHypothesis = false;
+        hasChange = true;
+        statusCount++;
+      } else if (params.researchStatus === 'hypothetical') {
+        updated.researchStatus = 'hypothetical';
+        updated.isHypothesis = true;
+        hasChange = true;
+        statusCount++;
+      }
+
+      if (hasChange) {
+        targetPersons.push(updated);
+      }
+    });
+
+    if (targetPersons.length > 0) {
+      updatePersons(targetPersons);
+      const summaryParts: string[] = [];
+      if (tagsCount > 0) {
+        const actionLabel = params.tagAction === 'add' ? 'додано теги' : params.tagAction === 'replace' ? 'замінено теги на' : 'вилучено теги';
+        summaryParts.push(`${actionLabel} (${params.tagValues.map((t) => `#${t}`).join(', ')})`);
+      }
+      if (livingCount > 0) {
+        summaryParts.push(`статус «${params.livingStatus === 'living' ? 'Живий (🌱)' : 'Померлий (🕊️)'}»`);
+      }
+      if (statusCount > 0) {
+        summaryParts.push(`дослідження: ${params.researchStatus === 'confirmed' ? 'Підтверджена' : 'Гіпотеза'}`);
+      }
+
+      setToast({
+        message: `Масове оновлення для ${targetPersons.length} осіб: ${summaryParts.join(' • ')}.`
+      });
+    } else {
+      setToast({ message: 'Змін не виявлено.' });
+    }
   };
 
   return (
@@ -787,22 +968,61 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
               {isSelectionMode && selectedIds.size > 0 && (
                 <>
+                  {/* Primary Bulk Edit Modal button */}
+                  <button
+                    onClick={() => setIsBulkEditModalOpen(true)}
+                    className="px-3 py-1 rounded-lg bg-[#B88E3E] hover:bg-[#9E7830] text-xs font-bold text-black transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                    title="Масове редагування: спільні теги, статус життя, статус дослідження"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    <span>Масове редагування ({selectedIds.size})</span>
+                  </button>
+
+                  {/* Quick Tag Button */}
+                  <button
+                    onClick={() => setIsBulkEditModalOpen(true)}
+                    className="px-2.5 py-1 rounded-lg bg-[#262626] hover:bg-[#333333] border border-[#404040] text-xs font-semibold text-[#E5E5E5] transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Встановити або змінити спільний тег для обраних"
+                  >
+                    <Tag className="w-3.5 h-3.5 text-[#B88E3E]" />
+                    <span>Спільний тег</span>
+                  </button>
+
+                  {/* Quick Living Status Buttons */}
+                  <button
+                    onClick={() => handleBatchSetLiving(true)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-xs font-bold text-emerald-200 transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Встановити статус «Живий» (isLiving = true) для обраних"
+                  >
+                    <Heart className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>🌱 Живі</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleBatchSetLiving(false)}
+                    className="px-2.5 py-1 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-bold text-neutral-300 transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Встановити статус «Померлий» (isLiving = false) для обраних"
+                  >
+                    <span>🕊️ Померлі</span>
+                  </button>
+
+                  {/* Research status */}
                   <button
                     onClick={() => handleBatchSetResearchStatus('confirmed')}
-                    className="px-3 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-xs font-bold text-emerald-200 transition-all cursor-pointer flex items-center gap-1.5"
+                    className="px-2.5 py-1 rounded-lg bg-emerald-950/50 hover:bg-emerald-900/80 border border-emerald-700/50 text-xs font-bold text-emerald-300 transition-all cursor-pointer flex items-center gap-1.5"
                     title="Встановити статус 'Підтверджена особа' для вибраних"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Підтверджена особа ({selectedIds.size})</span>
+                    <span>Підтверджена</span>
                   </button>
 
                   <button
                     onClick={() => handleBatchSetResearchStatus('hypothetical')}
-                    className="px-3 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 border border-amber-700/60 text-xs font-bold text-amber-200 transition-all cursor-pointer flex items-center gap-1.5"
+                    className="px-2.5 py-1 rounded-lg bg-amber-950/50 hover:bg-amber-900/80 border border-amber-700/50 text-xs font-bold text-amber-300 transition-all cursor-pointer flex items-center gap-1.5"
                     title="Встановити статус 'Гіпотеза' для вибраних"
                   >
                     <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Гіпотеза ({selectedIds.size})</span>
+                    <span>Гіпотеза</span>
                   </button>
 
                   <button
@@ -810,7 +1030,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     className="px-3 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 text-xs font-bold text-rose-200 transition-all cursor-pointer flex items-center gap-1.5"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Видалити вибраних ({selectedIds.size})</span>
+                    <span>Видалити ({selectedIds.size})</span>
                   </button>
                 </>
               )}
@@ -976,16 +1196,29 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       }`}
                     >
                       {/* Checkbox / Index */}
-                      <td className="p-3 text-center" onClick={(e) => isSelectionMode && e.stopPropagation()}>
+                      <td 
+                        className="p-3 text-center group/cell cursor-pointer" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!isSelectionMode) {
+                            setIsSelectionMode(true);
+                          }
+                          toggleSelectOne(p.id);
+                        }}
+                        title={isSelectionMode ? (isChecked ? 'Зняти вибір' : 'Вибрати') : 'Натисніть для вибору'}
+                      >
                         {isSelectionMode ? (
                           <input
                             type="checkbox"
                             checked={isChecked}
-                            onChange={() => toggleSelectOne(p.id)}
+                            onChange={() => {}} // handled by td onClick
                             className="rounded border-[#404040] bg-[#121212] text-[#B88E3E] focus:ring-0 w-4 h-4 cursor-pointer"
                           />
                         ) : (
-                          <span className="font-mono text-[11px] text-[#8C8C8C]">{idx + 1}</span>
+                          <div className="flex items-center justify-center">
+                            <span className="font-mono text-[11px] text-[#8C8C8C] group-hover/cell:hidden">{idx + 1}</span>
+                            <span className="hidden group-hover/cell:inline-block w-3.5 h-3.5 rounded border border-[#666666] bg-[#222222]" />
+                          </div>
                         )}
                       </td>
 
@@ -1057,9 +1290,28 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Years */}
+                      {/* Years & Living status */}
                       <td className="p-3 font-mono text-[11px] text-[#E5E5E5]">
-                        {formatDates(p)}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{formatDates(p)}</span>
+                          {p.isLiving ? (
+                            <span 
+                              className="px-1.5 py-0.5 rounded text-[10px] font-sans font-bold bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 inline-flex items-center gap-0.5 shrink-0" 
+                              title="Жива особа"
+                            >
+                              <span>🌱</span>
+                              <span className="hidden xl:inline">Живий</span>
+                            </span>
+                          ) : (p.deathDate || p.deathYear || p.isLiving === false) ? (
+                            <span 
+                              className="px-1.5 py-0.5 rounded text-[10px] font-sans font-medium bg-neutral-900 text-neutral-400 border border-neutral-800 inline-flex items-center gap-0.5 shrink-0" 
+                              title="Померла особа"
+                            >
+                              <span>🕊️</span>
+                              <span className="hidden xl:inline">Померлий</span>
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
 
                       {/* Research Status */}
@@ -1330,7 +1582,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 <div className="space-y-1 pt-1.5 border-t border-[#2A2A2A] text-xs">
                   <div className="flex items-center justify-between text-[#A3A3A3]">
                     <span className="text-[10px] uppercase font-bold text-[#8C8C8C]">Роки:</span>
-                    <span className="font-mono text-[#E5E5E5]">{formatDates(p)}</span>
+                    <span className="font-mono text-[#E5E5E5] flex items-center gap-1">
+                      <span>{formatDates(p)}</span>
+                      {p.isLiving ? (
+                        <span className="text-[10px] text-emerald-400" title="Живий">🌱</span>
+                      ) : (p.deathDate || p.deathYear || p.isLiving === false) ? (
+                        <span className="text-[10px] text-neutral-400" title="Померлий">🕊️</span>
+                      ) : null}
+                    </span>
                   </div>
 
                   <div className="flex items-center justify-between text-[#B88E3E] font-bold">
@@ -1451,6 +1710,83 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           </button>
         </div>
       )}
+
+      {/* FLOATING SELECTION ACTION DOCK */}
+      {selectedIds.size > 0 && tabFilter !== 'trash' && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-[#171717]/95 backdrop-blur-md border border-[#B88E3E]/50 px-3.5 py-2 rounded-2xl shadow-2xl flex items-center gap-2 sm:gap-3 max-w-[95vw] overflow-x-auto">
+          <div className="flex items-center gap-1.5 pr-2 border-r border-[#333333] shrink-0">
+            <span className="w-5 h-5 rounded-full bg-[#B88E3E] text-black font-extrabold text-[11px] flex items-center justify-center">
+              {selectedIds.size}
+            </span>
+            <span className="text-xs font-bold text-white hidden sm:inline">обрано</span>
+          </div>
+
+          {/* Primary Modal Action */}
+          <button
+            type="button"
+            onClick={() => setIsBulkEditModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-[#B88E3E] hover:bg-[#9E7830] text-black text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shrink-0"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span>Масове редагування</span>
+          </button>
+
+          {/* Quick Tag Button */}
+          <button
+            type="button"
+            onClick={() => setIsBulkEditModalOpen(true)}
+            className="px-2.5 py-1.5 rounded-xl bg-[#262626] hover:bg-[#333333] border border-[#404040] text-xs font-semibold text-[#E5E5E5] flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+            title="Встановити спільний тег"
+          >
+            <Tag className="w-3.5 h-3.5 text-[#B88E3E]" />
+            <span className="hidden md:inline">Спільний тег</span>
+            <span className="md:hidden">Тег</span>
+          </button>
+
+          {/* Quick Living: Living */}
+          <button
+            type="button"
+            onClick={() => handleBatchSetLiving(true)}
+            className="px-2.5 py-1.5 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+            title="Встановити статус «Живий» для всіх вибраних"
+          >
+            <Heart className="w-3.5 h-3.5 text-emerald-400" />
+            <span>🌱 Живі</span>
+          </button>
+
+          {/* Quick Living: Deceased */}
+          <button
+            type="button"
+            onClick={() => handleBatchSetLiving(false)}
+            className="px-2.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+            title="Встановити статус «Померлий» для всіх вибраних"
+          >
+            <span>🕊️ Померлі</span>
+          </button>
+
+          {/* Quick Clear Selection */}
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="p-1.5 rounded-xl text-[#8C8C8C] hover:text-white hover:bg-[#2A2A2A] transition-colors cursor-pointer shrink-0"
+            title="Зняти вибір"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* BULK EDIT PERSONS MODAL */}
+      <BulkEditPersonsModal
+        isOpen={isBulkEditModalOpen}
+        onClose={() => setIsBulkEditModalOpen(false)}
+        selectedIds={selectedIds}
+        persons={persons}
+        availableHashtags={availableHashtags}
+        themePalette={themePalette}
+        onApply={handleBulkEditApply}
+        onDeselectPerson={(id) => toggleSelectOne(id)}
+      />
 
       {/* CONFIRMATION MODAL */}
       {confirmModal && (

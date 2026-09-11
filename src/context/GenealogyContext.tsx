@@ -68,6 +68,7 @@ export interface GenealogyContextType {
   setPersons: (persons: Person[] | ((prev: Person[]) => Person[])) => void;
   addPerson: (person: Person) => void;
   updatePerson: (person: Person) => void;
+  updatePersons: (persons: Person[]) => void;
   deletePerson: (id: string) => void;
   deletePersons: (ids: string[]) => void;
   restorePerson: (id: string) => void;
@@ -179,6 +180,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const setSelectedPersonId = useGenealogyStore((s) => s.setSelectedPersonId);
   const addPerson = useGenealogyStore((s) => s.addPerson);
   const updatePerson = useGenealogyStore((s) => s.updatePerson);
+  const updatePersons = useGenealogyStore((s) => s.updatePersons);
   const deletePerson = useGenealogyStore((s) => s.deletePerson);
   const deletePersons = useGenealogyStore((s) => s.deletePersons);
   const restorePerson = useGenealogyStore((s) => s.restorePerson);
@@ -563,6 +565,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setAccessLockConfig,
       addPerson,
       updatePerson,
+      updatePersons,
       deletePerson,
       deletePersons,
       restorePerson,
@@ -653,6 +656,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setAccessLockConfig,
       addPerson,
       updatePerson,
+      updatePersons,
       deletePerson,
       deletePersons,
       restorePerson,

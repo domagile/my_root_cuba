@@ -55,6 +55,12 @@ import {
 } from '../../types';
 import { parseAndNormalizeTags, getTreeHashtagsWithCounts, extractHashtagsFromText, COMMON_GENEALOGY_HASHTAG_PRESETS } from '../../utils/tagUtils';
 import { detectGenderFromName, isPersonMale, isPersonFemale, parseFullNameComponents } from '../../utils/genderUtils';
+import {
+  generateUkrainianPatronymic,
+  adaptUkrainianSurnameForGender,
+  inheritContextFromParents,
+  ParentContextInheritance
+} from '../../utils/ukrainianNameUtils';
 import { ContactAuthorModal } from '../ContactAuthorModal';
 import { findDuplicatesForPerson, PersonDuplicateMatch } from '../../utils/duplicateDetector';
 import { MergePersonsByIdModal } from '../modals/MergePersonsByIdModal';
@@ -155,14 +161,113 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     ? persons.find((p) => p.id === initialRelation.targetPersonId)
     : null;
 
+  // Resolve initial parents based on effectivePerson, initialRelation and targetPerson
+  const initialFatherId = useMemo(() => {
+    if (effectivePerson?.fatherId) return effectivePerson.fatherId;
+    if (initialRelation?.type === 'child' && targetPerson) {
+      if (isPersonMale(targetPerson)) return targetPerson.id;
+      if (isPersonFemale(targetPerson) && targetPerson.spouseIds && targetPerson.spouseIds.length > 0) {
+        const spouse = persons.find((p) => targetPerson.spouseIds?.includes(p.id) && isPersonMale(p));
+        if (spouse) return spouse.id;
+      }
+    }
+    if (initialRelation?.type === 'sibling' && targetPerson?.fatherId) return targetPerson.fatherId;
+    return '';
+  }, [effectivePerson, initialRelation, targetPerson, persons]);
+
+  const initialMotherId = useMemo(() => {
+    if (effectivePerson?.motherId) return effectivePerson.motherId;
+    if (initialRelation?.type === 'child' && targetPerson) {
+      if (isPersonFemale(targetPerson)) return targetPerson.id;
+      if (isPersonMale(targetPerson) && targetPerson.spouseIds && targetPerson.spouseIds.length > 0) {
+        const spouse = persons.find((p) => targetPerson.spouseIds?.includes(p.id) && isPersonFemale(p));
+        if (spouse) return spouse.id;
+      }
+    }
+    if (initialRelation?.type === 'sibling' && targetPerson?.motherId) return targetPerson.motherId;
+    return '';
+  }, [effectivePerson, initialRelation, targetPerson, persons]);
+
+  const initialFatherPerson = useMemo(() => {
+    return initialFatherId ? persons.find((p) => p.id === initialFatherId) || null : null;
+  }, [initialFatherId, persons]);
+
+  const initialMotherPerson = useMemo(() => {
+    return initialMotherId ? persons.find((p) => p.id === initialMotherId) || null : null;
+  }, [initialMotherId, persons]);
+
+  // Initial gender inference
+  const initialGenderVal: Gender = useMemo(() => {
+    if (effectivePerson) {
+      if (isPersonFemale(effectivePerson)) return 'female';
+      if (isPersonMale(effectivePerson)) return 'male';
+      return effectivePerson.gender || 'male';
+    }
+    if (initialRelation?.type === 'father') return 'male';
+    if (initialRelation?.type === 'mother') return 'female';
+    if (initialRelation?.type === 'spouse') {
+      return targetPerson ? (isPersonMale(targetPerson) ? 'female' : 'male') : 'female';
+    }
+    const detected = detectGenderFromName(
+      effectivePerson?.name?.given || effectivePerson?.firstName || '',
+      effectivePerson?.name?.surname || effectivePerson?.lastName || '',
+      effectivePerson?.name?.patronymic || effectivePerson?.patronymic || '',
+      effectivePerson?.name?.maidenName || effectivePerson?.maidenName || ''
+    );
+    return detected || 'male';
+  }, [effectivePerson, initialRelation, targetPerson]);
+
+  // Inherited context for new person from initial parents
+  const initialParentContext: ParentContextInheritance | null = useMemo(() => {
+    if (effectivePerson) return null;
+    return inheritContextFromParents({
+      father: initialFatherPerson,
+      mother: initialMotherPerson,
+      childGender: initialGenderVal
+    });
+  }, [effectivePerson, initialFatherPerson, initialMotherPerson, initialGenderVal]);
+
   // 1. Basic Information
-  const [researchBranch, setResearchBranch] = useState(effectivePerson?.researchBranch || 'Без прив\'язки');
+  const initialBranchVal = useMemo(() => {
+    if (effectivePerson?.researchBranch) return effectivePerson.researchBranch;
+    if (initialParentContext?.suggestedBranch) return initialParentContext.suggestedBranch;
+    if (targetPerson?.researchBranch && targetPerson.researchBranch !== 'Без прив\'язки') {
+      return targetPerson.researchBranch;
+    }
+    return 'Без прив\'язки';
+  }, [effectivePerson, initialParentContext, targetPerson]);
+
+  const [researchBranch, setResearchBranch] = useState(initialBranchVal);
   const [researchStatus, setResearchStatus] = useState(effectivePerson?.researchStatus || 'hypothetical');
   
   const initialFirst = effectivePerson?.name?.given || effectivePerson?.firstName || '';
-  const initialLast = effectivePerson?.name?.surname || effectivePerson?.lastName || '';
+  const initialLast = useMemo(() => {
+    if (effectivePerson?.name?.surname || effectivePerson?.lastName) {
+      return effectivePerson.name?.surname || effectivePerson.lastName || '';
+    }
+    if (initialRelation?.type === 'child') {
+      return initialParentContext?.suggestedLastName || '';
+    }
+    if (initialRelation?.type === 'sibling') {
+      return initialParentContext?.suggestedLastName || (targetPerson ? adaptUkrainianSurnameForGender(targetPerson.name?.surname || targetPerson.lastName, initialGenderVal) : '');
+    }
+    if (initialRelation?.type === 'father' && targetPerson) {
+      return adaptUkrainianSurnameForGender(targetPerson.name?.surname || targetPerson.lastName, 'male');
+    }
+    return '';
+  }, [effectivePerson, initialRelation, initialParentContext, targetPerson, initialGenderVal]);
+
   const initialMaiden = effectivePerson?.name?.maidenName || effectivePerson?.maidenName || '';
-  const initialPatronym = effectivePerson?.name?.patronymic || effectivePerson?.patronymic || '';
+  const initialPatronym = useMemo(() => {
+    if (effectivePerson?.name?.patronymic || effectivePerson?.patronymic) {
+      return effectivePerson.name?.patronymic || effectivePerson.patronymic || '';
+    }
+    if (initialRelation?.type === 'child' || initialRelation?.type === 'sibling') {
+      return initialParentContext?.suggestedPatronymic || '';
+    }
+    return '';
+  }, [effectivePerson, initialRelation, initialParentContext]);
+
   const initialPrefix = effectivePerson?.name?.prefix || effectivePerson?.prefix || '';
 
   const [firstName, setFirstName] = useState(initialFirst);
@@ -181,21 +286,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     );
   });
 
+  // Track auto-inherited fields so we know which values can be auto-updated when gender/father changes
+  const [autoInheritedValues, setAutoInheritedValues] = useState<{
+    lastName?: string;
+    patronymic?: string;
+    branch?: string;
+    fatherId?: string;
+  }>(() => ({
+    lastName: !effectivePerson && initialLast ? initialLast : undefined,
+    patronymic: !effectivePerson && initialPatronym ? initialPatronym : undefined,
+    branch: !effectivePerson && initialBranchVal !== 'Без прив\'язки' ? initialBranchVal : undefined,
+    fatherId: !effectivePerson && initialFatherId ? initialFatherId : undefined
+  }));
+
   // Gender
-  const [gender, setGender] = useState<Gender>(() => {
-    if (effectivePerson) {
-      if (isPersonFemale(effectivePerson)) return 'female';
-      if (isPersonMale(effectivePerson)) return 'male';
-      return effectivePerson.gender || 'male';
-    }
-    if (initialRelation?.type === 'father') return 'male';
-    if (initialRelation?.type === 'mother') return 'female';
-    if (initialRelation?.type === 'spouse') {
-      return targetPerson ? (isPersonMale(targetPerson) ? 'female' : 'male') : 'female';
-    }
-    const detected = detectGenderFromName(initialFirst, initialLast, initialPatronym, initialMaiden);
-    return detected || 'male';
-  });
+  const [gender, setGender] = useState<Gender>(initialGenderVal);
   const [genderManuallyChanged, setGenderManuallyChanged] = useState(() => {
     return Boolean(effectivePerson || initialRelation?.type === 'father' || initialRelation?.type === 'mother' || initialRelation?.type === 'spouse');
   });
@@ -204,23 +309,203 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [isLiving, setIsLiving] = useState<boolean>(effectivePerson?.isLiving ?? false);
 
   // 3. Parents & Kinship
-  const [fatherId, setFatherId] = useState<string>(() => {
-    if (effectivePerson?.fatherId) return effectivePerson.fatherId;
-    if (initialRelation?.type === 'child' && targetPerson && isPersonMale(targetPerson)) return targetPerson.id;
-    if (initialRelation?.type === 'sibling' && targetPerson?.fatherId) return targetPerson.fatherId;
-    return '';
-  });
-  const [motherId, setMotherId] = useState<string>(() => {
-    if (effectivePerson?.motherId) return effectivePerson.motherId;
-    if (initialRelation?.type === 'child' && targetPerson && isPersonFemale(targetPerson)) return targetPerson.id;
-    if (initialRelation?.type === 'sibling' && targetPerson?.motherId) return targetPerson.motherId;
-    return '';
-  });
+  const [fatherId, setFatherId] = useState<string>(initialFatherId);
+  const [motherId, setMotherId] = useState<string>(initialMotherId);
   const [spouseId, setSpouseId] = useState<string>(() => {
     if (effectivePerson?.spouseIds && effectivePerson.spouseIds.length > 0) return effectivePerson.spouseIds[0];
     if (initialRelation?.type === 'spouse' && targetPerson) return targetPerson.id;
     return '';
   });
+
+  // Selected father and mother objects
+  const selectedFather = useMemo(() => {
+    return fatherId ? persons.find((p) => p.id === fatherId) || null : null;
+  }, [fatherId, persons]);
+
+  const selectedMother = useMemo(() => {
+    return motherId ? persons.find((p) => p.id === motherId) || null : null;
+  }, [motherId, persons]);
+
+  // Dynamic context inheritance from currently selected parents & child gender
+  const currentInheritance = useMemo(() => {
+    return inheritContextFromParents({
+      father: selectedFather,
+      mother: selectedMother,
+      childGender: gender
+    });
+  }, [selectedFather, selectedMother, gender]);
+
+  // Intelligent gender change handler that adjusts Ukrainian surnames and patronymics
+  const applyGenderChange = (newGender: Gender, isManual = true) => {
+    if (isManual) setGenderManuallyChanged(true);
+    setGender(newGender);
+
+    if (!effectivePerson) {
+      // 1. Patronymic update:
+      if (selectedFather) {
+        const fatherFirst = selectedFather.name?.given || selectedFather.firstName;
+        if (fatherFirst) {
+          const oldPatr = generateUkrainianPatronymic(fatherFirst, gender);
+          const newPatr = generateUkrainianPatronymic(fatherFirst, newGender);
+          if (!patronymic || patronymic === oldPatr || patronymic === autoInheritedValues.patronymic) {
+            setPatronymic(newPatr);
+            setAutoInheritedValues(prev => ({ ...prev, patronymic: newPatr }));
+          }
+        }
+      }
+
+      // 2. Surname update:
+      if (selectedFather) {
+        const fatherLast = selectedFather.name?.surname || selectedFather.lastName;
+        if (fatherLast) {
+          const oldSur = adaptUkrainianSurnameForGender(fatherLast, gender);
+          const newSur = adaptUkrainianSurnameForGender(fatherLast, newGender);
+          if (!lastName || lastName === oldSur || lastName === autoInheritedValues.lastName) {
+            setLastName(newSur);
+            setAutoInheritedValues(prev => ({ ...prev, lastName: newSur }));
+          }
+        }
+      } else if (lastName) {
+        const adapted = adaptUkrainianSurnameForGender(lastName, newGender);
+        if (adapted !== lastName) {
+          setLastName(adapted);
+          setAutoInheritedValues(prev => ({ ...prev, lastName: adapted }));
+        }
+      }
+    }
+  };
+
+  // Intelligent father selection handler
+  const handleFatherSelect = (newFatherId: string) => {
+    setFatherId(newFatherId);
+    if (!newFatherId) return;
+
+    const f = persons.find((p) => p.id === newFatherId);
+    if (!f) return;
+
+    const fFirst = f.name?.given || f.firstName;
+    const fLast = f.name?.surname || f.lastName;
+
+    // 1. Auto-generate patronymic from father's name
+    if (fFirst) {
+      const newPatr = generateUkrainianPatronymic(fFirst, gender);
+      if (!patronymic || patronymic === autoInheritedValues.patronymic) {
+        setPatronymic(newPatr);
+        setAutoInheritedValues(prev => ({ ...prev, patronymic: newPatr, fatherId: newFatherId }));
+      }
+    }
+
+    // 2. Auto-inherit and adapt surname
+    if (fLast) {
+      const newSur = adaptUkrainianSurnameForGender(fLast, gender);
+      if (!lastName || lastName === autoInheritedValues.lastName) {
+        setLastName(newSur);
+        setAutoInheritedValues(prev => ({ ...prev, lastName: newSur }));
+      }
+    }
+
+    // 3. Auto-inherit research branch
+    if (f.researchBranch && f.researchBranch !== 'Без прив\'язки') {
+      if (!researchBranch || researchBranch === 'Без прив\'язки' || researchBranch === autoInheritedValues.branch) {
+        setResearchBranch(f.researchBranch);
+        setAutoInheritedValues(prev => ({ ...prev, branch: f.researchBranch }));
+      }
+    }
+
+    // 4. Auto-suggest mother if not yet selected and father has a wife
+    if (!motherId && f.spouseIds && f.spouseIds.length > 0) {
+      const wife = persons.find((p) => f.spouseIds?.includes(p.id) && isPersonFemale(p));
+      if (wife) {
+        setMotherId(wife.id);
+      }
+    }
+
+    // 5. Geographic & social context inheritance if empty
+    const place = f.residencePlace || f.birthPlace;
+    if (place) {
+      if (!birthPlace) setBirthPlace(place);
+      if (!residencePlace) setResidencePlace(place);
+    }
+    const fEstate = f.estateOrSocialStatus || f.estate;
+    if (fEstate && !estate) setEstate(fEstate);
+    if (f.confession && !confession) setConfession(f.confession);
+  };
+
+  // Intelligent mother selection handler
+  const handleMotherSelect = (newMotherId: string) => {
+    setMotherId(newMotherId);
+    if (!newMotherId) return;
+
+    const m = persons.find((p) => p.id === newMotherId);
+    if (!m) return;
+
+    // Auto-inherit branch if still empty or without attachment
+    if ((!researchBranch || researchBranch === 'Без прив\'язки' || researchBranch === autoInheritedValues.branch) && m.researchBranch && m.researchBranch !== 'Без прив\'язки') {
+      setResearchBranch(m.researchBranch);
+      setAutoInheritedValues(prev => ({ ...prev, branch: m.researchBranch }));
+    }
+
+    // Auto-suggest father if not selected and mother has a husband
+    if (!fatherId && m.spouseIds && m.spouseIds.length > 0) {
+      const husband = persons.find((p) => m.spouseIds?.includes(p.id) && isPersonMale(p));
+      if (husband) {
+        handleFatherSelect(husband.id);
+      }
+    }
+  };
+
+  // Apply all inherited parent attributes
+  const applyAllParentAttributes = () => {
+    if (currentInheritance.suggestedLastName) {
+      setLastName(currentInheritance.suggestedLastName);
+      setAutoInheritedValues(prev => ({ ...prev, lastName: currentInheritance.suggestedLastName }));
+    }
+    if (currentInheritance.suggestedPatronymic) {
+      setPatronymic(currentInheritance.suggestedPatronymic);
+      setAutoInheritedValues(prev => ({ ...prev, patronymic: currentInheritance.suggestedPatronymic }));
+    }
+    if (currentInheritance.suggestedBranch) {
+      setResearchBranch(currentInheritance.suggestedBranch);
+      setAutoInheritedValues(prev => ({ ...prev, branch: currentInheritance.suggestedBranch }));
+    }
+    if (currentInheritance.suggestedBirthPlace && !birthPlace) {
+      setBirthPlace(currentInheritance.suggestedBirthPlace);
+    }
+    if (currentInheritance.suggestedResidencePlace && !residencePlace) {
+      setResidencePlace(currentInheritance.suggestedResidencePlace);
+    }
+    if (currentInheritance.suggestedEstate && !estate) {
+      setEstate(currentInheritance.suggestedEstate);
+    }
+    if (currentInheritance.suggestedConfession && !confession) {
+      setConfession(currentInheritance.suggestedConfession);
+    }
+  };
+
+  // Gather all available research branches from persons database + presets
+  const allAvailableBranches = useMemo(() => {
+    const defaultBranches = [
+      'Без прив\'язки',
+      'Головна гілка',
+      'Батьківська лінія',
+      'Материнська лінія',
+      'Шляхетська лінія',
+      'Селянська лінія'
+    ];
+    const custom = new Set<string>();
+    persons.forEach((p) => {
+      if (p.researchBranch && p.researchBranch.trim() && !defaultBranches.includes(p.researchBranch.trim())) {
+        custom.add(p.researchBranch.trim());
+      }
+    });
+    if (researchBranch && researchBranch.trim() && !defaultBranches.includes(researchBranch.trim())) {
+      custom.add(researchBranch.trim());
+    }
+    if (currentInheritance.suggestedBranch && !defaultBranches.includes(currentInheritance.suggestedBranch)) {
+      custom.add(currentInheritance.suggestedBranch);
+    }
+    return [...defaultBranches, ...Array.from(custom)];
+  }, [persons, researchBranch, currentInheritance.suggestedBranch]);
 
   // Sibling IDs
   const [siblingIds, setSiblingIds] = useState<string[]>(effectivePerson?.siblingIds || []);
@@ -261,7 +546,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
   // 4. Dates & Places (Map locations)
   const [birthDate, setBirthDate] = useState(effectivePerson?.birthDate || '');
-  const [birthPlace, setBirthPlace] = useState(effectivePerson?.birthPlace || '');
+  const [birthPlace, setBirthPlace] = useState(
+    effectivePerson?.birthPlace || (!effectivePerson ? initialParentContext?.suggestedBirthPlace || '' : '')
+  );
   const [birthPlaceHistorical, setBirthPlaceHistorical] = useState('');
 
   const [marriageDate, setMarriageDate] = useState(effectivePerson?.marriageDate || '');
@@ -273,7 +560,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [deathPlaceHistorical, setDeathPlaceHistorical] = useState('');
   const [deathReason, setDeathReason] = useState(effectivePerson?.deathReason || '');
 
-  const [residencePlace, setResidencePlace] = useState(effectivePerson?.residencePlace || '');
+  const [residencePlace, setResidencePlace] = useState(
+    effectivePerson?.residencePlace || (!effectivePerson ? initialParentContext?.suggestedResidencePlace || '' : '')
+  );
   const [residencePlaceHistorical, setResidencePlaceHistorical] = useState('');
 
   // 5. Biography, Notes & Social info
@@ -282,10 +571,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     typeof effectivePerson?.notes === 'string' ? effectivePerson.notes : ''
   );
   const [estate, setEstate] = useState(
-    effectivePerson?.estateOrSocialStatus || effectivePerson?.estate || ''
+    effectivePerson?.estateOrSocialStatus || effectivePerson?.estate || (!effectivePerson ? initialParentContext?.suggestedEstate || '' : '')
   );
   const [occupation, setOccupation] = useState(effectivePerson?.occupation || '');
-  const [confession, setConfession] = useState(effectivePerson?.confession || '');
+  const [confession, setConfession] = useState(
+    effectivePerson?.confession || (!effectivePerson ? initialParentContext?.suggestedConfession || '' : '')
+  );
   const [militaryRank, setMilitaryRank] = useState(effectivePerson?.militaryRank || '');
   const [tagsStr, setTagsStr] = useState(() => {
     const raw = effectivePerson?.tags || [];
@@ -2290,12 +2581,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 </span>
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2">
-                {openSectionsCount !== 2 && (
+                {openSectionsCount > 0 && (
                   <button
                     type="button"
                     onClick={handleResetSectionsToDefault}
                     className="px-2 py-1 rounded-lg text-[11px] font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                    title="Скинути розкриття секцій до початкового стану (Основне + Імена)"
+                    title="Скинути розкриття секцій до початкового стану (всі секції згорнуті)"
                   >
                     За замовчуванням
                   </button>
@@ -2310,7 +2601,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 <button
                   type="button"
                   onClick={handleCollapseAllSections}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-black/5 dark:hover:bg-white/5 border border-black/10 dark:border-white/10 transition-colors cursor-pointer"
+                  disabled={openSectionsCount === 0}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                    openSectionsCount === 0
+                      ? 'opacity-40 border-black/5 dark:border-white/5 text-neutral-400 cursor-not-allowed'
+                      : 'text-neutral-600 dark:text-neutral-300 hover:bg-black/5 dark:hover:bg-white/5 border-black/10 dark:border-white/10'
+                  }`}
                 >
                   Згорнути всі
                 </button>
@@ -2330,13 +2626,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                   <div>
                     <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Основне та теги</h3>
-                    <p className={`text-xs ${theme.textMuted}`}>Дослідження, статус, стать, статус життя та хештеги</p>
+                    <p className={`text-xs ${theme.textMuted}`}>Дослідження, статус, хештеги та статус життя</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {!openSections.basic && (
                     <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
-                      {gender === 'male' ? '♂ Чол' : gender === 'female' ? '♀ Жін' : '?'} • {isLiving ? '🟢 Жива' : '✝ Померла'}
+                      {isLiving ? '🟢' : '✝'} • {researchBranch} {currentTagsList.length > 0 && `• #${currentTagsList[0]}`}
                     </span>
                   )}
                   <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.basic ? 'rotate-180 text-[#B88E3E]' : ''}`} />
@@ -2344,30 +2640,51 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               </button>
 
               {openSections.basic && (
-                <div className="p-4 pt-2 border-t border-black/5 dark:border-white/5 space-y-3">
-                  {/* 4 compact controls in 1-2 rows */}
+                <div className="p-4 pt-2 border-t border-black/5 dark:border-white/5 space-y-2.5">
+                  {/* Compact row: 1. Дослідження, 2. Статус дослідження, 3. Хештеги, 4. Статус життя */}
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
                     {/* 1. Дослідження */}
                     <div className="space-y-1">
-                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
-                        <span>🌳</span>
-                        <span>Дослідження</span>
-                      </label>
+                      <div className="flex items-center justify-between">
+                        <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
+                          <span>🌳</span>
+                          <span>Дослідження</span>
+                        </label>
+                        {currentInheritance.suggestedBranch && researchBranch === currentInheritance.suggestedBranch && (
+                          <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-0.5">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            <span>успадковано</span>
+                          </span>
+                        )}
+                      </div>
                       <select
                         value={researchBranch}
-                        onChange={(e) => setResearchBranch(e.target.value)}
-                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        onChange={(e) => {
+                          setResearchBranch(e.target.value);
+                          setAutoInheritedValues(prev => ({ ...prev, branch: undefined }));
+                        }}
+                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[34px]`}
                       >
-                        <option value="Без прив'язки">Без прив'язки</option>
-                        <option value="Головна гілка">Головна гілка</option>
-                        {researchBranch === 'Головна гілка родоводу' && (
-                          <option value="Головна гілка родоводу">Головна гілка</option>
-                        )}
-                        <option value="Батьківська лінія">Батьківська лінія</option>
-                        <option value="Материнська лінія">Материнська лінія</option>
-                        <option value="Шляхетська лінія">Шляхетська лінія</option>
-                        <option value="Селянська лінія">Селянська лінія</option>
+                        {allAvailableBranches.map((br) => (
+                          <option key={br} value={br}>
+                            {br}
+                          </option>
+                        ))}
                       </select>
+                      {currentInheritance.suggestedBranch && researchBranch !== currentInheritance.suggestedBranch && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResearchBranch(currentInheritance.suggestedBranch!);
+                            setAutoInheritedValues(prev => ({ ...prev, branch: currentInheritance.suggestedBranch }));
+                          }}
+                          className="text-[10px] text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                          title="Застосувати гілку дослідження від батьків"
+                        >
+                          <Sparkles className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                          <span className="truncate">Гілка батьків: {currentInheritance.suggestedBranch}</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* 2. Статус дослідження */}
@@ -2379,7 +2696,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       <select
                         value={researchStatus}
                         onChange={(e) => setResearchStatus(e.target.value)}
-                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[34px]`}
                       >
                         <option value="hypothetical">❓ Гіпотетична</option>
                         <option value="confirmed">✅ Підтверджена</option>
@@ -2389,160 +2706,140 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       </select>
                     </div>
 
-                    {/* 3. Стать */}
+                    {/* 3. Хештег (розміщено замість статі для компактності) */}
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
                         <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
-                          <span>👤</span>
-                          <span>Стать <span className="text-rose-500">*</span></span>
+                          <Tag className="w-3 h-3 text-[#B88E3E]" />
+                          <span>Хештег</span>
                         </label>
-                        {!genderManuallyChanged && (
-                          <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">авто</span>
+                        {currentTagsList.length > 0 && (
+                          <span className="text-[9px] text-[#B88E3E] font-medium">
+                            {currentTagsList.length}
+                          </span>
                         )}
                       </div>
-                      <select
-                        value={gender}
-                        onChange={(e) => {
-                          setGenderManuallyChanged(true);
-                          setGender(e.target.value as Gender);
-                        }}
-                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                      >
-                        <option value="male">♂ Чоловіча</option>
-                        <option value="female">♀ Жіноча</option>
-                        <option value="other">? Невідомо</option>
-                      </select>
+                      <div className="flex items-center gap-1">
+                        <div className="relative flex-1">
+                          <Hash className="w-3 h-3 text-neutral-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={newTagDraft}
+                            onChange={(e) => setNewTagDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ',') {
+                                e.preventDefault();
+                                handleAddHashtagsFromDraft();
+                              }
+                            }}
+                            placeholder="тег..."
+                            className={`w-full pl-6 pr-1.5 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] h-[34px]`}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddHashtagsFromDraft}
+                          disabled={!newTagDraft.trim()}
+                          className="px-2.5 h-[34px] rounded-xl bg-[#B88E3E] hover:bg-[#a07b34] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all flex items-center justify-center shrink-0 cursor-pointer"
+                          title="Додати хештег"
+                        >
+                          <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                        </button>
+                      </div>
                     </div>
 
-                    {/* 4. Статус життя (Перемикач / Toggle Switch) */}
+                    {/* 4. Статус життя (компактні іконки без зайвих слів) */}
                     <div className="space-y-1">
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
-                        <span>Статус життя <span className="text-rose-500">*</span></span>
+                        <span>Статус</span>
                       </label>
-                      <div className={`flex items-center justify-between px-2.5 py-1 rounded-xl border ${theme.inputBg} ${theme.inputBorder} h-[34px]`}>
+                      <div className={`flex items-center p-0.5 rounded-xl border ${theme.inputBorder} ${theme.inputBg} h-[34px]`}>
                         <button
                           type="button"
-                          role="switch"
-                          aria-checked={isLiving}
-                          onClick={() => setIsLiving(!isLiving)}
-                          className="inline-flex items-center justify-between w-full cursor-pointer select-none group"
+                          onClick={() => setIsLiving(true)}
+                          className={`flex-1 h-full rounded-lg text-xs font-semibold flex items-center justify-center transition-all cursor-pointer ${
+                            isLiving
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+                          }`}
+                          title="Жива особа"
                         >
-                          <span className={`text-xs font-semibold flex items-center gap-1.5 ${isLiving ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-600 dark:text-neutral-400'}`}>
-                            <span>{isLiving ? '🟢' : '✝'}</span>
-                            <span>{isLiving ? 'Жива особа' : 'Померла'}</span>
-                          </span>
-                          <span
-                            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                              isLiving ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-600'
-                            }`}
-                          >
-                            <span
-                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
-                                isLiving ? 'translate-x-4' : 'translate-x-0'
-                              }`}
-                            />
-                          </span>
+                          <span className="text-sm">🟢</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsLiving(false)}
+                          className={`flex-1 h-full rounded-lg text-xs font-semibold flex items-center justify-center transition-all cursor-pointer ${
+                            !isLiving
+                              ? 'bg-neutral-700 text-white shadow-xs'
+                              : 'text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+                          }`}
+                          title="Померла особа"
+                        >
+                          <span className="text-sm">✝</span>
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* Compact Tags & Hashtags */}
-                  <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1.5">
-                        <Tag className="w-3 h-3 text-[#B88E3E]" />
-                        <span>Хештеги {currentTagsList.length > 0 && `(${currentTagsList.length})`}</span>
-                      </label>
+                  {/* Active tags badges and history */}
+                  {(currentTagsList.length > 0 || popularHashtags.length > 0) && (
+                    <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1.5">
                       {currentTagsList.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={handleClearAllTags}
-                          className="text-[10px] text-rose-500 hover:text-rose-600 hover:underline cursor-pointer font-medium"
-                        >
-                          Очистити
-                        </button>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {currentTagsList.map((tag) => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30"
+                            >
+                              <Hash className="w-2.5 h-2.5 text-[#B88E3E]/70" />
+                              <span>{tag}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveTag(tag)}
+                                className="p-0.5 hover:bg-[#B88E3E]/25 rounded cursor-pointer transition-colors text-[#B88E3E]"
+                                title={`Видалити #${tag}`}
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </span>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={handleClearAllTags}
+                            className="text-[10px] text-rose-500 hover:text-rose-600 hover:underline cursor-pointer font-medium ml-1"
+                          >
+                            Очистити
+                          </button>
+                        </div>
+                      )}
+
+                      {popularHashtags.length > 0 && (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-[10px] text-neutral-400 font-medium">Раніше вводилися:</span>
+                          {popularHashtags.map((h) => {
+                            const isSelected = currentTagsList.some((t) => t.toLowerCase() === h.tag.toLowerCase());
+                            return (
+                              <button
+                                key={h.tag}
+                                type="button"
+                                onClick={() => handleAddHashtagSuggestion(h.tag)}
+                                disabled={isSelected}
+                                className={`px-1.5 py-0.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 opacity-50 cursor-default'
+                                    : 'bg-black/[0.03] dark:bg-white/[0.04] hover:bg-[#B88E3E]/20 text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] border-black/5 dark:border-white/10'
+                                }`}
+                                title={isSelected ? 'Вже додано' : `Додати #${h.tag}`}
+                              >
+                                #{h.tag} {h.count > 1 && <span className="opacity-60 text-[9px]">({h.count})</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-
-                    {/* Active Tag Badges */}
-                    {currentTagsList.length > 0 && (
-                      <div className="flex flex-wrap gap-1 p-1.5 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5">
-                        {currentTagsList.map((tag) => (
-                          <span
-                            key={tag}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30"
-                          >
-                            <Hash className="w-2.5 h-2.5 text-[#B88E3E]/70" />
-                            <span>{tag}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveTag(tag)}
-                              className="p-0.5 hover:bg-[#B88E3E]/25 rounded cursor-pointer transition-colors text-[#B88E3E]"
-                              title={`Видалити #${tag}`}
-                            >
-                              <X className="w-2.5 h-2.5" />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Quick Add Row */}
-                    <div className="flex items-center gap-1.5">
-                      <div className="relative flex-1">
-                        <Hash className="w-3 h-3 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                        <input
-                          type="text"
-                          value={newTagDraft}
-                          onChange={(e) => setNewTagDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ',') {
-                              e.preventDefault();
-                              handleAddHashtagsFromDraft();
-                            }
-                          }}
-                          placeholder="Введіть хештег..."
-                          className={`w-full pl-7 pr-2.5 py-1.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddHashtagsFromDraft}
-                        disabled={!newTagDraft.trim()}
-                        className="px-3 py-1.5 rounded-xl bg-[#B88E3E] hover:bg-[#a07b34] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span>Додати</span>
-                      </button>
-                    </div>
-
-                    {/* Only PREVIOUSLY entered hashtags from the tree */}
-                    {popularHashtags.length > 0 && (
-                      <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                        <span className="text-[10px] text-neutral-400 font-medium">Раніше вводилися:</span>
-                        {popularHashtags.map((h) => {
-                          const isSelected = currentTagsList.some((t) => t.toLowerCase() === h.tag.toLowerCase());
-                          return (
-                            <button
-                              key={h.tag}
-                              type="button"
-                              onClick={() => handleAddHashtagSuggestion(h.tag)}
-                              disabled={isSelected}
-                              className={`px-1.5 py-0.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer ${
-                                isSelected
-                                  ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 opacity-50 cursor-default'
-                                  : 'bg-black/[0.03] dark:bg-white/[0.04] hover:bg-[#B88E3E]/20 text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] border-black/5 dark:border-white/10'
-                              }`}
-                              title={isSelected ? 'Вже додано' : `Додати #${h.tag}`}
-                            >
-                              #{h.tag} {h.count > 1 && <span className="opacity-60 text-[9px]">({h.count})</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2560,12 +2857,15 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                   <div>
                     <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Імена та варіанти</h3>
-                    <p className={`text-xs ${theme.textMuted}`}>Канонічне ім'я картки та варіанти написання</p>
+                    <p className={`text-xs ${theme.textMuted}`}>Стать, канонічне ім'я та варіанти написання</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {!openSections.names && (
-                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block max-w-[220px] truncate">
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block max-w-[240px] truncate">
+                      <span className={gender === 'male' ? 'text-blue-500 font-bold mr-1' : gender === 'female' ? 'text-rose-500 font-bold mr-1' : 'text-neutral-400 mr-1'}>
+                        {gender === 'male' ? '♂' : gender === 'female' ? '♀' : '?'}
+                      </span>
                       {[lastName, firstName, patronymic].filter(Boolean).join(' ') || 'Не вказано'}
                     </span>
                   )}
@@ -2576,31 +2876,122 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               {openSections.names && (
                 <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
                   <div className="space-y-3.5 text-xs">
-                {/* Row 1: Прізвище (+ Дівоче прізвище лише для жіночої статі) */}
-                {gender === 'female' ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                    <div className="space-y-1">
+                {/* Row 1: Стать (Toggles) + Прізвище (+ Дівоче прізвище якщо жінка) */}
+                <div className="flex flex-col sm:flex-row gap-3 items-start">
+                  {/* 1. Стать (Toggles) */}
+                  <div className="space-y-1 shrink-0 w-full sm:w-auto">
+                    <div className="flex items-center justify-between gap-1">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] flex items-center gap-1">
+                        <span>Стать</span>
+                        <span className="text-rose-500">*</span>
+                      </label>
+                      {!genderManuallyChanged && (
+                        <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">авто</span>
+                      )}
+                    </div>
+                    <div className={`inline-flex p-1 rounded-xl border ${theme.inputBorder} ${theme.inputBg} h-[38px] items-center gap-0.5 w-full sm:w-auto justify-center`}>
+                      <button
+                        type="button"
+                        onClick={() => applyGenderChange('male', true)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                          gender === 'male'
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+                        }`}
+                        title="Чоловіча стать"
+                      >
+                        <span className="font-bold text-sm">♂</span>
+                        <span>Чоловік</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyGenderChange('female', true)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                          gender === 'female'
+                            ? 'bg-rose-600 text-white shadow-xs'
+                            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+                        }`}
+                        title="Жіноча стать"
+                      >
+                        <span className="font-bold text-sm">♀</span>
+                        <span>Жінка</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyGenderChange('other', true)}
+                        className={`px-2 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center transition-all cursor-pointer ${
+                          gender === 'other'
+                            ? 'bg-neutral-600 text-white shadow-xs'
+                            : 'text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+                        }`}
+                        title="Невідомо або інша"
+                      >
+                        <span>?</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2. Прізвище (зменшене поле, щоб поміщалось поруч) */}
+                  <div className="space-y-1 flex-1 min-w-[140px] w-full">
+                    <div className="flex items-center justify-between">
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
                         Прізвище <span className="text-rose-500">*</span>
                       </label>
-                      <input
-                        type="text"
-                        value={lastName}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setLastName(val);
-                          if (!genderManuallyChanged) {
-                            const detected = detectGenderFromName(firstName, val, patronymic, maidenName);
-                            if (detected) setGender(detected);
-                          }
-                        }}
-                        placeholder="Шевченко"
-                        className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                        autoFocus
-                      />
+                      {currentInheritance.suggestedLastName && lastName === currentInheritance.suggestedLastName && (
+                        <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-0.5">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          <span>від батька</span>
+                        </span>
+                      )}
                     </div>
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setLastName(val);
+                        setAutoInheritedValues(prev => ({ ...prev, lastName: undefined }));
+                        if (!genderManuallyChanged) {
+                          const detected = detectGenderFromName(firstName, val, patronymic, maidenName);
+                          if (detected) setGender(detected);
+                        }
+                      }}
+                      placeholder="Шевченко"
+                      className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[38px]`}
+                      autoFocus
+                    />
+                    {currentInheritance.suggestedLastName && currentInheritance.suggestedLastName !== lastName && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLastName(currentInheritance.suggestedLastName!);
+                          setAutoInheritedValues(prev => ({ ...prev, lastName: currentInheritance.suggestedLastName }));
+                        }}
+                        className="inline-flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 px-2 py-0.5 rounded-md cursor-pointer transition-colors font-medium mt-1"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
+                        <span>Від батька: <strong>{currentInheritance.suggestedLastName}</strong></span>
+                      </button>
+                    )}
+                    {gender === 'female' && lastName && adaptUkrainianSurnameForGender(lastName, 'female') !== lastName && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const adapted = adaptUkrainianSurnameForGender(lastName, 'female');
+                          setLastName(adapted);
+                          setAutoInheritedValues(prev => ({ ...prev, lastName: adapted }));
+                        }}
+                        className="inline-flex items-center gap-1 text-[10px] text-purple-700 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 px-2 py-0.5 rounded-md cursor-pointer transition-colors font-medium mt-1"
+                      >
+                        <Sparkles className="w-3 h-3 text-purple-500 shrink-0" />
+                        <span>Закінчення: <strong>{adaptUkrainianSurnameForGender(lastName, 'female')}</strong></span>
+                      </button>
+                    )}
+                  </div>
 
-                    <div className="space-y-1">
+                  {/* 3. Дівоче прізвище (лише якщо жінка) */}
+                  {gender === 'female' && (
+                    <div className="space-y-1 flex-1 min-w-[140px] w-full">
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
                         Дівоче прізвище
                       </label>
@@ -2611,36 +3002,15 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                           const val = e.target.value;
                           setMaidenName(val);
                           if (!genderManuallyChanged && val.trim()) {
-                            setGender('female');
+                            applyGenderChange('female', false);
                           }
                         }}
-                        placeholder="Дівоче прізвище до шлюбу"
-                        className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                        placeholder="Дівоче до шлюбу"
+                        className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[38px]`}
                       />
                     </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Прізвище <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={lastName}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setLastName(val);
-                        if (!genderManuallyChanged) {
-                          const detected = detectGenderFromName(firstName, val, patronymic, maidenName);
-                          if (detected) setGender(detected);
-                        }
-                      }}
-                      placeholder="Шевченко"
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                      autoFocus
-                    />
-                  </div>
-                )}
+                  )}
+                </div>
 
                 {/* Row 2: Ім'я & По батькові */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -2665,15 +3035,24 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      По батькові
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
+                        По батькові
+                      </label>
+                      {currentInheritance.suggestedPatronymic && patronymic === currentInheritance.suggestedPatronymic && (
+                        <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-0.5">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          <span>згенеровано від батька</span>
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={patronymic}
                       onChange={(e) => {
                         const val = e.target.value;
                         setPatronymic(val);
+                        setAutoInheritedValues(prev => ({ ...prev, patronymic: undefined }));
                         if (!genderManuallyChanged) {
                           const detected = detectGenderFromName(firstName, lastName, val, maidenName);
                           if (detected) setGender(detected);
@@ -2682,6 +3061,19 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       placeholder="Григорович"
                       className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
                     />
+                    {currentInheritance.suggestedPatronymic && currentInheritance.suggestedPatronymic !== patronymic && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPatronymic(currentInheritance.suggestedPatronymic!);
+                          setAutoInheritedValues(prev => ({ ...prev, patronymic: currentInheritance.suggestedPatronymic }));
+                        }}
+                        className="inline-flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 px-2 py-0.5 rounded-md cursor-pointer transition-colors font-medium mt-1"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
+                        <span>По батькові від батька ({selectedFather?.name?.given || selectedFather?.firstName || 'обраного'}): <strong>{currentInheritance.suggestedPatronymic}</strong></span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -2811,13 +3203,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Father */}
                   <div className="space-y-1.5 p-3 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
-                      <User className="w-3.5 h-3.5 text-blue-500" />
-                      <span>Батько</span>
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
+                        <User className="w-3.5 h-3.5 text-blue-500" />
+                        <span>Батько</span>
+                      </label>
+                      {fatherId && (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          <span>автозаповнення активне</span>
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={fatherId}
-                      onChange={(e) => setFatherId(e.target.value)}
+                      onChange={(e) => handleFatherSelect(e.target.value)}
                       className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
                     >
                       <option value="">-- Оберіть батька зі списку осіб --</option>
@@ -2831,13 +3231,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
                   {/* Mother */}
                   <div className="space-y-1.5 p-3 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
-                      <User className="w-3.5 h-3.5 text-rose-500" />
-                      <span>Матір</span>
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
+                        <User className="w-3.5 h-3.5 text-rose-500" />
+                        <span>Матір</span>
+                      </label>
+                      {motherId && (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          <span>зв'язок встановлено</span>
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={motherId}
-                      onChange={(e) => setMotherId(e.target.value)}
+                      onChange={(e) => handleMotherSelect(e.target.value)}
                       className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
                     >
                       <option value="">-- Оберіть матір зі списку осіб --</option>
@@ -2849,6 +3257,85 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     </select>
                   </div>
                 </div>
+
+                {/* Smart Parent Context & Auto-inheritance Card */}
+                {(selectedFather || selectedMother) && (
+                  <div className="p-3.5 rounded-xl border border-amber-200/80 dark:border-amber-700/60 bg-gradient-to-r from-amber-50/60 to-orange-50/40 dark:from-amber-950/20 dark:to-orange-950/20 space-y-2.5">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-200">
+                        <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                        <span>Розумне автозаповнення та успадкування від батьків</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={applyAllParentAttributes}
+                        className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors cursor-pointer flex items-center gap-1 shadow-sm"
+                        title="Автоматично застосувати прізвище, патронім, гілку та місцевість"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>Застосувати всі ознаки</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+                      {currentInheritance.suggestedLastName && (
+                        <div className="p-2 rounded-lg bg-white/80 dark:bg-neutral-800/80 border border-black/5 dark:border-white/5 flex flex-col justify-between">
+                          <span className="text-neutral-500 dark:text-neutral-400 text-[10px]">
+                            Прізвище ({gender === 'female' ? 'донька' : 'син'}):
+                          </span>
+                          <span className="font-semibold text-neutral-800 dark:text-neutral-200 truncate">
+                            {currentInheritance.suggestedLastName}
+                          </span>
+                        </div>
+                      )}
+
+                      {currentInheritance.suggestedPatronymic && (
+                        <div className="p-2 rounded-lg bg-white/80 dark:bg-neutral-800/80 border border-black/5 dark:border-white/5 flex flex-col justify-between">
+                          <span className="text-neutral-500 dark:text-neutral-400 text-[10px]">По батькові:</span>
+                          <span className="font-semibold text-neutral-800 dark:text-neutral-200 truncate">
+                            {currentInheritance.suggestedPatronymic}
+                          </span>
+                        </div>
+                      )}
+
+                      {currentInheritance.suggestedBranch && (
+                        <div className="p-2 rounded-lg bg-white/80 dark:bg-neutral-800/80 border border-black/5 dark:border-white/5 flex flex-col justify-between">
+                          <span className="text-neutral-500 dark:text-neutral-400 text-[10px]">Гілка роду:</span>
+                          <span className="font-semibold text-neutral-800 dark:text-neutral-200 truncate">
+                            {currentInheritance.suggestedBranch}
+                          </span>
+                        </div>
+                      )}
+
+                      {currentInheritance.suggestedBirthPlace && (
+                        <div className="p-2 rounded-lg bg-white/80 dark:bg-neutral-800/80 border border-black/5 dark:border-white/5 flex flex-col justify-between">
+                          <span className="text-neutral-500 dark:text-neutral-400 text-[10px]">Населений пункт:</span>
+                          <span className="font-semibold text-neutral-800 dark:text-neutral-200 truncate">
+                            {currentInheritance.suggestedBirthPlace}
+                          </span>
+                        </div>
+                      )}
+
+                      {currentInheritance.suggestedEstate && (
+                        <div className="p-2 rounded-lg bg-white/80 dark:bg-neutral-800/80 border border-black/5 dark:border-white/5 flex flex-col justify-between">
+                          <span className="text-neutral-500 dark:text-neutral-400 text-[10px]">Стан / Верства:</span>
+                          <span className="font-semibold text-neutral-800 dark:text-neutral-200 truncate">
+                            {currentInheritance.suggestedEstate}
+                          </span>
+                        </div>
+                      )}
+
+                      {currentInheritance.suggestedConfession && (
+                        <div className="p-2 rounded-lg bg-white/80 dark:bg-neutral-800/80 border border-black/5 dark:border-white/5 flex flex-col justify-between">
+                          <span className="text-neutral-500 dark:text-neutral-400 text-[10px]">Віросповідання:</span>
+                          <span className="font-semibold text-neutral-800 dark:text-neutral-200 truncate">
+                            {currentInheritance.suggestedConfession}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Spouse Selector */}
                 <div className="p-3 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] space-y-1.5">
