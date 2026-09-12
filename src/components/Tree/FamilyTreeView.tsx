@@ -16,6 +16,7 @@ import {
   Heart,
   Eye,
   EyeOff,
+  Pencil,
   Users,
   ChevronUp,
   ChevronDown
@@ -26,6 +27,16 @@ import { Person } from '../../types';
 import { RelationManagerModal } from './RelationManagerModal';
 import { AddPersonModal } from './AddPersonModal';
 import { comparePersonsByAge } from '../../rodovid/utils/treeLayout';
+
+const getPersonMaiden = (p?: Person | null): string => {
+  if (!p) return '';
+  const maiden = (p.name?.maidenName || p.maidenName || '').trim();
+  const last = (p.name?.surname || p.lastName || '').trim();
+  if (maiden && maiden.toLowerCase() !== last.toLowerCase()) {
+    return maiden;
+  }
+  return '';
+};
 
 export const FamilyTreeView: React.FC = () => {
   const { persons, selectedPersonId, setSelectedPersonId, themePalette } = useGenealogy();
@@ -39,6 +50,8 @@ export const FamilyTreeView: React.FC = () => {
   const [showChildren, setShowChildren] = useState<boolean>(true);
 
   const [relationTargetPerson, setRelationTargetPerson] = useState<Person | null>(null);
+  const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
+  const [editPersonId, setEditPersonId] = useState<string | null>(null);
   const [addRelationData, setAddRelationData] = useState<{
     type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness';
     targetPersonId: string;
@@ -165,21 +178,45 @@ export const FamilyTreeView: React.FC = () => {
                     onClick={() => setSelectedPersonId(parent.id)}
                     className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:shadow-xl hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1.5 relative group`}
                   >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRelationTargetPerson(parent);
-                      }}
-                      className="absolute top-2 right-2 w-6 h-6 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
-                      title="Додати родича (+ батьків, дітей, подружжя)"
-                    >
-                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                    </button>
+                    <div className="absolute top-2 right-2 flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setInspectPersonId(parent.id);
+                        }}
+                        className="w-6 h-6 rounded-md bg-amber-600/90 hover:bg-amber-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Переглянути заповнені дані особи"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditPersonId(parent.id);
+                        }}
+                        className="w-6 h-6 rounded-md bg-sky-600/90 hover:bg-sky-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Редагувати особу"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRelationTargetPerson(parent);
+                        }}
+                        className="w-6 h-6 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Додати родича (+ батьків, дітей, подружжя)"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      </button>
+                    </div>
                     <span className="text-[10px] uppercase font-bold tracking-wider text-[#B88E3E]">
                       {parent.gender === 'male' ? 'Батько' : 'Мати'}
                     </span>
                     <div className={`font-bold text-base ${theme.cardTitle}`}>
-                      {parent.firstName} {parent.lastName}
+                      {parent.firstName} {parent.lastName} {getPersonMaiden(parent) && (
+                        <span className="font-normal text-sm opacity-85 text-[#B88E3E]">({getPersonMaiden(parent)})</span>
+                      )}
                     </div>
                     <div className={`text-xs ${theme.cardSubtext}`}>
                       {parent.birthYear ? `нар. ${parent.birthYear}` : ''} {parent.deathYear ? `— пом. ${parent.deathYear}` : ''}
@@ -225,21 +262,45 @@ export const FamilyTreeView: React.FC = () => {
                     onClick={() => setSelectedPersonId(sibling.id)}
                     className={`p-3.5 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-md hover:border-sky-500 transition-all cursor-pointer w-56 text-center space-y-1 relative group`}
                   >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRelationTargetPerson(sibling);
-                      }}
-                      className="absolute top-2 right-2 w-5 h-5 rounded-md bg-sky-600/90 hover:bg-sky-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
-                      title="Додати родича"
-                    >
-                      <Plus className="w-3 h-3 stroke-[2.5]" />
-                    </button>
+                    <div className="absolute top-2 right-2 flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setInspectPersonId(sibling.id);
+                        }}
+                        className="w-5 h-5 rounded-md bg-amber-600/90 hover:bg-amber-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Переглянути заповнені дані особи"
+                      >
+                        <Eye className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditPersonId(sibling.id);
+                        }}
+                        className="w-5 h-5 rounded-md bg-sky-600/90 hover:bg-sky-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Редагувати особу"
+                      >
+                        <Pencil className="w-2.5 h-2.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRelationTargetPerson(sibling);
+                        }}
+                        className="w-5 h-5 rounded-md bg-sky-600/90 hover:bg-sky-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Додати родича"
+                      >
+                        <Plus className="w-3 h-3 stroke-[2.5]" />
+                      </button>
+                    </div>
                     <span className="text-[10px] uppercase font-bold text-sky-400">
                       {sibling.gender === 'male' ? 'Брат' : 'Сестра'}
                     </span>
                     <div className={`font-bold text-sm ${theme.cardTitle}`}>
-                      {sibling.firstName} {sibling.lastName}
+                      {sibling.firstName} {sibling.lastName} {getPersonMaiden(sibling) && (
+                        <span className="font-normal text-xs opacity-85 text-sky-500">({getPersonMaiden(sibling)})</span>
+                      )}
                     </div>
                     <div className={`text-xs ${theme.cardSubtext}`}>
                       {sibling.birthYear ? `нар. ${sibling.birthYear}` : ''}
@@ -256,23 +317,47 @@ export const FamilyTreeView: React.FC = () => {
               <div
                 className={`p-6 rounded-3xl border-2 border-[#B88E3E] ${theme.cardBg} shadow-2xl w-72 text-center space-y-2 relative overflow-hidden group`}
               >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRelationTargetPerson(activePerson);
-                  }}
-                  className="absolute top-3 right-3 z-10 w-7 h-7 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer border border-emerald-400/40"
-                  title="Додати родича (+ батьків, дітей, подружжя, братів/сестер)"
-                >
-                  <Plus className="w-4 h-4 stroke-[2.5]" />
-                </button>
+                <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInspectPersonId(activePerson.id);
+                    }}
+                    className="w-7 h-7 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 flex items-center justify-center shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                    title="Переглянути заповнені дані особи"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditPersonId(activePerson.id);
+                    }}
+                    className="w-7 h-7 rounded-lg bg-sky-600 hover:bg-sky-500 text-white flex items-center justify-center shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                    title="Редагувати особу"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRelationTargetPerson(activePerson);
+                    }}
+                    className="w-7 h-7 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer border border-emerald-400/40"
+                    title="Додати родича (+ батьків, дітей, подружжя, братів/сестер)"
+                  >
+                    <Plus className="w-4 h-4 stroke-[2.5]" />
+                  </button>
+                </div>
 
                 <div className="absolute -top-10 -right-10 w-28 h-28 bg-[#B88E3E]/20 rounded-full blur-xl pointer-events-none" />
                 <span className="text-[10px] uppercase font-extrabold tracking-widest px-2.5 py-1 rounded-full bg-[#B88E3E] text-white">
                   Фокусна персона
                 </span>
                 <h3 className={`font-extrabold text-lg ${theme.cardTitle} pt-1`}>
-                  {activePerson.firstName} {activePerson.lastName}
+                  {activePerson.firstName} {activePerson.lastName} {getPersonMaiden(activePerson) && (
+                    <span className="font-semibold text-base opacity-85 text-[#B88E3E]">({getPersonMaiden(activePerson)})</span>
+                  )}
                 </h3>
                 <p className={`text-xs ${theme.cardSubtext}`}>
                   {activePerson.birthDate || activePerson.birthYear ? `Нар: ${activePerson.birthDate || activePerson.birthYear}` : ''}
@@ -292,22 +377,46 @@ export const FamilyTreeView: React.FC = () => {
                 onClick={() => setSelectedPersonId(spouse.id)}
                 className={`p-5 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1 relative group`}
               >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRelationTargetPerson(spouse);
-                  }}
-                  className="absolute top-2 right-2 w-6 h-6 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
-                  title="Додати родича"
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                </button>
+                <div className="absolute top-2 right-2 flex items-center gap-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInspectPersonId(spouse.id);
+                    }}
+                    className="w-6 h-6 rounded-md bg-amber-600/90 hover:bg-amber-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                    title="Переглянути заповнені дані особи"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditPersonId(spouse.id);
+                    }}
+                    className="w-6 h-6 rounded-md bg-sky-600/90 hover:bg-sky-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                    title="Редагувати особу"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRelationTargetPerson(spouse);
+                    }}
+                    className="w-6 h-6 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                    title="Додати родича"
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                  </button>
+                </div>
                 <span className="text-[10px] uppercase font-bold text-rose-500 flex items-center justify-center gap-1">
                   <Heart className="w-3 h-3 fill-rose-500" />
                   <span>{spouse.gender === 'female' ? 'Дружина' : 'Чоловік'}</span>
                 </span>
                 <div className={`font-bold text-base ${theme.cardTitle}`}>
-                  {spouse.firstName} {spouse.lastName}
+                  {spouse.firstName} {spouse.lastName} {getPersonMaiden(spouse) && (
+                    <span className="font-normal text-sm opacity-85 text-rose-500">({getPersonMaiden(spouse)})</span>
+                  )}
                 </div>
                 <div className={`text-xs ${theme.cardSubtext}`}>
                   {spouse.birthYear ? `нар. ${spouse.birthYear}` : ''}
@@ -350,21 +459,45 @@ export const FamilyTreeView: React.FC = () => {
                     onClick={() => setSelectedPersonId(child.id)}
                     className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-md hover:border-[#B88E3E] transition-all cursor-pointer w-56 text-center space-y-1 relative group`}
                   >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRelationTargetPerson(child);
-                      }}
-                      className="absolute top-2 right-2 w-5 h-5 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
-                      title="Додати родича"
-                    >
-                      <Plus className="w-3 h-3 stroke-[2.5]" />
-                    </button>
+                    <div className="absolute top-2 right-2 flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setInspectPersonId(child.id);
+                        }}
+                        className="w-5 h-5 rounded-md bg-amber-600/90 hover:bg-amber-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Переглянути заповнені дані особи"
+                      >
+                        <Eye className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditPersonId(child.id);
+                        }}
+                        className="w-5 h-5 rounded-md bg-sky-600/90 hover:bg-sky-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Редагувати особу"
+                      >
+                        <Pencil className="w-2.5 h-2.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRelationTargetPerson(child);
+                        }}
+                        className="w-5 h-5 rounded-md bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Додати родича"
+                      >
+                        <Plus className="w-3 h-3 stroke-[2.5]" />
+                      </button>
+                    </div>
                     <span className="text-[10px] uppercase font-bold text-blue-500">
                       {child.gender === 'male' ? 'Син' : 'Донька'}
                     </span>
                     <div className={`font-bold text-sm ${theme.cardTitle}`}>
-                      {child.firstName} {child.lastName}
+                      {child.firstName} {child.lastName} {getPersonMaiden(child) && (
+                        <span className="font-normal text-xs opacity-85 text-blue-500">({getPersonMaiden(child)})</span>
+                      )}
                     </div>
                     <div className={`text-xs ${theme.cardSubtext}`}>
                       {child.birthYear ? `нар. ${child.birthYear}` : ''}
@@ -397,6 +530,26 @@ export const FamilyTreeView: React.FC = () => {
         <AddPersonModal
           initialRelation={addRelationData}
           onClose={() => setAddRelationData(null)}
+        />
+      )}
+
+      {/* Inspect Person Modal (View Mode) */}
+      {inspectPersonId && (
+        <AddPersonModal
+          personId={inspectPersonId}
+          initialMode="view"
+          onClose={() => setInspectPersonId(null)}
+          onSelectPerson={(id) => setInspectPersonId(id)}
+        />
+      )}
+
+      {/* Edit Person Modal */}
+      {editPersonId && (
+        <AddPersonModal
+          personId={editPersonId}
+          initialMode="full"
+          onClose={() => setEditPersonId(null)}
+          onSelectPerson={(id) => setEditPersonId(id)}
         />
       )}
     </div>

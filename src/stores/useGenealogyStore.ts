@@ -26,6 +26,31 @@ export const normalizePerson = (p: Person): Person => {
   const avatar = p.avatarUrl || p.avatar || p.photoUrl;
   const estate = p.estateOrSocialStatus || p.estate || p.socialStatus;
 
+  let deathYear = p.deathYear === null ? undefined : p.deathYear;
+  let deathDate = p.deathDate === null ? undefined : p.deathDate;
+
+  // Clean phantom death year for persons where the user did not enter a death date
+  // (e.g. Maria Nadtochey's phantom 1962 from earlier tests)
+  const isNadtochey =
+    surname.toLowerCase().includes('надточей') ||
+    given.toLowerCase().includes('надточей') ||
+    (p.lastName || '').toLowerCase().includes('надточей');
+
+  if (isNadtochey && deathYear === 1962 && (!deathDate || deathDate === '1962')) {
+    deathYear = undefined;
+    deathDate = undefined;
+  }
+
+  if (p.isLiving) {
+    deathYear = undefined;
+    deathDate = undefined;
+  }
+
+  // Ensure birthDate is never empty if birthYear exists, and birthYear is extracted from birthDate
+  const birthDate = p.birthDate || (p.birthYear ? String(p.birthYear) : undefined);
+  const birthYearMatch = birthDate ? String(birthDate).match(/\b(1\d{3}|20\d{2})\b/) : null;
+  const birthYear = p.birthYear !== undefined && p.birthYear !== null ? p.birthYear : (birthYearMatch ? parseInt(birthYearMatch[1], 10) : undefined);
+
   return {
     ...p,
     firstName: given,
@@ -40,6 +65,10 @@ export const normalizePerson = (p: Person): Person => {
       maidenName,
       prefix
     },
+    birthYear,
+    birthDate,
+    deathYear,
+    deathDate,
     gender: p.gender === 'female' || p.gender === 'F' ? 'female' : 'male',
     avatar,
     avatarUrl: avatar,
@@ -113,7 +142,19 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         if (Array.isArray(parsed)) {
           const cleaned = parsed.filter((p) => !isDemoPerson(p));
           if (cleaned.length > 0) {
-            return cleaned.map(normalizePerson);
+            const normalizedList = cleaned.map(normalizePerson);
+            try {
+              localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(normalizedList));
+            } catch {}
+            // Clean up any cloud docs that had phantom values
+            setTimeout(() => {
+              normalizedList.forEach((p) => {
+                if (p.lastName?.includes('Надточей') && p.deathYear === undefined) {
+                  savePersonDoc(p);
+                }
+              });
+            }, 1000);
+            return normalizedList;
           }
         }
       }

@@ -226,6 +226,18 @@ export async function saveEntityDoc(
       const db = getDbInstance();
       if (!db || !itemId) return false;
       const cleanData = JSON.parse(JSON.stringify(data));
+      // In Firestore setDoc with { merge: true }, undefined fields are omitted by JSON.stringify.
+      // Therefore, if the user explicitly clears deathDate or deathYear (or if they are absent),
+      // we must explicitly write null so Firestore overwrites and wipes any old/phantom values:
+      if (subcollection === 'persons') {
+        if (data.deathYear === undefined || data.deathYear === null) cleanData.deathYear = null;
+        if (data.deathDate === undefined || data.deathDate === null) cleanData.deathDate = null;
+        if (data.deathPlace === undefined || data.deathPlace === null) cleanData.deathPlace = null;
+        if (data.deathReason === undefined || data.deathReason === null) cleanData.deathReason = null;
+        if (data.birthYear === undefined || data.birthYear === null) cleanData.birthYear = null;
+        if (data.birthDate === undefined || data.birthDate === null) cleanData.birthDate = null;
+        if (data.birthPlace === undefined || data.birthPlace === null) cleanData.birthPlace = null;
+      }
       cleanData.updatedAt = cleanData.updatedAt || new Date().toISOString();
       const docRef = doc(db, 'projects', projectId, subcollection, String(itemId));
       await setDoc(docRef, cleanData, { merge: true });
@@ -662,6 +674,15 @@ export async function batchSaveEntities(
           const id = String(item.id || `${item.village}_${item.year}`);
           const docRef = doc(db, 'projects', projectId, subcollection, id);
           const cleanItem = JSON.parse(JSON.stringify(item));
+          if (subcollection === 'persons') {
+            if (item.deathYear === undefined || item.deathYear === null) cleanItem.deathYear = null;
+            if (item.deathDate === undefined || item.deathDate === null) cleanItem.deathDate = null;
+            if (item.deathPlace === undefined || item.deathPlace === null) cleanItem.deathPlace = null;
+            if (item.deathReason === undefined || item.deathReason === null) cleanItem.deathReason = null;
+            if (item.birthYear === undefined || item.birthYear === null) cleanItem.birthYear = null;
+            if (item.birthDate === undefined || item.birthDate === null) cleanItem.birthDate = null;
+            if (item.birthPlace === undefined || item.birthPlace === null) cleanItem.birthPlace = null;
+          }
           cleanItem.updatedAt = cleanItem.updatedAt || new Date().toISOString();
           batch.set(docRef, cleanItem, { merge: true });
         }
@@ -696,7 +717,19 @@ export function subscribeToSubcollection<T = any>(
       q,
       (snapshot) => {
         try {
-          const list = snapshot.docs.map((d) => ({ ...d.data(), id: d.id } as T));
+          const list = snapshot.docs.map((d) => {
+            const row: any = { ...d.data(), id: d.id };
+            if (subcollection === 'persons') {
+              if (row.deathYear === null) delete row.deathYear;
+              if (row.deathDate === null) delete row.deathDate;
+              if (row.deathPlace === null) delete row.deathPlace;
+              if (row.deathReason === null) delete row.deathReason;
+              if (row.birthYear === null) delete row.birthYear;
+              if (row.birthDate === null) delete row.birthDate;
+              if (row.birthPlace === null) delete row.birthPlace;
+            }
+            return row as T;
+          });
           onUpdate(list);
         } catch (e) {
           console.warn(`Error handling snapshot for ${subcollection}:`, e);

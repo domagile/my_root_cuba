@@ -17,13 +17,16 @@ import {
   Cross,
   Sparkles,
   Layers,
-  Map as MapIcon
+  Map as MapIcon,
+  BarChart3
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
+import { useResearchStore } from '../../../stores/useResearchStore';
 import { getThemeConfig } from '../../../utils/theme';
 import { normalizeUkrainianPlace } from '../../../utils/ukrainianPhonetics';
+import { OriginStatsMap } from './OriginStatsMap';
 
 interface PlacesMapViewProps {
   database: GenealogyDatabase;
@@ -56,6 +59,8 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlace, setSelectedPlace] = useState<string | null>(null);
   const [eventTypeFilter, setEventTypeFilter] = useState<'all' | 'birth' | 'marriage' | 'death'>('all');
+  const [placesViewSubmode, setPlacesViewSubmode] = useState<'map_catalog' | 'origin_stats'>('map_catalog');
+  const metricRecords = useResearchStore((s) => s.metricRecords);
 
   const personsList = useMemo(() => {
     return Object.values(database.persons || {}) as Person[];
@@ -191,15 +196,60 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
   const activePlaceObj = activePlaceName ? placeData[activePlaceName] : null;
 
   return (
-    <div className={`flex-1 flex flex-col md:flex-row h-full overflow-hidden ${theme.textPrimary}`}>
-      {/* Left panel: Places search & list */}
-      <div className={`w-full md:w-96 border-b md:border-b-0 md:border-r ${theme.cardBorder} flex flex-col h-1/2 md:h-full ${theme.cardBg}`}>
-        <div className={`p-4 border-b ${theme.borderSubtle} space-y-3`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-amber-500">
-              <Compass className="w-5 h-5" />
-              <h2 className={`font-bold text-xs tracking-wide uppercase ${theme.textPrimary}`}>Географія Роду</h2>
-            </div>
+    <div className={`flex-1 flex flex-col h-full overflow-hidden ${theme.textPrimary}`}>
+      {/* Top Header Submode Switcher */}
+      <div className={`px-4 py-2.5 border-b ${theme.cardBorder} flex flex-wrap items-center justify-between gap-3 ${isDark ? 'bg-[#15191e]' : 'bg-neutral-50'} shrink-0`}>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPlacesViewSubmode('map_catalog')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              placesViewSubmode === 'map_catalog'
+                ? isDark
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs'
+                  : 'bg-amber-100 text-amber-900 border border-amber-300 shadow-xs'
+                : `${theme.surfaceBg} ${theme.textMuted} border ${theme.borderSubtle} hover:${theme.textPrimary}`
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5 text-amber-500" />
+            <span>Каталог локацій та Google Карти</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPlacesViewSubmode('origin_stats')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              placesViewSubmode === 'origin_stats'
+                ? isDark
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs'
+                  : 'bg-amber-100 text-amber-900 border border-amber-300 shadow-xs'
+                : `${theme.surfaceBg} ${theme.textMuted} border ${theme.borderSubtle} hover:${theme.textPrimary}`
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
+            <span>Статистична карта походження та діаграми</span>
+          </button>
+        </div>
+      </div>
+
+      {placesViewSubmode === 'origin_stats' ? (
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          <OriginStatsMap
+            database={database}
+            metricRecordsList={metricRecords}
+            onSelectPerson={onSelectPerson}
+          />
+        </div>
+      ) : (
+        <div className={`flex-1 flex flex-col md:flex-row h-full overflow-hidden ${theme.textPrimary}`}>
+          {/* Left panel: Places search & list */}
+          <div className={`w-full md:w-96 border-b md:border-b-0 md:border-r ${theme.cardBorder} flex flex-col h-1/2 md:h-full ${theme.cardBg}`}>
+            <div className={`p-4 border-b ${theme.borderSubtle} space-y-3`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-amber-500">
+                  <Compass className="w-5 h-5" />
+                  <h2 className={`font-bold text-xs tracking-wide uppercase ${theme.textPrimary}`}>Географія Роду</h2>
+                </div>
             <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-neutral-200 text-neutral-700'}`}>
               {placeList.length} локацій
             </span>
@@ -473,5 +523,7 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
         </div>
       </div>
     </div>
-  );
+  )}
+</div>
+);
 };

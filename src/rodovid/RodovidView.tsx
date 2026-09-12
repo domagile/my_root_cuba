@@ -381,6 +381,10 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
             database={database}
             activePersonId={activePersonId}
             onSelectPerson={(id) => setInspectPersonId(id)}
+            onEditPerson={(id) => {
+              if (isReadOnly) return;
+              setEditPersonTarget(id);
+            }}
             onOpenAddChild={(_parentId) => {
               if (isReadOnly) return;
               setEditPersonTarget('NEW');

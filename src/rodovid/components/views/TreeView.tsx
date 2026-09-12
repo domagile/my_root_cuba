@@ -98,6 +98,7 @@ interface TreeViewProps {
   database: GenealogyDatabase;
   activePersonId: string;
   onSelectPerson: (id: string) => void;
+  onEditPerson?: (id: string) => void;
   onOpenAddChild: (parentId: string) => void;
   onOpenAddParent: (childId: string) => void;
   onChangeRoot: (id: string) => void;
@@ -110,6 +111,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
   database,
   activePersonId,
   onSelectPerson,
+  onEditPerson,
   onOpenAddChild,
   onOpenAddParent,
   onChangeRoot,
@@ -1501,6 +1503,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
       const firstName = escapeXml(p.name?.given || p.firstName || '');
       const lastName = escapeXml(p.name?.surname || p.lastName || '');
+      const rawMaiden = escapeXml((p.name?.maidenName || p.maidenName || '').trim());
+      const maidenName = rawMaiden && rawMaiden.toLowerCase() !== lastName.toLowerCase() ? `(${rawMaiden})` : '';
+      const displayLastName = maidenName ? `${lastName} ${maidenName}` : lastName;
       const dates = escapeXml(formatLifespan(p));
       const code = escapeXml(getGenealogyCode(p));
 
@@ -1510,7 +1515,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
       svgContent += `  <rect width="${node.width}" height="${node.height}" rx="10" class="node-card" stroke="${cardBorder}" stroke-width="${borderWidth}" />\n`;
       svgContent += `  <circle cx="${node.width / 2}" cy="42" r="23" fill="${avatarBg}" stroke="${avatarStroke}" stroke-width="1.5" />\n`;
       svgContent += `  <text x="${node.width / 2}" y="95" class="text-first">${firstName}</text>\n`;
-      svgContent += `  <text x="${node.width / 2}" y="113" class="text-last">${lastName}</text>\n`;
+      svgContent += `  <text x="${node.width / 2}" y="113" class="text-last">${displayLastName}</text>\n`;
       svgContent += `  <text x="${node.width / 2}" y="133" class="text-dates">${dates}</text>\n`;
       svgContent += `  <text x="${node.width / 2}" y="152" class="text-code">${code}</text>\n`;
       svgContent += `</g>\n`;
@@ -1747,39 +1752,47 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          setShowSiblings((prev) => {
-                            const next = !prev;
-                            if (!next) {
-                              setCollapsedSiblings(new Set());
-                            }
-                            return next;
-                          });
+                          if (directAncestorsOnly) {
+                            setDirectAncestorsOnly(false);
+                            setShowSiblings(true);
+                          } else {
+                            setShowSiblings((prev) => {
+                              const next = !prev;
+                              if (!next) {
+                                setCollapsedSiblings(new Set());
+                              }
+                              return next;
+                            });
+                          }
+                          setTimeout(() => focusOnPerson(activePersonId), 50);
                         }}
                         className={`w-full flex items-center justify-between p-2 rounded-lg text-xs border transition-all cursor-pointer ${
-                          showSiblings
+                          showSiblings && !directAncestorsOnly
                             ? 'bg-sky-950/40 text-sky-200 border-sky-800/50 hover:bg-sky-900/50'
                             : 'bg-[#14171a] text-slate-400 border-[#2d3238] hover:text-white'
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          <Users className={`w-4 h-4 shrink-0 ${showSiblings ? 'text-sky-400' : 'text-slate-400'}`} />
+                          <Users className={`w-4 h-4 shrink-0 ${showSiblings && !directAncestorsOnly ? 'text-sky-400' : 'text-slate-400'}`} />
                           <div className="text-left">
                             <div className="font-semibold text-white">
-                              {showSiblings ? 'Всі родичі' : 'Тільки пряма лінія'}
+                              {showSiblings && !directAncestorsOnly ? 'Всі родичі' : 'Тільки пряма лінія'}
                             </div>
                             <div className="text-[10px] text-slate-400">
-                              {showSiblings ? 'Показувати братів, сестер та кузенів' : 'Приховано бічні гілки'}
+                              {directAncestorsOnly
+                                ? 'Вимкнено (активний режим «Тільки предки»)'
+                                : (showSiblings ? 'Показувати братів, сестер та кузенів' : 'Приховано бічні гілки')}
                             </div>
                           </div>
                         </div>
                         <div
                           className={`w-8 h-4 rounded-full p-0.5 transition-colors shrink-0 ${
-                            showSiblings ? 'bg-sky-600' : 'bg-slate-700'
+                            showSiblings && !directAncestorsOnly ? 'bg-sky-600' : 'bg-slate-700'
                           }`}
                         >
                           <div
                             className={`w-3 h-3 rounded-full bg-white transition-transform ${
-                              showSiblings ? 'translate-x-4' : 'translate-x-0'
+                              showSiblings && !directAncestorsOnly ? 'translate-x-4' : 'translate-x-0'
                             }`}
                           />
                         </div>
@@ -1789,7 +1802,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          setDirectAncestorsOnly((prev) => !prev);
+                          setDirectAncestorsOnly((prev) => {
+                            const next = !prev;
+                            if (next) {
+                              setShowSiblings(false);
+                            } else {
+                              setShowSiblings(true);
+                            }
+                            return next;
+                          });
                           setTimeout(() => focusOnPerson(activePersonId), 50);
                         }}
                         className={`w-full flex items-center justify-between p-2 rounded-lg text-xs border transition-all cursor-pointer ${
@@ -2390,6 +2411,29 @@ export const TreeView: React.FC<TreeViewProps> = ({
           </div>
         )}
 
+        {directAncestorsOnly && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-[#181b1f]/95 backdrop-blur-md border border-indigo-500/60 shadow-2xl px-3.5 py-1.5 rounded-full text-xs animate-in fade-in slide-in-from-top-2 duration-200 select-none">
+            <GitCommit className="w-4 h-4 text-indigo-400 shrink-0" />
+            <span className="font-medium text-slate-200">
+              {layout.nodes.length === 1
+                ? 'Режим «Тільки предки»: у вибраної особи немає батьків у базі'
+                : `Режим «Тільки предки»: ${layout.nodes.length} осіб`}
+            </span>
+            <div className="h-3.5 w-px bg-slate-700 mx-0.5" />
+            <button
+              type="button"
+              onClick={() => {
+                setDirectAncestorsOnly(false);
+                setShowSiblings(true);
+                setTimeout(() => focusOnPerson(activePersonId), 50);
+              }}
+              className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-colors cursor-pointer"
+            >
+              Показати всіх родичів
+            </button>
+          </div>
+        )}
+
         {/* World Transform Layer */}
         <div
           className="absolute origin-top-left transition-transform duration-75"
@@ -2601,6 +2645,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
             const firstName = isMasked ? 'Скрито' : (p.name?.given || p.firstName || '—');
             const lastName = isMasked ? 'Скрито' : (p.name?.surname || p.lastName || '—');
+            const rawMaidenName = isMasked ? '' : (p.name?.maidenName || p.maidenName || '').trim();
+            const maidenName = rawMaidenName && rawMaidenName.toLowerCase() !== (lastName !== '—' ? lastName.toLowerCase() : '')
+              ? rawMaidenName
+              : '';
+            const maidenFormatted = maidenName ? `(${maidenName})` : '';
             const lifespanStr = isMasked ? '🔒 Скрито (Жива особа)' : formatLifespan(p);
             const fsCode = isMasked ? '🔒 ЗАХИЩЕНО' : getGenealogyCode(p);
 
@@ -2696,7 +2745,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/70 border-white/30'
                         : 'border-white/30'
                     }`}
-                    title={`${firstName} ${lastName} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку`}
+                    title={`${firstName} ${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку`}
                   >
                     <div className="flex items-center gap-1 truncate min-w-0">
                       {isTreeRoot ? (
@@ -2705,7 +2754,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         <Lock className="w-2.5 h-2.5 text-emerald-200 shrink-0" />
                       ) : null}
                       <span className="font-black text-[11px] truncate tracking-tight">
-                        {lastName}
+                        {lastName} {maidenFormatted && <span className="font-normal opacity-85">{maidenFormatted}</span>}
                       </span>
                     </div>
                     {shortLifespan && (
@@ -2793,7 +2842,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/40 shadow-lg'
                         : ''
                     }`}
-                    title={`${firstName} ${lastName} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку`}
+                    title={`${firstName} ${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку`}
                   >
                     {/* Top row: Status/Crown + Name + Quick Edit */}
                     <div className="flex items-center justify-between gap-1 min-w-0">
@@ -2810,22 +2859,39 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           />
                         )}
                         <span className="font-extrabold text-xs truncate leading-tight tracking-tight">
-                          {lastName} {firstName !== '—' ? firstName : ''}
+                          {lastName} {maidenFormatted && <span className="font-semibold opacity-90">{maidenFormatted} </span>}{firstName !== '—' ? firstName : ''}
                         </span>
                       </div>
 
                       {!isMasked && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelectPerson(p.id);
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-black/20 dark:hover:bg-white/20 transition-opacity shrink-0 cursor-pointer"
-                          title="Редагувати картку"
-                        >
-                          <Pencil className="w-2.5 h-2.5" />
-                        </button>
+                        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelectPerson(p.id);
+                            }}
+                            className="p-0.5 rounded hover:bg-black/20 dark:hover:bg-white/20 shrink-0 cursor-pointer"
+                            title="Переглянути заповнені дані особи"
+                          >
+                            <Eye className="w-2.5 h-2.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onEditPerson) {
+                                onEditPerson(p.id);
+                              } else {
+                                onSelectPerson(p.id);
+                              }
+                            }}
+                            className="p-0.5 rounded hover:bg-black/20 dark:hover:bg-white/20 shrink-0 cursor-pointer"
+                            title="Редагувати картку"
+                          >
+                            <Pencil className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -3211,7 +3277,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                                 <div className="min-w-0 pr-1.5">
                                   <div className="text-[10px] text-rose-500 font-semibold uppercase tracking-wider">Мати</div>
                                   <div className={`font-medium truncate ${isLightCanvas ? 'text-stone-800' : 'text-white'}`}>
-                                    {mother.maidenName || mother.lastName} {mother.firstName}
+                                    {mother.lastName ? `${mother.lastName} ` : ''}
+                                    {(mother.name?.maidenName || mother.maidenName) && (mother.name?.maidenName || mother.maidenName) !== mother.lastName && (
+                                      <span className="text-amber-600 dark:text-amber-300 font-normal">({mother.name?.maidenName || mother.maidenName}) </span>
+                                    )}
+                                    {mother.firstName}
                                   </div>
                                 </div>
                                 <button
@@ -3332,22 +3402,39 @@ export const TreeView: React.FC<TreeViewProps> = ({
                               ? 'text-neutral-900 group-hover:text-emerald-700'
                               : 'text-white group-hover:text-emerald-400'
                           }`}
-                          title={`${lastName} ${firstName}`}
+                          title={`${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} ${firstName}`}
                         >
-                          {lastName} {firstName !== '—' ? firstName : ''}
+                          {lastName} {maidenFormatted && <span className={`font-semibold text-[11px] ${isLightCanvas ? 'text-amber-800' : 'text-amber-300'}`}>{maidenFormatted} </span>}{firstName !== '—' ? firstName : ''}
                         </h4>
                         {!isMasked && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onSelectPerson(p.id);
-                            }}
-                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-opacity shrink-0 cursor-pointer"
-                            title="Редагувати особу"
-                          >
-                            <Pencil className="w-2.5 h-2.5 text-slate-400 hover:text-white" />
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectPerson(p.id);
+                              }}
+                              className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 shrink-0 cursor-pointer text-amber-600 dark:text-amber-400"
+                              title="Переглянути заповнені дані особи"
+                            >
+                              <Eye className="w-2.5 h-2.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onEditPerson) {
+                                  onEditPerson(p.id);
+                                } else {
+                                  onSelectPerson(p.id);
+                                }
+                              }}
+                              className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 shrink-0 cursor-pointer"
+                              title="Редагувати особу"
+                            >
+                              <Pencil className="w-2.5 h-2.5 text-slate-400 hover:text-white" />
+                            </button>
+                          </div>
                         )}
                       </div>
 
@@ -3446,18 +3533,24 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       {/* First Name */}
                       <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
                         isLightCanvas
-                          ? 'text-neutral-900 group-hover:text-emerald-700 font-bold'
-                          : 'text-white group-hover:text-emerald-400 font-bold'
+                          ? 'text-neutral-900 group-hover:text-emerald-700'
+                          : 'text-white group-hover:text-emerald-400'
                       }`}>
                         {firstName}
                       </h4>
-                      {/* Last Name */}
+                      {/* Last Name & Maiden Name in () */}
                       <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
                         isLightCanvas
-                          ? 'text-neutral-900 group-hover:text-emerald-700 font-bold'
-                          : 'text-white group-hover:text-emerald-400 font-bold'
-                      }`}>
-                        {lastName}
+                          ? 'text-neutral-900 group-hover:text-emerald-700'
+                          : 'text-white group-hover:text-emerald-400'
+                      }`} title={maidenFormatted ? `${lastName} ${maidenFormatted}` : lastName}>
+                        {lastName} {maidenFormatted && (
+                          <span className={`font-semibold text-[11px] ${
+                            isLightCanvas ? 'text-amber-800' : 'text-amber-300'
+                          }`}>
+                            {maidenFormatted}
+                          </span>
+                        )}
                       </h4>
 
                       {/* Lifespan */}
@@ -3520,7 +3613,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         </div>
                       ) : (
                         <>
-                          {/* Person Card / Edit Badge (Pencil icon to open/edit person card) */}
+                          {/* View Person Filled Data Button (Eye icon) */}
                           <button
                             type="button"
                             onClick={(e) => {
@@ -3529,10 +3622,31 @@ export const TreeView: React.FC<TreeViewProps> = ({
                             }}
                             className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
                               isLightCanvas
+                                ? 'bg-amber-50 hover:bg-amber-600 text-amber-800 hover:text-white border-amber-300'
+                                : 'bg-amber-950/40 hover:bg-amber-600 text-amber-400 hover:text-white border-amber-800/60'
+                            }`}
+                            title="Переглянути заповнені дані особи"
+                          >
+                            <Eye className="w-3 h-3" />
+                          </button>
+
+                          {/* Person Card / Edit Badge (Pencil icon to open/edit person card) */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onEditPerson) {
+                                onEditPerson(p.id);
+                              } else {
+                                onSelectPerson(p.id);
+                              }
+                            }}
+                            className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
+                              isLightCanvas
                                 ? 'bg-sky-50 hover:bg-sky-600 text-sky-800 hover:text-white border-sky-300'
                                 : 'bg-[#0e7490]/30 hover:bg-sky-600 text-[#38bdf8] hover:text-white border-[#0e7490]/50'
                             }`}
-                            title="Картка особи (редагування)"
+                            title="Редагувати особу"
                           >
                             <Pencil className="w-3 h-3" />
                           </button>
@@ -3791,7 +3905,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           <div className="space-y-1 max-h-48 overflow-y-auto">
                             {collateralSiblings.map((sib) => {
                               const isCollapsed = collapsedSiblings.has(sib.id) || !showSiblings;
-                              const sibName = `${sib.firstName || ''} ${sib.lastName || ''}`.trim() || 'Без імені';
+                              const sibMaiden = (sib.name?.maidenName || sib.maidenName || '').trim();
+                              const sibMaidenStr = sibMaiden && sibMaiden.toLowerCase() !== (sib.lastName || '').toLowerCase() ? ` (${sibMaiden})` : '';
+                              const sibName = `${sib.firstName || ''} ${sib.lastName || ''}${sibMaidenStr}`.trim() || 'Без імені';
                               const relationLabel = sib.gender === 'female' ? 'сестра' : 'брат';
                               return (
                                 <div

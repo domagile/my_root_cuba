@@ -41,8 +41,12 @@ import {
   Compass,
   Mail,
   GitMerge,
-  AlertTriangle
+  AlertTriangle,
+  Eye,
+  Pencil
 } from 'lucide-react';
+import { PersonProfileView } from './PersonProfileView';
+import { DoveIcon } from '../common/GenealogyIcons';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
 import {
@@ -82,6 +86,19 @@ import {
   validatePersonFormDates,
   validateLifeEventDate
 } from '../../utils/dateValidation';
+import { Zap, RotateCcw } from 'lucide-react';
+import { useResearchStore } from '../../stores/useResearchStore';
+import { ExpressPersonForm } from './ExpressPersonForm';
+import { SmartHistoricalDateInput } from './SmartHistoricalDateInput';
+import { PlaceHierarchyAutocompleteInput } from './PlaceHierarchyAutocompleteInput';
+import { SourceMetricLinker } from './SourceMetricLinker';
+import { FamilyQuickAddModal } from './FamilyQuickAddModal';
+import {
+  savePersonDraft,
+  loadPersonDraft,
+  clearPersonDraft,
+  PersonDraftData
+} from '../../utils/formDraftStorage';
 
 export type { ModalSection, ModalAccordionState };
 
@@ -98,6 +115,11 @@ export interface AddPersonModalProps {
   onOpenKinshipWith?: (personId: string) => void;
   onDeletePerson?: (personId: string) => void;
   onSelectPerson?: (personId: string) => void;
+  onOpenAddRelation?: (
+    type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness',
+    targetPersonId: string
+  ) => void;
+  initialMode?: 'view' | 'edit' | 'full' | 'express';
   isReadOnly?: boolean;
 }
 
@@ -116,12 +138,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   personId,
   initialPersonToEdit,
   initialRelation,
+  initialMode,
   onClose,
   onSaveAndOpenProfile,
   onChangeRoot,
   onOpenKinshipWith,
   onDeletePerson,
   onSelectPerson,
+  onOpenAddRelation,
   isReadOnly = false
 }) => {
   const { persons, addPerson, updatePerson, themePalette, setSelectedPersonId, getGenealogyDatabase, families, sources, events } = useGenealogy();
@@ -545,7 +569,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [tempWitnessedPersons, setTempWitnessedPersons] = useState<Array<{ id: string; person: Person; notes?: string }>>([]);
 
   // 4. Dates & Places (Map locations)
-  const [birthDate, setBirthDate] = useState(effectivePerson?.birthDate || '');
+  const [birthDate, setBirthDate] = useState(
+    effectivePerson?.birthDate || (effectivePerson?.birthYear ? String(effectivePerson.birthYear) : '')
+  );
   const [birthPlace, setBirthPlace] = useState(
     effectivePerson?.birthPlace || (!effectivePerson ? initialParentContext?.suggestedBirthPlace || '' : '')
   );
@@ -555,7 +581,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [marriagePlace, setMarriagePlace] = useState(effectivePerson?.marriagePlace || '');
   const [marriagePlaceHistorical, setMarriagePlaceHistorical] = useState('');
 
-  const [deathDate, setDeathDate] = useState(effectivePerson?.deathDate || '');
+  const [deathDate, setDeathDate] = useState(
+    effectivePerson?.deathDate || (effectivePerson?.deathYear ? String(effectivePerson.deathYear) : '')
+  );
   const [deathPlace, setDeathPlace] = useState(effectivePerson?.deathPlace || '');
   const [deathPlaceHistorical, setDeathPlaceHistorical] = useState('');
   const [deathReason, setDeathReason] = useState(effectivePerson?.deathReason || '');
@@ -635,6 +663,183 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [showDuplicateSaveDialog, setShowDuplicateSaveDialog] = useState<boolean>(false);
   const [dateValidationDismissedForSave, setDateValidationDismissedForSave] = useState<boolean>(false);
   const [showDateValidationDialog, setShowDateValidationDialog] = useState<boolean>(false);
+
+  // 9. Metric records & Archival sources linking
+  const metricRecords = useResearchStore((state) => state.metricRecords);
+  const [sourceCitations, setSourceCitations] = useState<string[]>(effectivePerson?.sourceCitations || []);
+  const [linkedMetricId, setLinkedMetricId] = useState<string>(
+    effectivePerson?.sourceIds && effectivePerson.sourceIds.length > 0 ? effectivePerson.sourceIds[0] : ''
+  );
+
+  // Form Mode: 'view' vs 'express' vs 'full'
+  const [formMode, setFormMode] = useState<'view' | 'express' | 'full'>(() => {
+    if (initialMode === 'edit' || initialMode === 'full') return 'full';
+    if (initialMode === 'express') return 'express';
+    if (initialMode === 'view') return 'view';
+    // If effectivePerson exists and not creating a new relation, default to view mode
+    return effectivePerson && !initialRelation ? 'view' : 'express';
+  });
+
+  useEffect(() => {
+    if (personId && !initialRelation && initialMode !== 'edit' && initialMode !== 'full') {
+      setFormMode('view');
+    }
+  }, [personId, initialRelation, initialMode]);
+
+  // Family quick add modal state
+  const [showFamilyQuickAddModal, setShowFamilyQuickAddModal] = useState(false);
+
+  // Draft auto-save and recovery state
+  const [availableDraft, setAvailableDraft] = useState<PersonDraftData | null>(null);
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
+
+  // Filter available fathers & mothers for quick selection
+  const availableFathers = useMemo(() => {
+    return persons.filter((p) => isPersonMale(p) && p.id !== effectivePerson?.id);
+  }, [persons, effectivePerson]);
+
+  const availableMothers = useMemo(() => {
+    return persons.filter((p) => isPersonFemale(p) && p.id !== effectivePerson?.id);
+  }, [persons, effectivePerson]);
+
+  // Load draft on mount if exists
+  useEffect(() => {
+    if (isReadOnly) return;
+    const draft = loadPersonDraft(effectivePerson?.id);
+    if (draft && (draft.firstName || draft.lastName)) {
+      if (
+        draft.firstName !== (effectivePerson?.firstName || initialFirst) ||
+        draft.lastName !== (effectivePerson?.lastName || initialLast)
+      ) {
+        setAvailableDraft(draft);
+        setShowDraftBanner(true);
+      }
+    }
+  }, [effectivePerson?.id]);
+
+  const handleRestoreDraft = () => {
+    if (!availableDraft) return;
+    if (availableDraft.firstName) setFirstName(availableDraft.firstName);
+    if (availableDraft.lastName) setLastName(availableDraft.lastName);
+    if (availableDraft.patronymic) setPatronymic(availableDraft.patronymic);
+    if (availableDraft.maidenName) setMaidenName(availableDraft.maidenName);
+    if (availableDraft.birthDate) setBirthDate(availableDraft.birthDate);
+    if (availableDraft.birthPlace) setBirthPlace(availableDraft.birthPlace);
+    if (availableDraft.deathDate) setDeathDate(availableDraft.deathDate);
+    if (availableDraft.deathPlace) setDeathPlace(availableDraft.deathPlace);
+    if (availableDraft.gender) applyGenderChange(availableDraft.gender as Gender, true);
+    if (availableDraft.isLiving !== undefined) setIsLiving(availableDraft.isLiving);
+    if (availableDraft.fatherId) setFatherId(availableDraft.fatherId);
+    if (availableDraft.motherId) setMotherId(availableDraft.motherId);
+    if (availableDraft.formMode) setFormMode(availableDraft.formMode);
+    setShowDraftBanner(false);
+  };
+
+  const handleDismissDraft = () => {
+    clearPersonDraft(effectivePerson?.id);
+    setShowDraftBanner(false);
+    setAvailableDraft(null);
+  };
+
+  // Debounced auto-save draft
+  useEffect(() => {
+    if (isReadOnly) return;
+    const timer = setTimeout(() => {
+      savePersonDraft(effectivePerson?.id, {
+        firstName,
+        lastName,
+        patronymic,
+        maidenName,
+        gender,
+        isLiving,
+        birthDate,
+        birthPlace,
+        deathDate,
+        deathPlace,
+        residencePlace,
+        fatherId,
+        motherId,
+        spouseId,
+        notes,
+        bio,
+        formMode
+      });
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [
+    isReadOnly, effectivePerson?.id, firstName, lastName, patronymic, maidenName,
+    gender, isLiving, birthDate, birthPlace, deathDate, deathPlace, residencePlace,
+    fatherId, motherId, spouseId, notes, bio, formMode
+  ]);
+
+  const isFormDirty = useMemo(() => {
+    if (effectivePerson) {
+      return (
+        firstName !== (effectivePerson.firstName || '') ||
+        lastName !== (effectivePerson.lastName || '') ||
+        birthDate !== (effectivePerson.birthDate || (effectivePerson.birthYear ? String(effectivePerson.birthYear) : ''))
+      );
+    }
+    return Boolean(firstName.trim() || lastName.trim() || birthDate.trim() || birthPlace.trim());
+  }, [effectivePerson, firstName, lastName, birthDate, birthPlace]);
+
+  const handleSafeClose = () => {
+    if (isFormDirty && !isReadOnly) {
+      if (window.confirm('У вас є незбережені дані у формі. Ви дійсно бажаєте вийти без збереження?')) {
+        clearPersonDraft(effectivePerson?.id);
+        onClose();
+      }
+    } else {
+      onClose();
+    }
+  };
+
+  const handleFamilyQuickAddSave = (fatherData: Partial<Person>, motherData: Partial<Person>) => {
+    const fId = `p-f-${Date.now()}`;
+    const mId = `p-m-${Date.now() + 1}`;
+
+    const newFather: Person = {
+      id: fId,
+      name: { given: fatherData.firstName, surname: fatherData.lastName },
+      firstName: fatherData.firstName || '',
+      lastName: fatherData.lastName || '',
+      gender: 'male',
+      birthYear: fatherData.birthYear,
+      isLiving: fatherData.isLiving,
+      birthPlace: fatherData.birthPlace,
+      residencePlace: fatherData.residencePlace,
+      spouseIds: [mId],
+      childrenIds: effectivePerson ? [effectivePerson.id] : []
+    };
+
+    const newMother: Person = {
+      id: mId,
+      name: { given: motherData.firstName, surname: motherData.lastName, maidenName: motherData.maidenName },
+      firstName: motherData.firstName || '',
+      lastName: motherData.lastName || '',
+      maidenName: motherData.maidenName,
+      gender: 'female',
+      birthYear: motherData.birthYear,
+      isLiving: motherData.isLiving,
+      birthPlace: motherData.birthPlace,
+      residencePlace: motherData.residencePlace,
+      spouseIds: [fId],
+      childrenIds: effectivePerson ? [effectivePerson.id] : []
+    };
+
+    addPerson(newFather);
+    addPerson(newMother);
+
+    setFatherId(fId);
+    setMotherId(mId);
+
+    if (fatherData.firstName && (!patronymic || patronymic === autoInheritedValues.patronymic)) {
+      const newPatr = generateUkrainianPatronymic(fatherData.firstName, gender);
+      setPatronymic(newPatr);
+    }
+
+    setShowFamilyQuickAddModal(false);
+  };
 
   const draftPersonForDuplicates = useMemo<Person>(() => {
     return {
@@ -809,11 +1014,11 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     setSpouseId(effectivePerson.spouseIds?.[0] || '');
     setSiblingIds(effectivePerson.siblingIds || []);
     setGodparents(effectivePerson.godparents || []);
-    setBirthDate(effectivePerson.birthDate || '');
+    setBirthDate(effectivePerson.birthDate || (effectivePerson.birthYear ? String(effectivePerson.birthYear) : ''));
     setBirthPlace(effectivePerson.birthPlace || '');
     setMarriageDate(effectivePerson.marriageDate || '');
     setMarriagePlace(effectivePerson.marriagePlace || '');
-    setDeathDate(effectivePerson.deathDate || '');
+    setDeathDate(effectivePerson.deathDate || (effectivePerson.deathYear ? String(effectivePerson.deathYear) : ''));
     setDeathPlace(effectivePerson.deathPlace || '');
     setDeathReason(effectivePerson.deathReason || '');
     setResidencePlace(effectivePerson.residencePlace || '');
@@ -1644,7 +1849,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   };
 
   // Save Person Core Logic
-  const handleSave = (openProfileAfterSave = false) => {
+  const handleSave = (openProfileAfterSave = false, closeAfterSave = true) => {
     if (!firstName.trim() && !lastName.trim()) {
       alert('Будь ласка, вкажіть прізвище або ім\'я особи.');
       return;
@@ -1754,7 +1959,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         tags: tags.length > 0 ? tags : undefined,
         notes: notes.trim() || undefined,
         events: lifeEvents.length > 0 ? lifeEvents : undefined,
-        customFields: customFields.length > 0 ? customFields : undefined
+        customFields: customFields.length > 0 ? customFields : undefined,
+        sourceCitations: sourceCitations.length > 0 ? sourceCitations : undefined,
+        sourceIds: linkedMetricId ? [linkedMetricId] : (effectivePerson.sourceIds || undefined)
       };
 
       updatePerson(updatedPerson);
@@ -1807,7 +2014,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         tags: tags.length > 0 ? tags : undefined,
         notes: notes.trim() || undefined,
         events: lifeEvents.length > 0 ? lifeEvents : undefined,
-        customFields: customFields.length > 0 ? customFields : undefined
+        customFields: customFields.length > 0 ? customFields : undefined,
+        sourceCitations: sourceCitations.length > 0 ? sourceCitations : undefined,
+        sourceIds: linkedMetricId ? [linkedMetricId] : undefined
       };
 
       // Set relationships based on initialRelation
@@ -2065,8 +2274,85 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       }
     }
 
-    onClose();
+    clearPersonDraft(effectivePerson?.id);
+
+    if (linkedMetricId) {
+      try {
+        useResearchStore.getState().updateMetricRecord(linkedMetricId, { linkedPersonId: savedPersonId });
+      } catch (err) {
+        console.error('Failed to link metric record:', err);
+      }
+    }
+
+    if (closeAfterSave) {
+      onClose();
+    }
   };
+
+  const handleSaveAndAddNext = () => {
+    if (!firstName.trim() && !lastName.trim()) {
+      alert('Будь ласка, вкажіть прізвище або ім\'я особи.');
+      return;
+    }
+
+    // Save current person without opening profile and without closing modal
+    handleSave(false, false);
+
+    // Retain context: fatherId, motherId, lastName, birthPlace, residencePlace
+    setFirstName('');
+    if (fatherId) {
+      const f = persons.find((p) => p.id === fatherId);
+      if (f) {
+        const fFirst = f.name?.given || f.firstName;
+        if (fFirst) {
+          setPatronymic(generateUkrainianPatronymic(fFirst, gender));
+        }
+      }
+    } else {
+      setPatronymic('');
+    }
+    setMaidenName('');
+    setBirthDate('');
+    setDeathDate('');
+    setBio('');
+    setNotes('');
+    setSourceCitations([]);
+    setLinkedMetricId('');
+    clearPersonDraft(null);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        showDuplicateSaveDialog ||
+        showDateValidationDialog ||
+        isMergeModalOpen ||
+        isContactModalOpen ||
+        isReportModalOpen ||
+        showFamilyQuickAddModal
+      ) {
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        handleSaveAndAddNext();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleSave(false, true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    handleSave,
+    handleSaveAndAddNext,
+    showDuplicateSaveDialog,
+    showDateValidationDialog,
+    isMergeModalOpen,
+    isContactModalOpen,
+    isReportModalOpen,
+    showFamilyQuickAddModal
+  ]);
 
   const getRelationLabel = () => {
     if (!initialRelation) {
@@ -2215,8 +2501,64 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               </button>
             )}
 
+            {/* Mode Switcher */}
+            {effectivePerson && formMode === 'view' && !isReadOnly && (
+              <button
+                type="button"
+                onClick={() => setFormMode('full')}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-transform active:scale-95"
+                title="Перейти до редагування картки особи"
+              >
+                <Pencil className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Редагувати</span>
+              </button>
+            )}
+
+            {effectivePerson && formMode !== 'view' && (
+              <button
+                type="button"
+                onClick={() => setFormMode('view')}
+                className="px-2.5 py-1.5 rounded-xl border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/10 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Переглянути заповнені дані особи"
+              >
+                <Eye className="w-3.5 h-3.5 text-sky-500" />
+                <span className="hidden sm:inline">Перегляд</span>
+              </button>
+            )}
+
+            {!isReadOnly && formMode !== 'view' && (
+              <div className="flex items-center p-0.5 rounded-xl bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setFormMode('express')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    formMode === 'express'
+                      ? 'bg-amber-500 text-neutral-950 shadow-xs'
+                      : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'
+                  }`}
+                  title="Швидкий запис: 5-6 ключових полів для ревізій та метрик"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Експрес</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormMode('full')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    formMode === 'full'
+                      ? 'bg-amber-500 text-neutral-950 shadow-xs'
+                      : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'
+                  }`}
+                  title="Повна анкета: усі розділи, деталі, біографія, події та духовні зв'язки"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Повна картка</span>
+                </button>
+              </div>
+            )}
+
             <button
-              onClick={onClose}
+              onClick={handleSafeClose}
               className="p-1.5 sm:p-2 rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0 cursor-pointer"
               title="Закрити вікно"
             >
@@ -2225,8 +2567,121 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Main Body (2 Columns: Left Sidebar + Scrollable Content) */}
-        <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
+        {/* Draft Recovery Banner */}
+        {showDraftBanner && availableDraft && (
+          <div className="px-4 py-2 bg-amber-500/15 border-b border-amber-500/30 text-xs flex flex-wrap items-center justify-between gap-2 text-amber-500 shrink-0">
+            <div className="flex items-center gap-2 font-medium">
+              <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+              <span>
+                Знайдено збережену чернетку: <strong>{availableDraft.firstName || ''} {availableDraft.lastName || ''}</strong>. Відновити дані?
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRestoreDraft}
+                className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-neutral-950 font-bold transition-all shadow-xs cursor-pointer"
+              >
+                Відновити
+              </button>
+              <button
+                type="button"
+                onClick={handleDismissDraft}
+                className="px-2.5 py-1 text-neutral-400 hover:text-neutral-200 text-xs cursor-pointer hover:underline"
+              >
+                Відхилити
+              </button>
+            </div>
+          </div>
+        )}
+
+        {formMode === 'view' && effectivePerson ? (
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <PersonProfileView
+              person={effectivePerson}
+              persons={persons}
+              families={families}
+              sources={sources}
+              events={events}
+              onStartEdit={() => setFormMode('full')}
+              onClose={onClose}
+              onSelectPerson={(id) => {
+                if (onSelectPerson) {
+                  onSelectPerson(id);
+                }
+              }}
+              onEditPerson={(id) => {
+                if (onSelectPerson) {
+                  onSelectPerson(id);
+                }
+                setFormMode('full');
+              }}
+              onChangeRoot={onChangeRoot}
+              onOpenKinshipWith={onOpenKinshipWith}
+              onOpenAddRelation={
+                onOpenAddRelation ||
+                ((type, targetId) => {
+                  setShowFamilyQuickAddModal(true);
+                })
+              }
+              onOpenReport={() => setIsReportModalOpen(true)}
+              onOpenContact={() => setIsContactModalOpen(true)}
+              isReadOnly={isReadOnly}
+            />
+          </div>
+        ) : formMode === 'express' ? (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 max-w-4xl mx-auto w-full">
+            <ExpressPersonForm
+              firstName={firstName}
+              setFirstName={setFirstName}
+              lastName={lastName}
+              setLastName={setLastName}
+              patronymic={patronymic}
+              setPatronymic={setPatronymic}
+              maidenName={maidenName}
+              setMaidenName={setMaidenName}
+              gender={gender}
+              onGenderChange={(g) => applyGenderChange(g, true)}
+              isLiving={isLiving}
+              setIsLiving={setIsLiving}
+              birthDate={birthDate}
+              setBirthDate={(val) => {
+                setBirthDate(val);
+                setDateValidationDismissedForSave(false);
+              }}
+              deathDate={deathDate}
+              setDeathDate={(val) => {
+                setDeathDate(val);
+                setDateValidationDismissedForSave(false);
+              }}
+              birthPlace={birthPlace}
+              setBirthPlace={setBirthPlace}
+              historicalBirthPlace={birthPlaceHistorical}
+              setHistoricalBirthPlace={setBirthPlaceHistorical}
+              fatherId={fatherId}
+              setFatherId={setFatherId}
+              motherId={motherId}
+              setMotherId={setMotherId}
+              availableFathers={availableFathers}
+              availableMothers={availableMothers}
+              onOpenFamilyQuickAdd={() => setShowFamilyQuickAddModal(true)}
+              persons={persons}
+              metricRecords={metricRecords}
+              linkedMetricId={linkedMetricId}
+              onLinkMetric={setLinkedMetricId}
+              sourceCitations={sourceCitations}
+              onAddCitation={(cit) => setSourceCitations((prev) => [...prev, cit])}
+              onRemoveCitation={(idx) => setSourceCitations((prev) => prev.filter((_, i) => i !== idx))}
+              onSwitchToFull={() => setFormMode('full')}
+              onSave={() => handleSave(false, true)}
+              onSaveAndAddNext={handleSaveAndAddNext}
+              theme={theme}
+              isDark={isDark}
+            />
+          </div>
+        ) : (
+          /* Modal Main Body (2 Columns: Left Sidebar + Scrollable Content) */
+          <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
           
           {/* Left Navigation & Profile Summary Column */}
           <div className={`w-full md:w-64 lg:w-72 border-b md:border-b-0 md:border-r border-black/10 dark:border-white/10 flex flex-col shrink-0 bg-black/[0.02] dark:bg-white/[0.02] p-3 md:p-4 overflow-y-auto ${isMobileNavCollapsed ? 'max-md:py-2 max-md:px-3' : ''}`}>
@@ -2631,8 +3086,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                   {!openSections.basic && (
-                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
-                      {isLiving ? '🟢' : '✝'} • {researchBranch} {currentTagsList.length > 0 && `• #${currentTagsList[0]}`}
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-flex items-center gap-1.5">
+                      {isLiving ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                          <Heart className="w-3 h-3 fill-current" />
+                          <span>Жива</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-neutral-500 dark:text-neutral-400 font-medium">
+                          <DoveIcon className="w-3.5 h-3.5 text-neutral-400" />
+                          <span>Упокоїлася</span>
+                        </span>
+                      )}
+                      <span>•</span>
+                      <span>{researchBranch}</span>
+                      {currentTagsList.length > 0 && <span>• #{currentTagsList[0]}</span>}
                     </span>
                   )}
                   <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.basic ? 'rotate-180 text-[#B88E3E]' : ''}`} />
@@ -2647,7 +3115,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
                         <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
-                          <span>🌳</span>
+                          <GitFork className="w-3 h-3 text-[#B88E3E]" />
                           <span>Дослідження</span>
                         </label>
                         {currentInheritance.suggestedBranch && researchBranch === currentInheritance.suggestedBranch && (
@@ -2690,7 +3158,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     {/* 2. Статус дослідження */}
                     <div className="space-y-1">
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
-                        <span>📋</span>
+                        <CheckCircle2 className="w-3 h-3 text-[#B88E3E]" />
                         <span>Статус <span className="text-rose-500">*</span></span>
                       </label>
                       <select
@@ -2748,35 +3216,36 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       </div>
                     </div>
 
-                    {/* 4. Статус життя (компактні іконки без зайвих слів) */}
+                    {/* 4. Статус життя (Серце / Голуб вічного спокою з Богом) */}
                     <div className="space-y-1">
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
+                        <Heart className="w-3 h-3 text-[#B88E3E]" />
                         <span>Статус</span>
                       </label>
                       <div className={`flex items-center p-0.5 rounded-xl border ${theme.inputBorder} ${theme.inputBg} h-[34px]`}>
                         <button
                           type="button"
                           onClick={() => setIsLiving(true)}
-                          className={`flex-1 h-full rounded-lg text-xs font-semibold flex items-center justify-center transition-all cursor-pointer ${
+                          className={`flex-1 h-full rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                             isLiving
                               ? 'bg-emerald-600 text-white shadow-xs'
-                              : 'text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+                              : 'text-neutral-400 hover:text-emerald-600 dark:hover:text-emerald-400'
                           }`}
                           title="Жива особа"
                         >
-                          <span className="text-sm">🟢</span>
+                          <Heart className={`w-3.5 h-3.5 ${isLiving ? 'fill-current text-white' : ''}`} />
                         </button>
                         <button
                           type="button"
                           onClick={() => setIsLiving(false)}
-                          className={`flex-1 h-full rounded-lg text-xs font-semibold flex items-center justify-center transition-all cursor-pointer ${
+                          className={`flex-1 h-full rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                             !isLiving
-                              ? 'bg-neutral-700 text-white shadow-xs'
+                              ? 'bg-neutral-800 text-neutral-100 dark:bg-neutral-700 shadow-xs'
                               : 'text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
                           }`}
-                          title="Померла особа"
+                          title="Померла особа (упокоїлася з Богом)"
                         >
-                          <span className="text-sm">✝</span>
+                          <DoveIcon className={`w-3.5 h-3.5 ${!isLiving ? 'text-white' : ''}`} />
                         </button>
                       </div>
                     </div>
@@ -5183,47 +5652,72 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
           </div>
         </div>
+        )}
 
-        {/* Sticky Bottom Actions Bar (Matching Screenshot) */}
-        <div className="px-5 py-3.5 border-t border-black/10 dark:border-white/10 flex items-center justify-between bg-black/5 dark:bg-white/5 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-black/10 dark:hover:bg-white/10 text-xs font-semibold transition-colors cursor-pointer"
-          >
-            {isReadOnly ? 'Закрити' : 'Скасувати'}
-          </button>
+        {/* Sticky Bottom Actions Bar (Shown only in Full mode) */}
+        {formMode === 'full' && (
+          <div className="px-5 py-3.5 border-t border-black/10 dark:border-white/10 flex items-center justify-between bg-black/5 dark:bg-white/5 shrink-0">
+            <button
+              type="button"
+              onClick={handleSafeClose}
+              className="px-4 py-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-black/10 dark:hover:bg-white/10 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              {isReadOnly ? 'Закрити' : 'Скасувати'}
+            </button>
 
-          <div className="flex items-center gap-2.5">
-            {isReadOnly ? (
-              <span className="text-xs text-neutral-400 italic">
-                Режим перегляду картки
-              </span>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => handleSave(false)}
-                  className="px-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5 text-[#B88E3E]" />
-                  <span>Зберегти</span>
-                </button>
+            <div className="flex items-center gap-2.5">
+              {isReadOnly ? (
+                <span className="text-xs text-neutral-400 italic">
+                  Режим перегляду картки
+                </span>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleSave(false, true)}
+                    className="px-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5 text-[#B88E3E]" />
+                    <span>Зберегти</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleSave(true)}
-                  className="px-5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Зберегти й відкрити профіль</span>
-                </button>
-              </>
-            )}
+                  <button
+                    type="button"
+                    onClick={() => handleSave(true, true)}
+                    className="px-5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Зберегти й відкрити профіль</span>
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
+
+      {/* Family Quick Add Modal */}
+      {showFamilyQuickAddModal && (
+        <FamilyQuickAddModal
+          childPerson={
+            effectivePerson ||
+            ({
+              id: '__new_child__',
+              firstName,
+              lastName,
+              patronymic,
+              gender,
+              birthPlace,
+              residencePlace
+            } as Person)
+          }
+          onClose={() => setShowFamilyQuickAddModal(false)}
+          onSaveParents={handleFamilyQuickAddSave}
+          theme={theme}
+          isDark={isDark}
+        />
+      )}
 
       {/* Contact Author Modal */}
       {isContactModalOpen && (

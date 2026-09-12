@@ -54,9 +54,13 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const [isLiving, setIsLiving] = useState<boolean>(existingPerson?.isLiving ?? false);
   const [fatherId, setFatherId] = useState<string>(initialFatherId || '');
   const [motherId, setMotherId] = useState<string>(initialMotherId || '');
-  const [birthDate, setBirthDate] = useState(existingPerson?.birthDate || '');
+  const [birthDate, setBirthDate] = useState(
+    existingPerson?.birthDate || (existingPerson?.birthYear ? String(existingPerson.birthYear) : '')
+  );
   const [birthPlace, setBirthPlace] = useState(existingPerson?.birthPlace || '');
-  const [deathDate, setDeathDate] = useState(existingPerson?.deathDate || '');
+  const [deathDate, setDeathDate] = useState(
+    existingPerson?.deathDate || (existingPerson?.deathYear ? String(existingPerson.deathYear) : '')
+  );
   const [deathPlace, setDeathPlace] = useState(existingPerson?.deathPlace || '');
   const [occupation, setOccupation] = useState(existingPerson?.occupation || '');
   const [estate, setEstate] = useState(existingPerson?.estateOrSocialStatus || existingPerson?.estate || '');

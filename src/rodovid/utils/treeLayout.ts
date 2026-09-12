@@ -201,18 +201,20 @@ export function getGenealogyCode(person: Person): string {
  * Format Lifespan string matching classic genealogical notation (e.g. "1882–1928" or "1874–Померла")
  */
 export function formatLifespan(person: Person): string {
-  const isFemale = person.gender === 'female' || person.gender === 'F';
-  const birth = person.birthYear || (person.birthDate ? person.birthDate.slice(0, 4) : '?');
+  const birth = person.birthYear || (person.birthDate ? person.birthDate.slice(0, 4) : null);
+  const death = person.deathYear || (person.deathDate ? person.deathDate.slice(0, 4) : null);
   
   if (person.isLiving) {
-    return birth !== '?' ? `${birth}–зараз` : 'Живий/а';
+    return birth ? `${birth}–зараз` : 'Живий/а';
   }
-  const death = person.deathYear || (person.deathDate ? person.deathDate.slice(0, 4) : null);
-  if (death) {
+  if (birth && death) {
     return `${birth}–${death}`;
   }
-  if (birth !== '?') {
-    return `${birth}–${isFemale ? 'Померла' : 'Помер'}`;
+  if (birth && !death) {
+    return `${birth}–?`;
+  }
+  if (!birth && death) {
+    return `?–${death}`;
   }
   return '—';
 }
