@@ -140,6 +140,10 @@ export interface UIState {
   closeAuthModal: () => void;
   openContactModal: () => void;
   closeContactModal: () => void;
+  appEmblemVariant: number;
+  setAppEmblemVariant: (variant: number) => void;
+  customEmblemImage: string | null;
+  setCustomEmblemImage: (dataUrl: string | null) => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -150,6 +154,24 @@ export const useUIStore = create<UIState>((set, get) => ({
   isAuthModalOpen: false,
   authModalFeature: undefined,
   isContactModalOpen: false,
+  customEmblemImage: typeof window !== 'undefined' ? (localStorage.getItem('genealogy_custom_emblem_image') || null) : null,
+  setCustomEmblemImage: (dataUrl: string | null) => {
+    try {
+      if (dataUrl) {
+        localStorage.setItem('genealogy_custom_emblem_image', dataUrl);
+      } else {
+        localStorage.removeItem('genealogy_custom_emblem_image');
+      }
+    } catch {}
+    set({ customEmblemImage: dataUrl });
+  },
+  appEmblemVariant: typeof window !== 'undefined' ? (parseInt(localStorage.getItem('genealogy_app_emblem_variant') || '1', 10) || 1) : 1,
+  setAppEmblemVariant: (variant: number) => {
+    try {
+      localStorage.setItem('genealogy_app_emblem_variant', String(variant));
+    } catch {}
+    set({ appEmblemVariant: variant });
+  },
   
   personModalOpenSections: getSavedAccordionSections(),
   personModalActiveSection: getSavedActiveSection(),

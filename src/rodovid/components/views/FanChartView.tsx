@@ -15,7 +15,10 @@ import {
   Users,
   Layers,
   Sparkles,
-  Filter
+  Filter,
+  ExternalLink,
+  Calendar,
+  Eye
 } from 'lucide-react';
 import { TreeIcon } from '../../../components/common/GenealogyIcons';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
@@ -31,8 +34,28 @@ import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId } from 
 import { useUIStore } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
-import { areSurnamesEquivalent } from '../../../utils/ukrainianPhonetics';
+import { areSurnamesEquivalent, normalizeUkrainianSurnameGender } from '../../../utils/ukrainianPhonetics';
 import { getThemeConfig } from '../../../utils/theme';
+import { ClanMembersModal, ClanMemberItem } from './ClanMembersModal';
+
+// Ukrainian kinship title from Ahnentafel number
+export function getAhnentafelRelationTitle(ahnentafel?: number, gender?: string): string {
+  if (!ahnentafel) return '';
+  const isFemale = gender === 'female' || gender === 'F';
+  if (ahnentafel === 1) return 'Цільова особа (центр)';
+  if (ahnentafel === 2) return 'Батько';
+  if (ahnentafel === 3) return 'Мати';
+  if (ahnentafel === 4) return 'Дідусь (по батькові)';
+  if (ahnentafel === 5) return 'Бабуся (по батькові)';
+  if (ahnentafel === 6) return 'Дідусь (по матері)';
+  if (ahnentafel === 7) return 'Бабуся (по матері)';
+  if (ahnentafel >= 8 && ahnentafel <= 15) return isFemale ? 'Прабабуся' : 'Прадід';
+  if (ahnentafel >= 16 && ahnentafel <= 31) return isFemale ? 'Прапрабабуся' : 'Прапрадід';
+  if (ahnentafel >= 32 && ahnentafel <= 63) return isFemale ? 'Пра(3)бабуся' : 'Пра(3)дід';
+  if (ahnentafel >= 64 && ahnentafel <= 127) return isFemale ? 'Пра(4)бабуся' : 'Пра(4)дід';
+  const gen = Math.floor(Math.log2(ahnentafel)) + 1;
+  return `Предок ${gen}-го покоління`;
+}
 
 // Ukrainian generation declension helper
 function getUkrainianGenerationLabel(n: number): string {
@@ -95,6 +118,8 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   const [isColorMenuOpen, setIsColorMenuOpen] = useState<boolean>(false);
   const [selectedClanId, setSelectedClanId] = useState<string | null>(null);
   const [hoveredClanId, setHoveredClanId] = useState<string | null>(null);
+  const [expandedClanId, setExpandedClanId] = useState<string | null>(null);
+  const [modalClan, setModalClan] = useState<FanChartClan | null>(null);
 
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const colorMenuRef = useRef<HTMLDivElement>(null);
@@ -328,6 +353,77 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   const clans = useMemo(() => {
     return extractFanChartClans(sectors);
   }, [sectors]);
+
+  // Collect and group all clan members (both in fan chart and across the database)
+  const clanMembersMap = useMemo(() => {
+    const allDbPersons = Object.values(database.persons || {}) as Person[];
+    const map = new Map<string, ClanMemberItem[]>();
+
+    clans.forEach((clan) => {
+      const items: ClanMemberItem[] = [];
+      const seenIds = new Set<string>();
+
+      // 1. Direct fan chart ancestors in this clan
+      clan.persons.forEach((p) => {
+        if (!p || seenIds.has(p.id)) return;
+        seenIds.add(p.id);
+
+        const sec = sectors.find((s) => s.person?.id === p.id);
+        items.push({
+          person: p,
+          isInFan: true,
+          ahnentafelNumber: sec?.ahnentafelNumber,
+          generation: sec?.generation,
+          kinshipTitle: sec?.ahnentafelNumber
+            ? getAhnentafelRelationTitle(sec.ahnentafelNumber, p.gender)
+            : undefined
+        });
+      });
+
+      // 2. Any additional persons belonging to this clan in database
+      allDbPersons.forEach((p) => {
+        if (!p || seenIds.has(p.id)) return;
+
+        const rawSurname = (p.name?.surname || p.lastName || '').trim();
+        const normSurname = normalizeUkrainianSurnameGender(rawSurname) || rawSurname;
+        const maiden = (p.name?.maidenName || p.maidenName || '').trim();
+        const normMaiden = normalizeUkrainianSurnameGender(maiden) || maiden;
+
+        const matches =
+          normSurname.toLowerCase() === clan.id.toLowerCase() ||
+          areSurnamesEquivalent(normSurname, clan.id) ||
+          areSurnamesEquivalent(rawSurname, clan.id) ||
+          (maiden &&
+            (normMaiden.toLowerCase() === clan.id.toLowerCase() ||
+              areSurnamesEquivalent(normMaiden, clan.id) ||
+              areSurnamesEquivalent(maiden, clan.id)));
+
+        if (matches) {
+          seenIds.add(p.id);
+          items.push({
+            person: p,
+            isInFan: false
+          });
+        }
+      });
+
+      // Sort: fan members first (by generation ascending), then remaining by birth year
+      items.sort((a, b) => {
+        if (a.isInFan && !b.isInFan) return -1;
+        if (!a.isInFan && b.isInFan) return 1;
+        if (a.generation && b.generation && a.generation !== b.generation) {
+          return a.generation - b.generation;
+        }
+        const yA = Number(a.person.birthYear || 0);
+        const yB = Number(b.person.birthYear || 0);
+        return yA - yB;
+      });
+
+      map.set(clan.id, items);
+    });
+
+    return map;
+  }, [clans, sectors, database.persons]);
 
   const maxRadius = useMemo(() => {
     if (sectors.length === 0) return 400;
@@ -1535,9 +1631,9 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               canvasTheme === 'parchment'
                 ? 'bg-white/95 border-neutral-300 text-neutral-900 shadow-xl'
                 : 'bg-slate-900/95 border-slate-800 text-white shadow-2xl'
-            } backdrop-blur border rounded-xl p-3.5 max-w-sm text-xs space-y-2.5 z-30 animate-in fade-in zoom-in-95 duration-150`}
+            } backdrop-blur border rounded-xl p-3.5 w-80 sm:w-96 max-w-[calc(100vw-2rem)] max-h-[82vh] flex flex-col text-xs space-y-2.5 z-30 animate-in fade-in zoom-in-95 duration-150`}
           >
-            <div className="flex items-center justify-between gap-2 border-b pb-2 border-inherit">
+            <div className="flex items-center justify-between gap-2 border-b pb-2 border-inherit shrink-0">
               <div className="flex items-center gap-1.5">
                 <Palette className="w-3.5 h-3.5 text-amber-500" />
                 <h4
@@ -1553,13 +1649,16 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                 </h4>
               </div>
               <div className="flex items-center gap-1">
-                {selectedClanId && (
+                {(selectedClanId || expandedClanId) && (
                   <button
-                    onClick={() => setSelectedClanId(null)}
+                    onClick={() => {
+                      setSelectedClanId(null);
+                      setExpandedClanId(null);
+                    }}
                     className="text-[10px] px-1.5 py-0.5 bg-neutral-500/20 hover:bg-neutral-500/30 rounded text-amber-500 font-medium transition-colors cursor-pointer"
-                    title="Скинути виділення роду"
+                    title="Скинути виділення та згорнути списки"
                   >
-                    Скинути фільтр
+                    Скинути
                   </button>
                 )}
                 <button
@@ -1578,50 +1677,213 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
             {/* Clans Color Mode Content */}
             {colorMode === 'clans' && (
-              <div className="max-h-60 overflow-y-auto pr-1 space-y-1.5 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto pr-1 space-y-1.5 custom-scrollbar min-h-0">
                 <div
                   className={`text-[10px] ${
                     canvasTheme === 'parchment' ? 'text-neutral-500' : 'text-slate-400'
-                  } mb-1.5`}
+                  } mb-1`}
                 >
-                  Кожен рід виділено індивідуальним кольором. Натисніть на рід, щоб підсвітити його
-                  у віялі:
+                  Натисніть на назву роду для підсвітки або на кількість осіб, щоб відкрити їх список:
                 </div>
                 {clans.map((clan) => {
                   const isSelected = selectedClanId === clan.id;
                   const isHoveredClan = hoveredClanId === clan.id;
+                  const isExpanded = expandedClanId === clan.id;
+                  const members = clanMembersMap.get(clan.id) || [];
+                  const fanMembers = members.filter((m) => m.isInFan);
+
                   return (
                     <div
                       key={clan.id}
-                      onClick={() =>
-                        setSelectedClanId((prev) => (prev === clan.id ? null : clan.id))
-                      }
-                      onMouseEnter={() => setHoveredClanId(clan.id)}
-                      onMouseLeave={() => setHoveredClanId(null)}
-                      className={`flex items-center justify-between p-1.5 rounded-lg text-[11px] transition-all cursor-pointer ${
+                      className={`rounded-xl border transition-all ${
                         isSelected
-                          ? 'ring-2 ring-emerald-500 font-bold'
-                          : isHoveredClan
-                          ? 'bg-neutral-500/15'
-                          : 'hover:bg-neutral-500/10'
-                      } ${canvasTheme === 'parchment' ? 'text-neutral-800' : 'text-slate-200'}`}
+                          ? 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-500/5'
+                          : isExpanded
+                          ? canvasTheme === 'parchment'
+                            ? 'border-neutral-300 bg-neutral-50 shadow-xs'
+                            : 'border-slate-700 bg-slate-800/60 shadow-xs'
+                          : canvasTheme === 'parchment'
+                          ? 'border-transparent hover:border-neutral-200'
+                          : 'border-transparent hover:border-slate-800'
+                      }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="w-3.5 h-3.5 rounded shrink-0 shadow-2xs"
-                          style={{ backgroundColor: clan.color }}
-                        />
-                        <span className="truncate">{clan.name}</span>
-                      </div>
-                      <span
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ml-2 ${
-                          canvasTheme === 'parchment'
-                            ? 'bg-neutral-200 text-neutral-700'
-                            : 'bg-slate-800 text-slate-300'
-                        }`}
+                      <div
+                        onClick={() =>
+                          setSelectedClanId((prev) => (prev === clan.id ? null : clan.id))
+                        }
+                        onMouseEnter={() => setHoveredClanId(clan.id)}
+                        onMouseLeave={() => setHoveredClanId(null)}
+                        className={`flex items-center justify-between p-1.5 rounded-lg text-[11px] transition-all cursor-pointer ${
+                          isHoveredClan ? 'bg-neutral-500/15' : 'hover:bg-neutral-500/10'
+                        } ${canvasTheme === 'parchment' ? 'text-neutral-800' : 'text-slate-200'}`}
                       >
-                        {clan.count} {clan.count === 1 ? 'особа' : clan.count < 5 ? 'особи' : 'осіб'}
-                      </span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-3.5 h-3.5 rounded shrink-0 shadow-2xs"
+                            style={{ backgroundColor: clan.color }}
+                          />
+                          <span className={`truncate font-medium ${isSelected ? 'text-emerald-600 dark:text-emerald-400 font-bold' : ''}`}>
+                            {clan.name}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
+                          {/* Clickable Badge to view clan members */}
+                          <button
+                            type="button"
+                            onClick={() => setExpandedClanId((prev) => (prev === clan.id ? null : clan.id))}
+                            className={`text-[10px] px-2 py-0.5 rounded-md font-mono transition-all cursor-pointer flex items-center gap-1 font-semibold border ${
+                              isExpanded
+                                ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                                : canvasTheme === 'parchment'
+                                ? 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border-neutral-300 hover:border-neutral-400'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 hover:border-slate-600'
+                            }`}
+                            title="Переглянути список особ цього роду"
+                          >
+                            <Users className="w-2.5 h-2.5" />
+                            <span>
+                              {clan.count} {clan.count === 1 ? 'особа' : clan.count < 5 ? 'особи' : 'осіб'}
+                            </span>
+                            <ChevronDown
+                              className={`w-3 h-3 transition-transform duration-200 ${
+                                isExpanded ? 'rotate-180 text-white' : 'opacity-70'
+                              }`}
+                            />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setModalClan(clan)}
+                            className={`p-1 rounded transition-colors cursor-pointer ${
+                              canvasTheme === 'parchment'
+                                ? 'text-neutral-400 hover:text-emerald-600 hover:bg-neutral-200'
+                                : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-700'
+                            }`}
+                            title="Відкрити повний список особ роду з фільтрами"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Expanded Accordion: List of clan members */}
+                      {isExpanded && (
+                        <div
+                          className={`p-2 pt-1 border-t space-y-1.5 text-xs animate-in fade-in duration-150 ${
+                            canvasTheme === 'parchment'
+                              ? 'border-neutral-200/80 bg-neutral-100/50'
+                              : 'border-slate-800/80 bg-slate-950/40'
+                          } rounded-b-xl`}
+                        >
+                          <div className="flex items-center justify-between text-[10px] px-1 py-0.5 text-neutral-500 dark:text-neutral-400">
+                            <span>
+                              Особи у віялі: {fanMembers.length}
+                              {members.length > fanMembers.length && ` (всього в базі: ${members.length})`}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setModalClan(clan)}
+                              className="text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 font-medium cursor-pointer"
+                            >
+                              <span>Всі детально</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+
+                          <div className="max-h-52 overflow-y-auto space-y-1 pr-0.5 custom-scrollbar">
+                            {members.map(({ person: p, isInFan, ahnentafelNumber, generation, kinshipTitle }) => {
+                              const isFemale = p.gender === 'female' || p.gender === 'F';
+                              const maiden = (p.name?.maidenName || p.maidenName || '').trim();
+                              const maidenFormatted = isFemale && maiden ? `(${maiden})` : '';
+                              const surname = (p.name?.surname || p.lastName || '').trim();
+                              const given = (p.name?.given || p.firstName || '').trim();
+                              const patronymic = (p.name?.patronymic || p.patronymic || '').trim();
+
+                              const displayName = `${surname} ${maidenFormatted} ${given} ${patronymic}`
+                                .replace(/\s+/g, ' ')
+                                .trim() || 'Без імені';
+
+                              const birthYear = p.birthYear || (p.birthDate ? String(p.birthDate).slice(0, 4) : '');
+                              const deathYear = p.deathYear || (p.deathDate ? String(p.deathDate).slice(0, 4) : '');
+                              const datesStr = p.isLiving
+                                ? `нар. ${birthYear || '?'}`
+                                : `${birthYear || '?'} — ${deathYear || '?'}`;
+
+                              const relationText = kinshipTitle || getAhnentafelRelationTitle(ahnentafelNumber, p.gender);
+
+                              return (
+                                <div
+                                  key={p.id}
+                                  onClick={() => onSelectPerson(p.id)}
+                                  onMouseEnter={() => {
+                                    const matchingSec = sectors.find((s) => s.person?.id === p.id);
+                                    if (matchingSec) setHoveredSector(matchingSec);
+                                  }}
+                                  onMouseLeave={() => setHoveredSector(null)}
+                                  className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-2 group ${
+                                    canvasTheme === 'parchment'
+                                      ? 'bg-white border-neutral-200 hover:border-emerald-500 hover:bg-emerald-50/40 text-neutral-800 shadow-2xs'
+                                      : 'bg-slate-900 border-slate-800 hover:border-emerald-500/70 hover:bg-slate-850 text-slate-200 shadow-2xs'
+                                  }`}
+                                  title="Натисніть, щоб відкрити повну картку особи"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span
+                                      className={`w-2 h-2 rounded-full shrink-0 ${
+                                        isFemale ? 'bg-rose-500' : 'bg-blue-500'
+                                      }`}
+                                    />
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-[11px] truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors leading-tight">
+                                        {displayName}
+                                      </div>
+                                      <div className="text-[9px] opacity-75 flex items-center gap-1 mt-0.5 truncate">
+                                        <span>{datesStr}</span>
+                                        {relationText && (
+                                          <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                            • {relationText}
+                                          </span>
+                                        )}
+                                        {generation && generation > 0 && !relationText && (
+                                          <span>• Пок. {generation}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      onClick={() => onChangeRoot(p.id)}
+                                      className={`p-1 rounded transition-colors cursor-pointer ${
+                                        canvasTheme === 'parchment'
+                                          ? 'text-neutral-400 hover:text-emerald-600 hover:bg-neutral-100'
+                                          : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800'
+                                      }`}
+                                      title="Зробити центром віяла"
+                                    >
+                                      <GitFork className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => onSelectPerson(p.id)}
+                                      className={`p-1 rounded transition-colors cursor-pointer ${
+                                        canvasTheme === 'parchment'
+                                          ? 'text-neutral-400 hover:text-emerald-600 hover:bg-neutral-100'
+                                          : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800'
+                                      }`}
+                                      title="Відкрити картку особи"
+                                    >
+                                      <User className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1802,6 +2064,19 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
             <Sparkles className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Clan Members Detail Modal */}
+        {modalClan && (
+          <ClanMembersModal
+            clan={modalClan}
+            members={clanMembersMap.get(modalClan.id) || []}
+            canvasTheme={canvasTheme}
+            onClose={() => setModalClan(null)}
+            onSelectPerson={onSelectPerson}
+            onChangeRoot={onChangeRoot}
+            onSwitchToTree={onSwitchToTree}
+          />
+        )}
       </div>
     </div>
   );

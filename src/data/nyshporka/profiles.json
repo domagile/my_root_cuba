@@ -1,0 +1,101 @@
+{
+  "defaults": {
+    "tiles": {
+      "rows": 6,
+      "overlap": 0.35,
+      "split": 0.5,
+      "split_overlap": 0.06,
+      "margin": 0.015,
+      "head_frac": 0.16,
+      "preview_max": 1600,
+      "quality": 92,
+      "zoom": false,
+      "zoom_target_px": 1540
+    },
+    "book": {
+      "lanes_by_sex": [
+        "birth",
+        "death"
+      ],
+      "lanes_single": [
+        "marriage"
+      ],
+      "has_tally": true,
+      "numbering_by": "rite",
+      "script": "cyrillic_prereform"
+    },
+    "reconstitute": {
+      "fuzzy_surname": 88,
+      "fuzzy_patronymic": 82,
+      "fuzzy_place": 85,
+      "skip_roles": [
+        "priest"
+      ],
+      "merge_anonymous": false
+    },
+    "consensus": {
+      "prefer": "b",
+      "fuzzy_same_name": 88,
+      "near_scans": 6,
+      "no_escalate_fields": [
+        "name",
+        "sheet"
+      ]
+    }
+  },
+  "profiles": {
+    "orthodox_metric_19": {
+      "title": "Православна метрична книга РІ (Н/Ш/С), сер.–кін. XIX ст."
+    },
+    "catholic_metric": {
+      "extends": "orthodox_metric_19",
+      "title": "Костельна метрика (латина/польська)",
+      "note": "Записи суцільним текстом абзацами, а не в графах; нумерація зазвичай одна наскрізна; підсумків причту часто немає — тоді повноту доводити нема чим, і `has_tally: false` це чесно фіксує.\n",
+      "book": {
+        "lanes_by_sex": [],
+        "lanes_single": [
+          "birth",
+          "marriage",
+          "death"
+        ],
+        "has_tally": false,
+        "numbering_by": "rite",
+        "script": "latin_pl"
+      }
+    },
+    "confession_list": {
+      "extends": "orthodox_metric_19",
+      "title": "Сповідні розписи (двори, не акти)",
+      "note": "Одиниця — двір із переліком душ і віком, а не подія. Нумерація дворів наскрізна; підсумки за станами наприкінці. Смуг треба більше: у сповідці на аркуші вдвічі-втричі щільніше рядків, ніж у метриці.\n",
+      "tiles": {
+        "rows": 9,
+        "overlap": 0.3
+      },
+      "book": {
+        "lanes_by_sex": [],
+        "lanes_single": [
+          "confession_entry"
+        ],
+        "has_tally": true,
+        "numbering_by": "event"
+      }
+    },
+    "revision_tale": {
+      "extends": "orthodox_metric_19",
+      "title": "Ревізька казка",
+      "note": "Одиниця — сім'я з номером за попередньою і теперішньою ревізією; чоловіча й жіноча половини часто на РІЗНИХ розворотах, тому лічильники за статтю лишаються, але звірка йде окремими секціями.\n",
+      "tiles": {
+        "rows": 8
+      },
+      "book": {
+        "lanes_by_sex": [
+          "revision_entry"
+        ],
+        "lanes_single": [],
+        "has_tally": true,
+        "numbering_by": "event"
+      }
+    }
+  },
+  "fallback": "orthodox_metric_19"
+}

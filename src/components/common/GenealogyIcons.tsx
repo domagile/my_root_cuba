@@ -47,6 +47,8 @@ export const TreeIcon: React.FC<{ className?: string; size?: number }> = ({
   return <TreeDeciduous className={className} size={size} />;
 };
 
+export { TreeOfLifeEmblem } from './TreeOfLifeEmblem';
+
 /**
  * Custom Memorial Dove Icon (Голуб - символ миру, Духа Святого та душі, що відійшла у вічність до Бога)
  */

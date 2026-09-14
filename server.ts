@@ -195,6 +195,100 @@ ${JSON.stringify(existingPersons.slice(0, 30).map((p: any) => ({
   }
 });
 
+// Нишпорка (HTR Engine): Спеціалізоване розпізнавання та аналіз архівного скоропису XVIII-XIX ст.
+app.post('/api/nyshporka/htr-analyze', async (req, res) => {
+  try {
+    const { imageBase64, mimeType = 'image/jpeg', targetEngine = 'pysar', documentContext } = req.body;
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(200).json({
+        fallback: true,
+        message: 'GEMINI_API_KEY не вказано. Використано симуляцію розпізнавання рушієм Нишпорки.',
+        pysarText: 'Священническій сынъ Григорій Долищинскій по Генеральнымъ ревизіамъ записанъ состояніемъ при отцѣ въ числѣ дѣтей...',
+        diakText: 'Священническій сынъ Григорій Долищинскій по Генеральнымъ ревизіямъ записанъ состояніемъ при отцѣ въ числѣ дѣтей...',
+        modernUkrainian: 'Священницький син Григорій Долищинський за Генеральними ревізіями записаний у стані при батькові серед дітей...',
+        entities: [
+          { name: 'Григорій Долищинський', role: 'Головна особа (дякон)', status: 'Священницький син', year: '1822', place: 'с. Липовеньке, Балтський повіт' }
+        ],
+        lines: [
+          'Священническій сынъ Григорій Долищинскій',
+          'по Генеральнымъ ревизіамъ записанъ состояніемъ',
+          'при отцѣ въ числѣ дѣтей отъ рожденія...'
+        ]
+      });
+    }
+
+    const ai = getGenAI();
+
+    const systemInstruction = `Ти — експертний палеограф та рушій розпізнавання архівного скоропису "Нишпорка" (Nyshporka HTR), навчений на українських та східноєвропейських рукописах XVIII–XIX століть (метричні книги, сповідні розписи, ревізькі казки, клірові відомості, справи консисторій, польські нотаріальні та костельні акти).
+Твоє завдання:
+1. Автентично розпізнати скоропис (HTR) трьома історичними моделями/голосами:
+   - "pysar" (світський та канцелярійний скоропис: зберігай літери ѣ, ъ, ѳ, і, ї, скорописні особливості).
+   - "diak" (церковнослов'янський устав та напівустав, метричні церковні формули).
+   - "skryba" (латинська або польська мова/транслітерація нотаріальних та костельних записів).
+2. Надати нормалізовану транскрипцію сучасною українською мовою.
+3. Розбити текст на окремі фізичні рядки документу.
+4. Витягти всі ключові генеалогічні сутності: згадані особи (ПІБ, стан: козак, шляхтич, міщанин, селянин, однодворець, священнослужитель), родинні зв'язки, географічні назви (село, повіт, парафія), дати та роки подій.
+5. Повернути результат строго у форматі JSON з полями:
+   - pysarText (string)
+   - diakText (string)
+   - skrybaText (string)
+   - modernUkrainian (string)
+   - lines (array of string)
+   - entities (array of { name, role, status, year, place, details })
+   - summary (string)`;
+
+    const contents: any[] = [];
+    if (imageBase64) {
+      const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
+      contents.push({
+        inlineData: {
+          mimeType: mimeType,
+          data: cleanBase64,
+        },
+      });
+    }
+
+    contents.push({
+      text: `Будь ласка, розпізнай цей архівний скан скоропису та надай детальний палеографічний аналіз для генеалогічного дослідження.${documentContext ? ' Контекст документу: ' + documentContext : ''}`
+    });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: contents.length === 1 ? contents[0].text : contents,
+      config: {
+        systemInstruction,
+        temperature: 0.15,
+        responseMimeType: 'application/json',
+      }
+    });
+
+    const rawText = response.text || '{}';
+    let resultJson: any = {};
+    try {
+      resultJson = JSON.parse(rawText);
+    } catch {
+      resultJson = { pysarText: rawText, modernUkrainian: rawText, lines: rawText.split('\n') };
+    }
+
+    res.json({
+      success: true,
+      source: 'gemini-3.8-flash',
+      ...resultJson
+    });
+  } catch (err: any) {
+    console.error('[Nyshporka HTR Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Помилка розпізнавання скоропису',
+      pysarText: '',
+      modernUkrainian: ''
+    });
+  }
+});
+
+
 
 
 // Fallback algorithm if API key is not supplied

@@ -186,10 +186,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return 0.95;
   });
   const [pan, setPan] = useState<{ x: number; y: number }>(() => {
-    if (initialUserState?.pan && typeof initialUserState.pan.x === 'number') {
+    if (initialUserState?.pan && typeof initialUserState.pan.x === 'number' && (initialUserState.pan.x !== 80 || initialUserState.pan.y !== 80)) {
       return initialUserState.pan;
     }
-    return { x: 80, y: 80 };
+    return { x: 0, y: 0 };
   });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -1133,10 +1133,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setScale(fitScale);
   }, [layout.nodes, containerDimensions, treeBounds]);
 
-  // Focus camera directly and smoothly onto a specific person card (defaulting to active / root person)
+  // Focus camera directly and smoothly onto a specific person card (defaulting to root person)
   const focusOnPerson = useCallback((personId?: string, preferredScale?: number) => {
-    const targetId = personId || activePersonId;
-    const targetNode = layout.nodes.find(n => n.person.id === targetId) || layout.nodes[0];
+    const targetId = personId || activePersonId || rootPersonId;
+    const targetNode = layout.nodes.find(n => n.person.id === targetId) 
+      || layout.nodes.find(n => n.person.id === rootPersonId)
+      || layout.nodes[0];
+
     if (!targetNode) {
       centerTree();
       return;
@@ -1156,7 +1159,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
     if (preferredScale !== undefined || targetScale !== scale) {
       setScale(targetScale);
     }
-  }, [layout.nodes, activePersonId, containerDimensions, scale, centerTree]);
+  }, [layout.nodes, activePersonId, rootPersonId, containerDimensions, scale, centerTree]);
 
   const centerOnActive = useCallback(() => {
     focusOnPerson(activePersonId);
@@ -1167,9 +1170,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
     if (activePersonId !== rootPersonId) {
       onChangeRoot(rootPersonId);
     }
-    setTimeout(() => {
-      focusOnPerson(rootPersonId, 0.95);
-    }, 40);
+    focusOnPerson(rootPersonId, 0.95);
   }, [activePersonId, rootPersonId, onChangeRoot, focusOnPerson]);
 
   const scrollStep = useCallback((direction: 'left' | 'right') => {
@@ -1194,45 +1195,56 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }
   }, [layout, scale]);
 
-  // Center tree on root person by default, or restore previous state if returning authorized user
-  const isInitialMount = useRef<boolean>(true);
+  // Center tree on root person as soon as layout nodes are available, and on root person change
+  const hasCenteredOnMount = useRef<boolean>(false);
   const prevRootId = useRef<string>(activePersonId);
   const prevLayoutType = useRef<TreeLayoutType>(layoutType);
 
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
+    if (!layout.nodes.length) return;
+
+    if (!hasCenteredOnMount.current) {
+      hasCenteredOnMount.current = true;
       prevRootId.current = activePersonId;
       prevLayoutType.current = layoutType;
 
-      const timer = setTimeout(() => {
-        if (isWhitelisted && currentUser?.email) {
-          const saved = getSavedUserTreeState(currentUser.email);
-          if (saved?.pan && typeof saved.scale === 'number') {
-            setPan(saved.pan);
-            setScale(saved.scale);
-            return;
-          }
-        }
-        // Default focus: center squarely on the root person (or active person)
-        focusOnPerson(activePersonId, 0.95);
-      }, 50);
-      return () => clearTimeout(timer);
+      // Focus on the root person (or active person)
+      const targetId = activePersonId || rootPersonId;
+      const targetNode = layout.nodes.find(n => n.person.id === targetId)
+        || layout.nodes.find(n => n.person.id === rootPersonId)
+        || layout.nodes[0];
+
+      if (targetNode) {
+        const container = containerRef.current;
+        const cw = container?.clientWidth || containerDimensions.width || 1200;
+        const ch = container?.clientHeight || containerDimensions.height || 800;
+        const targetScale = 0.95;
+        const nodeCenterX = targetNode.x + (targetNode.width || CLASSIC_CARD_WIDTH) / 2;
+        const nodeCenterY = targetNode.y + (targetNode.height || CLASSIC_CARD_HEIGHT) / 2;
+
+        setPan({
+          x: Math.round(cw / 2 - nodeCenterX * targetScale),
+          y: Math.round(ch / 2 - nodeCenterY * targetScale)
+        });
+        setScale(targetScale);
+      }
+      return;
     }
 
     if (prevRootId.current !== activePersonId || prevLayoutType.current !== layoutType) {
       prevRootId.current = activePersonId;
       prevLayoutType.current = layoutType;
-      const timer = setTimeout(() => {
-        focusOnPerson(activePersonId);
-      }, 40);
-      return () => clearTimeout(timer);
+      focusOnPerson(activePersonId, 0.95);
     }
-  }, [activePersonId, layoutType, isWhitelisted, currentUser?.email, focusOnPerson]);
+  }, [layout.nodes, activePersonId, rootPersonId, layoutType, containerDimensions, focusOnPerson]);
 
   // Auto-save user tree viewport and active state for authorized users
   useEffect(() => {
     if (!isWhitelisted || !currentUser?.email) return;
+    if (!hasCenteredOnMount.current) return;
+    if (pan.x === 80 && pan.y === 80) return;
+    if (pan.x === 0 && pan.y === 0) return;
+
     const timer = setTimeout(() => {
       saveUserTreeState(currentUser.email, {
         pan,
@@ -1244,7 +1256,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
         enableBloodlineHover,
         isCompact
       });
-    }, 500);
+    }, 600);
     return () => clearTimeout(timer);
   }, [pan, scale, activePersonId, generations, showSiblings, orientation, enableBloodlineHover, isCompact, isWhitelisted, currentUser?.email]);
 
@@ -3989,13 +4001,24 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 <Compass className="w-3 h-3 text-emerald-400" />
                 <span>Огляд дерева ({layout.nodes.length})</span>
               </div>
-              <button
-                onClick={() => setShowMinimap(false)}
-                className="text-slate-400 hover:text-white transition-colors cursor-pointer p-0.5 rounded"
-                title="Сховати міні-мапу"
-              >
-                <X className="w-3 h-3" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleFocusRootPerson}
+                  className="flex items-center gap-1 text-[10px] font-medium text-amber-400 hover:text-amber-300 transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-slate-800"
+                  title="Фокус на корінній особі роду"
+                >
+                  <User className="w-3 h-3" />
+                  <span>Корінь</span>
+                </button>
+                <button
+                  onClick={() => setShowMinimap(false)}
+                  className="text-slate-400 hover:text-white transition-colors cursor-pointer p-0.5 rounded"
+                  title="Сховати міні-мапу"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
             </div>
 
             {/* Dynamic Miniature Canvas tightly mapped to actual treeBounds */}
@@ -4088,6 +4111,14 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
         {/* Floating Canvas Navigation HUD (Quick 1-tap zoom, fit and root focus on mobile & tablet) */}
         <div className="absolute bottom-6 right-4 sm:bottom-7 sm:right-6 z-20 flex items-center gap-1 bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] p-1 rounded-xl shadow-2xl">
+          <button
+            type="button"
+            onClick={handleFocusRootPerson}
+            className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-slate-700/80 rounded-lg transition-colors cursor-pointer"
+            title="Фокус на корінній особі роду"
+          >
+            <User className="w-4 h-4" />
+          </button>
           <button
             type="button"
             onClick={() => zoomAroundCenter(1.2)}

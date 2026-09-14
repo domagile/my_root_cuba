@@ -31,7 +31,12 @@ export function getSavedUserTreeState(email?: string | null): UserTreeState | nu
     const clean = email.trim().toLowerCase();
     const raw = localStorage.getItem(`${USER_STATE_PREFIX}${clean}`);
     if (!raw) return null;
-    return JSON.parse(raw) as UserTreeState;
+    const parsed = JSON.parse(raw) as UserTreeState;
+    // Filter out uncentered fallback/stale coordinates
+    if (parsed.pan && ((parsed.pan.x === 80 && parsed.pan.y === 80) || (parsed.pan.x === 0 && parsed.pan.y === 0))) {
+      delete parsed.pan;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -48,9 +53,14 @@ export function saveUserTreeState(email: string, partial: Partial<UserTreeState>
       selectedPersonId: '',
       updatedAt: new Date().toISOString()
     };
+    // Never persist dummy uncentered pan (80, 80) or (0, 0)
+    const sanitizedPartial = { ...partial };
+    if (sanitizedPartial.pan && ((sanitizedPartial.pan.x === 80 && sanitizedPartial.pan.y === 80) || (sanitizedPartial.pan.x === 0 && sanitizedPartial.pan.y === 0))) {
+      delete sanitizedPartial.pan;
+    }
     const next: UserTreeState = {
       ...existing,
-      ...partial,
+      ...sanitizedPartial,
       updatedAt: new Date().toISOString()
     };
     localStorage.setItem(`${USER_STATE_PREFIX}${clean}`, JSON.stringify(next));

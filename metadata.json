@@ -1,5 +1,5 @@
 {
-  "name": "Родовід - Генеалогічний дослідницький центр",
+  "name": "Тіні забутих предків",
   "description": "Платформа для дослідження родоводу, аналізу метричних книг та побудови родинного дерева",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

@@ -19,12 +19,9 @@ import {
   Bookmark, 
   Lightbulb, 
   Settings, 
-  FolderTree, 
   ShieldCheck, 
   ShieldAlert,
   Sparkles, 
-  PanelLeftClose, 
-  PanelLeftOpen, 
   FlaskConical,
   X,
   ChevronLeft,
@@ -33,7 +30,8 @@ import {
   Mail,
   ExternalLink
 } from 'lucide-react';
-import { TreeIcon, FanIcon } from './common/GenealogyIcons';
+import { TreeIcon, FanIcon, TreeOfLifeEmblem } from './common/GenealogyIcons';
+import { EmblemManagerModal } from './common/EmblemManagerModal';
 import { useUIStore, getTabUrl } from '../stores/useUIStore';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -73,6 +71,7 @@ export const Sidebar: React.FC = () => {
 
   const theme = getThemeConfig(themePalette);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isEmblemModalOpen, setIsEmblemModalOpen] = useState(false);
 
   const rodovidItems: { id: ViewMode; label: string; icon: React.FC<{ className?: string }>; isPublic?: boolean }[] = [
     { id: 'tree', label: 'Дерево', icon: TreeIcon, isPublic: true },
@@ -95,7 +94,7 @@ export const Sidebar: React.FC = () => {
     { id: 'notes', label: 'Чернетки & Завдання', icon: CheckSquare },
     { id: 'findings', label: 'Зачіпки', icon: Bookmark },
     { id: 'hypotheses', label: 'Підозри & Гіпотези', icon: Lightbulb },
-    { id: 'experiment', label: 'Експеримент', icon: FlaskConical }
+    { id: 'experiment', label: 'Нишпорка (HTR)', icon: FlaskConical }
   ];
 
   const handleRodovidClick = (item: { id: ViewMode; label: string; isPublic?: boolean }) => {
@@ -132,7 +131,7 @@ export const Sidebar: React.FC = () => {
         id="app-sidebar" 
         className={`
           fixed md:relative top-0 bottom-0 left-0 z-50 md:z-20
-          ${isSidebarVisible ? (isCollapsed ? 'w-16 md:w-16' : 'w-72 max-w-[85vw] md:w-64') : 'w-0 border-r-0 overflow-hidden p-0'} 
+          ${isSidebarVisible ? (isCollapsed ? 'w-16 md:w-16' : 'w-72 max-w-[85vw] md:w-72') : 'w-0 border-r-0 overflow-hidden p-0'} 
           ${theme.sidebarBg} ${theme.sidebarText} 
           flex flex-col h-full border-r ${theme.sidebarBorder} select-none flex-shrink-0 
           transition-all duration-300 ease-in-out
@@ -142,34 +141,34 @@ export const Sidebar: React.FC = () => {
         {/* Brand Header & Action Controls */}
         <div className={`p-3.5 border-b ${theme.sidebarBorder} flex items-center justify-between shrink-0`}>
           <div className="flex items-center gap-2.5 overflow-hidden">
-            <div className="w-8 h-8 rounded-lg bg-[#B88E3E]/20 border border-[#B88E3E]/40 flex items-center justify-center text-[#B88E3E] shrink-0">
-              <FolderTree className="w-4 h-4" />
-            </div>
+            <button 
+              type="button"
+              onClick={() => setIsEmblemModalOpen(true)}
+              className="w-9 h-9 flex items-center justify-center shrink-0 cursor-pointer relative group rounded-full p-0 border-0 bg-transparent focus:outline-none"
+              title="Натисніть, щоб завантажити або налаштувати ваш малюнок дерева (image.png)"
+            >
+              <TreeOfLifeEmblem className="w-full h-full drop-shadow-sm transition-transform group-hover:scale-105" />
+              <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm text-[8px] font-bold">
+                ✎
+              </span>
+            </button>
             {!isCollapsed && (
               <div className="whitespace-nowrap overflow-hidden">
-                <h1 className="font-bold text-sm leading-tight tracking-wide">Родовід</h1>
-                <p className="text-[10px] opacity-75">Генеалогія & Архіви</p>
+                <h1 className="font-bold text-sm leading-tight tracking-wide text-neutral-100 truncate" title="Тіні забутих предків">
+                  Тіні забутих предків
+                </h1>
               </div>
             )}
           </div>
 
           <div className="flex items-center gap-1">
-            {/* Collapse / Expand Button (Mobile & Desktop) */}
+            {/* Collapse / Expand Toggle Button */}
             <button 
               onClick={() => setIsCollapsed(!isCollapsed)}
-              className={`flex p-1.5 rounded-lg ${theme.sidebarHover} transition-colors text-[#B88E3E] shrink-0 cursor-pointer`}
-              title={isCollapsed ? 'Розгорнути список' : 'Згорнути список'}
+              className={`flex p-1.5 rounded-lg ${theme.sidebarHover} transition-colors text-neutral-400 hover:text-white shrink-0 cursor-pointer`}
+              title={isCollapsed ? 'Розгорнути панель' : 'Згорнути панель'}
             >
-              {isCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-            </button>
-
-            {/* Desktop Hide Panel Button */}
-            <button 
-              onClick={() => setSidebarVisible(false)}
-              className={`hidden md:flex p-1.5 rounded-lg ${theme.sidebarHover} transition-colors text-neutral-400 hover:text-white shrink-0 cursor-pointer`}
-              title="Сховати бічну панель"
-            >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className={`w-4 h-4 transition-transform duration-200 ${isCollapsed ? 'rotate-180' : ''}`} />
             </button>
 
             {/* Mobile Close Button */}
@@ -352,6 +351,12 @@ export const Sidebar: React.FC = () => {
             </button>
           )}
         </div>
+
+        {/* Emblem Manager Modal for user uploaded image */}
+        <EmblemManagerModal 
+          isOpen={isEmblemModalOpen} 
+          onClose={() => setIsEmblemModalOpen(false)} 
+        />
       </aside>
     </>
   );

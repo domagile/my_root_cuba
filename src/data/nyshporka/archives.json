@@ -1,0 +1,470 @@
+{
+  "version": 1,
+  "repositories": {
+    "DAHMO": {
+      "label": "ДАХмО",
+      "name": "Державний архів Хмельницької області",
+      "country": "UA",
+      "sites": {
+        "archium": {
+          "url": "https://archium.dahmo.gov.ua",
+          "source_id": "archium",
+          "bundled": "dahmo_archium_cases.tsv.gz",
+          "groups": [
+            {
+              "id": "1",
+              "label": "Фонди давніх актів (1739-1921)"
+            },
+            {
+              "id": "2",
+              "label": "Фонди радянського періоду"
+            },
+            {
+              "id": "3",
+              "label": "Фонди особового походження"
+            },
+            {
+              "id": "4",
+              "label": "Колекції"
+            }
+          ]
+        }
+      },
+      "codes": {
+        "babynyar": "34",
+        "duck": "ДАХмО",
+        "commons": "ДАХмО"
+      },
+      "aliases": [
+        "ДАХмельнО"
+      ]
+    },
+    "CDIAK": {
+      "label": "ЦДІАК",
+      "name": "Центральний державний історичний архів України, м. Київ",
+      "country": "UA",
+      "sites": {
+        "archium": {
+          "url": "https://archium.cdiak.archives.gov.ua",
+          "fond_groups": false
+        }
+      },
+      "codes": {
+        "babynyar": "30",
+        "duck": "ЦДІАК",
+        "commons": "ЦДІАК"
+      },
+      "aliases": [
+        "ЦДІАУК"
+      ]
+    },
+    "DAVIO": {
+      "label": "ДАВіО",
+      "name": "Державний архів Вінницької області",
+      "country": "UA",
+      "codes": {
+        "duck": "ДАВіО",
+        "commons": [
+          "ДАВіО",
+          "ДАВО"
+        ]
+      },
+      "aliases": [
+        "ДАВО",
+        "DAVO"
+      ]
+    },
+    "DAVO": {
+      "label": "ДАВіО",
+      "name": "Державний архів Вінницької області",
+      "country": "UA",
+      "same_as": "DAVIO",
+      "note": "Два коди на той самий архів — історична розбіжність між джерелами шифр.\nРезолвер спирається на це, коли лейбл шифри каже одне, а тека диска інше.\n"
+    },
+    "DACHVO": {
+      "label": "ДАЧвО",
+      "name": "Державний архів Чернівецької області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "42"
+      }
+    },
+    "DAOO": {
+      "label": "ДАОО",
+      "name": "Державний архів Одеської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "44"
+      }
+    },
+    "ANRM": {
+      "label": "ANRM",
+      "name": "Arhiva Naţională a Republicii Moldova",
+      "country": "MD",
+      "aliases": [
+        "АНРМ",
+        "НАМ"
+      ]
+    },
+    "BNRM": {
+      "label": "BNRM",
+      "name": "Biblioteca Naţională a Republicii Moldova",
+      "country": "MD"
+    },
+    "DAZHO": {
+      "label": "ДАЖО",
+      "name": "Державний архів Житомирської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "38"
+      }
+    },
+    "DACHO": {
+      "label": "ДАЧО",
+      "name": "Державний архів Чернігівської області",
+      "country": "UA",
+      "aliases": [
+        "ДАЧгО"
+      ],
+      "codes": {
+        "babynyar": "32"
+      }
+    },
+    "CSAMM": {
+      "label": "CSAMM",
+      "name": "Chişinău State Archive of Moldova (мікрофільми)",
+      "country": "MD"
+    },
+    "KOSTEL": {
+      "label": "костел",
+      "name": "Метрики костелу М'ястківки",
+      "country": "UA"
+    },
+    "DAARK": {
+      "label": "ДААРК",
+      "name": "Державний архів в Автономній Республіці Крим",
+      "country": "UA"
+    },
+    "DAVOO": {
+      "label": "ДАВоО",
+      "name": "Державний архів Волинської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "46"
+      }
+    },
+    "DADNO": {
+      "label": "ДАДнО",
+      "name": "Державний архів Дніпропетровської області",
+      "country": "UA"
+    },
+    "DADOO": {
+      "label": "ДАДоО",
+      "name": "Державний архів Донецької області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "41"
+      }
+    },
+    "DAZKO": {
+      "label": "ДАЗкО",
+      "name": "Державний архів Закарпатської області",
+      "country": "UA"
+    },
+    "DAZPO": {
+      "label": "ДАЗпО",
+      "name": "Державний архів Запорізької області",
+      "country": "UA"
+    },
+    "DAIFO": {
+      "label": "ДАІФО",
+      "name": "Державний архів Івано-Франківської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "26"
+      }
+    },
+    "DAK": {
+      "label": "ДАК",
+      "name": "Державний архів міста Києва",
+      "country": "UA",
+      "codes": {
+        "babynyar": "16"
+      }
+    },
+    "DAKO": {
+      "label": "ДАКО",
+      "name": "Державний архів Київської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "15"
+      }
+    },
+    "DAKRO": {
+      "label": "ДАКрО",
+      "name": "Державний архів Кіровоградської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "45"
+      }
+    },
+    "DALO": {
+      "label": "ДАЛО",
+      "name": "Державний архів Львівської області",
+      "country": "UA"
+    },
+    "DALUO": {
+      "label": "ДАЛуО",
+      "name": "Державний архів Луганської області",
+      "country": "UA"
+    },
+    "DAMO": {
+      "label": "ДАМО",
+      "name": "Державний архів Миколаївської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "36"
+      }
+    },
+    "DAPO": {
+      "label": "ДАПО",
+      "name": "Державний архів Полтавської області",
+      "country": "UA"
+    },
+    "DARO": {
+      "label": "ДАРО",
+      "name": "Державний архів Рівненської області",
+      "country": "UA"
+    },
+    "DAS": {
+      "label": "ДАС",
+      "name": "Державний архів міста Севастополя",
+      "country": "UA"
+    },
+    "DASO": {
+      "label": "ДАСО",
+      "name": "Державний архів Сумської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "33"
+      }
+    },
+    "DATO": {
+      "label": "ДАТО",
+      "name": "Державний архів Тернопільської області",
+      "country": "UA"
+    },
+    "DAHO": {
+      "label": "ДАХО",
+      "name": "Державний архів Харківської області",
+      "country": "UA",
+      "codes": {
+        "babynyar": "40"
+      }
+    },
+    "DAHEO": {
+      "label": "ДАХеО",
+      "name": "Державний архів Херсонської області",
+      "country": "UA"
+    },
+    "DACHKO": {
+      "label": "ДАЧкО",
+      "name": "Державний архів Черкаської області",
+      "country": "UA",
+      "note": "Сюди належать справи Золотоніського повіту (Полтавська губернія за\nстарим поділом) — саме через нього архів і знадобився першим.\n",
+      "codes": {
+        "babynyar": "39"
+      }
+    },
+    "CDIAL": {
+      "label": "ЦДІАЛ",
+      "name": "Центральний державний історичний архів України, м. Львів",
+      "country": "UA"
+    },
+    "CDAVO": {
+      "label": "ЦДАВО",
+      "name": "Центральний державний архів вищих органів влади та управління України",
+      "country": "UA",
+      "codes": {
+        "babynyar": "17"
+      }
+    },
+    "CDAHOU": {
+      "label": "ЦДАГОУ",
+      "name": "Центральний державний архів громадських об'єднань та україніки",
+      "country": "UA",
+      "codes": {
+        "babynyar": "20"
+      }
+    },
+    "DASU": {
+      "label": "ДАСУ",
+      "name": "Державна архівна служба України",
+      "country": "UA",
+      "codes": {
+        "babynyar": "35"
+      }
+    },
+    "HDASBU": {
+      "label": "ГДАСБУ",
+      "name": "Галузевий державний архів Служби безпеки України",
+      "country": "UA",
+      "aliases": [
+        "ГДА СБУ",
+        "ГДА СБ України"
+      ],
+      "codes": {
+        "babynyar": "37"
+      }
+    }
+  },
+  "fonds": [
+    {
+      "repo": "DAHMO",
+      "fond": "315",
+      "name": "Подільська духовна консисторія",
+      "guberniya": "Подільська",
+      "default_opys": "1"
+    },
+    {
+      "repo": "DAHMO",
+      "fond": "226",
+      "name": "Подільська казенна палата",
+      "guberniya": "Подільська"
+    },
+    {
+      "repo": "DAHMO",
+      "fond": "196",
+      "name": "Подільська палата цивільного суду",
+      "guberniya": "Подільська"
+    },
+    {
+      "repo": "DAHMO",
+      "fond": "230",
+      "name": "Подільське дворянське депутатське зібрання",
+      "guberniya": "Подільська",
+      "guide_total": 7925,
+      "opys_last": {
+        "1": {
+          "last": 7438,
+          "basis": "header"
+        },
+        "2": {
+          "last": 320,
+          "basis": "header"
+        },
+        "3": {
+          "last": 144,
+          "basis": "header"
+        },
+        "4": {
+          "last": 4,
+          "basis": "header"
+        },
+        "5": {
+          "last": 93,
+          "basis": "header"
+        }
+      }
+    },
+    {
+      "repo": "DAVIO",
+      "fond": "904",
+      "name": "Метричні книги церков Подільської губернії",
+      "guberniya": "Подільська"
+    },
+    {
+      "repo": "DAVIO",
+      "fond": "792",
+      "name": "Нотаріальні книги (Ольгопільський повіт)",
+      "guberniya": "Подільська"
+    },
+    {
+      "repo": "CDIAK",
+      "fond": "224",
+      "name": "Колекція метричних книг",
+      "default_opys": "1",
+      "archium_fond": "198",
+      "archium_opys": {
+        "1": "1527",
+        "2": "1528",
+        "3": "1529"
+      },
+      "opys_last": {
+        "1": {
+          "last": 1515,
+          "basis": "official",
+          "note": "звірено з переліком архіву; транскрипція повна"
+        },
+        "2": {
+          "last": 231,
+          "basis": "transcript"
+        },
+        "3": {
+          "last": 1183,
+          "basis": "transcript"
+        }
+      }
+    },
+    {
+      "repo": "CDIAK",
+      "fond": "481",
+      "name": "Подільська духовна консисторія",
+      "guide_total": 3979,
+      "opys_last": {
+        "1": {
+          "last": 293,
+          "basis": "transcript"
+        },
+        "2": {
+          "last": 2384,
+          "basis": "transcript"
+        },
+        "3": {
+          "last": 1286,
+          "basis": "transcript"
+        }
+      }
+    },
+    {
+      "repo": "CDIAK",
+      "fond": "127",
+      "default_opys": "1076"
+    },
+    {
+      "repo": "CDIAK",
+      "fond": "1125",
+      "archium_fond": "695",
+      "archium_opys": {
+        "1": "2217"
+      }
+    },
+    {
+      "repo": "ANRM",
+      "fond": "211",
+      "name": "Кишинівська духовна консисторія",
+      "opys_in_key": true,
+      "note": "🔴 Опис ОБОВ'ЯЗКОВО входить у ключ справи: нумерація починається з одиниці\nв КОЖНОМУ описі, тож без опису різні книги злипаються в одну.\nоп.1/3 — метрики, оп.5 — метрики сільських церков, оп.11 — сповідні розписи;\nусі мають справи з малими номерами.\nЦіна помилки: аркуші однієї книги мовчки дописувались би в іншу.\n"
+    }
+  ],
+  "skip_slugs": [
+    "davo_opysy",
+    "dahmo_319_f65_opisy",
+    "bev_pdh",
+    "kev_pdh",
+    "khev_pdh",
+    "eev_pdh",
+    "_console_pages"
+  ],
+  "record_type_labels": {
+    "birth": "народження",
+    "marriage": "шлюби",
+    "death": "смерті",
+    "confession": "сповідні",
+    "revision": "ревізькі",
+    "gazette": "єпарх. відомості",
+    "clergy_list": "клірові",
+    "finding_aid": "опис фонду",
+    "other": "інше"
+  }
+}

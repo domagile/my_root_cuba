@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "runtime": {
+    "id": "htr",
+    "python": "3.11",
+    "packages": [
+      "kraken==7.0.2",
+      "timm>=1.0",
+      "nltk>=3.9",
+      "pytorch-lightning>=2.0",
+      "rapidfuzz>=3.10"
+    ],
+    "vcs_packages": [
+      {
+        "name": "strhub",
+        "spec": "strhub @ git+https://github.com/baudm/parseq.git@1902db043c029a7e03a3818c616c06600af574be",
+        "note": "Scene Text Recognition Model Hub, Apache-2.0. Використовується ЛИШЕ\nPARSeq. ⚠ Пакет містить підмодуль `models/abinet` під non-commercial\nліцензією USTC — його не вантажимо й не поширюємо.\n"
+      }
+    ],
+    "torch": {
+      "default": [
+        "torch",
+        "torchvision"
+      ],
+      "cuda_index": "https://download.pytorch.org/whl/{tag}",
+      "cuda_matrix": [
+        {
+          "min_capability": "7.0",
+          "max_capability": "8.9",
+          "tag": "cu126",
+          "min_driver": "527.41"
+        },
+        {
+          "min_capability": "9.0",
+          "max_capability": "12.9",
+          "tag": "cu128",
+          "min_driver": "527.41"
+        }
+      ]
+    }
+  },
+  "patches": [
+    {
+      "id": "gpu_sato",
+      "module": "nyshporka.htr.patches.gpu_sato",
+      "verify": "nyshporka.htr.patches.gpu_sato_verify",
+      "tested_on": "kraken==7.0.2",
+      "requires_cuda": true,
+      "gain": "×1.51 на сторінку (ridge-фільтр skimage.filters.sato → torch на карті)"
+    },
+    {
+      "id": "fast_geom",
+      "module": "nyshporka.htr.patches.fast_geom",
+      "verify": "nyshporka.htr.patches.fast_geom_verify",
+      "tested_on": "kraken==7.0.2",
+      "requires_cuda": false,
+      "gain": "×1.36 на сторінку (_calc_roi через STRtree, boundary_tracing скалярами)"
+    },
+    {
+      "id": "seg_resize",
+      "module": "nyshporka.htr.patches.seg_resize",
+      "verify": "nyshporka.htr.patches.seg_resize_verify",
+      "tested_on": "kraken==7.0.2",
+      "requires_cuda": false,
+      "gain": "−0.3…−0.5 с/стор на 16-Мпікс кадрах (один LANCZOS-ресайз замість двох)"
+    }
+  ],
+  "engines": [
+    {
+      "id": "skryba",
+      "label": "Скриба",
+      "kind": "kraken",
+      "script": "latin",
+      "model_glob": "skryba_*.mlmodel",
+      "note": "латинка — нотаріальні й костельні книги"
+    },
+    {
+      "id": "pysar",
+      "label": "Писар",
+      "kind": "parseq",
+      "script": "cyrillic",
+      "model_glob": "pysar_*.pt",
+      "note": "кирилиця — канцелярія, метрики, сповідки"
+    },
+    {
+      "id": "diak",
+      "label": "Дяк",
+      "kind": "kraken",
+      "script": "cyrillic",
+      "model_glob": "diak_*.mlmodel",
+      "note": "другий голос: CTC прив'язаний до пікселів і калічить локально, тоді як\nPARSeq має внутрішню мовну модель і підставляє правдоподібне слово.\n"
+    }
+  ],
+  "base_models": [
+    {
+      "id": "mccatmus",
+      "doi": "10.5281/zenodo.13788177",
+      "filename": "McCATMuS_nfd_nofix_V1.mlmodel",
+      "note": "Generic-латинка XVI-XXI ст. (рукопис + друк). Фолбек, коли власної моделі\nнемає, і база для файн-тюнів. Ставиться `kraken get`, кешується в\nпрофілі користувача — не в репозиторії.\n"
+    }
+  ]
+}
