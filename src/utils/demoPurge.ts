@@ -75,14 +75,50 @@ export function isDemoFamily(familyId: string, family?: any): boolean {
   return false;
 }
 
+export function isDemoEvent(eventId: string, event?: any): boolean {
+  const id = String(eventId || event?.id || '').trim();
+  if (/^e[0-9]+$/i.test(id)) return true;
+  const text = String(
+    (event?.title || '') + ' ' +
+    (event?.description || '') + ' ' +
+    (event?.place || '')
+  ).toLowerCase();
+  if (text.includes('коваленк') || text.includes('чернечий яр') || text.includes('диканьк') || text.includes('лисенк')) return true;
+  return false;
+}
+
+export function isDemoSource(sourceId: string, source?: any): boolean {
+  const id = String(sourceId || source?.id || '').trim();
+  if (/^s[0-9]+$/i.test(id)) return true;
+  const text = String(
+    (source?.title || '') + ' ' +
+    (source?.name || '') + ' ' +
+    (source?.notes || '') + ' ' +
+    (source?.archiveReference || '')
+  ).toLowerCase();
+  if (text.includes('коваленк') || text.includes('чернечий яр') || text.includes('диканьк') || text.includes('покровської церкви 1878')) return true;
+  return false;
+}
+
 export function isDemoResearchItem(item: any): boolean {
   if (!item) return false;
   const id = String(item.id || '');
-  if (/^(mr|doc|task|fnd|hyp|req|mx)-[0-9]+$/.test(id)) return true;
-  const title = String(item.title || item.transcription || item.hypothesis || item.village || '').toLowerCase();
-  if (title.includes('коваленк') || title.includes('чернечий яр')) return true;
+  if (/^(m|mr|doc|task|t|fnd|f|hyp|h|req|mx)-[0-9]+$/i.test(id)) return true;
+  const text = String(
+    (item.title || '') + ' ' +
+    (item.transcription || '') + ' ' +
+    (item.hypothesis || '') + ' ' +
+    (item.village || '') + ' ' +
+    (item.archive || '')
+  ).toLowerCase();
+  if (text.includes('коваленк') || text.includes('чернечий яр') || text.includes('диканьк')) return true;
   if (Array.isArray(item.persons)) {
     if (item.persons.some((p: any) => String(p.name || '').toLowerCase().includes('коваленк'))) {
+      return true;
+    }
+  }
+  if (Array.isArray(item.indexedPersons)) {
+    if (item.indexedPersons.some((p: any) => String(p.name || '').toLowerCase().includes('коваленк'))) {
       return true;
     }
   }
@@ -164,19 +200,94 @@ export function purgeDemoStorage(): void {
       }
     }
 
-    // 5. Research items
+    // 4b. Sources
+    const sKey = 'genealogy_workstation_data_v4_familio_sources';
+    const sSaved = localStorage.getItem(sKey);
+    if (sSaved) {
+      const parsed = JSON.parse(sSaved);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const cleaned: Record<string, any> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (!isDemoSource(k, v)) {
+            cleaned[k] = v;
+          }
+        }
+        localStorage.setItem(sKey, JSON.stringify(cleaned));
+      }
+    }
+
+    // 4c. Events
+    const eKey = 'genealogy_workstation_data_v4_familio_events';
+    const eSaved = localStorage.getItem(eKey);
+    if (eSaved) {
+      const parsed = JSON.parse(eSaved);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const cleaned: Record<string, any> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (!isDemoEvent(k, v)) {
+            cleaned[k] = v;
+          }
+        }
+        localStorage.setItem(eKey, JSON.stringify(cleaned));
+      }
+    }
+
+    // 5. Research items (both v2 and v1 keys)
     const researchKeys = ['metrics', 'documents', 'tasks', 'findings', 'hypotheses', 'requests', 'matrix'];
-    researchKeys.forEach((sub) => {
-      const rKey = `genealogy_research_hub_v1_${sub}`;
-      const rSaved = localStorage.getItem(rKey);
-      if (rSaved) {
-        const parsed = JSON.parse(rSaved);
+    ['genealogy_workstation_data_v2_', 'genealogy_research_hub_v1_'].forEach((prefix) => {
+      researchKeys.forEach((sub) => {
+        const rKey = `${prefix}${sub}`;
+        const rSaved = localStorage.getItem(rKey);
+        if (rSaved) {
+          const parsed = JSON.parse(rSaved);
+          if (Array.isArray(parsed)) {
+            const cleaned = parsed.filter((item: any) => !isDemoResearchItem(item));
+            localStorage.setItem(rKey, JSON.stringify(cleaned));
+          }
+        }
+      });
+    });
+
+    // Comprehensive scan across all localStorage keys starting with 'genealogy_'
+    try {
+      const allKeys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k) allKeys.push(k);
+      }
+      for (const k of allKeys) {
+        if (!k.startsWith('genealogy_')) continue;
+        const val = localStorage.getItem(k);
+        if (!val) continue;
+        const parsed = JSON.parse(val);
         if (Array.isArray(parsed)) {
-          const cleaned = parsed.filter((item: any) => !isDemoResearchItem(item));
-          localStorage.setItem(rKey, JSON.stringify(cleaned));
+          const cleaned = parsed.filter((item: any) => {
+            if (isDemoPerson(item)) return false;
+            if (isDemoResearchItem(item)) return false;
+            if (isDemoNote(item)) return false;
+            if (item?.email && isDemoEmail(item.email)) return false;
+            if (item?.id === 'req-1' || item?.id === 't-1' || item?.id === 't-2' || item?.id === 'doc-1' || item?.id === 'f-1' || item?.id === 'h-1') return false;
+            return true;
+          });
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem(k, JSON.stringify(cleaned));
+          }
+        } else if (parsed && typeof parsed === 'object') {
+          let changed = false;
+          const cleaned: Record<string, any> = {};
+          for (const [propKey, propVal] of Object.entries(parsed)) {
+            if (isDemoFamily(propKey, propVal) || isDemoSource(propKey, propVal) || isDemoEvent(propKey, propVal)) {
+              changed = true;
+            } else {
+              cleaned[propKey] = propVal;
+            }
+          }
+          if (changed) {
+            localStorage.setItem(k, JSON.stringify(cleaned));
+          }
         }
       }
-    });
+    } catch {}
 
     // 6. Notes
     const notesKey = 'genealogy_research_notes_v1';

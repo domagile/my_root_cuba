@@ -27,7 +27,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { getSavedUserTreeState } from '../utils/userTreeState';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
-import { isDemoPerson, isDemoResearchItem, purgeDemoStorage } from '../utils/demoPurge';
+import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent, isDemoResearchItem, purgeDemoStorage } from '../utils/demoPurge';
 
 export { useUIStore } from '../stores/useUIStore';
 export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore';
@@ -93,6 +93,12 @@ export interface GenealogyContextType {
   setEvents: (events: any) => void;
   saveEvent: (event: any) => void;
   deleteEvent: (id: string) => void;
+
+  // Places & Settlement Dossiers
+  places: Record<string, any>;
+  setPlaces: (places: any) => void;
+  savePlace: (place: any) => void;
+  deletePlace: (idOrName: string) => void;
 
   getGenealogyDatabase: () => any;
   loadGenealogyDatabase: (db: any) => void;
@@ -211,6 +217,11 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const saveEvent = useGenealogyStore((s) => s.saveEvent);
   const deleteEvent = useGenealogyStore((s) => s.deleteEvent);
 
+  const places = useGenealogyStore((s) => s.places);
+  const setPlaces = useGenealogyStore((s) => s.setPlaces);
+  const savePlace = useGenealogyStore((s) => s.savePlace);
+  const deletePlace = useGenealogyStore((s) => s.deletePlace);
+
   const getGenealogyDatabase = useGenealogyStore((s) => s.getGenealogyDatabase);
   const loadGenealogyDatabase = useGenealogyStore((s) => s.loadGenealogyDatabase);
 
@@ -307,37 +318,67 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const unsubscribe = subscribeToProjectData((cloudData) => {
       if (!cloudData) return;
       if (cloudData.persons && Array.isArray(cloudData.persons) && cloudData.persons.length > 0) {
-        setPersons(cloudData.persons);
+        setPersons(cloudData.persons.filter((p: any) => !isDemoPerson(p)).map(normalizePerson));
       }
       if (cloudData.families && Array.isArray(cloudData.families)) {
         const famMap: Record<string, any> = {};
-        cloudData.families.forEach((f: any) => { if (f && f.id) famMap[f.id] = f; });
+        cloudData.families.forEach((f: any) => {
+          if (f && f.id && !isDemoFamily(f.id, f)) famMap[f.id] = f;
+        });
         setFamilies(famMap);
       }
       if (cloudData.events && Array.isArray(cloudData.events)) {
         const evMap: Record<string, any> = {};
-        cloudData.events.forEach((e: any) => { if (e && e.id) evMap[e.id] = e; });
+        cloudData.events.forEach((e: any) => {
+          if (e && e.id && !isDemoEvent(e.id, e)) evMap[e.id] = e;
+        });
         setEvents(evMap);
       }
       if (cloudData.sources && Array.isArray(cloudData.sources)) {
         const srcMap: Record<string, any> = {};
-        cloudData.sources.forEach((s: any) => { if (s && s.id) srcMap[s.id] = s; });
+        cloudData.sources.forEach((s: any) => {
+          if (s && s.id && !isDemoSource(s.id, s)) srcMap[s.id] = s;
+        });
         setSources(srcMap);
       }
-      if (cloudData.metricRecords && Array.isArray(cloudData.metricRecords)) setMetricRecords(cloudData.metricRecords);
-      if (cloudData.documents && Array.isArray(cloudData.documents)) setDocuments(cloudData.documents);
-      if (cloudData.tasks && Array.isArray(cloudData.tasks)) setTasks(cloudData.tasks);
-      if (cloudData.findings && Array.isArray(cloudData.findings)) setFindings(cloudData.findings);
-      if (cloudData.hypotheses && Array.isArray(cloudData.hypotheses)) setHypotheses(cloudData.hypotheses);
-      if (cloudData.requests && Array.isArray(cloudData.requests)) setRequests(cloudData.requests);
-      if (cloudData.matrixEntries && Array.isArray(cloudData.matrixEntries)) setMatrixEntries(cloudData.matrixEntries);
+      if (cloudData.places && Array.isArray(cloudData.places)) {
+        const plMap: Record<string, any> = {};
+        cloudData.places.forEach((p: any) => {
+          if (p && (p.id || p.placeName)) {
+            const k = p.id || p.placeName.trim();
+            plMap[k] = p;
+          }
+        });
+        setPlaces(plMap);
+      }
+      if (cloudData.metricRecords && Array.isArray(cloudData.metricRecords)) {
+        setMetricRecords(cloudData.metricRecords.filter((m: any) => !isDemoResearchItem(m)));
+      }
+      if (cloudData.documents && Array.isArray(cloudData.documents)) {
+        setDocuments(cloudData.documents.filter((d: any) => !isDemoResearchItem(d)));
+      }
+      if (cloudData.tasks && Array.isArray(cloudData.tasks)) {
+        setTasks(cloudData.tasks.filter((t: any) => !isDemoResearchItem(t)));
+      }
+      if (cloudData.findings && Array.isArray(cloudData.findings)) {
+        setFindings(cloudData.findings.filter((f: any) => !isDemoResearchItem(f)));
+      }
+      if (cloudData.hypotheses && Array.isArray(cloudData.hypotheses)) {
+        setHypotheses(cloudData.hypotheses.filter((h: any) => !isDemoResearchItem(h)));
+      }
+      if (cloudData.requests && Array.isArray(cloudData.requests)) {
+        setRequests(cloudData.requests.filter((r: any) => !isDemoResearchItem(r)));
+      }
+      if (cloudData.matrixEntries && Array.isArray(cloudData.matrixEntries)) {
+        setMatrixEntries(cloudData.matrixEntries.filter((e: any) => !isDemoResearchItem(e)));
+      }
       setStatus('synced');
     });
 
     return () => {
       unsubscribe();
     };
-  }, [setPersons, setFamilies, setEvents, setSources, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
+  }, [setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
 
   // Debounced auto-sync to Firestore
   useEffect(() => {
@@ -347,6 +388,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         families: Object.values(families || {}),
         events: Object.values(events || {}),
         sources: Object.values(sources || {}),
+        places: Object.values(places || {}),
         metricRecords,
         documents,
         tasks,
@@ -364,7 +406,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }, 2500);
 
     return () => clearTimeout(timer);
-  }, [persons, families, events, sources, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime]);
+  }, [persons, families, events, sources, places, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime]);
 
   // Manual Trigger: Force Upload to Cloud
   const triggerUploadToCloud = useCallback(async (): Promise<{ success: boolean; message: string }> => {
@@ -415,34 +457,42 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         let totalCount = 0;
 
         if (Array.isArray(d.persons) && d.persons.length > 0) {
-          setPersons(d.persons);
-          totalCount += d.persons.length;
+          const validPersons = d.persons.filter((p: any) => !isDemoPerson(p)).map(normalizePerson);
+          setPersons(validPersons);
+          totalCount += validPersons.length;
         }
         if (Array.isArray(d.families)) {
           const famMap: Record<string, any> = {};
-          d.families.forEach((f: any) => { if (f && f.id) famMap[f.id] = f; });
+          d.families.forEach((f: any) => {
+            if (f && f.id && !isDemoFamily(f.id, f)) famMap[f.id] = f;
+          });
           setFamilies(famMap);
         }
         if (Array.isArray(d.events)) {
           const evMap: Record<string, any> = {};
-          d.events.forEach((e: any) => { if (e && e.id) evMap[e.id] = e; });
+          d.events.forEach((e: any) => {
+            if (e && e.id && !isDemoEvent(e.id, e)) evMap[e.id] = e;
+          });
           setEvents(evMap);
         }
         if (Array.isArray(d.sources)) {
           const srcMap: Record<string, any> = {};
-          d.sources.forEach((s: any) => { if (s && s.id) srcMap[s.id] = s; });
+          d.sources.forEach((s: any) => {
+            if (s && s.id && !isDemoSource(s.id, s)) srcMap[s.id] = s;
+          });
           setSources(srcMap);
         }
         if (Array.isArray(d.metricRecords)) {
-          setMetricRecords(d.metricRecords);
-          totalCount += d.metricRecords.length;
+          const validMetrics = d.metricRecords.filter((m: any) => !isDemoResearchItem(m));
+          setMetricRecords(validMetrics);
+          totalCount += validMetrics.length;
         }
-        if (Array.isArray(d.documents)) setDocuments(d.documents);
-        if (Array.isArray(d.tasks)) setTasks(d.tasks);
-        if (Array.isArray(d.findings)) setFindings(d.findings);
-        if (Array.isArray(d.hypotheses)) setHypotheses(d.hypotheses);
-        if (Array.isArray(d.requests)) setRequests(d.requests);
-        if (Array.isArray(d.matrixEntries)) setMatrixEntries(d.matrixEntries);
+        if (Array.isArray(d.documents)) setDocuments(d.documents.filter((x: any) => !isDemoResearchItem(x)));
+        if (Array.isArray(d.tasks)) setTasks(d.tasks.filter((x: any) => !isDemoResearchItem(x)));
+        if (Array.isArray(d.findings)) setFindings(d.findings.filter((x: any) => !isDemoResearchItem(x)));
+        if (Array.isArray(d.hypotheses)) setHypotheses(d.hypotheses.filter((x: any) => !isDemoResearchItem(x)));
+        if (Array.isArray(d.requests)) setRequests(d.requests.filter((x: any) => !isDemoResearchItem(x)));
+        if (Array.isArray(d.matrixEntries)) setMatrixEntries(d.matrixEntries.filter((x: any) => !isDemoResearchItem(x)));
 
         setStatus('synced');
         setLastSyncTime(new Date().toISOString());
@@ -586,6 +636,10 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setEvents,
       saveEvent,
       deleteEvent,
+      places,
+      setPlaces,
+      savePlace,
+      deletePlace,
       getGenealogyDatabase,
       loadGenealogyDatabase,
       metricRecords,
@@ -677,6 +731,10 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setEvents,
       saveEvent,
       deleteEvent,
+      places,
+      setPlaces,
+      savePlace,
+      deletePlace,
       getGenealogyDatabase,
       loadGenealogyDatabase,
       metricRecords,

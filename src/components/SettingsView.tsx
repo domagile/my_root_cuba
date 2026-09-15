@@ -1081,7 +1081,7 @@ export const SettingsView: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                if (window.confirm('Видалити всі залишки демонстраційних даних (Коваленки, зразки записів, тестові нотатки)? Ваші власні дані та додані родичі залишаться збереженими.')) {
+                if (window.confirm('Видалити всі залишки демонстраційних або тестових даних? Ваші власні архівні дані та родове дерево залишаться збереженими.')) {
                   purgeAllDemoData();
                   setImportStatus('Усі залишки демо-даних успішно очищено!');
                   setTimeout(() => setImportStatus(null), 4000);
@@ -1518,7 +1518,7 @@ export const SettingsView: React.FC = () => {
                     type="text"
                     value={newWhiteName}
                     onChange={(e) => setNewWhiteName(e.target.value)}
-                    placeholder="наприклад: Василь Коваленко"
+                    placeholder="наприклад: Василь Болотний"
                     className={`w-full px-3 py-2 rounded-lg text-xs border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-none focus:border-[#B88E3E]`}
                   />
                 </div>

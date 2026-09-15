@@ -45,9 +45,6 @@ export const SheetsAnalyzerTab: React.FC<SheetsAnalyzerTabProps> = ({
   const [googleSheetsUrl, setGoogleSheetsUrl] = useState('');
   const [isLoadingUrl, setIsLoadingUrl] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [targetSurnamesInput, setTargetSurnamesInput] = useState('Коваленко, Шакало, Шевель');
-  const [analysisProgress, setAnalysisProgress] = useState(0);
-
   // Extract distinct surnames from current tree as quick clickable suggestions
   const treeSurnames = useMemo(() => {
     const set = new Set<string>();
@@ -57,6 +54,16 @@ export const SheetsAnalyzerTab: React.FC<SheetsAnalyzerTabProps> = ({
     });
     return Array.from(set).slice(0, 8);
   }, [treePersons]);
+
+  const [targetSurnamesInput, setTargetSurnamesInput] = useState(() => {
+    const set = new Set<string>();
+    treePersons.forEach(p => {
+      const s = p.lastName || p.name?.surname;
+      if (s && s.length >= 3) set.add(s);
+    });
+    return Array.from(set).slice(0, 3).join(', ');
+  });
+  const [analysisProgress, setAnalysisProgress] = useState(0);
 
   // Handle Excel file upload (Multi-sheet)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -260,11 +267,11 @@ export const SheetsAnalyzerTab: React.FC<SheetsAnalyzerTabProps> = ({
             type="text"
             value={targetSurnamesInput}
             onChange={e => setTargetSurnamesInput(e.target.value)}
-            placeholder="Коваленко, Шакало, Шевель, Бондаренко..."
+            placeholder={treeSurnames.slice(0, 4).join(', ') || 'Болотний, Дядькін, Шакало...'}
             className={`w-full px-4 py-2.5 ${theme.inputBg} border ${theme.inputBorder} rounded-xl text-xs ${theme.inputText} font-bold focus:outline-none`}
           />
           <p className="text-[11px] text-neutral-400">
-            Алгоритм автоматично знаходить форми прізвищ (напр. <em>Коваленко ↔ Коваленкова ↔ Ковалиха ↔ Коваль</em>), а також осіб, де ці прізвища фігурують як <strong>батьки, подружжя або хрещені</strong>.
+            Алгоритм автоматично знаходить форми прізвищ (напр. <em>Шакало ↔ Шакалиха ↔ Шакаленко</em>, <em>Болотний ↔ Болотна</em>), а також осіб, де ці прізвища фігурують як <strong>батьки, подружжя або хрещені</strong>.
           </p>
         </div>
       </div>

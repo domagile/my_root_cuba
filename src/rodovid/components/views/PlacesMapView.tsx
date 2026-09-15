@@ -18,15 +18,23 @@ import {
   Sparkles,
   Layers,
   Map as MapIcon,
-  BarChart3
+  BarChart3,
+  BookOpen,
+  ScrollText,
+  FileText,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
+import { useGenealogyStore } from '../../../stores/useGenealogyStore';
 import { useResearchStore } from '../../../stores/useResearchStore';
 import { getThemeConfig } from '../../../utils/theme';
 import { normalizeUkrainianPlace } from '../../../utils/ukrainianPhonetics';
 import { OriginStatsMap } from './OriginStatsMap';
+import { PlaceDossierView } from './places/PlaceDossierView';
+import { PlaceDossier } from '../../../types';
 
 interface PlacesMapViewProps {
   database: GenealogyDatabase;
@@ -60,7 +68,27 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
   const [selectedPlace, setSelectedPlace] = useState<string | null>(null);
   const [eventTypeFilter, setEventTypeFilter] = useState<'all' | 'birth' | 'marriage' | 'death'>('all');
   const [placesViewSubmode, setPlacesViewSubmode] = useState<'map_catalog' | 'origin_stats'>('map_catalog');
+  const [activeDossierTab, setActiveDossierTab] = useState<'overview' | 'history' | 'sources' | 'notes'>('overview');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  const places = useGenealogyStore((s) => s.places);
+  const savePlace = useGenealogyStore((s) => s.savePlace);
   const metricRecords = useResearchStore((s) => s.metricRecords);
+
+  const getPlaceDossier = (placeName: string): PlaceDossier | undefined => {
+    if (!placeName || !places) return undefined;
+    const trimmed = placeName.trim();
+    if (places[trimmed]) return places[trimmed];
+    const normalized = normalizeUkrainianPlace(trimmed);
+    if (places[normalized]) return places[normalized];
+    return Object.values(places).find(
+      (p) => p && (p.placeName?.trim().toLowerCase() === trimmed.toLowerCase() || p.id === trimmed || p.id === normalized)
+    );
+  };
+
+  const handleSaveDossier = (updated: PlaceDossier) => {
+    savePlace(updated);
+  };
 
   const personsList = useMemo(() => {
     return Object.values(database.persons || {}) as Person[];
@@ -242,18 +270,79 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
         </div>
       ) : (
         <div className={`flex-1 flex flex-col md:flex-row h-full overflow-hidden ${theme.textPrimary}`}>
-          {/* Left panel: Places search & list */}
-          <div className={`w-full md:w-96 border-b md:border-b-0 md:border-r ${theme.cardBorder} flex flex-col h-1/2 md:h-full ${theme.cardBg}`}>
-            <div className={`p-4 border-b ${theme.borderSubtle} space-y-3`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-amber-500">
-                  <Compass className="w-5 h-5" />
-                  <h2 className={`font-bold text-xs tracking-wide uppercase ${theme.textPrimary}`}>Географія Роду</h2>
+          {/* Left panel: Places search & list (Collapsible) */}
+          {isSidebarCollapsed ? (
+            <>
+              {/* Desktop compact collapsed rail */}
+              <div
+                onClick={() => setIsSidebarCollapsed(false)}
+                title="Розгорнути список локацій «Географія Роду»"
+                className={`hidden md:flex flex-col items-center py-4 px-1.5 w-12 shrink-0 border-r ${theme.cardBorder} ${theme.cardBg} cursor-pointer hover:bg-amber-500/5 transition-all select-none justify-between`}
+              >
+                <div className="flex flex-col items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsSidebarCollapsed(false);
+                    }}
+                    title="Розгорнути список локацій «Географія Роду»"
+                    className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 transition-colors cursor-pointer"
+                  >
+                    <PanelLeftOpen className="w-4 h-4" />
+                  </button>
+                  <Compass className="w-4 h-4 text-amber-500 opacity-80" />
                 </div>
-            <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-neutral-200 text-neutral-700'}`}>
-              {placeList.length} локацій
-            </span>
-          </div>
+
+                <div className="flex flex-col items-center gap-2 [writing-mode:vertical-lr] rotate-180 text-xs font-semibold tracking-wider uppercase text-neutral-400 hover:text-amber-500 transition-colors">
+                  <span>Географія Роду</span>
+                </div>
+
+                <div className="flex flex-col items-center">
+                  <span 
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${isDark ? 'bg-neutral-800 text-amber-400 border border-neutral-700' : 'bg-amber-100 text-amber-800 border border-amber-300'} font-semibold`} 
+                    title={`${placeList.length} локацій`}
+                  >
+                    {placeList.length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Mobile compact collapsed strip */}
+              <div className={`md:hidden flex items-center justify-between p-2.5 border-b ${theme.borderSubtle} ${theme.cardBg}`}>
+                <button
+                  type="button"
+                  onClick={() => setIsSidebarCollapsed(false)}
+                  className="flex items-center gap-2 text-xs font-semibold text-amber-600 dark:text-amber-400 cursor-pointer"
+                >
+                  <PanelLeftOpen className="w-4 h-4" />
+                  <span>Показати список локацій ({placeList.length})</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className={`w-full md:w-96 border-b md:border-b-0 md:border-r ${theme.cardBorder} flex flex-col h-1/2 md:h-full ${theme.cardBg} transition-all`}>
+              <div className={`p-4 border-b ${theme.borderSubtle} space-y-3`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-amber-500 min-w-0">
+                    <Compass className="w-5 h-5 shrink-0" />
+                    <h2 className={`font-bold text-xs tracking-wide uppercase truncate ${theme.textPrimary}`}>Географія Роду</h2>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-neutral-200 text-neutral-700'}`}>
+                      {placeList.length} локацій
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsSidebarCollapsed(true)}
+                      title="Згорнути панель «Географія Роду» (більше простору для вкладок)"
+                      aria-label="Згорнути список локацій"
+                      className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${theme.surfaceBg} ${theme.borderSubtle} hover:border-amber-500 text-neutral-500 hover:text-amber-600 dark:hover:text-amber-400`}
+                    >
+                      <PanelLeftClose className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
 
           <div className="relative">
             <Search className={`w-4 h-4 absolute left-3 top-3 ${theme.textMuted}`} />
@@ -314,11 +403,15 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {placeList.map((item) => {
             const isSelected = activePlaceName === item.place;
+            const itemDossier = getPlaceDossier(item.place);
+            const hasHistory = !!(itemDossier?.historyText || itemDossier?.historicalName || itemDossier?.district || itemDossier?.parishChurch);
+            const sourcesCount = itemDossier?.sourceLinks?.length || 0;
+            const hasNotes = !!itemDossier?.notes;
+
             return (
-              <button
+              <div
                 key={item.place}
-                onClick={() => setSelectedPlace(item.place)}
-                className={`w-full text-left p-3 rounded-xl transition-all border cursor-pointer ${
+                className={`w-full p-3 rounded-xl transition-all border ${
                   isSelected
                     ? isDark
                       ? 'bg-amber-950/40 border-amber-500 text-white shadow-xs'
@@ -326,7 +419,10 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
                     : `${theme.surfaceBg} ${theme.borderSubtle} hover:border-neutral-400 ${theme.textSecondary}`
                 }`}
               >
-                <div className="flex items-start justify-between gap-2">
+                <div 
+                  onClick={() => setSelectedPlace(item.place)}
+                  className="flex items-start justify-between gap-2 cursor-pointer"
+                >
                   <div className="flex items-center gap-2 min-w-0">
                     <MapPin className={`w-4 h-4 shrink-0 ${isSelected ? 'text-amber-500' : theme.textMuted}`} />
                     <span className="font-semibold text-xs truncate">{item.place}</span>
@@ -335,7 +431,11 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
                     {item.total}
                   </span>
                 </div>
-                <div className={`flex flex-wrap items-center gap-2.5 text-[11px] ${theme.textMuted} mt-2 pl-6`}>
+
+                <div 
+                  onClick={() => setSelectedPlace(item.place)}
+                  className={`flex flex-wrap items-center gap-2.5 text-[11px] ${theme.textMuted} mt-2 pl-6 cursor-pointer`}
+                >
                   {item.birthCount > 0 && (
                     <span className="flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
@@ -355,7 +455,60 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
                     </span>
                   )}
                 </div>
-              </button>
+
+                {/* Dossier Indicator Badges */}
+                {(hasHistory || sourcesCount > 0 || hasNotes) && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-6 pt-1.5 border-t border-dashed border-neutral-200 dark:border-neutral-800/80">
+                    {hasHistory && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedPlace(item.place);
+                          setActiveDossierTab('history');
+                        }}
+                        title="Відкрити історію населеного пункту"
+                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60' : 'bg-amber-100 text-amber-900 border border-amber-300'} hover:opacity-80 transition-opacity cursor-pointer`}
+                      >
+                        <BookOpen className="w-3 h-3" />
+                        <span>Історія</span>
+                      </button>
+                    )}
+
+                    {sourcesCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedPlace(item.place);
+                          setActiveDossierTab('sources');
+                        }}
+                        title="Відкрити збережені метрики та архіви"
+                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60' : 'bg-emerald-100 text-emerald-900 border border-emerald-300'} hover:opacity-80 transition-opacity cursor-pointer`}
+                      >
+                        <ScrollText className="w-3 h-3" />
+                        <span>Метрики ({sourcesCount})</span>
+                      </button>
+                    )}
+
+                    {hasNotes && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedPlace(item.place);
+                          setActiveDossierTab('notes');
+                        }}
+                        title="Відкрити нотатки дослідника"
+                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-sky-950/60 text-sky-300 border border-sky-800/60' : 'bg-sky-100 text-sky-900 border border-sky-300'} hover:opacity-80 transition-opacity cursor-pointer`}
+                      >
+                        <FileText className="w-3 h-3" />
+                        <span>Нотатки</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
 
@@ -372,156 +525,23 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
           )}
         </div>
       </div>
+      )}
 
-      {/* Right panel: Details & Related Persons */}
-      <div className={`flex-1 flex flex-col h-1/2 md:h-full overflow-hidden ${theme.containerBg}`}>
-        <div className={`p-5 border-b ${theme.borderSubtle} flex flex-wrap items-center justify-between gap-3 ${theme.cardBg}`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl ${isDark ? 'bg-amber-950/40 text-amber-400 border border-amber-800/60' : 'bg-amber-100 text-amber-800 border border-amber-300'} flex items-center justify-center`}>
-              <Building className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className={`font-bold text-base ${theme.textPrimary}`}>{activePlaceName || 'Оберіть населений пункт'}</h3>
-              <p className={`text-xs ${theme.textMuted}`}>
-                {activePlaceObj 
-                  ? `Зафіксовано ${activePlaceObj.persons.length} родичів та ${activePlaceObj.events.length} генеалогічних подій`
-                  : 'Немає даних'}
-              </p>
-            </div>
-          </div>
-
-          {activePlaceName && (
-            <a
-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activePlaceName + ', Ukraine')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${theme.surfaceBg} border ${theme.borderSubtle} hover:border-amber-500 ${theme.textPrimary} transition-colors`}
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-              <span>Знайти на Google Картах</span>
-            </a>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Historical / Geographic Card */}
-          <div className={`w-full p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} relative overflow-hidden shadow-xs`}>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <Navigation className="w-5 h-5 text-amber-500" />
-                  <span className={`font-bold ${theme.textPrimary} text-base`}>{activePlaceName || 'Локація роду'}</span>
-                </div>
-                <p className={`text-xs ${theme.textMuted}`}>
-                  Історико-етнографічний та архівний регіон України
-                </p>
-              </div>
-
-              {activePlaceObj && (
-                <div className="flex items-center gap-4 text-xs font-mono">
-                  <div className={`p-2.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} text-center`}>
-                    <span className={`block text-[10px] ${theme.textMuted} font-sans`}>Народжень</span>
-                    <strong className="text-emerald-500 text-sm">{activePlaceObj.birthCount}</strong>
-                  </div>
-                  <div className={`p-2.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} text-center`}>
-                    <span className={`block text-[10px] ${theme.textMuted} font-sans`}>Шлюбів</span>
-                    <strong className="text-rose-500 text-sm">{activePlaceObj.marriageCount}</strong>
-                  </div>
-                  <div className={`p-2.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} text-center`}>
-                    <span className={`block text-[10px] ${theme.textMuted} font-sans`}>Поховань</span>
-                    <strong className="text-purple-500 text-sm">{activePlaceObj.deathCount}</strong>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Related Persons Grid */}
-          <div className="space-y-3">
-            <h4 className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted} flex items-center gap-2`}>
-              <User className="w-4 h-4 text-amber-500" />
-              <span>Пов'язані особи родоводу ({activePlaceObj?.persons.length || 0})</span>
-            </h4>
-
-            {activePlaceObj && activePlaceObj.persons.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {activePlaceObj.persons.map((person) => (
-                  <div
-                    key={person.id}
-                    onClick={() => onSelectPerson(person.id)}
-                    className={`p-4 rounded-xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all cursor-pointer flex items-center justify-between shadow-xs`}
-                  >
-                    <div className="space-y-1 min-w-0">
-                      <div className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
-                        {getFullName(person)}
-                      </div>
-                      <div className={`flex items-center gap-2 text-[11px] ${theme.textMuted}`}>
-                        <Calendar className="w-3.5 h-3.5 shrink-0" />
-                        <span>
-                          {person.birthYear ? `нар. ${person.birthYear}` : ''}{' '}
-                          {person.deathYear ? `— пом. ${person.deathYear}` : ''}
-                        </span>
-                      </div>
-                      {person.occupation && (
-                        <div className={`text-[10px] ${theme.textMuted} truncate`}>
-                          Фах: {person.occupation}
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-xs text-amber-600 hover:underline shrink-0 ml-3 font-medium">
-                      Профіль →
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className={`p-6 text-center ${theme.cardBg} border ${theme.cardBorder} rounded-xl text-xs ${theme.textMuted}`}>
-                Оберіть населений пункт зі списку ліворуч
-              </div>
-            )}
-          </div>
-
-          {/* Timeline of events in this place */}
-          {activePlaceObj && activePlaceObj.events.length > 0 && (
-            <div className="space-y-3 pt-2">
-              <h4 className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted} flex items-center gap-2`}>
-                <Layers className="w-4 h-4 text-amber-500" />
-                <span>Архівний літопис локації ({activePlaceObj.events.length})</span>
-              </h4>
-
-              <div className="space-y-2">
-                {activePlaceObj.events.map((ev, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-xl ${theme.cardBg} border ${theme.cardBorder} flex items-center justify-between text-xs`}
-                  >
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className={`font-mono font-semibold text-[11px] ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
-                          {ev.date || (ev.year ? `${ev.year} р.` : 'Дата не вказана')}
-                        </span>
-                        <span className={`font-medium ${theme.textPrimary}`}>
-                          {ev.personName}
-                        </span>
-                      </div>
-                      <p className={`text-[11px] ${theme.textMuted}`}>
-                        {ev.description || ev.type}
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={() => onSelectPerson(ev.personId)}
-                      className={`text-[11px] font-medium text-amber-600 hover:underline cursor-pointer`}
-                    >
-                      Перейти
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Right panel: Place Dossier & Pedigree View */}
+      <PlaceDossierView
+        placeName={activePlaceName}
+        placeObj={activePlaceObj}
+        dossier={activePlaceName ? getPlaceDossier(activePlaceName) : undefined}
+        onSaveDossier={handleSaveDossier}
+        onSelectPerson={onSelectPerson}
+        theme={theme}
+        isDark={isDark}
+        activeDossierTab={activeDossierTab}
+        setActiveDossierTab={setActiveDossierTab}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
+        placesCount={placeList.length}
+      />
     </div>
   )}
 </div>

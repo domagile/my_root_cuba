@@ -203,7 +203,7 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
                 type="text"
                 value={treeTitle}
                 onChange={(e) => setTreeTitle(e.target.value)}
-                placeholder="Наприклад: Родовід родини Коваленків"
+                placeholder="Наприклад: Родовід роду"
                 className={`w-full px-3 py-2 rounded-lg border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-[#B88E3E] transition-colors font-medium`}
               />
             </div>

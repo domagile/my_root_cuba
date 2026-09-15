@@ -453,7 +453,7 @@ export const AccessLockScreen: React.FC = () => {
                       type="text"
                       value={reqName}
                       onChange={(e) => setReqName(e.target.value)}
-                      placeholder="Олександр Коваленко"
+                      placeholder="Олександр Шакало"
                       className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-stone-950/80 border border-stone-700 text-white placeholder-stone-500 focus:outline-none focus:border-[#B88E3E] transition-colors"
                       required
                     />
@@ -467,7 +467,7 @@ export const AccessLockScreen: React.FC = () => {
                       type="email"
                       value={reqEmail}
                       onChange={(e) => setReqEmail(e.target.value)}
-                      placeholder="alex.kovalenko@gmail.com"
+                      placeholder="alex.shakalo@gmail.com"
                       className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-stone-950/80 border border-stone-700 text-white placeholder-stone-500 focus:outline-none focus:border-[#B88E3E] transition-colors"
                       required
                     />
@@ -497,7 +497,7 @@ export const AccessLockScreen: React.FC = () => {
                     rows={2}
                     value={reqNote}
                     onChange={(e) => setReqNote(e.target.value)}
-                    placeholder="наприклад: Я онук Остапа Коваленка з Полтавщини, хочу ознайомитися з деревом..."
+                    placeholder="наприклад: Я родич із лінії Шакалів з Полтавщини, хочу ознайомитися з родоводом..."
                     className="w-full px-3.5 py-2 rounded-xl text-xs bg-stone-950/80 border border-stone-700 text-white placeholder-stone-500 focus:outline-none focus:border-[#B88E3E] resize-none transition-colors"
                   />
                 </div>

@@ -299,7 +299,7 @@ export const DocumentsView: React.FC = () => {
                   type="text" 
                   value={tagsInput} 
                   onChange={e => setTagsInput(e.target.value)}
-                  placeholder="Метрика, 1901, Коваленко"
+                  placeholder="Метрика, 1901, Болотний"
                   className="w-full bg-[#071C17] border border-[#16443B] rounded-xl px-3 py-2 text-[#F5EEDC]"
                 />
               </div>

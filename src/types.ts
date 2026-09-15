@@ -600,7 +600,7 @@ export interface GenealogyDatabase {
   families: Record<string, Family>;
   sources: Record<string, Source>;
   events?: Record<string, Event>;
-  places?: Record<string, any>;
+  places?: Record<string, PlaceDossier>;
   notes?: Record<string, any>;
   submitters?: Record<string, any>;
   repositories?: Record<string, any>;
@@ -695,6 +695,29 @@ export interface ResearchNote {
   linkUrl?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PlaceSourceLink {
+  id: string;
+  title: string;
+  url: string;
+  archive?: string;
+  archiveRef?: string;
+  years?: string;
+  description?: string;
+}
+
+export interface PlaceDossier {
+  id: string;
+  placeName: string;
+  historicalName?: string;
+  parishChurch?: string;
+  district?: string;
+  historyText?: string;
+  notes?: string;
+  sourceLinks?: PlaceSourceLink[];
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 

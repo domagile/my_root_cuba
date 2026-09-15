@@ -39,6 +39,12 @@ service cloud.firestore {
         allow write: if true;
       }
 
+      // Places subcollection (Village/City history, online metric links, researcher notes)
+      match /places/{placeId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
       // Metric records subcollection
       match /metricRecords/{recordId} {
         allow read: if true;

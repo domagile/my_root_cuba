@@ -204,9 +204,31 @@
         "addedAt": { "type": "string" }
       },
       "required": ["id", "email", "role"]
+    },
+    "PlaceDossier": {
+      "title": "PlaceDossier",
+      "description": "Genealogical dossier for village/city history, archival online links, and researcher notes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "placeName": { "type": "string" },
+        "historicalName": { "type": "string" },
+        "parishChurch": { "type": "string" },
+        "district": { "type": "string" },
+        "historyText": { "type": "string" },
+        "notes": { "type": "string" },
+        "sourceLinks": { "type": "array" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "placeName"]
     }
   },
   "firestore": {
+    "/projects/{projectId}/places/{placeId}": {
+      "schema": "PlaceDossier",
+      "description": "Individual village or city genealogical dossier document"
+    },
     "/sharedTrees/{treeId}": {
       "schema": "SharedTree",
       "description": "Public or shared genealogy tree document"

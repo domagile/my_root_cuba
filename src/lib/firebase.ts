@@ -346,6 +346,16 @@ export const saveNoteDoc = (note: any, projectId?: string) =>
 export const deleteNoteDoc = (noteId: string, projectId?: string) =>
   deleteEntityDoc('researchNotes', noteId, projectId);
 
+export const getPlaceDocId = (placeNameOrId: string) => {
+  return String(placeNameOrId).trim().toLowerCase().replace(/[^a-z0-9а-яіїєґ_]/gi, '_');
+};
+
+export const savePlaceDoc = (place: any, projectId?: string) =>
+  saveEntityDoc('places', place.id || getPlaceDocId(place.placeName), place, projectId);
+
+export const deletePlaceDoc = (placeId: string, projectId?: string) =>
+  deleteEntityDoc('places', placeId, projectId);
+
 // Whitelist and Admin Cloud Persistence Helpers
 export const getWhitelistDocId = (emailOrId: string) => {
   return String(emailOrId).trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -754,6 +764,7 @@ export function subscribeToProjectData(
     families?: any[];
     events?: any[];
     sources?: any[];
+    places?: any[];
     metricRecords?: any[];
     documents?: any[];
     tasks?: any[];
@@ -772,6 +783,7 @@ export function subscribeToProjectData(
     'families',
     'events',
     'sources',
+    'places',
     'metricRecords',
     'documents',
     'tasks',
@@ -815,6 +827,7 @@ export async function saveProjectDataToCloud(
     families?: any[];
     events?: any[];
     sources?: any[];
+    places?: any[];
     metricRecords?: any[];
     documents?: any[];
     tasks?: any[];
@@ -843,6 +856,9 @@ export async function saveProjectDataToCloud(
     }
     if (Array.isArray(data.sources) && data.sources.length > 0) {
       promises.push(batchSaveEntities('sources', data.sources, projectId));
+    }
+    if (Array.isArray(data.places) && data.places.length > 0) {
+      promises.push(batchSaveEntities('places', data.places, projectId));
     }
     if (Array.isArray(data.metricRecords) && data.metricRecords.length > 0) {
       promises.push(batchSaveEntities('metricRecords', data.metricRecords, projectId));
@@ -922,6 +938,7 @@ export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_P
       'families',
       'events',
       'sources',
+      'places',
       'metricRecords',
       'documents',
       'tasks',

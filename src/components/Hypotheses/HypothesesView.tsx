@@ -537,7 +537,7 @@ export const HypothesesView: React.FC = () => {
                   type="text"
                   value={hypoTitle}
                   onChange={e => setHypoTitle(e.target.value)}
-                  placeholder="напр. Василь Коваленко є рідним братом Семена за метрикою 1882..."
+                  placeholder="напр. Василь Болотний є рідним братом Семена за метрикою 1882..."
                   className={`w-full ${theme.inputBg} border ${theme.inputBorder} rounded-xl px-3 py-2 ${theme.inputText} font-bold`}
                   required
                 />

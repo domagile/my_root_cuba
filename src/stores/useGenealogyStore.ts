@@ -1,12 +1,12 @@
 import { create } from 'zustand';
-import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig } from '../types';
+import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig, PlaceDossier } from '../types';
 import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
-import { savePersonDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc } from '../lib/firebase';
+import { savePersonDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc, savePlaceDoc, deletePlaceDoc } from '../lib/firebase';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { useAuthStore } from './useAuthStore';
-import { isDemoPerson, isDemoFamily } from '../utils/demoPurge';
+import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
 
@@ -14,8 +14,12 @@ export const INITIAL_PERSONS: Person[] = FAMILIO_PERSONS.filter((p) => !isDemoPe
 export const INITIAL_FAMILIES: Record<string, Family> = Object.fromEntries(
   Object.entries(FAMILIO_FAMILIES).filter(([k, v]) => !isDemoFamily(k, v))
 );
-export const INITIAL_SOURCES: Record<string, Source> = FAMILIO_SOURCES;
-export const INITIAL_EVENTS: Record<string, LifeEvent> = FAMILIO_EVENTS;
+export const INITIAL_SOURCES: Record<string, Source> = Object.fromEntries(
+  Object.entries(FAMILIO_SOURCES).filter(([k, v]) => !isDemoSource(k, v))
+);
+export const INITIAL_EVENTS: Record<string, LifeEvent> = Object.fromEntries(
+  Object.entries(FAMILIO_EVENTS).filter(([k, v]) => !isDemoEvent(k, v))
+);
 
 export const normalizePerson = (p: Person): Person => {
   const given = p.name?.given || p.firstName || '';
@@ -84,6 +88,7 @@ export interface GenealogyDataState {
   families: Record<string, Family>;
   sources: Record<string, Source>;
   events: Record<string, LifeEvent>;
+  places: Record<string, PlaceDossier>;
   trashPersons: Person[];
   selectedPersonId: string | null;
   gitConfig: GitConfig;
@@ -118,6 +123,11 @@ export interface GenealogyDataState {
   setEvents: (events: Record<string, LifeEvent> | ((prev: Record<string, LifeEvent>) => Record<string, LifeEvent>)) => void;
   saveEvent: (event: LifeEvent) => void;
   deleteEvent: (id: string) => void;
+
+  // Place Actions
+  setPlaces: (places: Record<string, PlaceDossier> | ((prev: Record<string, PlaceDossier>) => Record<string, PlaceDossier>)) => void;
+  savePlace: (place: PlaceDossier) => void;
+  deletePlace: (idOrName: string) => void;
 
   // Whole Database & Integrations
   getGenealogyDatabase: () => GenealogyDatabase;
@@ -193,7 +203,11 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed;
+          const cleaned: Record<string, Source> = {};
+          for (const [k, v] of Object.entries(parsed)) {
+            if (!isDemoSource(k, v)) cleaned[k] = v as Source;
+          }
+          return cleaned;
         }
       }
       return INITIAL_SOURCES;
@@ -208,12 +222,31 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed;
+          const cleaned: Record<string, LifeEvent> = {};
+          for (const [k, v] of Object.entries(parsed)) {
+            if (!isDemoEvent(k, v)) cleaned[k] = v as LifeEvent;
+          }
+          return cleaned;
         }
       }
       return INITIAL_EVENTS;
     } catch {
       return INITIAL_EVENTS;
+    }
+  })(),
+
+  places: (() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_places`);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+      return {};
+    } catch {
+      return {};
     }
   })(),
 
@@ -547,9 +580,41 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       return { events: nextEvents };
     }),
 
+  setPlaces: (updater) =>
+    set((state) => {
+      const nextPlaces = typeof updater === 'function' ? updater(state.places) : updater;
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
+      } catch {}
+      return { places: nextPlaces };
+    }),
+
+  savePlace: (place) =>
+    set((state) => {
+      const key = place.id || place.placeName.trim();
+      const updatedPlace = { ...place, id: key, updatedAt: new Date().toISOString() };
+      const nextPlaces = { ...state.places, [key]: updatedPlace };
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
+      } catch {}
+      savePlaceDoc(updatedPlace);
+      return { places: nextPlaces };
+    }),
+
+  deletePlace: (idOrName) =>
+    set((state) => {
+      const nextPlaces = { ...state.places };
+      delete nextPlaces[idOrName];
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
+      } catch {}
+      deletePlaceDoc(idOrName);
+      return { places: nextPlaces };
+    }),
+
   // Unified Database export / import
   getGenealogyDatabase: (): GenealogyDatabase => {
-    const { persons, families, sources, events, selectedPersonId } = get();
+    const { persons, families, sources, events, places, selectedPersonId } = get();
     const personsRecord: Record<string, Person> = {};
     persons.forEach((p) => {
       personsRecord[p.id] = p;
@@ -557,7 +622,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
     return {
       metadata: {
-        title: 'Родовід родини Коваленків та Шевченків',
+        title: 'Родовід',
         description: 'Єдина база даних родоводу',
         lastModified: new Date().toISOString(),
         author: 'Дослідник'
@@ -567,6 +632,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       families,
       sources,
       events,
+      places,
       lastModified: new Date().toISOString()
     };
   },
@@ -577,12 +643,14 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const incomingFamilies = db.families || {};
       const incomingSources = db.sources || {};
       const incomingEvents = db.events || {};
+      const incomingPlaces = db.places || {};
 
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(incomingPersons));
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(incomingFamilies));
         localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(incomingSources));
         localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(incomingEvents));
+        localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(incomingPlaces));
       } catch {}
 
       return {
@@ -590,6 +658,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         families: incomingFamilies,
         sources: incomingSources,
         events: incomingEvents,
+        places: incomingPlaces,
         selectedPersonId: db.rootPersonId || incomingPersons[0]?.id || null
       };
     }),
@@ -641,13 +710,29 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
           cleanFamilies[k] = v;
         }
       }
+      const cleanSources: Record<string, Source> = {};
+      for (const [k, v] of Object.entries(state.sources)) {
+        if (!isDemoSource(k, v)) {
+          cleanSources[k] = v;
+        }
+      }
+      const cleanEvents: Record<string, LifeEvent> = {};
+      for (const [k, v] of Object.entries(state.events)) {
+        if (!isDemoEvent(k, v)) {
+          cleanEvents[k] = v;
+        }
+      }
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(cleanPersons));
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(cleanFamilies));
+        localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(cleanSources));
+        localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(cleanEvents));
       } catch {}
       return {
         persons: cleanPersons,
-        families: cleanFamilies
+        families: cleanFamilies,
+        sources: cleanSources,
+        events: cleanEvents
       };
     })
 }));

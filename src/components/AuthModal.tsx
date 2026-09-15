@@ -329,7 +329,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       required
                       value={reqName}
                       onChange={(e) => setReqName(e.target.value)}
-                      placeholder="Олександр Коваленко (гілка з Полтавщини)"
+                      placeholder="Олександр Шакало (родина з Полтавщини)"
                       className={`w-full py-2 px-3 rounded-xl border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs focus:outline-none focus:border-emerald-500 shadow-inner`}
                     />
                   </div>
