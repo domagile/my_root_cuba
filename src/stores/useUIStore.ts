@@ -123,6 +123,9 @@ export interface UIState {
   resetPersonModalSectionsToDefault: (personId?: string | null) => void;
   initPersonModalAccordion: (personId?: string | null) => void;
 
+  personClanFilter: string | null;
+  setPersonClanFilter: (clan: string | null) => void;
+
   // Actions
   setActiveTab: (tab: string) => void;
   setRodovidView: (view: ViewMode) => void;
@@ -266,6 +269,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   
   searchQuery: '',
   treeMode: 'hourglass',
+  personClanFilter: null,
+  setPersonClanFilter: (personClanFilter: string | null) => set({ personClanFilter }),
   
   accessLockConfig: (() => {
     try {

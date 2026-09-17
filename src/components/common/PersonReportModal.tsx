@@ -56,6 +56,7 @@ export const PersonReportModal: React.FC<PersonReportModalProps> = ({
   const [activePersonId, setActivePersonId] = useState<string>(personId || (database.persons ? Object.keys(database.persons)[0] : ''));
   const [viewMode, setViewMode] = useState<'document' | 'raw_text'>('document');
   const [isCopied, setIsCopied] = useState(false);
+  const [isDownloaded, setIsDownloaded] = useState(false);
   const [personSearch, setPersonSearch] = useState('');
   const [showPersonPicker, setShowPersonPicker] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
@@ -101,7 +102,11 @@ export const PersonReportModal: React.FC<PersonReportModalProps> = ({
 
   const handleDownloadTxt = () => {
     if (!person) return;
-    downloadPersonTextReport(person, database, options);
+    const success = downloadPersonTextReport(person, database, options);
+    if (success) {
+      setIsDownloaded(true);
+      setTimeout(() => setIsDownloaded(false), 2500);
+    }
   };
 
   const handlePrintPdf = () => {
@@ -167,11 +172,21 @@ export const PersonReportModal: React.FC<PersonReportModalProps> = ({
             <button
               type="button"
               onClick={handleDownloadTxt}
-              className="px-3 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-neutral-700 dark:text-neutral-200 border border-black/10 dark:border-white/10 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                isDownloaded
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-neutral-700 dark:text-neutral-200 border-black/10 dark:border-white/10'
+              }`}
               title="Завантажити звіт у форматі .txt (UTF-8)"
             >
-              <Download className="w-3.5 h-3.5 text-sky-500" />
-              <span className="hidden sm:inline">Завантажити TXT</span>
+              {isDownloaded ? (
+                <Check className="w-3.5 h-3.5 text-emerald-500" />
+              ) : (
+                <Download className="w-3.5 h-3.5 text-sky-500" />
+              )}
+              <span className="hidden sm:inline">
+                {isDownloaded ? 'Завантажено!' : 'Завантажити TXT'}
+              </span>
             </button>
 
             <button

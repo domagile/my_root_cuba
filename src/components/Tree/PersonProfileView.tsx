@@ -26,11 +26,14 @@ import {
   ExternalLink,
   ChevronRight,
   Cross,
-  Baby
+  Baby,
+  Trash2,
+  Crown
 } from 'lucide-react';
 import { Person, Gender } from '../../types';
 import { isPersonMale, isPersonFemale } from '../../rodovid/utils/genderUtils';
-import { comparePersonsByAge } from '../../rodovid/utils/treeLayout';
+import { comparePersonsByAge, getPersonRodName } from '../../rodovid/utils/treeLayout';
+import { formatClanName } from '../../utils/ukrainianPhonetics';
 
 export interface PersonProfileViewProps {
   person: Person;
@@ -48,8 +51,10 @@ export interface PersonProfileViewProps {
     type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness',
     targetPersonId: string
   ) => void;
+  onOpenFamilyQuickAdd?: () => void;
   onOpenReport?: () => void;
   onOpenContact?: () => void;
+  onDeletePerson?: () => void;
   isReadOnly?: boolean;
 }
 
@@ -66,8 +71,10 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   onChangeRoot,
   onOpenKinshipWith,
   onOpenAddRelation,
+  onOpenFamilyQuickAdd,
   onOpenReport,
   onOpenContact,
+  onDeletePerson,
   isReadOnly = false
 }) => {
   const familiesList = useMemo(() => {
@@ -115,34 +122,77 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
     return 'Дати невідомі';
   }, [person]);
 
-  // Parents
+  // Parents (resolved via direct IDs, parentFamilyId, or families children list)
   const father = useMemo(() => {
-    if (!person.fatherId) return null;
-    return persons.find((p) => p.id === person.fatherId) || null;
-  }, [person.fatherId, persons]);
+    let fId = person.fatherId;
+    if (!fId && person.parentFamilyId && families) {
+      const fam = Array.isArray(families)
+        ? families.find((f) => f.id === person.parentFamilyId)
+        : families[person.parentFamilyId];
+      if (fam?.husbandId) fId = fam.husbandId;
+    }
+    if (!fId && families) {
+      const fam = Array.isArray(families)
+        ? families.find(
+            (f) =>
+              (f.childrenIds || []).includes(person.id) ||
+              (f.children || []).some((c: any) => c.personId === person.id)
+          )
+        : Object.values(families || {}).find(
+            (f: any) =>
+              (f.childrenIds || []).includes(person.id) ||
+              (f.children || []).some((c: any) => c.personId === person.id)
+          );
+      if (fam?.husbandId) fId = fam.husbandId;
+    }
+    if (!fId) return null;
+    return persons.find((p) => p.id === fId) || null;
+  }, [person.fatherId, person.parentFamilyId, person.id, families, persons]);
 
   const mother = useMemo(() => {
-    if (!person.motherId) return null;
-    return persons.find((p) => p.id === person.motherId) || null;
-  }, [person.motherId, persons]);
+    let mId = person.motherId;
+    if (!mId && person.parentFamilyId && families) {
+      const fam = Array.isArray(families)
+        ? families.find((f) => f.id === person.parentFamilyId)
+        : families[person.parentFamilyId];
+      if (fam?.wifeId) mId = fam.wifeId;
+    }
+    if (!mId && families) {
+      const fam = Array.isArray(families)
+        ? families.find(
+            (f) =>
+              (f.childrenIds || []).includes(person.id) ||
+              (f.children || []).some((c: any) => c.personId === person.id)
+          )
+        : Object.values(families || {}).find(
+            (f: any) =>
+              (f.childrenIds || []).includes(person.id) ||
+              (f.children || []).some((c: any) => c.personId === person.id)
+          );
+      if (fam?.wifeId) mId = fam.wifeId;
+    }
+    if (!mId) return null;
+    return persons.find((p) => p.id === mId) || null;
+  }, [person.motherId, person.parentFamilyId, person.id, families, persons]);
 
-  // Siblings (children of either father or mother, excluding active person)
+  // Siblings (children of either father or mother, or same parent family, excluding active person)
   const siblings = useMemo(() => {
     const pId = person.id;
-    const fId = person.fatherId;
-    const mId = person.motherId;
-    if (!fId && !mId && (!person.siblingIds || person.siblingIds.length === 0)) return [];
+    const fId = father?.id || person.fatherId;
+    const mId = mother?.id || person.motherId;
+    const parentFamId = person.parentFamilyId;
 
     const list = persons.filter((p) => {
       if (p.id === pId) return false;
       if (person.siblingIds && person.siblingIds.includes(p.id)) return true;
-      if (fId && p.fatherId === fId) return true;
-      if (mId && p.motherId === mId) return true;
+      if (fId && (p.fatherId === fId || (p.parentFamilyId && families && (Array.isArray(families) ? families.find(f => f.id === p.parentFamilyId)?.husbandId === fId : families[p.parentFamilyId]?.husbandId === fId)))) return true;
+      if (mId && (p.motherId === mId || (p.parentFamilyId && families && (Array.isArray(families) ? families.find(f => f.id === p.parentFamilyId)?.wifeId === mId : families[p.parentFamilyId]?.wifeId === mId)))) return true;
+      if (parentFamId && p.parentFamilyId === parentFamId) return true;
       return false;
     });
 
     return list.sort(comparePersonsByAge);
-  }, [person, persons]);
+  }, [person, father, mother, families, persons]);
 
   // All children of the parents (active person + siblings, sorted chronologically)
   const parentsChildren = useMemo(() => {
@@ -386,6 +436,21 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                   {fsCode}
                 </span>
               )}
+              {(() => {
+                const rod = person.clan || getPersonRodName(person);
+                return rod ? (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1" title="Рід (Родова лінія)">
+                    <Crown className="w-3 h-3" />
+                    <span>{formatClanName(rod)}</span>
+                  </span>
+                ) : null;
+              })()}
+              {person.researchBranch && person.researchBranch !== "Без прив'язки" && (
+                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1" title="Гілка дослідження">
+                  <GitFork className="w-3 h-3" />
+                  <span>{person.researchBranch}</span>
+                </span>
+              )}
             </div>
             <div className="text-xs text-neutral-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-0.5">
               <span>{lifespanStr}</span>
@@ -468,6 +533,18 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
             >
               <Mail className="w-3.5 h-3.5 text-[#B88E3E]" />
               <span className="hidden md:inline">Контакт</span>
+            </button>
+          )}
+
+          {onDeletePerson && !isReadOnly && (
+            <button
+              type="button"
+              onClick={onDeletePerson}
+              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-rose-500/30 hover:border-rose-500/60 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Видалити особу з бази даних"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Видалити</span>
             </button>
           )}
         </div>
@@ -631,11 +708,17 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                     <Users className="w-4 h-4 text-amber-500" />
                     <span>Батьки та брати/сестри</span>
                   </h3>
-                  {!isReadOnly && onOpenAddRelation && (!father || !mother) && (
+                  {!isReadOnly && (onOpenFamilyQuickAdd || onOpenAddRelation) && (!father || !mother) && (
                     <button
                       type="button"
-                      onClick={() => onOpenAddRelation(!father ? 'father' : 'mother', person.id)}
-                      className="text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:underline uppercase tracking-wider flex items-center gap-1"
+                      onClick={() => {
+                        if (onOpenFamilyQuickAdd) {
+                          onOpenFamilyQuickAdd();
+                        } else if (onOpenAddRelation) {
+                          onOpenAddRelation(!father ? 'father' : 'mother', person.id);
+                        }
+                      }}
+                      className="text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:underline uppercase tracking-wider flex items-center gap-1 cursor-pointer"
                     >
                       <Plus className="w-3 h-3" />
                       Додати батьків
@@ -993,6 +1076,17 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {onDeletePerson && !isReadOnly && (
+            <button
+              type="button"
+              onClick={onDeletePerson}
+              className="px-3 py-1.5 rounded-lg border border-rose-500/30 hover:border-rose-500/60 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1.5 cursor-pointer text-xs transition-colors"
+              title="Видалити особу з бази даних"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Видалити</span>
+            </button>
+          )}
           {!isReadOnly && (
             <button
               type="button"

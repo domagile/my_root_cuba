@@ -26,6 +26,23 @@ export const isUserWhitelisted = (
 };
 
 /**
+ * Checks if the current user has admin access.
+ */
+export const isUserAdmin = (
+  user: AuthUser | null,
+  whitelist: WhitelistEntry[] = []
+): boolean => {
+  if (!user || !user.isAuthenticated) return false;
+  if (user.role === 'admin') return true;
+  if (!user.email) return false;
+  const clean = user.email.trim().toLowerCase();
+  if (clean === 'domagile@gmail.com' || clean === 'cubatarara400@gmail.com') return true;
+  return whitelist.some(
+    (w) => w.email.toLowerCase() === clean && w.role === 'admin' && w.status === 'active'
+  );
+};
+
+/**
  * Determines whether a person is considered living.
  * Prioritizes explicit `isLiving` flag, or falls back to absence of death info.
  */

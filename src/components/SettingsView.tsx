@@ -1081,16 +1081,16 @@ export const SettingsView: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                if (window.confirm('Видалити всі залишки демонстраційних або тестових даних? Ваші власні архівні дані та родове дерево залишаться збереженими.')) {
+                if (window.confirm('Очистити сторонні тестові зразки? Ваші власні архівні дані та родове дерево залишаться збереженими.')) {
                   purgeAllDemoData();
-                  setImportStatus('Усі залишки демо-даних успішно очищено!');
+                  setImportStatus('Тестові зразки успішно очищено!');
                   setTimeout(() => setImportStatus(null), 4000);
                 }
               }}
               className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-medium text-xs transition-all cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />
-              <span>Очистити залишки демо-даних</span>
+              <span>Очистити тестові зразки</span>
             </button>
           </div>
         </div>

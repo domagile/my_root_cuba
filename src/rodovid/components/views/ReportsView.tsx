@@ -58,6 +58,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [personSearch, setPersonSearch] = useState('');
   const [dossierViewMode, setDossierViewMode] = useState<'document' | 'raw_text'>('document');
   const [isCopied, setIsCopied] = useState(false);
+  const [isDossierDownloaded, setIsDossierDownloaded] = useState(false);
+  const [isReportDownloaded, setIsReportDownloaded] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
 
   const [dossierOptions, setDossierOptions] = useState<PersonReportOptions>({
@@ -105,7 +107,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   const handleDownloadDossierTxt = () => {
     if (!dossierPerson) return;
-    downloadPersonTextReport(dossierPerson, database, dossierOptions);
+    const success = downloadPersonTextReport(dossierPerson, database, dossierOptions);
+    if (success) {
+      setIsDossierDownloaded(true);
+      setTimeout(() => setIsDossierDownloaded(false), 2500);
+    }
   };
 
   const handlePrintDossierPdf = () => {
@@ -150,13 +156,38 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       reportText += '\n';
     });
 
-    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `genealogy_report_${Date.now()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `genealogy_report_${Date.now()}.txt`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setIsReportDownloaded(true);
+      setTimeout(() => setIsReportDownloaded(false), 2500);
+      setTimeout(() => {
+        try {
+          if (a.parentNode) document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch {}
+      }, 30000);
+    } catch {
+      const dataUri = 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportText);
+      const a = document.createElement('a');
+      a.href = dataUri;
+      a.download = `genealogy_report_${Date.now()}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      setIsReportDownloaded(true);
+      setTimeout(() => setIsReportDownloaded(false), 2500);
+      setTimeout(() => {
+        try {
+          if (a.parentNode) document.body.removeChild(a);
+        } catch {}
+      }, 5000);
+    }
   };
 
   // Filtered persons for dossier switcher
@@ -190,8 +221,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               onClick={handleExportText}
               className={`px-3.5 py-2 ${theme.surfaceBg} hover:opacity-80 ${theme.textPrimary} rounded-lg text-xs font-medium flex items-center gap-2 border ${theme.borderSubtle} transition-all cursor-pointer`}
             >
-              <Download className="w-4 h-4" />
-              <span>Завантажити TXT</span>
+              {isReportDownloaded ? <Check className="w-4 h-4 text-emerald-500" /> : <Download className="w-4 h-4" />}
+              <span>{isReportDownloaded ? 'Завантажено!' : 'Завантажити TXT'}</span>
             </button>
             <button
               onClick={handlePrint}
@@ -416,10 +447,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   <button
                     type="button"
                     onClick={handleDownloadDossierTxt}
-                    className="px-3.5 py-1.5 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-neutral-700 dark:text-neutral-200 border border-black/10 dark:border-white/10 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                    className={`px-3.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      isDossierDownloaded
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-neutral-700 dark:text-neutral-200 border-black/10 dark:border-white/10'
+                    }`}
                   >
-                    <Download className="w-3.5 h-3.5 text-sky-500" />
-                    <span>Завантажити TXT</span>
+                    {isDossierDownloaded ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5 text-sky-500" />
+                    )}
+                    <span>{isDossierDownloaded ? 'Завантажено!' : 'Завантажити TXT'}</span>
                   </button>
 
                   <button

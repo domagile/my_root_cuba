@@ -538,22 +538,70 @@ export function downloadPersonTextReport(
   person: Person,
   database: GenealogyDatabase,
   options?: PersonReportOptions
-): void {
-  const reportText = generatePersonTextReport(person, database, options);
-  const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  
-  const rawSurname = person.name?.surname || person.lastName || 'Особа';
-  const rawGiven = person.name?.given || person.firstName || '';
-  const safeFileName = `Звіт_${rawSurname}_${rawGiven}`.replace(/[\s/\\?%*:|"<>]+/g, '_').replace(/_+$/, '');
-  a.download = `${safeFileName}.txt`;
-  
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+): boolean {
+  try {
+    const reportText = generatePersonTextReport(person, database, options);
+    const rawSurname = person.name?.surname || person.lastName || 'Особа';
+    const rawGiven = person.name?.given || person.firstName || '';
+    const safeFileName = `Звіт_${rawSurname}_${rawGiven}`.replace(/[\s/\\?%*:|"<>]+/g, '_').replace(/_+$/, '');
+    const fileName = `${safeFileName || 'Генеалогічний_звіт'}.txt`;
+
+    // Strategy 1: Blob URL with delayed revocation
+    try {
+      const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+      
+      // IE / legacy Edge
+      if ((window.navigator as any)?.msSaveOrOpenBlob) {
+        (window.navigator as any).msSaveOrOpenBlob(blob, fileName);
+        return true;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+
+      // Delay revoke by 30 seconds so browser download manager has ample time to stream
+      setTimeout(() => {
+        try {
+          if (a.parentNode) {
+            document.body.removeChild(a);
+          }
+          URL.revokeObjectURL(url);
+        } catch {}
+      }, 30000);
+
+      return true;
+    } catch (blobErr) {
+      console.warn('Blob download attempt failed, falling back to data URI:', blobErr);
+    }
+
+    // Strategy 2: Data URI (works even in restrictive iframes without blob support)
+    const dataUri = 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportText);
+    const fallbackLink = document.createElement('a');
+    fallbackLink.href = dataUri;
+    fallbackLink.download = fileName;
+    fallbackLink.rel = 'noopener';
+    fallbackLink.style.display = 'none';
+    document.body.appendChild(fallbackLink);
+    fallbackLink.click();
+    setTimeout(() => {
+      try {
+        if (fallbackLink.parentNode) {
+          document.body.removeChild(fallbackLink);
+        }
+      } catch {}
+    }, 5000);
+
+    return true;
+  } catch (err) {
+    console.error('downloadPersonTextReport critical error:', err);
+    return false;
+  }
 }
 
 /**

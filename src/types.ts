@@ -107,6 +107,7 @@ export interface Person {
   researchStatus?: 'hypothetical' | 'confirmed' | 'in_progress' | 'archival_search' | 'needs_verification' | string;
   isHypothesis?: boolean;
   researchBranch?: string;
+  clan?: string; // Назва роду (наприклад "Рід Іуліанових", "Іуліанових", кастомне перевизначення)
   nameVariants?: string[];
   surnameVariants?: string[];
   godparents?: GodparentItem[];

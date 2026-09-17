@@ -3024,6 +3024,12 @@ export const LINEAGE_PALETTE = [
 // Helper to get normalized rod / surname name
 export function getPersonRodName(person?: Person | null): string {
   if (!person) return 'Рід';
+  // Check explicit clan / rod override first
+  if (person.clan && person.clan.trim()) {
+    const clanTrimmed = person.clan.trim();
+    const stripped = clanTrimmed.replace(/^рід\s+/i, '');
+    return stripped || clanTrimmed;
+  }
   const raw = person.name?.surname || person.lastName || person.name?.maidenName || person.maidenName || '';
   const trimmed = raw.trim();
   if (!trimmed) return 'Рід';
@@ -3041,7 +3047,8 @@ export function getLineageColorMap(database: GenealogyDatabase): Record<string, 
 
   // Prioritize root and direct ancestors
   Object.values(database.persons).forEach((p) => {
-    const rawSurname = (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
+    const customClan = (p.clan || '').trim().replace(/^рід\s+/i, '');
+    const rawSurname = customClan || (p.name?.surname || p.lastName || p.name?.maidenName || p.maidenName || '').trim();
     if (!rawSurname) return;
     const canonical = normalizeUkrainianSurnameGender(rawSurname) || rawSurname;
     if (canonical && canonical !== 'Рід') {
@@ -3066,6 +3073,10 @@ export function getLineageColorMap(database: GenealogyDatabase): Record<string, 
       // Also map original raw forms (e.g. female ending "пірковська" maps to the same color as "пірковський")
       map[rawSurname.toLowerCase()] = color;
       map[rawSurname] = color;
+      if (p.clan && p.clan.trim()) {
+        map[p.clan.trim().toLowerCase()] = color;
+        map[p.clan.trim()] = color;
+      }
     }
   });
 

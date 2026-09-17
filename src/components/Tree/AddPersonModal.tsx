@@ -43,14 +43,17 @@ import {
   GitMerge,
   AlertTriangle,
   Eye,
-  Pencil
+  Pencil,
+  Crown
 } from 'lucide-react';
+import { formatClanName, normalizeUkrainianSurnameGender } from '../../utils/ukrainianPhonetics';
 import { PersonProfileView } from './PersonProfileView';
 import { DoveIcon } from '../common/GenealogyIcons';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
 import {
   Person,
+  Family,
   Gender,
   CustomFieldItem,
   GodparentItem,
@@ -69,6 +72,7 @@ import { ContactAuthorModal } from '../ContactAuthorModal';
 import { findDuplicatesForPerson, PersonDuplicateMatch } from '../../utils/duplicateDetector';
 import { MergePersonsByIdModal } from '../modals/MergePersonsByIdModal';
 import { PersonReportModal } from '../common/PersonReportModal';
+import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 import {
   getBidirectionalGodchildren,
   getBidirectionalWitnessedPersons,
@@ -148,7 +152,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   onOpenAddRelation,
   isReadOnly = false
 }) => {
-  const { persons, addPerson, updatePerson, themePalette, setSelectedPersonId, getGenealogyDatabase, families, sources, events } = useGenealogy();
+  const { persons, addPerson, updatePerson, saveFamily, themePalette, setSelectedPersonId, getGenealogyDatabase, families, sources, events } = useGenealogy();
   const theme = getThemeConfig(themePalette);
   const isDark = themePalette.includes('dark');
 
@@ -173,10 +177,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
 
-  // Determine effective person either from prop or personId
+  // Determine effective person either from prop or personId, prioritizing live store data
   const effectivePerson = useMemo(() => {
+    const targetId = personId || initialPersonToEdit?.id;
+    if (targetId) {
+      const found = persons.find((p) => p.id === targetId);
+      if (found) return found;
+    }
     if (initialPersonToEdit) return initialPersonToEdit;
-    if (personId) return persons.find((p) => p.id === personId) || null;
     return null;
   }, [initialPersonToEdit, personId, persons]);
 
@@ -262,7 +270,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   }, [effectivePerson, initialParentContext, targetPerson]);
 
   const [researchBranch, setResearchBranch] = useState(initialBranchVal);
+  const [isCustomBranch, setIsCustomBranch] = useState(false);
+  const [customBranchInput, setCustomBranchInput] = useState('');
   const [researchStatus, setResearchStatus] = useState(effectivePerson?.researchStatus || 'hypothetical');
+  
+  const initialClan = effectivePerson?.clan || '';
+  const [clan, setClan] = useState(initialClan);
   
   const initialFirst = effectivePerson?.name?.given || effectivePerson?.firstName || '';
   const initialLast = useMemo(() => {
@@ -309,6 +322,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       (effectivePerson?.surnameVariants && effectivePerson.surnameVariants.length > 0)
     );
   });
+
+  // Default computed rod from surname
+  const computedRodDefault = useMemo(() => {
+    const sur = (lastName || maidenName || '').trim();
+    if (!sur) return '';
+    return normalizeUkrainianSurnameGender(sur) || sur;
+  }, [lastName, maidenName]);
 
   // Track auto-inherited fields so we know which values can be auto-updated when gender/father changes
   const [autoInheritedValues, setAutoInheritedValues] = useState<{
@@ -688,6 +708,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
   // Family quick add modal state
   const [showFamilyQuickAddModal, setShowFamilyQuickAddModal] = useState(false);
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
 
   // Draft auto-save and recovery state
   const [availableDraft, setAvailableDraft] = useState<PersonDraftData | null>(null);
@@ -731,6 +752,11 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     if (availableDraft.isLiving !== undefined) setIsLiving(availableDraft.isLiving);
     if (availableDraft.fatherId) setFatherId(availableDraft.fatherId);
     if (availableDraft.motherId) setMotherId(availableDraft.motherId);
+    if (availableDraft.clan !== undefined) setClan(availableDraft.clan);
+    if (availableDraft.researchBranch) {
+      setResearchBranch(availableDraft.researchBranch);
+      setCustomBranchInput(availableDraft.researchBranch);
+    }
     if (availableDraft.formMode) setFormMode(availableDraft.formMode);
     setShowDraftBanner(false);
   };
@@ -762,6 +788,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         spouseId,
         notes,
         bio,
+        clan,
+        researchBranch: isCustomBranch && customBranchInput.trim() ? customBranchInput.trim() : researchBranch,
         formMode
       });
     }, 1200);
@@ -769,7 +797,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   }, [
     isReadOnly, effectivePerson?.id, firstName, lastName, patronymic, maidenName,
     gender, isLiving, birthDate, birthPlace, deathDate, deathPlace, residencePlace,
-    fatherId, motherId, spouseId, notes, bio, formMode
+    fatherId, motherId, spouseId, notes, bio, clan, researchBranch, isCustomBranch, customBranchInput, formMode
   ]);
 
   const isFormDirty = useMemo(() => {
@@ -784,58 +812,136 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   }, [effectivePerson, firstName, lastName, birthDate, birthPlace]);
 
   const handleSafeClose = () => {
-    if (isFormDirty && !isReadOnly) {
-      if (window.confirm('У вас є незбережені дані у формі. Ви дійсно бажаєте вийти без збереження?')) {
-        clearPersonDraft(effectivePerson?.id);
-        onClose();
-      }
-    } else {
-      onClose();
-    }
+    // User preference: close immediately and discard uncommitted draft/changes
+    clearPersonDraft(effectivePerson?.id);
+    onClose();
   };
 
   const handleFamilyQuickAddSave = (fatherData: Partial<Person>, motherData: Partial<Person>) => {
-    const fId = `p-f-${Date.now()}`;
-    const mId = `p-m-${Date.now() + 1}`;
+    const hasFather = Boolean(
+      fatherData.id ||
+      (fatherData.firstName && fatherData.firstName.trim()) ||
+      (fatherData.lastName && fatherData.lastName.trim())
+    );
+    const hasMother = Boolean(
+      motherData.id ||
+      (motherData.firstName && motherData.firstName.trim()) ||
+      (motherData.lastName && motherData.lastName.trim()) ||
+      (motherData.maidenName && motherData.maidenName.trim())
+    );
 
-    const newFather: Person = {
-      id: fId,
-      name: { given: fatherData.firstName, surname: fatherData.lastName },
-      firstName: fatherData.firstName || '',
-      lastName: fatherData.lastName || '',
-      gender: 'male',
-      birthYear: fatherData.birthYear,
-      isLiving: fatherData.isLiving,
-      birthPlace: fatherData.birthPlace,
-      residencePlace: fatherData.residencePlace,
-      spouseIds: [mId],
-      childrenIds: effectivePerson ? [effectivePerson.id] : []
-    };
+    if (!hasFather && !hasMother) {
+      setShowFamilyQuickAddModal(false);
+      return;
+    }
 
-    const newMother: Person = {
-      id: mId,
-      name: { given: motherData.firstName, surname: motherData.lastName, maidenName: motherData.maidenName },
-      firstName: motherData.firstName || '',
-      lastName: motherData.lastName || '',
-      maidenName: motherData.maidenName,
-      gender: 'female',
-      birthYear: motherData.birthYear,
-      isLiving: motherData.isLiving,
-      birthPlace: motherData.birthPlace,
-      residencePlace: motherData.residencePlace,
-      spouseIds: [fId],
-      childrenIds: effectivePerson ? [effectivePerson.id] : []
-    };
+    const now = Date.now();
+    const isExistingFather = Boolean(fatherData.id && persons.some(p => p.id === fatherData.id));
+    const isExistingMother = Boolean(motherData.id && persons.some(p => p.id === motherData.id));
+    const fId = isExistingFather ? fatherData.id : (hasFather ? `p-f-${now}` : undefined);
+    const mId = isExistingMother ? motherData.id : (hasMother ? `p-m-${now + 1}` : undefined);
+    const famId = `fam-${now}`;
+    const childId = effectivePerson?.id;
 
-    addPerson(newFather);
-    addPerson(newMother);
+    if (hasFather && fId) {
+      if (isExistingFather) {
+        const existingFather = persons.find(p => p.id === fId);
+        if (existingFather) {
+          updatePerson({
+            ...existingFather,
+            spouseIds: mId && !existingFather.spouseIds?.includes(mId) ? [...(existingFather.spouseIds || []), mId] : (existingFather.spouseIds || []),
+            childrenIds: childId && !existingFather.childrenIds?.includes(childId) ? [...(existingFather.childrenIds || []), childId] : (existingFather.childrenIds || []),
+            spouseFamilyIds: !existingFather.spouseFamilyIds?.includes(famId) ? [...(existingFather.spouseFamilyIds || []), famId] : (existingFather.spouseFamilyIds || [])
+          });
+        }
+      } else {
+        const newFather: Person = {
+          id: fId,
+          name: { given: fatherData.firstName?.trim(), surname: fatherData.lastName?.trim() },
+          firstName: fatherData.firstName?.trim() || '',
+          lastName: fatherData.lastName?.trim() || '',
+          gender: 'male',
+          birthYear: fatherData.birthYear,
+          isLiving: fatherData.isLiving,
+          birthPlace: fatherData.birthPlace?.trim() || undefined,
+          residencePlace: fatherData.residencePlace?.trim() || undefined,
+          spouseIds: mId ? [mId] : [],
+          childrenIds: childId ? [childId] : [],
+          spouseFamilyIds: [famId]
+        };
+        addPerson(newFather);
+      }
+    }
 
-    setFatherId(fId);
-    setMotherId(mId);
+    if (hasMother && mId) {
+      if (isExistingMother) {
+        const existingMother = persons.find(p => p.id === mId);
+        if (existingMother) {
+          updatePerson({
+            ...existingMother,
+            spouseIds: fId && !existingMother.spouseIds?.includes(fId) ? [...(existingMother.spouseIds || []), fId] : (existingMother.spouseIds || []),
+            childrenIds: childId && !existingMother.childrenIds?.includes(childId) ? [...(existingMother.childrenIds || []), childId] : (existingMother.childrenIds || []),
+            spouseFamilyIds: !existingMother.spouseFamilyIds?.includes(famId) ? [...(existingMother.spouseFamilyIds || []), famId] : (existingMother.spouseFamilyIds || [])
+          });
+        }
+      } else {
+        const newMother: Person = {
+          id: mId,
+          name: { given: motherData.firstName?.trim(), surname: motherData.lastName?.trim(), maidenName: motherData.maidenName?.trim() },
+          firstName: motherData.firstName?.trim() || '',
+          lastName: motherData.lastName?.trim() || '',
+          maidenName: motherData.maidenName?.trim() || undefined,
+          gender: 'female',
+          birthYear: motherData.birthYear,
+          isLiving: motherData.isLiving,
+          birthPlace: motherData.birthPlace?.trim() || undefined,
+          residencePlace: motherData.residencePlace?.trim() || undefined,
+          spouseIds: fId ? [fId] : [],
+          childrenIds: childId ? [childId] : [],
+          spouseFamilyIds: [famId]
+        };
+        addPerson(newMother);
+      }
+    }
 
+    // Save Family record linking parents and child
+    if (fId || mId) {
+      const newFamily: Family = {
+        id: famId,
+        husbandId: fId,
+        wifeId: mId,
+        relationshipType: 'married',
+        children: childId ? [{ personId: childId }] : [],
+        childrenIds: childId ? [childId] : []
+      };
+      saveFamily(newFamily);
+    }
+
+    if (fId) setFatherId(fId);
+    if (mId) setMotherId(mId);
+
+    let newPatr: string | undefined = undefined;
     if (fatherData.firstName && (!patronymic || patronymic === autoInheritedValues.patronymic)) {
-      const newPatr = generateUkrainianPatronymic(fatherData.firstName, gender);
-      setPatronymic(newPatr);
+      newPatr = generateUkrainianPatronymic(fatherData.firstName, effectivePerson?.gender || gender);
+      if (newPatr) setPatronymic(newPatr);
+    }
+
+    // Crucial: If we are viewing/editing an existing child, immediately update and persist the child
+    if (effectivePerson) {
+      const updatedChild: Person = {
+        ...effectivePerson,
+        fatherId: fId || effectivePerson.fatherId,
+        motherId: mId || effectivePerson.motherId,
+        parentFamilyId: famId,
+        patronymic: newPatr || effectivePerson.patronymic,
+        name: {
+          ...effectivePerson.name,
+          given: effectivePerson.name?.given || effectivePerson.firstName,
+          surname: effectivePerson.name?.surname || effectivePerson.lastName,
+          patronymic: newPatr || effectivePerson.name?.patronymic || effectivePerson.patronymic
+        }
+      };
+      updatePerson(updatedChild);
     }
 
     setShowFamilyQuickAddModal(false);
@@ -987,6 +1093,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   useEffect(() => {
     if (!effectivePerson) return;
     setResearchBranch(effectivePerson.researchBranch || 'Без прив\'язки');
+    setCustomBranchInput(effectivePerson.researchBranch || '');
+    setIsCustomBranch(Boolean(effectivePerson.researchBranch && !['Без прив\'язки', 'Головна гілка', 'Батьківська лінія', 'Материнська лінія', 'Шляхетська лінія', 'Селянська лінія'].includes(effectivePerson.researchBranch)));
+    setClan(effectivePerson.clan || '');
     setResearchStatus(effectivePerson.researchStatus || 'hypothetical');
     setFirstName(effectivePerson.name?.given || effectivePerson.firstName || '');
     setLastName(effectivePerson.name?.surname || effectivePerson.lastName || '');
@@ -1911,6 +2020,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     };
 
     let savedPersonId: string;
+    const finalBranch = (isCustomBranch && customBranchInput.trim() ? customBranchInput.trim() : researchBranch.trim()) || undefined;
+    const finalClan = clan.trim() || undefined;
 
     if (effectivePerson) {
       savedPersonId = effectivePerson.id;
@@ -1923,7 +2034,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         maidenName: maidenName.trim() || undefined,
         prefix: prefix.trim() || undefined,
         gender,
-        researchBranch: researchBranch || undefined,
+        clan: finalClan,
+        researchBranch: finalBranch && finalBranch !== "Без прив'язки" ? finalBranch : undefined,
         researchStatus: researchStatus || undefined,
         nameVariants: nameVariantsList.length > 0 ? nameVariantsList : undefined,
         surnameVariants: surnameVariantsList.length > 0 ? surnameVariantsList : undefined,
@@ -1976,7 +2088,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         maidenName: maidenName.trim() || undefined,
         prefix: prefix.trim() || undefined,
         gender,
-        researchBranch: researchBranch || undefined,
+        clan: finalClan,
+        researchBranch: finalBranch && finalBranch !== "Без прив'язки" ? finalBranch : undefined,
         researchStatus: researchStatus || undefined,
         nameVariants: nameVariantsList.length > 0 ? nameVariantsList : undefined,
         surnameVariants: surnameVariantsList.length > 0 ? surnameVariantsList : undefined,
@@ -2125,40 +2238,77 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         }
       }
 
-      // If father selected, update father's childrenIds
-      if (fatherId) {
-        const f = persons.find((p) => p.id === fatherId);
-        if (f) {
+      addPerson(newPerson);
+    }
+
+    // If father selected, update father's childrenIds
+    if (fatherId) {
+      const f = persons.find((p) => p.id === fatherId);
+      if (f) {
+        const nextCIds = Array.from(new Set([...(f.childrenIds || []), savedPersonId]));
+        if (nextCIds.length !== (f.childrenIds || []).length) {
           updatePerson({
             ...f,
-            childrenIds: Array.from(new Set([...(f.childrenIds || []), savedPersonId]))
+            childrenIds: nextCIds
           });
         }
       }
+    }
 
-      // If mother selected, update mother's childrenIds
-      if (motherId) {
-        const m = persons.find((p) => p.id === motherId);
-        if (m) {
+    // If mother selected, update mother's childrenIds
+    if (motherId) {
+      const m = persons.find((p) => p.id === motherId);
+      if (m) {
+        const nextCIds = Array.from(new Set([...(m.childrenIds || []), savedPersonId]));
+        if (nextCIds.length !== (m.childrenIds || []).length) {
           updatePerson({
             ...m,
-            childrenIds: Array.from(new Set([...(m.childrenIds || []), savedPersonId]))
+            childrenIds: nextCIds
           });
         }
       }
+    }
 
-      // If spouse selected, update spouse's spouseIds
-      if (spouseId) {
-        const sp = persons.find((p) => p.id === spouseId);
-        if (sp) {
+    // If spouse selected, update spouse's spouseIds
+    if (spouseId) {
+      const sp = persons.find((p) => p.id === spouseId);
+      if (sp) {
+        const nextSpouseIds = Array.from(new Set([...(sp.spouseIds || []), savedPersonId]));
+        if (nextSpouseIds.length !== (sp.spouseIds || []).length) {
           updatePerson({
             ...sp,
-            spouseIds: Array.from(new Set([...(sp.spouseIds || []), savedPersonId]))
+            spouseIds: nextSpouseIds
           });
         }
       }
+    }
 
-      addPerson(newPerson);
+    // If both father and mother exist, ensure Family is linked or created
+    if (fatherId && motherId) {
+      const existingFam = Object.values(families || {}).find(
+        (fam: any) =>
+          ((fam.husbandId === fatherId && fam.wifeId === motherId) ||
+           (fam.husbandId === motherId && fam.wifeId === fatherId))
+      );
+      if (existingFam) {
+        const curChildrenIds = existingFam.childrenIds || (existingFam.children || []).map((c: any) => c.personId);
+        if (!curChildrenIds.includes(savedPersonId)) {
+          saveFamily({
+            ...existingFam,
+            children: [...(existingFam.children || []), { personId: savedPersonId }],
+            childrenIds: Array.from(new Set([...curChildrenIds, savedPersonId]))
+          });
+        }
+      } else {
+        saveFamily({
+          id: `fam-${Date.now()}`,
+          husbandId: fatherId,
+          wifeId: motherId,
+          relationshipType: 'married',
+          children: [{ personId: savedPersonId }],
+          childrenIds: [savedPersonId]
+        });
+      }
     }
 
     // Synchronize all linked godparents and witnesses so their godchildrenIds / witnessedPersonIds includes this saved person
@@ -2488,12 +2638,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             {effectivePerson && onDeletePerson && !isReadOnly && (
               <button
                 type="button"
-                onClick={() => {
-                  if (window.confirm(`Ви впевнені, що хочете видалити особу ${computedFullName}?`)) {
-                    onDeletePerson(effectivePerson.id);
-                    onClose();
-                  }
-                }}
+                onClick={() => setIsConfirmDeleteOpen(true)}
                 className="p-1.5 rounded-xl text-neutral-400 hover:text-rose-500 hover:bg-rose-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer"
                 title="Видалити особу з бази даних"
               >
@@ -2624,8 +2769,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   setShowFamilyQuickAddModal(true);
                 })
               }
+              onOpenFamilyQuickAdd={() => setShowFamilyQuickAddModal(true)}
               onOpenReport={() => setIsReportModalOpen(true)}
               onOpenContact={() => setIsContactModalOpen(true)}
+              onDeletePerson={onDeletePerson ? () => setIsConfirmDeleteOpen(true) : undefined}
               isReadOnly={isReadOnly}
             />
           </div>
@@ -3099,7 +3246,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                         </span>
                       )}
                       <span>•</span>
-                      <span>{researchBranch}</span>
+                      <span>{isCustomBranch && customBranchInput.trim() ? customBranchInput.trim() : researchBranch}</span>
+                      <span>•</span>
+                      <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
+                        <Crown className="w-3 h-3" />
+                        <span>{clan.trim() ? formatClanName(clan) : (computedRodDefault ? formatClanName(computedRodDefault) : 'Рід')}</span>
+                      </span>
                       {currentTagsList.length > 0 && <span>• #{currentTagsList[0]}</span>}
                     </span>
                   )}
@@ -3125,20 +3277,64 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                           </span>
                         )}
                       </div>
-                      <select
-                        value={researchBranch}
-                        onChange={(e) => {
-                          setResearchBranch(e.target.value);
-                          setAutoInheritedValues(prev => ({ ...prev, branch: undefined }));
-                        }}
-                        className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[34px]`}
-                      >
-                        {allAvailableBranches.map((br) => (
-                          <option key={br} value={br}>
-                            {br}
-                          </option>
-                        ))}
-                      </select>
+                      {isCustomBranch ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={customBranchInput}
+                            onChange={(e) => setCustomBranchInput(e.target.value)}
+                            placeholder="напр. QA, Лінія Іуліанових"
+                            className={`w-full py-1.5 px-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[34px]`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCustomBranch(false);
+                              if (customBranchInput.trim()) {
+                                setResearchBranch(customBranchInput.trim());
+                              }
+                            }}
+                            className="px-2 py-1 text-[10px] rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-black/5 dark:hover:bg-white/5 shrink-0 h-[34px]"
+                            title="Повернутися до списку"
+                          >
+                            Список
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={researchBranch}
+                            onChange={(e) => {
+                              if (e.target.value === '__custom__') {
+                                setIsCustomBranch(true);
+                                setCustomBranchInput(researchBranch !== "Без прив'язки" ? researchBranch : '');
+                              } else {
+                                setResearchBranch(e.target.value);
+                                setAutoInheritedValues(prev => ({ ...prev, branch: undefined }));
+                              }
+                            }}
+                            className={`w-full py-1.5 px-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[34px]`}
+                          >
+                            {allAvailableBranches.map((br) => (
+                              <option key={br} value={br}>
+                                {br}
+                              </option>
+                            ))}
+                            <option value="__custom__">+ Власна гілка (напр. QA)...</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCustomBranch(true);
+                              setCustomBranchInput(researchBranch !== "Без прив'язки" ? researchBranch : '');
+                            }}
+                            className="p-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-500 hover:text-amber-600 dark:hover:text-amber-400 shrink-0 h-[34px] w-[34px] flex items-center justify-center cursor-pointer"
+                            title="Ввести власну назву гілки (напр. QA)"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
                       {currentInheritance.suggestedBranch && researchBranch !== currentInheritance.suggestedBranch && (
                         <button
                           type="button"
@@ -3542,6 +3738,69 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                         <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
                         <span>По батькові від батька ({selectedFather?.name?.given || selectedFather?.firstName || 'обраного'}): <strong>{currentInheritance.suggestedPatronymic}</strong></span>
                       </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row 2.5: Рід / Клан (напр. "Рід Іуліанових", "QA") */}
+                <div className="p-3.5 rounded-2xl border border-amber-500/25 bg-amber-500/[0.04] dark:bg-amber-500/[0.06] space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <label className="font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
+                      <Crown className="w-4 h-4 text-amber-500" />
+                      <span>Рід (Клан / Родова назва)</span>
+                    </label>
+                    {computedRodDefault && (
+                      <span className="text-[10px] text-neutral-500 dark:text-neutral-400">
+                        Авто з прізвища: <strong className="text-amber-600 dark:text-amber-400">{formatClanName(computedRodDefault)}</strong>
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={clan}
+                        onChange={(e) => setClan(e.target.value)}
+                        placeholder={computedRodDefault ? formatClanName(computedRodDefault) : 'напр. Рід Іуліанових, Шевченків, QA'}
+                        className={`w-full px-3 py-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[38px]`}
+                      />
+                      {clan && (
+                        <button
+                          type="button"
+                          onClick={() => setClan('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200 text-xs cursor-pointer font-bold px-1"
+                          title="Очистити (повернути автовизначення з прізвища)"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    {clan && (
+                      <button
+                        type="button"
+                        onClick={() => setClan('')}
+                        className="px-2.5 py-1.5 rounded-xl border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 text-[11px] font-medium transition-colors cursor-pointer shrink-0 h-[38px] flex items-center gap-1"
+                        title="Скинути до автоматичного визначення з прізвища"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span className="hidden sm:inline">Скинути до авто</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-neutral-500 dark:text-neutral-400 pt-0.5 flex-wrap gap-1">
+                    <span>
+                      {clan.trim() ? (
+                        <>Встановлено власну назву роду: <strong className="text-amber-600 dark:text-amber-400 font-bold">{formatClanName(clan)}</strong></>
+                      ) : (
+                        <>За замовчуванням визначається автоматично з прізвища особи ({lastName || maidenName ? formatClanName(lastName || maidenName) : 'Рід'}).</>
+                      )}
+                    </span>
+                    {clan.trim() && (
+                      <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold border border-amber-500/30">
+                        Кастомний рід
+                      </span>
                     )}
                   </div>
                 </div>
@@ -5898,6 +6157,25 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Confirm Delete Person Modal */}
+      {effectivePerson && (
+        <ConfirmDeleteModal
+          isOpen={isConfirmDeleteOpen}
+          itemName={computedFullName}
+          itemType="особу"
+          message="Особу буде переміщено до кошика. Ви зможете відновити її у будь-який момент із вкладки «Кошик»."
+          confirmText="Так, видалити особу"
+          cancelText="Скасувати"
+          onConfirm={() => {
+            setIsConfirmDeleteOpen(false);
+            if (effectivePerson && onDeletePerson) {
+              onDeletePerson(effectivePerson.id);
+              onClose();
+            }
+          }}
+          onClose={() => setIsConfirmDeleteOpen(false)}
+        />
       )}
     </div>
   );

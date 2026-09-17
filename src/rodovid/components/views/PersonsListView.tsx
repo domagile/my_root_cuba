@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Search,
   Filter,
@@ -24,20 +24,23 @@ import {
   HelpCircle,
   FileText,
   GitMerge,
-  ChevronDown
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
 import { useUIStore } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
-import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
+import { useGenealogyStore } from '../../../stores/useGenealogyStore';
+import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted, isUserAdmin } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModal';
 import { PersonReportModal } from '../../../components/common/PersonReportModal';
 import { getTreeHashtagsWithCounts, formatHashtag } from '../../../utils/tagUtils';
 import { isPersonMale, isPersonFemale, normalizeGender } from '../../utils/genderUtils';
 import { isPersonHypothesis, isPersonConfirmed } from '../../../utils/researchStatusUtils';
-import { normalizeUkrainianSurnameGender, areSurnamesEquivalent } from '../../../utils/ukrainianPhonetics';
+import { normalizeUkrainianSurnameGender, areSurnamesEquivalent, formatClanName } from '../../../utils/ukrainianPhonetics';
+import { getPersonRodName } from '../../utils/treeLayout';
 
 interface PersonsListViewProps {
   database: GenealogyDatabase;
@@ -48,6 +51,7 @@ interface PersonsListViewProps {
   onOpenAddPerson: () => void;
   onChangeRoot: (id: string) => void;
   onOpenKinshipWith: (id: string) => void;
+  onUpdatePerson?: (person: Person) => void;
 }
 
 export const PersonsListView: React.FC<PersonsListViewProps> = ({
@@ -58,11 +62,18 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   onDeletePerson,
   onOpenAddPerson,
   onChangeRoot,
-  onOpenKinshipWith
+  onOpenKinshipWith,
+  onUpdatePerson
 }) => {
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
+  const updatePersonInStore = useGenealogyStore((s) => s.updatePerson);
+
   const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
+  const isAdmin = useMemo(() => {
+    if (isReadOnly) return false;
+    return isUserAdmin(currentUser, whitelist);
+  }, [isReadOnly, currentUser, whitelist]);
 
   const canEdit = useMemo(() => {
     if (isReadOnly) return false;
@@ -74,6 +85,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   }, [isReadOnly, currentUser, isWhitelisted, whitelist]);
 
   const themePalette = useUIStore((s) => s.themePalette);
+  const personClanFilter = useUIStore((s) => s.personClanFilter);
+  const setPersonClanFilter = useUIStore((s) => s.setPersonClanFilter);
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
 
@@ -87,6 +100,67 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [personToDelete, setPersonToDelete] = useState<Person | null>(null);
   const [reportPersonId, setReportPersonId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; actionText?: string; onAction?: () => void } | null>(null);
+  const [statusMenuPersonId, setStatusMenuPersonId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!statusMenuPersonId) return;
+    const handleClickOutside = () => setStatusMenuPersonId(null);
+    window.addEventListener('click', handleClickOutside);
+    return () => window.removeEventListener('click', handleClickOutside);
+  }, [statusMenuPersonId]);
+
+  const handleSetResearchStatus = (p: Person, nextStatus: 'confirmed' | 'hypothetical', e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (!isAdmin) return;
+
+    const prevIsHypo = isPersonHypothesis(p);
+    const prevStatus = p.researchStatus || (prevIsHypo ? 'hypothetical' : 'confirmed');
+    const isNextHypo = nextStatus === 'hypothetical';
+
+    const updated: Person = {
+      ...p,
+      researchStatus: nextStatus,
+      isHypothesis: isNextHypo
+    };
+
+    updatePersonInStore(updated);
+    onUpdatePerson?.(updated);
+    setStatusMenuPersonId(null);
+
+    setToast({
+      message: `Статус дослідження для «${getFullName(p)}»: ${isNextHypo ? 'Гіпотеза' : 'Підтверджена особа'}`,
+      actionText: 'Скасувати',
+      onAction: () => {
+        const reverted: Person = {
+          ...p,
+          researchStatus: prevStatus,
+          isHypothesis: prevIsHypo
+        };
+        updatePersonInStore(reverted);
+        onUpdatePerson?.(reverted);
+      }
+    });
+  };
+
+  const handleToggleResearchStatus = (p: Person, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!isAdmin) return;
+
+    const currentIsHypo = isPersonHypothesis(p);
+    const nextStatus = currentIsHypo ? 'confirmed' : 'hypothetical';
+    handleSetResearchStatus(p, nextStatus, e);
+  };
 
   // Mobile-friendly filter collapse state
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState<boolean>(() => {
@@ -99,16 +173,39 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (searchTerm.trim()) count++;
+    if (personClanFilter) count++;
     if (tagFilter !== 'ALL') count++;
     if (researchStatusFilter !== 'ALL') count++;
     if (genderFilter !== 'ALL') count++;
     if (statusFilter !== 'ALL') count++;
     return count;
-  }, [searchTerm, tagFilter, researchStatusFilter, genderFilter, statusFilter]);
+  }, [searchTerm, personClanFilter, tagFilter, researchStatusFilter, genderFilter, statusFilter]);
 
   // Extract all tree hashtags with counts
   const availableHashtags = useMemo(() => {
     return getTreeHashtagsWithCounts(database.persons);
+  }, [database.persons]);
+
+  // Available Clans list with counts
+  const availableClans = useMemo(() => {
+    const clansMap = new Map<string, { id: string; name: string; count: number }>();
+    Object.values(database.persons || {}).forEach((p) => {
+      const rawRod = getPersonRodName(p);
+      if (!rawRod || rawRod === 'Рід') return;
+      const canonical = normalizeUkrainianSurnameGender(rawRod) || rawRod;
+      const existingKey = Array.from(clansMap.keys()).find(
+        (k) => k.toLowerCase() === canonical.toLowerCase() || areSurnamesEquivalent(k, canonical)
+      );
+      const key = existingKey || canonical;
+      const clanName = formatClanName(key);
+
+      if (clansMap.has(key)) {
+        clansMap.get(key)!.count += 1;
+      } else {
+        clansMap.set(key, { id: key, name: clanName, count: 1 });
+      }
+    });
+    return Array.from(clansMap.values()).sort((a, b) => b.count - a.count);
   }, [database.persons]);
 
   const personsList = useMemo(() => {
@@ -121,22 +218,47 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       const place = (p.birthPlace || p.deathPlace || '').toLowerCase();
       const tags = (p.tags || []).join(' ').toLowerCase();
       const q = searchTerm.toLowerCase().trim();
+      const qWithoutRod = q.replace(/^рід\s+/i, '').trim();
+
+      const rawRod = getPersonRodName(p);
+      const clanFormatted = formatClanName(rawRod).toLowerCase();
+      const branch = (p.researchBranch || '').toLowerCase();
+      const customClan = (p.clan || '').toLowerCase();
 
       const searchTag = q.startsWith('#') ? q.slice(1).trim() : q;
-      const qTokens = q.split(/\s+/).filter(Boolean);
+      const qTokens = (qWithoutRod || q).split(/\s+/).filter(Boolean);
       const matchesSurnameEquiv =
         (sur && areSurnamesEquivalent(q, sur)) ||
+        (sur && areSurnamesEquivalent(qWithoutRod, sur)) ||
         (maiden && areSurnamesEquivalent(q, maiden)) ||
+        (maiden && areSurnamesEquivalent(qWithoutRod, maiden)) ||
         qTokens.some((token) => (sur && areSurnamesEquivalent(token, sur)) || (maiden && areSurnamesEquivalent(token, maiden)));
+
+      const matchesClanText =
+        clanFormatted.includes(q) ||
+        customClan.includes(q) ||
+        (qWithoutRod && (clanFormatted.includes(qWithoutRod) || customClan.includes(qWithoutRod) || sur.includes(qWithoutRod) || maiden.includes(qWithoutRod)));
 
       const matchesSearch =
         !q ||
         fullName.includes(q) ||
+        fullName.includes(qWithoutRod) ||
         matchesSurnameEquiv ||
+        matchesClanText ||
+        branch.includes(q) ||
         occu.includes(q) ||
         place.includes(q) ||
         tags.includes(q) ||
         (searchTag && tags.includes(searchTag));
+
+      // Clan filter
+      if (personClanFilter && personClanFilter !== 'ALL') {
+        const canonical = normalizeUkrainianSurnameGender(rawRod) || rawRod;
+        const matchesClan =
+          canonical.toLowerCase() === personClanFilter.toLowerCase() ||
+          areSurnamesEquivalent(canonical, personClanFilter);
+        if (!matchesClan) return false;
+      }
 
       // Gender filter
       let matchesGender = true;
@@ -168,7 +290,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
       return matchesSearch && matchesGender && matchesStatus && matchesResearchStatus && matchesTag;
     });
-  }, [database.persons, searchTerm, genderFilter, statusFilter, researchStatusFilter, tagFilter]);
+  }, [database.persons, searchTerm, personClanFilter, genderFilter, statusFilter, researchStatusFilter, tagFilter]);
 
   const sortedPersons = useMemo(() => {
     return [...personsList].sort((a, b) => {
@@ -289,18 +411,36 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
         {/* Filters and Search: 2 responsive rows ensuring full visibility on mobile, tablet & laptop */}
         <div className={`flex flex-col gap-2.5 pt-2 border-t ${theme.borderSubtle} ${isFiltersCollapsed ? 'hidden md:flex' : 'flex'}`}>
-          {/* Row 1: Search (flexible) + Tag Filter + Research Status */}
+          {/* Row 1: Search (flexible) + Clan + Tag Filter + Research Status */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
             {/* Search Input */}
-            <div className="lg:col-span-6 relative">
+            <div className="lg:col-span-4 relative">
               <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
               <input
                 type="text"
-                placeholder="Пошук за ПІБ, #хештегом, місцем..."
+                placeholder="Пошук за ПІБ, родом, #хештегом..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className={`w-full pl-9 pr-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-400 focus:outline-none focus:border-emerald-500`}
               />
+            </div>
+
+            {/* Clan / Rod Filter Dropdown */}
+            <div className="lg:col-span-3">
+              <select
+                value={personClanFilter || 'ALL'}
+                onChange={(e) => setPersonClanFilter(e.target.value === 'ALL' ? null : e.target.value)}
+                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
+                  personClanFilter ? 'border-amber-500 ring-1 ring-amber-500/20 text-amber-500' : theme.inputBorder
+                } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-amber-500 cursor-pointer`}
+              >
+                <option value="ALL">Всі роди ({availableClans.length})</option>
+                {availableClans.map((clan) => (
+                  <option key={clan.id} value={clan.id}>
+                    {clan.name} ({clan.count})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Tag / Hashtag Filter Dropdown */}
@@ -322,7 +462,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </div>
 
             {/* Research Status Filter */}
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-2">
               <select
                 value={researchStatusFilter}
                 onChange={(e) => setResearchStatusFilter(e.target.value as any)}
@@ -331,7 +471,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
               >
                 <option value="ALL">Статус: Всі</option>
-                <option value="CONFIRMED">Підтверджена особа</option>
+                <option value="CONFIRMED">Підтверджена</option>
                 <option value="HYPOTHESIS">Гіпотеза</option>
               </select>
             </div>
@@ -471,6 +611,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           <button
             onClick={() => {
               setSearchTerm('');
+              setPersonClanFilter(null);
               setGenderFilter('ALL');
               setStatusFilter('ALL');
               setResearchStatusFilter('ALL');
@@ -567,6 +708,33 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                             </div>
                             <div className={`text-[10px] ${theme.textMuted} font-mono flex items-center gap-1.5 flex-wrap`}>
                               <span>{isMasked ? '🔒 Конфіденційна жива особа' : `ID: ${p.id}${(p.name?.maidenName || p.maidenName) ? ` • / ${p.name?.maidenName || p.maidenName}` : ''}`}</span>
+                              {!isMasked && (() => {
+                                const rawRod = getPersonRodName(p);
+                                const clanBadge = rawRod && rawRod !== 'Рід' ? formatClanName(rawRod) : null;
+                                if (!clanBadge) return null;
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPersonClanFilter(rawRod);
+                                    }}
+                                    className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-amber-500/15 hover:bg-amber-500/30 text-amber-500 border border-amber-500/30 transition-colors cursor-pointer font-sans"
+                                    title={`Фільтрувати за: ${clanBadge}`}
+                                  >
+                                    {clanBadge}
+                                  </button>
+                                );
+                              })()}
+                              {!isMasked && p.researchBranch && p.researchBranch !== "Без прив'язки" && (
+                                <span
+                                  className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-0.5"
+                                  title={`Гілка дослідження: ${p.researchBranch}`}
+                                >
+                                  <GitFork className="w-2.5 h-2.5" />
+                                  <span>{p.researchBranch}</span>
+                                </span>
+                              )}
                               {!isMasked && p.tags && p.tags.length > 0 && (
                                 <div className="inline-flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                                   {p.tags.map((t, idx) => {
@@ -618,18 +786,115 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         {isMasked ? '🔒 Скрито' : `${p.birthYear || '?'} — ${p.isLiving ? 'живий' : p.deathYear || '?'}`}
                       </td>
 
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-4 relative" onClick={(e) => e.stopPropagation()}>
                         {isMasked ? (
                           <span className={theme.textMuted}>—</span>
-                        ) : isPersonHypothesis(p) ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                            <HelpCircle className="w-3 h-3" />
-                            <span>Гіпотеза</span>
-                          </span>
+                        ) : isAdmin ? (
+                          <div className="relative inline-flex items-center">
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleResearchStatus(p, e)}
+                              className={`group inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all cursor-pointer shadow-xs ${
+                                isPersonHypothesis(p)
+                                  ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 dark:text-amber-400 border-amber-500/40 hover:border-amber-500/80 hover:scale-[1.03] active:scale-95'
+                                  : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 border-emerald-500/40 hover:border-emerald-500/80 hover:scale-[1.03] active:scale-95'
+                              }`}
+                              title={`Статус: ${isPersonHypothesis(p) ? 'Гіпотеза' : 'Підтверджена особа'}. Натисніть, щоб змінити на «${isPersonHypothesis(p) ? 'Підтверджена особа' : 'Гіпотеза'}» (доступно адміністратору)`}
+                            >
+                              {isPersonHypothesis(p) ? (
+                                <>
+                                  <HelpCircle className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 group-hover:rotate-12 transition-transform shrink-0" />
+                                  <span>Гіпотеза</span>
+                                  <ArrowUpDown className="w-2.5 h-2.5 opacity-40 group-hover:opacity-100 transition-opacity ml-0.5 text-amber-500 dark:text-amber-400 shrink-0" />
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
+                                  <span>Підтверджена особа</span>
+                                  <ArrowUpDown className="w-2.5 h-2.5 opacity-40 group-hover:opacity-100 transition-opacity ml-0.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                </>
+                              )}
+                            </button>
+
+                            {/* Dropdown trigger */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setStatusMenuPersonId(statusMenuPersonId === p.id ? null : p.id);
+                              }}
+                              className="ml-1 p-1 rounded-full hover:bg-neutral-500/20 text-neutral-400 hover:text-neutral-200 transition-all cursor-pointer"
+                              title="Вибрати статус зі списку (тільки для адміна)"
+                            >
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+
+                            {/* Dropdown Menu */}
+                            {statusMenuPersonId === p.id && (
+                              <div
+                                className={`absolute left-0 top-full mt-1.5 z-40 min-w-[210px] rounded-xl shadow-2xl border p-1.5 backdrop-blur-md ${
+                                  isDark ? 'bg-neutral-900/98 border-neutral-700 text-neutral-200' : 'bg-white/98 border-neutral-200 text-neutral-800 shadow-neutral-300/60'
+                                }`}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div className="px-2 py-1 text-[10px] font-semibold text-neutral-400 uppercase tracking-wider border-b border-neutral-500/20 mb-1">
+                                  Змінити статус (Адмін)
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleSetResearchStatus(p, 'confirmed', e)}
+                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer ${
+                                    !isPersonHypothesis(p)
+                                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold'
+                                      : 'hover:bg-neutral-500/10 text-neutral-700 dark:text-neutral-300'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                    <span>Підтверджена особа</span>
+                                  </span>
+                                  {!isPersonHypothesis(p) && <Check className="w-3.5 h-3.5 text-emerald-500" />}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleSetResearchStatus(p, 'hypothetical', e)}
+                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer mt-0.5 ${
+                                    isPersonHypothesis(p)
+                                      ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400 font-bold'
+                                      : 'hover:bg-neutral-500/10 text-neutral-700 dark:text-neutral-300'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <HelpCircle className="w-3.5 h-3.5 text-amber-500" />
+                                    <span>Гіпотеза</span>
+                                  </span>
+                                  {isPersonHypothesis(p) && <Check className="w-3.5 h-3.5 text-amber-500" />}
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Підтверджена особа</span>
+                          /* Non-admin: static badge */
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold cursor-default select-none ${
+                              isPersonHypothesis(p)
+                                ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400 border border-amber-500/30'
+                                : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                            }`}
+                            title={`Статус дослідження: ${isPersonHypothesis(p) ? 'Гіпотеза' : 'Підтверджена особа'} (зміна доступна лише адміністратору)`}
+                          >
+                            {isPersonHypothesis(p) ? (
+                              <>
+                                <HelpCircle className="w-3 h-3 text-amber-500 dark:text-amber-400" />
+                                <span>Гіпотеза</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                <span>Підтверджена особа</span>
+                              </>
+                            )}
                           </span>
                         )}
                       </td>
@@ -793,16 +1058,81 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       </div>
 
                       {!isMasked && (
-                        <div className="mt-2 flex items-center gap-1.5">
-                          {isPersonHypothesis(p) ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                              <HelpCircle className="w-3 h-3" />
-                              <span>Гіпотеза</span>
+                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                          {(() => {
+                            const rawRod = getPersonRodName(p);
+                            const clanBadge = rawRod && rawRod !== 'Рід' ? formatClanName(rawRod) : null;
+                            if (!clanBadge) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setPersonClanFilter(rawRod)}
+                                className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 hover:bg-amber-500/30 text-amber-500 border border-amber-500/30 transition-colors cursor-pointer font-sans"
+                                title={`Фільтрувати за: ${clanBadge}`}
+                              >
+                                {clanBadge}
+                              </button>
+                            );
+                          })()}
+                          {p.researchBranch && p.researchBranch !== "Без прив'язки" && (
+                            <span
+                              className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1 font-sans"
+                              title={`Гілка дослідження: ${p.researchBranch}`}
+                            >
+                              <GitFork className="w-2.5 h-2.5" />
+                              <span>{p.researchBranch}</span>
                             </span>
+                          )}
+                        </div>
+                      )}
+
+                      {!isMasked && (
+                        <div className="mt-2 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          {isAdmin ? (
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleResearchStatus(p, e)}
+                              className={`group inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer shadow-xs ${
+                                isPersonHypothesis(p)
+                                  ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 dark:text-amber-400 border-amber-500/40 hover:border-amber-500/80 hover:scale-105 active:scale-95'
+                                  : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 border-emerald-500/40 hover:border-emerald-500/80 hover:scale-105 active:scale-95'
+                              }`}
+                              title={`Статус: ${isPersonHypothesis(p) ? 'Гіпотеза' : 'Підтверджена особа'}. Натисніть для зміни на «${isPersonHypothesis(p) ? 'Підтверджена особа' : 'Гіпотеза'}» (доступно адміністратору)`}
+                            >
+                              {isPersonHypothesis(p) ? (
+                                <>
+                                  <HelpCircle className="w-3 h-3 text-amber-500 dark:text-amber-400 group-hover:rotate-12 transition-transform" />
+                                  <span>Гіпотеза</span>
+                                  <ArrowUpDown className="w-2.5 h-2.5 opacity-40 group-hover:opacity-100 transition-opacity ml-0.5 text-amber-500 dark:text-amber-400" />
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform" />
+                                  <span>Підтверджена особа</span>
+                                  <ArrowUpDown className="w-2.5 h-2.5 opacity-40 group-hover:opacity-100 transition-opacity ml-0.5 text-emerald-600 dark:text-emerald-400" />
+                                </>
+                              )}
+                            </button>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Підтверджена особа</span>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold cursor-default select-none ${
+                                isPersonHypothesis(p)
+                                  ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400 border border-amber-500/30'
+                                  : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                              }`}
+                              title={`Статус дослідження: ${isPersonHypothesis(p) ? 'Гіпотеза' : 'Підтверджена особа'} (зміна доступна лише адміністратору)`}
+                            >
+                              {isPersonHypothesis(p) ? (
+                                <>
+                                  <HelpCircle className="w-3 h-3 text-amber-500 dark:text-amber-400" />
+                                  <span>Гіпотеза</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  <span>Підтверджена особа</span>
+                                </>
+                              )}
                             </span>
                           )}
                         </div>
@@ -921,6 +1251,34 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             setReportPersonId(null);
           }}
         />
+      )}
+
+      {/* Floating Status Update Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl shadow-2xl border bg-neutral-900/95 border-neutral-700 text-neutral-100 text-xs font-medium backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toast.message}</span>
+          {toast.onAction && (
+            <button
+              type="button"
+              onClick={() => {
+                toast.onAction?.();
+                setToast(null);
+              }}
+              className="ml-2 px-2.5 py-1 rounded bg-[#B88E3E] hover:bg-[#a37c33] text-black text-xs font-bold transition-all cursor-pointer"
+            >
+              {toast.actionText || 'Скасувати'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="p-1 text-neutral-400 hover:text-neutral-200 transition-colors cursor-pointer"
+            title="Закрити"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );

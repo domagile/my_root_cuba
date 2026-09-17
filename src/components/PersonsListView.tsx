@@ -38,6 +38,11 @@ import { getTreeHashtagsWithCounts } from '../utils/tagUtils';
 import { isPersonMale, isPersonFemale } from '../utils/genderUtils';
 import { isPersonHypothesis, isPersonConfirmed } from '../utils/researchStatusUtils';
 import { BulkEditPersonsModal, BulkEditParams } from './modals/BulkEditPersonsModal';
+import { useAuthStore } from '../stores/useAuthStore';
+import { useUIStore } from '../stores/useUIStore';
+import { isUserAdmin } from '../rodovid/utils/privacy';
+import { getPersonRodName } from '../rodovid/utils/treeLayout';
+import { formatClanName, normalizeUkrainianSurnameGender, areSurnamesEquivalent } from '../utils/ukrainianPhonetics';
 
 interface PersonsListViewProps {
   onInspectPerson?: (id: string) => void;
@@ -50,6 +55,10 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   onEditPerson,
   onOpenAddPerson
 }) => {
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const whitelist = useAuthStore((s) => s.whitelist);
+  const isAdmin = useMemo(() => isUserAdmin(currentUser, whitelist), [currentUser, whitelist]);
+
   const { 
     persons, 
     trashPersons,
@@ -83,6 +92,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [lifeStateFilter, setLifeStateFilter] = useState<'all' | 'alive' | 'deceased'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'hypothesis' | 'archived'>('all');
   const [tagFilter, setTagFilter] = useState<string>('all');
+  const personClanFilter = useUIStore((s) => s.personClanFilter);
+  const setPersonClanFilter = useUIStore((s) => s.setPersonClanFilter);
 
   // Toolbar & Display Options
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
@@ -96,6 +107,28 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   // Hashtags list
   const availableHashtags = useMemo(() => {
     return getTreeHashtagsWithCounts(persons);
+  }, [persons]);
+
+  // Available Clans list with member counts
+  const availableClans = useMemo(() => {
+    const clansMap = new Map<string, { id: string; name: string; count: number }>();
+    persons.forEach((p) => {
+      const rawRod = getPersonRodName(p);
+      if (!rawRod || rawRod === 'Рід') return;
+      const canonical = normalizeUkrainianSurnameGender(rawRod) || rawRod;
+      const existingKey = Array.from(clansMap.keys()).find(
+        (k) => k.toLowerCase() === canonical.toLowerCase() || areSurnamesEquivalent(k, canonical)
+      );
+      const key = existingKey || canonical;
+      const clanName = formatClanName(key);
+
+      if (clansMap.has(key)) {
+        clansMap.get(key)!.count += 1;
+      } else {
+        clansMap.set(key, { id: key, name: clanName, count: 1 });
+      }
+    });
+    return Array.from(clansMap.values()).sort((a, b) => b.count - a.count);
   }, [persons]);
 
   // Toast notification state
@@ -190,6 +223,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
+        const qWithoutRod = q.replace(/^рід\s+/i, '').trim();
         const fullName = `${p.lastName || ''} ${p.firstName || ''} ${p.patronymic || ''} ${p.maidenName || ''}`.toLowerCase();
         const places = `${p.birthPlace || ''} ${p.deathPlace || ''}`.toLowerCase();
         const notes = (p.notes || '').toLowerCase();
@@ -197,8 +231,30 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         const tags = (p.tags || []).join(' ').toLowerCase();
         const searchTag = q.startsWith('#') ? q.slice(1).trim() : q;
 
+        const rawRod = getPersonRodName(p);
+        const clanFormatted = formatClanName(rawRod).toLowerCase();
+        const sur = (p.lastName || '').toLowerCase();
+        const maiden = (p.maidenName || '').toLowerCase();
+        const branch = (p.researchBranch || '').toLowerCase();
+        const customClan = (p.clan || '').toLowerCase();
+
+        const matchesClanText =
+          clanFormatted.includes(q) ||
+          customClan.includes(q) ||
+          (qWithoutRod && (clanFormatted.includes(qWithoutRod) || customClan.includes(qWithoutRod) || sur.includes(qWithoutRod) || maiden.includes(qWithoutRod)));
+
+        const matchesSurnameEquiv =
+          (sur && areSurnamesEquivalent(q, sur)) ||
+          (sur && areSurnamesEquivalent(qWithoutRod, sur)) ||
+          (maiden && areSurnamesEquivalent(q, maiden)) ||
+          (maiden && areSurnamesEquivalent(qWithoutRod, maiden));
+
         if (
           !fullName.includes(q) &&
+          !fullName.includes(qWithoutRod) &&
+          !matchesSurnameEquiv &&
+          !matchesClanText &&
+          !branch.includes(q) &&
           !places.includes(q) &&
           !notes.includes(q) &&
           !occupation.includes(q) &&
@@ -207,6 +263,16 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         ) {
           return false;
         }
+      }
+
+      // Clan Filter
+      if (personClanFilter && personClanFilter !== 'all') {
+        const rawRod = getPersonRodName(p);
+        const canonical = normalizeUkrainianSurnameGender(rawRod) || rawRod;
+        const matchesClan =
+          canonical.toLowerCase() === personClanFilter.toLowerCase() ||
+          areSurnamesEquivalent(canonical, personClanFilter);
+        if (!matchesClan) return false;
       }
 
       // Hashtag Filter
@@ -238,7 +304,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
       return true;
     });
-  }, [sourceList, tabFilter, searchQuery, tagFilter, genderFilter, lifeStateFilter, statusFilter]);
+  }, [sourceList, tabFilter, searchQuery, personClanFilter, tagFilter, genderFilter, lifeStateFilter, statusFilter]);
 
   // Sorted Persons
   const sortedPersons = useMemo(() => {
@@ -307,6 +373,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   // Reset all filters
   const resetFilters = () => {
     setSearchQuery('');
+    setPersonClanFilter(null);
     setGenderFilter('all');
     setLifeStateFilter('all');
     setStatusFilter('all');
@@ -419,8 +486,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     return 'дати не вказані';
   };
 
-  // Toggle research status for a single person
+  // Toggle research status for a single person (Admin only)
   const handleToggleResearchStatus = (p: Person) => {
+    if (!isAdmin) {
+      setToast({
+        message: 'Зміна статусу дослідження доступна лише адміністраторам'
+      });
+      return;
+    }
     const currentIsHypo = isPersonHypothesis(p);
     const nextStatus = currentIsHypo ? 'confirmed' : 'hypothetical';
     updatePerson({
@@ -433,8 +506,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     });
   };
 
-  // Batch set research status
+  // Batch set research status (Admin only)
   const handleBatchSetResearchStatus = (status: 'confirmed' | 'hypothetical') => {
+    if (!isAdmin) {
+      setToast({
+        message: 'Зміна статусу дослідження доступна лише адміністраторам'
+      });
+      return;
+    }
     if (selectedIds.size === 0) return;
     const isHypo = status === 'hypothetical';
     const targetPersons: Person[] = [];
@@ -802,7 +881,26 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
 
         {/* Bottom row: Filter Selects */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-2 pt-1.5 border-t border-[#262626]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 pt-1.5 border-t border-[#262626]">
+          {/* Clan / Rod Filter */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[10px] font-bold text-[#8C8C8C] uppercase shrink-0">Рід:</span>
+            <select
+              value={personClanFilter || 'all'}
+              onChange={(e) => setPersonClanFilter(e.target.value === 'all' ? null : e.target.value)}
+              className={`flex-1 min-w-0 px-2 py-1 bg-[#121212] border ${
+                personClanFilter ? 'border-[#B88E3E] text-[#B88E3E]' : 'border-[#333333] text-[#E5E5E5]'
+              } rounded-md text-xs focus:outline-none focus:border-[#B88E3E] cursor-pointer`}
+            >
+              <option value="all">Усі роди ({availableClans.length})</option>
+              {availableClans.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.count})
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Tag Filter */}
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-[10px] font-bold text-[#8C8C8C] uppercase shrink-0">Хештег:</span>
@@ -865,8 +963,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           </div>
 
           {/* RESET BUTTON */}
-          <div className="flex sm:col-span-2 lg:col-span-4 xl:col-span-1 justify-end items-center">
-            {(searchQuery || tagFilter !== 'all' || genderFilter !== 'all' || lifeStateFilter !== 'all' || statusFilter !== 'all' || tabFilter !== 'all') ? (
+          <div className="flex sm:col-span-2 lg:col-span-3 xl:col-span-1 justify-end items-center">
+            {(searchQuery || personClanFilter || tagFilter !== 'all' || genderFilter !== 'all' || lifeStateFilter !== 'all' || statusFilter !== 'all' || tabFilter !== 'all') ? (
               <button
                 onClick={resetFilters}
                 className="w-full xl:w-auto text-xs font-semibold text-[#B88E3E] hover:text-[#E5E5E5] transition-colors flex items-center justify-center gap-1 cursor-pointer px-2.5 py-1 bg-[#262626] hover:bg-[#333333] rounded-md border border-[#333333]"
@@ -1006,24 +1104,28 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     <span>🕊️ Померлі</span>
                   </button>
 
-                  {/* Research status */}
-                  <button
-                    onClick={() => handleBatchSetResearchStatus('confirmed')}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-950/50 hover:bg-emerald-900/80 border border-emerald-700/50 text-xs font-bold text-emerald-300 transition-all cursor-pointer flex items-center gap-1.5"
-                    title="Встановити статус 'Підтверджена особа' для вибраних"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Підтверджена</span>
-                  </button>
+                  {/* Research status (Admin only) */}
+                  {isAdmin && (
+                    <>
+                      <button
+                        onClick={() => handleBatchSetResearchStatus('confirmed')}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-950/50 hover:bg-emerald-900/80 border border-emerald-700/50 text-xs font-bold text-emerald-300 transition-all cursor-pointer flex items-center gap-1.5"
+                        title="Встановити статус 'Підтверджена особа' для вибраних (тільки для адміна)"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Підтверджена</span>
+                      </button>
 
-                  <button
-                    onClick={() => handleBatchSetResearchStatus('hypothetical')}
-                    className="px-2.5 py-1 rounded-lg bg-amber-950/50 hover:bg-amber-900/80 border border-amber-700/50 text-xs font-bold text-amber-300 transition-all cursor-pointer flex items-center gap-1.5"
-                    title="Встановити статус 'Гіпотеза' для вибраних"
-                  >
-                    <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Гіпотеза</span>
-                  </button>
+                      <button
+                        onClick={() => handleBatchSetResearchStatus('hypothetical')}
+                        className="px-2.5 py-1 rounded-lg bg-amber-950/50 hover:bg-amber-900/80 border border-amber-700/50 text-xs font-bold text-amber-300 transition-all cursor-pointer flex items-center gap-1.5"
+                        title="Встановити статус 'Гіпотеза' для вибраних (тільки для адміна)"
+                      >
+                        <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Гіпотеза</span>
+                      </button>
+                    </>
+                  )}
 
                   <button
                     onClick={handleBatchDelete}
@@ -1259,6 +1361,33 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                               <span className="text-[9px] font-mono text-[#8C8C8C] truncate max-w-[100px]">
                                 {p.id}
                               </span>
+                              {(() => {
+                                const rawRod = getPersonRodName(p);
+                                const clanBadge = rawRod && rawRod !== 'Рід' ? formatClanName(rawRod) : null;
+                                if (!clanBadge) return null;
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPersonClanFilter(rawRod);
+                                    }}
+                                    className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-[#B88E3E]/20 hover:bg-[#B88E3E]/35 text-[#E5B55E] border border-[#B88E3E]/40 transition-colors cursor-pointer"
+                                    title={`Фільтрувати за: ${clanBadge}`}
+                                  >
+                                    {clanBadge}
+                                  </button>
+                                );
+                              })()}
+                              {p.researchBranch && p.researchBranch !== "Без прив'язки" && (
+                                <span
+                                  className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-0.5"
+                                  title={`Гілка дослідження: ${p.researchBranch}`}
+                                >
+                                  <GitFork className="w-2.5 h-2.5" />
+                                  <span>{p.researchBranch}</span>
+                                </span>
+                              )}
                               {p.tags && p.tags.length > 0 && (
                                 <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                                   {p.tags.map((t, tIdx) => {
@@ -1316,16 +1445,16 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
                       {/* Research Status */}
                       <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                        {tabFilter !== 'trash' ? (
+                        {tabFilter !== 'trash' && isAdmin ? (
                           <button
                             type="button"
                             onClick={() => handleToggleResearchStatus(p)}
                             className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer border shadow-xs ${
                               isHypo
-                                ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40 hover:scale-105'
-                                : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:scale-105'
+                                ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40 hover:scale-105 active:scale-95'
+                                : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:scale-105 active:scale-95'
                             }`}
-                            title={`Статус дослідження: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}. Натисніть, щоб змінити`}
+                            title={`Статус дослідження: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}. Натисніть, щоб змінити (доступно адміністратору)`}
                           >
                             {isHypo ? (
                               <>
@@ -1341,11 +1470,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                           </button>
                         ) : (
                           <span
-                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1.5 border ${
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1.5 border cursor-default select-none ${
                               isHypo
                                 ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                                 : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                             }`}
+                            title={`Статус дослідження: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}${!isAdmin ? ' (зміна доступна лише адміністратору)' : ''}`}
                           >
                             {isHypo ? (
                               <>
@@ -1497,7 +1627,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     />
                   )}
 
-                  {tabFilter !== 'trash' ? (
+                  {tabFilter !== 'trash' && isAdmin ? (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -1506,10 +1636,10 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       }}
                       className={`px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 transition-all cursor-pointer border ${
                         isHypo
-                          ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40 hover:scale-105'
-                          : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:scale-105'
+                          ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40 hover:scale-105 active:scale-95'
+                          : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:scale-105 active:scale-95'
                       }`}
-                      title={`Статус дослідження: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}. Натисніть для зміни`}
+                      title={`Статус дослідження: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}. Натисніть для зміни (доступно адміністратору)`}
                     >
                       {isHypo ? (
                         <>
@@ -1525,11 +1655,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     </button>
                   ) : (
                     <span
-                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 border ${
+                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 border cursor-default select-none ${
                         isHypo
                           ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                           : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                       }`}
+                      title={`Статус дослідження: ${isHypo ? 'Гіпотеза' : 'Підтверджена особа'}${!isAdmin ? ' (зміна доступна лише адміністратору)' : ''}`}
                     >
                       {isHypo ? (
                         <>
@@ -1572,9 +1703,38 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     {p.maidenName && (
                       <p className="text-[10px] text-[#B88E3E] italic truncate">({p.maidenName})</p>
                     )}
-                    <span className="text-[9px] font-mono text-[#8C8C8C] block truncate mt-0.5">
-                      {p.id}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                      <span className="text-[9px] font-mono text-[#8C8C8C] block truncate">
+                        {p.id}
+                      </span>
+                      {(() => {
+                        const rawRod = getPersonRodName(p);
+                        const clanBadge = rawRod && rawRod !== 'Рід' ? formatClanName(rawRod) : null;
+                        if (!clanBadge) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPersonClanFilter(rawRod);
+                            }}
+                            className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-[#B88E3E]/20 hover:bg-[#B88E3E]/35 text-[#E5B55E] border border-[#B88E3E]/40 transition-colors cursor-pointer"
+                            title={`Фільтрувати за: ${clanBadge}`}
+                          >
+                            {clanBadge}
+                          </button>
+                        );
+                      })()}
+                      {p.researchBranch && p.researchBranch !== "Без прив'язки" && (
+                        <span
+                          className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-0.5"
+                          title={`Гілка дослідження: ${p.researchBranch}`}
+                        >
+                          <GitFork className="w-2.5 h-2.5" />
+                          <span>{p.researchBranch}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 

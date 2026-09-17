@@ -186,9 +186,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
               cleaned[k] = v as Family;
             }
           }
-          if (Object.keys(cleaned).length > 0) {
-            return cleaned;
-          }
+          return cleaned;
         }
       }
       return INITIAL_FAMILIES;
@@ -479,21 +477,56 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   saveFamily: (family) =>
     set((state) => {
       const nextFamilies = { ...state.families, [family.id]: family };
+      const famChildIds = (family.childrenIds || (family.children || []).map((c) => c.personId)).filter(Boolean);
+
       // Synchronize person parent/spouse references
       const nextPersons = state.persons.map((p) => {
         let updated = { ...p };
+        let personChanged = false;
+
         if (family.husbandId === p.id || family.wifeId === p.id) {
           const spouseFams = Array.isArray(p.spouseFamilyIds) ? [...p.spouseFamilyIds] : [];
           if (!spouseFams.includes(family.id)) {
             spouseFams.push(family.id);
             updated.spouseFamilyIds = spouseFams;
+            personChanged = true;
+          }
+          if (famChildIds.length > 0) {
+            const currentCIds = Array.isArray(p.childrenIds) ? p.childrenIds : [];
+            const merged = Array.from(new Set([...currentCIds, ...famChildIds]));
+            if (merged.length !== currentCIds.length) {
+              updated.childrenIds = merged;
+              personChanged = true;
+            }
+          }
+          const otherSpouseId = family.husbandId === p.id ? family.wifeId : family.husbandId;
+          if (otherSpouseId) {
+            const currentSpouses = Array.isArray(p.spouseIds) ? p.spouseIds : [];
+            if (!currentSpouses.includes(otherSpouseId)) {
+              updated.spouseIds = [...currentSpouses, otherSpouseId];
+              personChanged = true;
+            }
           }
         }
-        const isChild = (family.children || []).some((c) => c.personId === p.id) || (family.childrenIds || []).includes(p.id);
+
+        const isChild = famChildIds.includes(p.id) || (family.children || []).some((c) => c.personId === p.id);
         if (isChild) {
-          updated.parentFamilyId = family.id;
-          if (family.husbandId && !updated.fatherId) updated.fatherId = family.husbandId;
-          if (family.wifeId && !updated.motherId) updated.motherId = family.wifeId;
+          if (updated.parentFamilyId !== family.id) {
+            updated.parentFamilyId = family.id;
+            personChanged = true;
+          }
+          if (family.husbandId && updated.fatherId !== family.husbandId) {
+            updated.fatherId = family.husbandId;
+            personChanged = true;
+          }
+          if (family.wifeId && updated.motherId !== family.wifeId) {
+            updated.motherId = family.wifeId;
+            personChanged = true;
+          }
+        }
+
+        if (personChanged) {
+          savePersonDoc(normalizePerson(updated));
         }
         return updated;
       });

@@ -158,7 +158,12 @@ export function formatClanName(surname: string): string {
 
   // If already prefixed with "Рід"
   if (clean.startsWith('Рід ') || clean.startsWith('рід ')) {
-    return clean;
+    return `Рід ${clean.slice(4).trim()}`;
+  }
+
+  // If already in plural genitive form (e.g. "Іуліанових", "Шевченків", "Петренків")
+  if (lower.endsWith('их') || lower.endsWith('іх') || lower.endsWith('ів')) {
+    return `Рід ${clean}`;
   }
 
   // -ський / -цький / -зький -> -ських / -цьких / -зьких

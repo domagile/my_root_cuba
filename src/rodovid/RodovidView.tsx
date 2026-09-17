@@ -427,6 +427,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
                 setCurrentView('tree');
               }}
               onOpenKinshipWith={handleOpenKinshipWith}
+              onUpdatePerson={updatePerson}
             />
           </div>
         )}

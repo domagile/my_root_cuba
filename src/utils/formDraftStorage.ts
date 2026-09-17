@@ -22,6 +22,8 @@ export interface PersonDraftData {
   spouseId?: string;
   notes?: string;
   bio?: string;
+  clan?: string;
+  researchBranch?: string;
   formMode?: 'express' | 'full' | 'view';
 }
 
@@ -58,6 +60,8 @@ export function savePersonDraft(personId: string | null | undefined, data: Parti
       spouseId: data.spouseId || '',
       notes: data.notes || '',
       bio: data.bio || '',
+      clan: data.clan || '',
+      researchBranch: data.researchBranch || '',
       formMode: data.formMode || 'express'
     };
     sessionStorage.setItem(key, JSON.stringify(payload));
