@@ -16,6 +16,7 @@ import {
   Heart
 } from 'lucide-react';
 import { Gender, Person, MetricRecord } from '../../types';
+import { MetricSearchStatus, METRIC_SEARCH_STATUS_OPTIONS } from '../../utils/researchStatusUtils';
 import { SmartHistoricalDateInput } from './SmartHistoricalDateInput';
 import { PlaceHierarchyAutocompleteInput } from './PlaceHierarchyAutocompleteInput';
 import { SourceMetricLinker } from './SourceMetricLinker';
@@ -33,6 +34,8 @@ interface ExpressPersonFormProps {
   onGenderChange: (newGender: Gender) => void;
   isLiving: boolean;
   setIsLiving: (val: boolean) => void;
+  metricSearchStatus?: MetricSearchStatus;
+  setMetricSearchStatus?: (status: MetricSearchStatus) => void;
   birthDate: string;
   setBirthDate: (val: string) => void;
   deathDate: string;
@@ -75,6 +78,8 @@ export const ExpressPersonForm: React.FC<ExpressPersonFormProps> = ({
   onGenderChange,
   isLiving,
   setIsLiving,
+  metricSearchStatus = 'not_searched',
+  setMetricSearchStatus,
   birthDate,
   setBirthDate,
   deathDate,
@@ -254,6 +259,24 @@ export const ExpressPersonForm: React.FC<ExpressPersonFormProps> = ({
               </button>
             </div>
           </div>
+        </div>
+
+        {/* Metric / Archival search status picker */}
+        <div>
+          <label className={`block text-xs font-semibold ${theme.textPrimary} mb-1.5`}>
+            Статус пошуку метрик / документів
+          </label>
+          <select
+            value={metricSearchStatus}
+            onChange={(e) => setMetricSearchStatus?.(e.target.value as MetricSearchStatus)}
+            className={`w-full px-3 py-2 text-xs rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} focus:outline-hidden focus:ring-1 focus:ring-amber-500 cursor-pointer`}
+          >
+            {METRIC_SEARCH_STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.icon} {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Maiden Name (if female) */}

@@ -47,6 +47,12 @@ import {
   Crown
 } from 'lucide-react';
 import { formatClanName, normalizeUkrainianSurnameGender } from '../../utils/ukrainianPhonetics';
+import {
+  MetricSearchStatus,
+  METRIC_SEARCH_STATUS_OPTIONS,
+  getMetricSearchStatus,
+  getMetricStatusConfig
+} from '../../utils/researchStatusUtils';
 import { PersonProfileView } from './PersonProfileView';
 import { DoveIcon } from '../common/GenealogyIcons';
 import { useGenealogy } from '../../context/GenealogyContext';
@@ -273,6 +279,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [isCustomBranch, setIsCustomBranch] = useState(false);
   const [customBranchInput, setCustomBranchInput] = useState('');
   const [researchStatus, setResearchStatus] = useState(effectivePerson?.researchStatus || 'hypothetical');
+  const [metricSearchStatus, setMetricSearchStatus] = useState<MetricSearchStatus>(() => getMetricSearchStatus(effectivePerson));
   
   const initialClan = effectivePerson?.clan || '';
   const [clan, setClan] = useState(initialClan);
@@ -1097,6 +1104,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     setIsCustomBranch(Boolean(effectivePerson.researchBranch && !['Без прив\'язки', 'Головна гілка', 'Батьківська лінія', 'Материнська лінія', 'Шляхетська лінія', 'Селянська лінія'].includes(effectivePerson.researchBranch)));
     setClan(effectivePerson.clan || '');
     setResearchStatus(effectivePerson.researchStatus || 'hypothetical');
+    setMetricSearchStatus(getMetricSearchStatus(effectivePerson));
     setFirstName(effectivePerson.name?.given || effectivePerson.firstName || '');
     setLastName(effectivePerson.name?.surname || effectivePerson.lastName || '');
     setMaidenName(effectivePerson.name?.maidenName || effectivePerson.maidenName || '');
@@ -2037,6 +2045,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         clan: finalClan,
         researchBranch: finalBranch && finalBranch !== "Без прив'язки" ? finalBranch : undefined,
         researchStatus: researchStatus || undefined,
+        metricSearchStatus: metricSearchStatus || 'not_searched',
         nameVariants: nameVariantsList.length > 0 ? nameVariantsList : undefined,
         surnameVariants: surnameVariantsList.length > 0 ? surnameVariantsList : undefined,
         birthDate: birthDate.trim() || undefined,
@@ -2091,6 +2100,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         clan: finalClan,
         researchBranch: finalBranch && finalBranch !== "Без прив'язки" ? finalBranch : undefined,
         researchStatus: researchStatus || undefined,
+        metricSearchStatus: metricSearchStatus || 'not_searched',
         nameVariants: nameVariantsList.length > 0 ? nameVariantsList : undefined,
         surnameVariants: surnameVariantsList.length > 0 ? surnameVariantsList : undefined,
         birthDate: birthDate.trim() || undefined,
@@ -2568,85 +2578,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           </div>
           
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {effectivePerson && onChangeRoot && (
-              <button
-                type="button"
-                onClick={() => {
-                  onChangeRoot(effectivePerson.id);
-                  onClose();
-                }}
-                className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-emerald-600 hover:bg-emerald-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
-                title="Показати в родинному дереві"
-              >
-                <GitFork className="w-3.5 h-3.5 text-emerald-500" />
-                <span className="hidden md:inline">В дерево</span>
-              </button>
-            )}
-
-            {effectivePerson && onOpenKinshipWith && (
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenKinshipWith(effectivePerson.id);
-                  onClose();
-                }}
-                className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-sky-600 hover:bg-sky-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
-                title="Розрахувати ступінь спорідненості"
-              >
-                <Compass className="w-3.5 h-3.5 text-sky-500" />
-                <span className="hidden md:inline">Спорідненість</span>
-              </button>
-            )}
-
-            {effectivePerson && (
-              <button
-                type="button"
-                onClick={() => setIsReportModalOpen(true)}
-                className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-amber-600 hover:bg-amber-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
-                title="Сформувати текстовий звіт про особу або експортувати в PDF"
-              >
-                <FileText className="w-3.5 h-3.5 text-amber-500" />
-                <span className="hidden md:inline">Звіт (PDF/TXT)</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setIsContactModalOpen(true)}
-              className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] hover:bg-[#B88E3E]/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
-              title="Зв'язатися з автором щодо цієї особи"
-            >
-              <Mail className="w-3.5 h-3.5 text-[#B88E3E]" />
-              <span className="hidden md:inline">Написати автору</span>
-            </button>
-
-            {effectivePerson && !isReadOnly && (
-              <button
-                type="button"
-                onClick={() => {
-                  setMergeModalPair({ idA: effectivePerson.id, idB: '' });
-                  setIsMergeModalOpen(true);
-                }}
-                className="px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-amber-600 hover:bg-amber-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
-                title="Обʼєднати з іншою особою по ID"
-              >
-                <GitMerge className="w-3.5 h-3.5 text-amber-500" />
-                <span className="hidden md:inline">Обʼєднати по ID</span>
-              </button>
-            )}
-
-            {effectivePerson && onDeletePerson && !isReadOnly && (
-              <button
-                type="button"
-                onClick={() => setIsConfirmDeleteOpen(true)}
-                className="p-1.5 rounded-xl text-neutral-400 hover:text-rose-500 hover:bg-rose-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer"
-                title="Видалити особу з бази даних"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-              </button>
-            )}
-
-            {/* Mode Switcher */}
+            {/* When in view mode, PersonProfileView already contains all profile actions. Only show Edit & Close */}
             {effectivePerson && formMode === 'view' && !isReadOnly && (
               <button
                 type="button"
@@ -2659,16 +2591,34 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               </button>
             )}
 
+            {/* When in edit / create mode, show standard tools and switchers */}
             {effectivePerson && formMode !== 'view' && (
-              <button
-                type="button"
-                onClick={() => setFormMode('view')}
-                className="px-2.5 py-1.5 rounded-xl border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/10 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                title="Переглянути заповнені дані особи"
-              >
-                <Eye className="w-3.5 h-3.5 text-sky-500" />
-                <span className="hidden sm:inline">Перегляд</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setFormMode('view')}
+                  className="px-2.5 py-1.5 rounded-xl border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/10 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Переглянути заповнені дані особи"
+                >
+                  <Eye className="w-3.5 h-3.5 text-sky-500" />
+                  <span className="hidden sm:inline">Перегляд</span>
+                </button>
+
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMergeModalPair({ idA: effectivePerson.id, idB: '' });
+                      setIsMergeModalOpen(true);
+                    }}
+                    className="hidden sm:flex px-2.5 py-1.5 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-amber-600 hover:bg-amber-500/10 border border-black/10 dark:border-white/10 transition-colors cursor-pointer items-center gap-1.5 text-xs font-semibold"
+                    title="Обʼєднати з іншою особою по ID"
+                  >
+                    <GitMerge className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="hidden md:inline">Обʼєднати по ID</span>
+                  </button>
+                )}
+              </>
             )}
 
             {!isReadOnly && formMode !== 'view' && (
@@ -2676,7 +2626,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setFormMode('express')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 sm:gap-1.5 cursor-pointer ${
                     formMode === 'express'
                       ? 'bg-amber-500 text-neutral-950 shadow-xs'
                       : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'
@@ -2689,7 +2639,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setFormMode('full')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 sm:gap-1.5 cursor-pointer ${
                     formMode === 'full'
                       ? 'bg-amber-500 text-neutral-950 shadow-xs'
                       : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'
@@ -2697,7 +2647,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   title="Повна анкета: усі розділи, деталі, біографія, події та духовні зв'язки"
                 >
                   <FileText className="w-3.5 h-3.5" />
-                  <span>Повна картка</span>
+                  <span>Повна</span>
                 </button>
               </div>
             )}
@@ -2791,6 +2741,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               onGenderChange={(g) => applyGenderChange(g, true)}
               isLiving={isLiving}
               setIsLiving={setIsLiving}
+              metricSearchStatus={metricSearchStatus}
+              setMetricSearchStatus={setMetricSearchStatus}
               birthDate={birthDate}
               setBirthDate={(val) => {
                 setBirthDate(val);
@@ -2946,7 +2898,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     <div className={`text-xs ${theme.textMuted} mt-0.5`}>
                       {lifeYearsPreview}
                     </div>
-                    <div className="mt-1.5 flex items-center gap-1.5">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       <span className="inline-block px-2 py-0.5 text-[10px] font-semibold rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                         {researchStatus === 'confirmed'
                           ? 'підтверджена'
@@ -2958,6 +2910,15 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                           ? 'перевірка'
                           : 'гіпотетична'}
                       </span>
+                      {(() => {
+                        const cfg = getMetricStatusConfig(metricSearchStatus);
+                        return (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-md border ${cfg.badgeClass}`}>
+                            <span>{cfg.icon}</span>
+                            <span>{cfg.label}</span>
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -3253,6 +3214,16 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                         <span>{clan.trim() ? formatClanName(clan) : (computedRodDefault ? formatClanName(computedRodDefault) : 'Рід')}</span>
                       </span>
                       {currentTagsList.length > 0 && <span>• #{currentTagsList[0]}</span>}
+                      <span>•</span>
+                      {(() => {
+                        const cfg = getMetricStatusConfig(metricSearchStatus);
+                        return (
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-semibold border ${cfg.badgeClass}`}>
+                            <span>{cfg.icon}</span>
+                            <span>{cfg.label}</span>
+                          </span>
+                        );
+                      })()}
                     </span>
                   )}
                   <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.basic ? 'rotate-180 text-[#B88E3E]' : ''}`} />
@@ -3261,8 +3232,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
               {openSections.basic && (
                 <div className="p-4 pt-2 border-t border-black/5 dark:border-white/5 space-y-2.5">
-                  {/* Compact row: 1. Дослідження, 2. Статус дослідження, 3. Хештеги, 4. Статус життя */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                  {/* Compact row: 1. Дослідження, 2. Статус дослідження, 3. Хештеги, 4. Статус життя, 5. Пошук метрик */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 text-xs">
                     {/* 1. Дослідження */}
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
@@ -3370,7 +3341,27 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       </select>
                     </div>
 
-                    {/* 3. Хештег (розміщено замість статі для компактності) */}
+                    {/* 3. Пошук метрик / документів */}
+                    <div className="space-y-1">
+                      <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
+                        <Search className="w-3 h-3 text-[#B88E3E]" />
+                        <span>Метрики / Пошук</span>
+                      </label>
+                      <select
+                        value={metricSearchStatus}
+                        onChange={(e) => setMetricSearchStatus(e.target.value as MetricSearchStatus)}
+                        className={`w-full py-1.5 px-2 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] h-[34px] cursor-pointer`}
+                        title="Чи шукали метрики / документи по особі"
+                      >
+                        {METRIC_SEARCH_STATUS_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.icon} {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 4. Хештег (розміщено замість статі для компактності) */}
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
                         <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
@@ -3412,7 +3403,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       </div>
                     </div>
 
-                    {/* 4. Статус життя (Серце / Голуб вічного спокою з Богом) */}
+                    {/* 5. Статус життя (Серце / Голуб вічного спокою з Богом) */}
                     <div className="space-y-1">
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[10px] flex items-center gap-1">
                         <Heart className="w-3 h-3 text-[#B88E3E]" />

@@ -9,6 +9,7 @@ import {
   X,
   Info,
   Download,
+  Upload,
   Printer,
   ChevronDown,
   Palette,
@@ -18,10 +19,13 @@ import {
   Filter,
   ExternalLink,
   Calendar,
-  Eye
+  Eye,
+  Check
 } from 'lucide-react';
 import { TreeIcon } from '../../../components/common/GenealogyIcons';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
+import { downloadGedcom, parseGedcom } from '../../utils/gedcom';
+import { useGenealogyStore } from '../../../stores/useGenealogyStore';
 import {
   calculateFanChart,
   extractFanChartClans,
@@ -79,6 +83,7 @@ interface FanChartViewProps {
   onSelectPerson: (id: string) => void;
   onChangeRoot: (id: string) => void;
   onSwitchToTree?: () => void;
+  onImportDatabase?: (newDb: GenealogyDatabase) => void;
 }
 
 export const FanChartView: React.FC<FanChartViewProps> = ({
@@ -86,7 +91,8 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   activePersonId,
   onSelectPerson,
   onChangeRoot,
-  onSwitchToTree
+  onSwitchToTree,
+  onImportDatabase
 }) => {
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
@@ -588,6 +594,70 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  // GEDCOM Import File Input Ref & Logic
+  const gedcomFileInputRef = useRef<HTMLInputElement>(null);
+  const [importNotification, setImportNotification] = useState<{ message: string; isError?: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!importNotification) return;
+    const timer = setTimeout(() => {
+      setImportNotification(null);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [importNotification]);
+
+  const handleGedcomFileImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        let parsedDb: GenealogyDatabase;
+
+        if (file.name.toLowerCase().endsWith('.json')) {
+          parsedDb = JSON.parse(text);
+        } else {
+          parsedDb = parseGedcom(text);
+        }
+
+        const personCount = Object.keys(parsedDb.persons || {}).length;
+        if (personCount === 0) {
+          setImportNotification({
+            message: 'Файл не містить записів осіб (INDI) або має непідтримуваний формат.',
+            isError: true
+          });
+          return;
+        }
+
+        if (onImportDatabase) {
+          onImportDatabase(parsedDb);
+        } else {
+          useGenealogyStore.getState().loadGenealogyDatabase(parsedDb);
+        }
+
+        if (parsedDb.rootPersonId) {
+          onChangeRoot(parsedDb.rootPersonId);
+        }
+
+        setImportNotification({
+          message: `Успішно імпортовано: ${personCount} осіб, ${Object.keys(parsedDb.families || {}).length} родин.`
+        });
+      } catch (err: any) {
+        setImportNotification({
+          message: `Помилка імпорту GEDCOM: ${err.message || 'Некоректний файл'}`,
+          isError: true
+        });
+      } finally {
+        if (e.target) {
+          e.target.value = '';
+        }
+      }
+    };
+    reader.readAsText(file);
+  }, [onImportDatabase, onChangeRoot]);
+
   // Check if sector matches the active clan highlight filter
   const activeFocusClanId = hoveredClanId || selectedClanId;
 
@@ -977,7 +1047,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                 <div
                   className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider ${theme.textMuted} border-b ${theme.borderSubtle} mb-1`}
                 >
-                  Збереження та друк
+                  Збереження та експорт
                 </div>
                 <button
                   onClick={() => {
@@ -1009,10 +1079,58 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     </div>
                   </div>
                 </button>
+                <button
+                  onClick={() => {
+                    const dateStr = new Date().toISOString().slice(0, 10);
+                    downloadGedcom(database, `rodovid_fan_${dateStr}.ged`);
+                    setIsExportOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left ${theme.textPrimary} hover:bg-emerald-500/10 transition-colors cursor-pointer`}
+                >
+                  <Download className="w-4 h-4 text-teal-400 shrink-0" />
+                  <div>
+                    <div className="font-medium">Скачати родовід (GEDCOM .ged)</div>
+                    <div className={`text-[10px] ${theme.textMuted}`}>
+                      Експорт всієї генеалогічної бази
+                    </div>
+                  </div>
+                </button>
+
+                <div className={`my-1 border-t ${theme.borderSubtle}`} />
+
+                <div
+                  className={`px-3 py-1 text-[10px] uppercase font-bold tracking-wider ${theme.textMuted} border-b ${theme.borderSubtle} mb-1`}
+                >
+                  Імпорт даних
+                </div>
+                <button
+                  onClick={() => {
+                    gedcomFileInputRef.current?.click();
+                    setIsExportOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left ${theme.textPrimary} hover:bg-amber-500/10 transition-colors cursor-pointer`}
+                >
+                  <Upload className="w-4 h-4 text-amber-400 shrink-0" />
+                  <div>
+                    <div className="font-medium">Імпортувати GEDCOM (.ged)</div>
+                    <div className={`text-[10px] ${theme.textMuted}`}>
+                      Завантажити дерево або архів роду
+                    </div>
+                  </div>
+                </button>
               </div>
             )}
           </div>
         </div>
+
+        {/* Hidden File Input for FanChartView */}
+        <input
+          type="file"
+          ref={gedcomFileInputRef}
+          accept=".ged,.gedcom,.json"
+          onChange={handleGedcomFileImport}
+          className="hidden"
+        />
 
         {/* Row 2 (< 2xl) or Right Group (>= 2xl): Center Person + Zoom Controls */}
         <div className="flex items-center justify-between 2xl:justify-end gap-1.5 sm:gap-2 w-full 2xl:w-auto min-w-0 pt-1 2xl:pt-0 border-t border-neutral-500/15 2xl:border-t-0">
@@ -2076,6 +2194,33 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
             onChangeRoot={onChangeRoot}
             onSwitchToTree={onSwitchToTree}
           />
+        )}
+
+        {/* Floating GEDCOM Import Toast Notification */}
+        {importNotification && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto">
+            <div
+              className={`flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-2xl border text-xs font-semibold backdrop-blur-md ${
+                importNotification.isError
+                  ? 'bg-rose-950/90 text-rose-200 border-rose-600/60 shadow-rose-950/50'
+                  : 'bg-emerald-950/90 text-emerald-200 border-emerald-600/60 shadow-emerald-950/50'
+              }`}
+            >
+              {importNotification.isError ? (
+                <X className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : (
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
+              <span>{importNotification.message}</span>
+              <button
+                type="button"
+                onClick={() => setImportNotification(null)}
+                className="ml-2 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

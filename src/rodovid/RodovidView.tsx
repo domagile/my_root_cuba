@@ -399,6 +399,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
               setRelationManagerPersonId(id);
             }}
             onSwitchToFan={() => setCurrentView('fan')}
+            onImportDatabase={handleImportDatabase}
             isReadOnly={isReadOnly}
           />
         )}
@@ -410,6 +411,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
             onSelectPerson={(id) => setInspectPersonId(id)}
             onChangeRoot={(id) => setSelectedPersonId(id)}
             onSwitchToTree={() => setCurrentView('tree')}
+            onImportDatabase={handleImportDatabase}
           />
         )}
 

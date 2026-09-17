@@ -34,6 +34,7 @@ import { Person, Gender } from '../../types';
 import { isPersonMale, isPersonFemale } from '../../rodovid/utils/genderUtils';
 import { comparePersonsByAge, getPersonRodName } from '../../rodovid/utils/treeLayout';
 import { formatClanName } from '../../utils/ukrainianPhonetics';
+import { getMetricSearchStatus, getMetricStatusConfig } from '../../utils/researchStatusUtils';
 
 export interface PersonProfileViewProps {
   person: Person;
@@ -403,212 +404,222 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-stone-50 dark:bg-[#14171c] text-neutral-900 dark:text-neutral-100 overflow-hidden">
-      {/* Top Profile Header Bar */}
-      <div className="px-4 sm:px-6 py-3.5 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex items-center justify-between gap-3 shrink-0 shadow-xs">
-        <div className="flex items-center gap-3 min-w-0">
-          <div
-            className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 border-2 shadow-xs ${
-              isMale
-                ? 'bg-sky-100 dark:bg-sky-950 border-sky-400 text-sky-600 dark:text-sky-300'
-                : isFemale
-                ? 'bg-rose-100 dark:bg-rose-950 border-rose-400 text-rose-600 dark:text-rose-300'
-                : 'bg-slate-100 dark:bg-slate-800 border-slate-400 text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            {person.avatarUrl || person.photoUrl ? (
-              <img
-                src={person.avatarUrl || person.photoUrl}
-                alt={firstName}
-                className="w-full h-full rounded-full object-cover"
-              />
-            ) : (
-              <User className="w-6 h-6 stroke-[1.8]" />
+        {/* Top Profile Header Bar */}
+        <div className="p-3.5 sm:p-5 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 shadow-xs">
+          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+            <div
+              className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 border-2 shadow-xs ${
+                isMale
+                  ? 'bg-sky-100 dark:bg-sky-950 border-sky-400 text-sky-600 dark:text-sky-300'
+                  : isFemale
+                  ? 'bg-rose-100 dark:bg-rose-950 border-rose-400 text-rose-600 dark:text-rose-300'
+                  : 'bg-slate-100 dark:bg-slate-800 border-slate-400 text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              {person.avatarUrl || person.photoUrl ? (
+                <img
+                  src={person.avatarUrl || person.photoUrl}
+                  alt={firstName}
+                  className="w-full h-full rounded-full object-cover"
+                />
+              ) : (
+                <User className="w-6 h-6 stroke-[1.8]" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h2 className="font-extrabold text-base sm:text-lg text-neutral-900 dark:text-white leading-tight break-words">
+                  {lastName} {hasMaiden && <span className="text-amber-600 dark:text-amber-400 font-semibold">({maidenName}) </span>}
+                  {firstName} {patronymic}
+                </h2>
+                {fsCode && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300/60 dark:border-slate-700 shrink-0">
+                    {fsCode}
+                  </span>
+                )}
+                {(() => {
+                  const rod = person.clan || getPersonRodName(person);
+                  return rod ? (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1 shrink-0" title="Рід (Родова лінія)">
+                      <Crown className="w-3 h-3" />
+                      <span>{formatClanName(rod)}</span>
+                    </span>
+                  ) : null;
+                })()}
+                {person.researchBranch && person.researchBranch !== "Без прив'язки" && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0" title="Гілка дослідження">
+                    <GitFork className="w-3 h-3" />
+                    <span>{person.researchBranch}</span>
+                  </span>
+                )}
+                {(() => {
+                  const metricStatus = getMetricSearchStatus(person);
+                  const cfg = getMetricStatusConfig(metricStatus);
+                  return (
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 shrink-0 ${cfg.badgeClass}`} title={cfg.description}>
+                      <span>{cfg.icon}</span>
+                      <span>{cfg.label}</span>
+                    </span>
+                  );
+                })()}
+              </div>
+              <div className="text-xs text-neutral-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-1">
+                <span>{lifespanStr}</span>
+                {person.birthPlace && (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                      <span>{person.birthPlace}</span>
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Action Controls in Header */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-stone-100 dark:border-[#272c33]">
+            {/* Main Edit Person Icon / Button */}
+            {!isReadOnly && (
+              <button
+                type="button"
+                onClick={onStartEdit}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-transform active:scale-95 cursor-pointer"
+                title="Перейти до редагування картки особи"
+              >
+                <Pencil className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Редагувати</span>
+              </button>
+            )}
+
+            {onChangeRoot && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChangeRoot(person.id);
+                  onClose();
+                }}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-300 dark:border-slate-700 hover:bg-stone-100 dark:hover:bg-slate-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Фокусувати дерево на цій особі"
+              >
+                <GitFork className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="hidden sm:inline">В дерево</span>
+              </button>
+            )}
+
+            {onOpenKinshipWith && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenKinshipWith(person.id);
+                  onClose();
+                }}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-300 dark:border-slate-700 hover:bg-stone-100 dark:hover:bg-slate-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Розрахувати ступінь спорідненості"
+              >
+                <Compass className="w-3.5 h-3.5 text-sky-500" />
+                <span className="hidden sm:inline">Спорідненість</span>
+              </button>
+            )}
+
+            {onOpenReport && (
+              <button
+                type="button"
+                onClick={onOpenReport}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-300 dark:border-slate-700 hover:bg-stone-100 dark:hover:bg-slate-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Звіт про особу"
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-500" />
+                <span className="hidden sm:inline">Звіт</span>
+              </button>
+            )}
+
+            {onOpenContact && (
+              <button
+                type="button"
+                onClick={onOpenContact}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-300 dark:border-slate-700 hover:bg-stone-100 dark:hover:bg-slate-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Написати автору"
+              >
+                <Mail className="w-3.5 h-3.5 text-[#B88E3E]" />
+                <span className="hidden sm:inline">Контакт</span>
+              </button>
+            )}
+
+            {onDeletePerson && !isReadOnly && (
+              <button
+                type="button"
+                onClick={onDeletePerson}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-rose-500/30 hover:border-rose-500/60 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Видалити особу з бази даних"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Видалити</span>
+              </button>
             )}
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-extrabold text-base sm:text-lg text-neutral-900 dark:text-white truncate leading-tight">
-                {lastName} {hasMaiden && <span className="text-amber-600 dark:text-amber-400 font-semibold">({maidenName}) </span>}
-                {firstName} {patronymic}
-              </h2>
-              {fsCode && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300/60 dark:border-slate-700">
-                  {fsCode}
-                </span>
-              )}
-              {(() => {
-                const rod = person.clan || getPersonRodName(person);
-                return rod ? (
-                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1" title="Рід (Родова лінія)">
-                    <Crown className="w-3 h-3" />
-                    <span>{formatClanName(rod)}</span>
-                  </span>
-                ) : null;
-              })()}
-              {person.researchBranch && person.researchBranch !== "Без прив'язки" && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1" title="Гілка дослідження">
-                  <GitFork className="w-3 h-3" />
-                  <span>{person.researchBranch}</span>
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-neutral-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-0.5">
-              <span>{lifespanStr}</span>
-              {person.birthPlace && (
-                <>
-                  <span>•</span>
-                  <span className="flex items-center gap-1">
-                    <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                    {person.birthPlace}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
         </div>
 
-        {/* Action Controls in Header */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Main Edit Person Icon / Button */}
-          {!isReadOnly && (
-            <button
-              type="button"
-              onClick={onStartEdit}
-              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-transform active:scale-95 cursor-pointer"
-              title="Перейти до редагування картки особи"
-            >
-              <Pencil className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span className="hidden sm:inline">Редагувати</span>
-            </button>
-          )}
-
-          {onChangeRoot && (
-            <button
-              type="button"
-              onClick={() => {
-                onChangeRoot(person.id);
-                onClose();
-              }}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-300 dark:border-slate-700 hover:bg-stone-100 dark:hover:bg-slate-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Фокусувати дерево на цій особі"
-            >
-              <GitFork className="w-3.5 h-3.5 text-emerald-500" />
-              <span className="hidden md:inline">В дерево</span>
-            </button>
-          )}
-
-          {onOpenKinshipWith && (
-            <button
-              type="button"
-              onClick={() => {
-                onOpenKinshipWith(person.id);
-                onClose();
-              }}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-300 dark:border-slate-700 hover:bg-stone-100 dark:hover:bg-slate-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Розрахувати ступінь спорідненості"
-            >
-              <Compass className="w-3.5 h-3.5 text-sky-500" />
-              <span className="hidden md:inline">Спорідненість</span>
-            </button>
-          )}
-
-          {onOpenReport && (
-            <button
-              type="button"
-              onClick={onOpenReport}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-300 dark:border-slate-700 hover:bg-stone-100 dark:hover:bg-slate-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Звіт про особу"
-            >
-              <FileText className="w-3.5 h-3.5 text-amber-500" />
-              <span className="hidden md:inline">Звіт</span>
-            </button>
-          )}
-
-          {onOpenContact && (
-            <button
-              type="button"
-              onClick={onOpenContact}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-stone-300 dark:border-slate-700 hover:bg-stone-100 dark:hover:bg-slate-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Написати автору"
-            >
-              <Mail className="w-3.5 h-3.5 text-[#B88E3E]" />
-              <span className="hidden md:inline">Контакт</span>
-            </button>
-          )}
-
-          {onDeletePerson && !isReadOnly && (
-            <button
-              type="button"
-              onClick={onDeletePerson}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-rose-500/30 hover:border-rose-500/60 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Видалити особу з бази даних"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Видалити</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Tabs Navigation */}
-      <div className="px-4 sm:px-6 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex items-center gap-2 overflow-x-auto shrink-0">
-        <button
-          type="button"
-          onClick={() => setActiveTab('family')}
-          className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
-            activeTab === 'family'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-600 dark:text-slate-400 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <Users className="w-3.5 h-3.5" />
-          <span>Родина та зв'язки</span>
-          <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-slate-800 font-mono">
-            {spouses.length + allChildren.length + (father ? 1 : 0) + (mother ? 1 : 0) + siblings.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('bio')}
-          className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
-            activeTab === 'bio'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-600 dark:text-slate-400 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <BookOpen className="w-3.5 h-3.5" />
-          <span>Біографія та дані</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('events')}
-          className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
-            activeTab === 'events'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-600 dark:text-slate-400 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <Calendar className="w-3.5 h-3.5" />
-          <span>Події життя</span>
-        </button>
-
-        {(person.photos && person.photos.length > 0) && (
+        {/* Tabs Navigation */}
+        <div className="px-3 sm:px-6 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex items-center gap-1.5 overflow-x-auto scrollbar-none flex-nowrap shrink-0">
           <button
             type="button"
-            onClick={() => setActiveTab('photos')}
-            className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'photos'
+            onClick={() => setActiveTab('family')}
+            className={`px-3 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'family'
                 ? 'border-amber-500 text-amber-600 dark:text-amber-400'
                 : 'border-transparent text-neutral-600 dark:text-slate-400 hover:text-neutral-900 dark:hover:text-white'
             }`}
           >
-            <ImageIcon className="w-3.5 h-3.5" />
-            <span>Фото ({person.photos.length})</span>
+            <Users className="w-3.5 h-3.5 shrink-0" />
+            <span>Родина та зв'язки</span>
+            <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-slate-800 font-mono">
+              {spouses.length + allChildren.length + (father ? 1 : 0) + (mother ? 1 : 0) + siblings.length}
+            </span>
           </button>
-        )}
-      </div>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('bio')}
+            className={`px-3 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'bio'
+                ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+                : 'border-transparent text-neutral-600 dark:text-slate-400 hover:text-neutral-900 dark:hover:text-white'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5 shrink-0" />
+            <span>Біографія та дані</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('events')}
+            className={`px-3 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'events'
+                ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+                : 'border-transparent text-neutral-600 dark:text-slate-400 hover:text-neutral-900 dark:hover:text-white'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5 shrink-0" />
+            <span>Події життя</span>
+          </button>
+
+          {(person.photos && person.photos.length > 0) && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('photos')}
+              className={`px-3 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'photos'
+                  ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+                  : 'border-transparent text-neutral-600 dark:text-slate-400 hover:text-neutral-900 dark:hover:text-white'
+              }`}
+            >
+              <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+              <span>Фото ({person.photos.length})</span>
+            </button>
+          )}
+        </div>
 
       {/* Main Content Area */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-6">

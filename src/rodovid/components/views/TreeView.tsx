@@ -53,6 +53,8 @@ import {
   Person
 } from '../../types/genealogy';
 import { TreeIcon, FanIcon } from '../../../components/common/GenealogyIcons';
+import { downloadGedcom, parseGedcom } from '../../utils/gedcom';
+import { useGenealogyStore } from '../../../stores/useGenealogyStore';
 import {
   calculateClassicFamilyTreeLayout,
   calculateAncestorsLayout,
@@ -104,6 +106,7 @@ interface TreeViewProps {
   onChangeRoot: (id: string) => void;
   onOpenRelationManager?: (personId: string) => void;
   onSwitchToFan?: () => void;
+  onImportDatabase?: (newDb: GenealogyDatabase) => void;
   isReadOnly?: boolean;
 }
 
@@ -117,6 +120,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
   onChangeRoot,
   onOpenRelationManager,
   onSwitchToFan,
+  onImportDatabase,
   isReadOnly = false
 }) => {
   const currentUser = useAuthStore((s) => s.currentUser);
@@ -1133,6 +1137,74 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setScale(fitScale);
   }, [layout.nodes, containerDimensions, treeBounds]);
 
+  // GEDCOM Import File Input Ref & Logic
+  const gedcomFileInputRef = useRef<HTMLInputElement>(null);
+  const [importNotification, setImportNotification] = useState<{ message: string; isError?: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!importNotification) return;
+    const timer = setTimeout(() => {
+      setImportNotification(null);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [importNotification]);
+
+  const handleGedcomFileImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        let parsedDb: GenealogyDatabase;
+
+        if (file.name.toLowerCase().endsWith('.json')) {
+          parsedDb = JSON.parse(text);
+        } else {
+          parsedDb = parseGedcom(text);
+        }
+
+        const personCount = Object.keys(parsedDb.persons || {}).length;
+        if (personCount === 0) {
+          setImportNotification({
+            message: 'Файл не містить записів осіб (INDI) або має непідтримуваний формат.',
+            isError: true
+          });
+          return;
+        }
+
+        if (onImportDatabase) {
+          onImportDatabase(parsedDb);
+        } else {
+          useGenealogyStore.getState().loadGenealogyDatabase(parsedDb);
+        }
+
+        if (parsedDb.rootPersonId) {
+          onChangeRoot(parsedDb.rootPersonId);
+        }
+
+        setImportNotification({
+          message: `Успішно імпортовано: ${personCount} осіб, ${Object.keys(parsedDb.families || {}).length} родин.`
+        });
+
+        setTimeout(() => {
+          centerTree();
+        }, 200);
+      } catch (err: any) {
+        setImportNotification({
+          message: `Помилка імпорту GEDCOM: ${err.message || 'Некоректний файл'}`,
+          isError: true
+        });
+      } finally {
+        if (e.target) {
+          e.target.value = '';
+        }
+      }
+    };
+    reader.readAsText(file);
+  }, [onImportDatabase, onChangeRoot, centerTree]);
+
   // Focus camera directly and smoothly onto a specific person card (defaulting to root person)
   const focusOnPerson = useCallback((personId?: string, preferredScale?: number) => {
     const targetId = personId || activePersonId || rootPersonId;
@@ -1667,7 +1739,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
               <button
                 type="button"
                 onClick={() => setIsViewOptionsMenuOpen((prev) => !prev)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-xs ${
+                className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-xs ${
                   isViewOptionsMenuOpen
                     ? 'bg-amber-600 text-white border-amber-500 shadow-amber-600/20'
                     : hasCustomFilters
@@ -1677,7 +1749,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 title="Параметри відображення та фільтри дерева родоводу"
               >
                 <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>Параметри дерева</span>
+                <span className="hidden sm:inline">Параметри дерева</span>
+                <span className="sm:hidden">Параметри</span>
                 {activeFiltersCount > 0 && (
                   <span className="px-1.5 py-0.5 rounded-full bg-amber-500/30 text-amber-300 text-[10px] font-bold leading-none">
                     {activeFiltersCount}
@@ -1691,23 +1764,39 @@ export const TreeView: React.FC<TreeViewProps> = ({
               </button>
 
               {isViewOptionsMenuOpen && (
-                <div className="absolute left-0 top-full mt-2 w-80 sm:w-88 bg-[#1b1f24] border border-[#383e46] rounded-xl shadow-2xl p-3 z-50 animate-in fade-in zoom-in-95 duration-150 max-h-[85vh] overflow-y-auto custom-scrollbar">
-                  {/* Dropdown Header */}
-                  <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-[#2d3238]">
-                    <div className="flex items-center gap-2">
-                      <SlidersHorizontal className="w-4 h-4 text-amber-400" />
-                      <span className="text-xs font-bold text-white">Параметри та вигляд</span>
+                <>
+                  {/* Mobile Backdrop */}
+                  <div
+                    className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 sm:hidden"
+                    onClick={() => setIsViewOptionsMenuOpen(false)}
+                  />
+                  <div className="fixed inset-x-3 top-24 bottom-auto max-h-[80vh] sm:inset-auto sm:absolute sm:left-0 sm:top-full sm:mt-2 sm:w-88 bg-[#1b1f24] border border-[#383e46] rounded-2xl sm:rounded-xl shadow-2xl p-3.5 sm:p-3 z-50 animate-in fade-in zoom-in-95 duration-150 overflow-y-auto custom-scrollbar">
+                    {/* Dropdown Header */}
+                    <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-[#2d3238]">
+                      <div className="flex items-center gap-2">
+                        <SlidersHorizontal className="w-4 h-4 text-amber-400" />
+                        <span className="text-xs font-bold text-white">Параметри та вигляд</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {hasCustomFilters && (
+                          <button
+                            type="button"
+                            onClick={resetViewOptions}
+                            className="text-[11px] font-medium text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                          >
+                            Скинути всі
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsViewOptionsMenuOpen(false)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                          title="Закрити параметри"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                    {hasCustomFilters && (
-                      <button
-                        type="button"
-                        onClick={resetViewOptions}
-                        className="text-[11px] font-medium text-amber-400 hover:text-amber-300 underline cursor-pointer"
-                      >
-                        Скинути всі
-                      </button>
-                    )}
-                  </div>
 
                   {/* 1. Tree Orientation */}
                   <div className="mb-3">
@@ -2079,8 +2168,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
-            </div>
+              </>
+            )}
+          </div>
 
 
 
@@ -2194,69 +2284,41 @@ export const TreeView: React.FC<TreeViewProps> = ({
               )}
             </div>
 
-            {/* Export Menu (Always visible on all screen sizes) */}
-            <div className="relative shrink-0" ref={exportMenuRef}>
-              <button
-                type="button"
-                onClick={() => setIsExportOpen((prev) => !prev)}
-                className={`flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs ${
-                  isExportOpen
-                    ? 'bg-slate-700 text-white border-slate-600 shadow-xs'
-                    : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238]'
-                }`}
-                title="Експорт та друк дерева (SVG / PDF)"
-              >
-                <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="hidden sm:inline">Експорт</span>
-              </button>
+            {/* Hidden file input for GEDCOM / JSON file import */}
+            <input
+              type="file"
+              ref={gedcomFileInputRef}
+              accept=".ged,.gedcom,.json"
+              onChange={handleGedcomFileImport}
+              className="hidden"
+            />
 
-              {isExportOpen && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-[#1b1f24] border border-[#323840] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-400 border-b border-[#2d3238] mb-1">
-                    Збереження та експорт
-                  </div>
-                  <button
-                    onClick={() => {
-                      handleExportSvg();
-                      setIsExportOpen(false);
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
-                  >
-                    <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <div>
-                      <div className="font-medium text-slate-200">Скачати векторне дерево (SVG)</div>
-                      <div className="text-[10px] text-slate-400">Векторний файл без втрати якості для друку</div>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      handlePrint();
-                      setIsExportOpen(false);
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
-                  >
-                    <Printer className="w-4 h-4 text-sky-400 shrink-0" />
-                    <div>
-                      <div className="font-medium text-slate-200">Роздрукувати / Зберегти в PDF</div>
-                      <div className="text-[10px] text-slate-400">Друк на папері або експорт у PDF</div>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setReportPersonId(activePersonId);
-                      setIsExportOpen(false);
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-[#252a30] hover:text-white transition-colors cursor-pointer"
-                  >
-                    <FileText className="w-4 h-4 text-amber-400 shrink-0" />
-                    <div>
-                      <div className="font-medium text-slate-200">Звіт про особу (PDF/TXT)</div>
-                      <div className="text-[10px] text-slate-400">Повний родовідний звіт про вибрану людину</div>
-                    </div>
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* GEDCOM Import Button */}
+            <button
+              type="button"
+              onClick={() => gedcomFileInputRef.current?.click()}
+              className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238] hover:border-amber-500/50 shrink-0"
+              title="Імпортувати файл GEDCOM (.ged) або JSON"
+            >
+              <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="hidden sm:inline">Імпорт GEDCOM</span>
+              <span className="sm:hidden">Імпорт</span>
+            </button>
+
+            {/* Export Button (Direct GEDCOM .ged download) */}
+            <button
+              type="button"
+              onClick={() => {
+                const dateStr = new Date().toISOString().slice(0, 10);
+                downloadGedcom(database, `rodovid_tree_${dateStr}.ged`);
+              }}
+              className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238] hover:border-emerald-500/50 shrink-0"
+              title="Експорт дерева у GEDCOM (.ged)"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="hidden sm:inline">Експорт (.ged)</span>
+              <span className="sm:hidden">.ged</span>
+            </button>
           </div>
         </div>
 
@@ -3995,11 +4057,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
         {/* Mini-Map / Overview Navigator (Dynamically scales to tree content) */}
         {showMinimap && layout.nodes.length > 0 && (
-          <div className="absolute bottom-16 left-4 z-20 p-2.5 rounded-xl bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] shadow-2xl">
+          <div className="absolute bottom-16 sm:bottom-20 left-3 sm:left-4 z-20 p-2 sm:p-2.5 rounded-xl bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] shadow-2xl">
             <div className="flex items-center justify-between gap-2 mb-1.5 pb-1 border-b border-[#282d33]">
               <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider text-slate-300">
                 <Compass className="w-3 h-3 text-emerald-400" />
-                <span>Огляд дерева ({layout.nodes.length})</span>
+                <span>Огляд ({layout.nodes.length})</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -4009,22 +4071,23 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   title="Фокус на корінній особі роду"
                 >
                   <User className="w-3 h-3" />
-                  <span>Корінь</span>
+                  <span className="hidden xs:inline">Корінь</span>
                 </button>
                 <button
                   onClick={() => setShowMinimap(false)}
                   className="text-slate-400 hover:text-white transition-colors cursor-pointer p-0.5 rounded"
                   title="Сховати міні-мапу"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
 
             {/* Dynamic Miniature Canvas tightly mapped to actual treeBounds */}
             {(() => {
-              const MINI_W = 180;
-              const MINI_H = 120;
+              const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+              const MINI_W = isMobile ? 140 : 180;
+              const MINI_H = isMobile ? 90 : 120;
               const safeTreeW = Math.max(treeBounds.width, 100);
               const safeTreeH = Math.max(treeBounds.height, 100);
 
@@ -4040,7 +4103,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
               return (
                 <div
-                  className="w-[180px] h-[120px] bg-[#121518] rounded-lg border border-[#262a30] relative overflow-hidden cursor-crosshair select-none"
+                  style={{ width: `${MINI_W}px`, height: `${MINI_H}px` }}
+                  className="bg-[#121518] rounded-lg border border-[#262a30] relative overflow-hidden cursor-crosshair select-none"
                   onClick={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     const clickX = e.clientX - rect.left;
@@ -4067,8 +4131,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     const miniY = ((n.y - treeBounds.minY) / safeTreeH) * MINI_H;
                     const cardNodeW = n.width || CLASSIC_CARD_WIDTH;
                     const cardNodeH = n.height || CLASSIC_CARD_HEIGHT;
-                    const dotW = Math.max(5, Math.min(12, (cardNodeW / safeTreeW) * MINI_W));
-                    const dotH = Math.max(4, Math.min(9, (cardNodeH / safeTreeH) * MINI_H));
+                    const dotW = Math.max(4, Math.min(10, (cardNodeW / safeTreeW) * MINI_W));
+                    const dotH = Math.max(3, Math.min(8, (cardNodeH / safeTreeH) * MINI_H));
 
                     return (
                       <div
@@ -4110,7 +4174,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
         )}
 
         {/* Floating Canvas Navigation HUD (Quick 1-tap zoom, fit and root focus on mobile & tablet) */}
-        <div className="absolute bottom-6 right-4 sm:bottom-7 sm:right-6 z-20 flex items-center gap-1 bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] p-1 rounded-xl shadow-2xl">
+        <div className="absolute bottom-5 right-3 sm:bottom-7 sm:right-6 z-20 flex items-center gap-0.5 sm:gap-1 bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] p-1 rounded-xl shadow-2xl">
           <button
             type="button"
             onClick={handleFocusRootPerson}
@@ -4158,10 +4222,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
         {!showMinimap && (
           <button
             onClick={() => setShowMinimap(true)}
-            className="absolute bottom-6 left-4 z-20 px-2.5 py-1.5 rounded-lg bg-[#1a1e22]/90 hover:bg-[#252a30] text-slate-300 text-xs font-medium border border-[#323840] shadow-lg flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="absolute bottom-5 left-3 sm:bottom-6 sm:left-4 z-20 px-2.5 py-1.5 rounded-lg bg-[#1a1e22]/90 hover:bg-[#252a30] text-slate-300 text-xs font-medium border border-[#323840] shadow-lg flex items-center gap-1.5 cursor-pointer transition-colors"
           >
             <Compass className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Міні-мапа</span>
+            <span className="hidden xs:inline">Міні-мапа</span>
           </button>
         )}
 
@@ -4306,6 +4370,33 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 : 'bg-[#0f1215] border-[#292f38]'
             }`}
           />
+        )}
+
+        {/* Floating GEDCOM Import Toast Notification */}
+        {importNotification && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto">
+            <div
+              className={`flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-2xl border text-xs font-semibold backdrop-blur-md ${
+                importNotification.isError
+                  ? 'bg-rose-950/90 text-rose-200 border-rose-600/60 shadow-rose-950/50'
+                  : 'bg-emerald-950/90 text-emerald-200 border-emerald-600/60 shadow-emerald-950/50'
+              }`}
+            >
+              {importNotification.isError ? (
+                <X className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : (
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
+              <span>{importNotification.message}</span>
+              <button
+                type="button"
+                onClick={() => setImportNotification(null)}
+                className="ml-2 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         )}
       </div>
 

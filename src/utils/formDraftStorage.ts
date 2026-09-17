@@ -24,6 +24,8 @@ export interface PersonDraftData {
   bio?: string;
   clan?: string;
   researchBranch?: string;
+  researchStatus?: string;
+  metricSearchStatus?: string;
   formMode?: 'express' | 'full' | 'view';
 }
 

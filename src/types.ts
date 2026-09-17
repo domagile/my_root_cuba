@@ -101,10 +101,13 @@ export interface Person {
   deathYear?: number | string;
   deathPlace?: string;
   deathReason?: string;
+  burialDate?: string;
+  burialPlace?: string;
   marriageDate?: string;
   marriagePlace?: string;
   residencePlace?: string;
   researchStatus?: 'hypothetical' | 'confirmed' | 'in_progress' | 'archival_search' | 'needs_verification' | string;
+  metricSearchStatus?: 'not_searched' | 'in_progress' | 'found' | 'not_found' | 'partial' | string;
   isHypothesis?: boolean;
   researchBranch?: string;
   clan?: string; // Назва роду (наприклад "Рід Іуліанових", "Іуліанових", кастомне перевизначення)

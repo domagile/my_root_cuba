@@ -38,7 +38,14 @@ import { ConfirmDeleteModal } from '../../../components/common/ConfirmDeleteModa
 import { PersonReportModal } from '../../../components/common/PersonReportModal';
 import { getTreeHashtagsWithCounts, formatHashtag } from '../../../utils/tagUtils';
 import { isPersonMale, isPersonFemale, normalizeGender } from '../../utils/genderUtils';
-import { isPersonHypothesis, isPersonConfirmed } from '../../../utils/researchStatusUtils';
+import { 
+  isPersonHypothesis, 
+  isPersonConfirmed, 
+  MetricSearchStatus, 
+  METRIC_SEARCH_STATUS_OPTIONS, 
+  getMetricSearchStatus, 
+  getMetricStatusConfig 
+} from '../../../utils/researchStatusUtils';
 import { normalizeUkrainianSurnameGender, areSurnamesEquivalent, formatClanName } from '../../../utils/ukrainianPhonetics';
 import { getPersonRodName } from '../../utils/treeLayout';
 
@@ -94,6 +101,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [genderFilter, setGenderFilter] = useState<'ALL' | Gender>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'LIVING' | 'DECEASED'>('ALL');
   const [researchStatusFilter, setResearchStatusFilter] = useState<'ALL' | 'CONFIRMED' | 'HYPOTHESIS'>('ALL');
+  const [metricSearchStatusFilter, setMetricSearchStatusFilter] = useState<'ALL' | MetricSearchStatus>('ALL');
   const [tagFilter, setTagFilter] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'surname' | 'birth' | 'events' | 'citations' | 'tag' | 'tagCount'>('surname');
   const [sortAsc, setSortAsc] = useState(true);
@@ -102,6 +110,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [reportPersonId, setReportPersonId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; actionText?: string; onAction?: () => void } | null>(null);
   const [statusMenuPersonId, setStatusMenuPersonId] = useState<string | null>(null);
+  const [metricMenuPersonId, setMetricMenuPersonId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -110,11 +119,46 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   }, [toast]);
 
   useEffect(() => {
-    if (!statusMenuPersonId) return;
-    const handleClickOutside = () => setStatusMenuPersonId(null);
+    if (!statusMenuPersonId && !metricMenuPersonId) return;
+    const handleClickOutside = () => {
+      setStatusMenuPersonId(null);
+      setMetricMenuPersonId(null);
+    };
     window.addEventListener('click', handleClickOutside);
     return () => window.removeEventListener('click', handleClickOutside);
-  }, [statusMenuPersonId]);
+  }, [statusMenuPersonId, metricMenuPersonId]);
+
+  const handleSetMetricSearchStatus = (p: Person, nextStatus: MetricSearchStatus, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (!canEdit) return;
+
+    const prevStatus = getMetricSearchStatus(p);
+    const updated: Person = {
+      ...p,
+      metricSearchStatus: nextStatus
+    };
+
+    updatePersonInStore(updated);
+    onUpdatePerson?.(updated);
+    setMetricMenuPersonId(null);
+
+    const cfg = getMetricStatusConfig(nextStatus);
+    setToast({
+      message: `Статус метрик для «${getFullName(p)}»: ${cfg.label}`,
+      actionText: 'Скасувати',
+      onAction: () => {
+        const reverted: Person = {
+          ...p,
+          metricSearchStatus: prevStatus
+        };
+        updatePersonInStore(reverted);
+        onUpdatePerson?.(reverted);
+      }
+    });
+  };
 
   const handleSetResearchStatus = (p: Person, nextStatus: 'confirmed' | 'hypothetical', e?: React.MouseEvent) => {
     if (e) {
@@ -176,10 +220,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     if (personClanFilter) count++;
     if (tagFilter !== 'ALL') count++;
     if (researchStatusFilter !== 'ALL') count++;
+    if (metricSearchStatusFilter !== 'ALL') count++;
     if (genderFilter !== 'ALL') count++;
     if (statusFilter !== 'ALL') count++;
     return count;
-  }, [searchTerm, personClanFilter, tagFilter, researchStatusFilter, genderFilter, statusFilter]);
+  }, [searchTerm, personClanFilter, tagFilter, researchStatusFilter, metricSearchStatusFilter, genderFilter, statusFilter]);
 
   // Extract all tree hashtags with counts
   const availableHashtags = useMemo(() => {
@@ -282,15 +327,20 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         (researchStatusFilter === 'CONFIRMED' && isPersonConfirmed(p)) ||
         (researchStatusFilter === 'HYPOTHESIS' && isPersonHypothesis(p));
 
+      // Metric search status filter (Не шукала / В процесі / Знайдено / Не знайдено / Частково)
+      const matchesMetricStatus =
+        metricSearchStatusFilter === 'ALL' ||
+        getMetricSearchStatus(p) === metricSearchStatusFilter;
+
       // Tag filter
       const cleanFilterTag = tagFilter !== 'ALL' ? tagFilter.toLowerCase().replace(/^#+/, '') : null;
       const matchesTag =
         !cleanFilterTag ||
         (p.tags || []).some((t) => t.toLowerCase().replace(/^#+/, '') === cleanFilterTag);
 
-      return matchesSearch && matchesGender && matchesStatus && matchesResearchStatus && matchesTag;
+      return matchesSearch && matchesGender && matchesStatus && matchesResearchStatus && matchesMetricStatus && matchesTag;
     });
-  }, [database.persons, searchTerm, personClanFilter, genderFilter, statusFilter, researchStatusFilter, tagFilter]);
+  }, [database.persons, searchTerm, personClanFilter, genderFilter, statusFilter, researchStatusFilter, metricSearchStatusFilter, tagFilter]);
 
   const sortedPersons = useMemo(() => {
     return [...personsList].sort((a, b) => {
@@ -409,12 +459,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           )}
         </div>
 
-        {/* Filters and Search: 2 responsive rows ensuring full visibility on mobile, tablet & laptop */}
-        <div className={`flex flex-col gap-2.5 pt-2 border-t ${theme.borderSubtle} ${isFiltersCollapsed ? 'hidden md:flex' : 'flex'}`}>
-          {/* Row 1: Search (flexible) + Clan + Tag Filter + Research Status */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+        {/* Filters and Search: Compact rows fitting text width */}
+        <div className={`flex flex-col gap-2 pt-2 border-t ${theme.borderSubtle} ${isFiltersCollapsed ? 'hidden md:flex' : 'flex'}`}>
+          {/* Row 1: Search + Clan + Tag + Research Status + Metric Search Status */}
+          <div className="flex flex-wrap items-center gap-2">
             {/* Search Input */}
-            <div className="lg:col-span-4 relative">
+            <div className="flex-1 min-w-[200px] relative">
               <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
               <input
                 type="text"
@@ -426,11 +476,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </div>
 
             {/* Clan / Rod Filter Dropdown */}
-            <div className="lg:col-span-3">
+            <div className="w-auto shrink-0">
               <select
                 value={personClanFilter || 'ALL'}
                 onChange={(e) => setPersonClanFilter(e.target.value === 'ALL' ? null : e.target.value)}
-                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
+                className={`px-2.5 py-2 ${theme.inputBg} border ${
                   personClanFilter ? 'border-amber-500 ring-1 ring-amber-500/20 text-amber-500' : theme.inputBorder
                 } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-amber-500 cursor-pointer`}
               >
@@ -444,11 +494,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </div>
 
             {/* Tag / Hashtag Filter Dropdown */}
-            <div className="lg:col-span-3">
+            <div className="w-auto shrink-0">
               <select
                 value={tagFilter}
                 onChange={(e) => setTagFilter(e.target.value)}
-                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
+                className={`px-2.5 py-2 ${theme.inputBg} border ${
                   tagFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
                 } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
               >
@@ -462,11 +512,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </div>
 
             {/* Research Status Filter */}
-            <div className="lg:col-span-2">
+            <div className="w-auto shrink-0">
               <select
                 value={researchStatusFilter}
                 onChange={(e) => setResearchStatusFilter(e.target.value as any)}
-                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${
+                className={`px-2.5 py-2 ${theme.inputBg} border ${
                   researchStatusFilter !== 'ALL' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
                 } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
               >
@@ -475,16 +525,35 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 <option value="HYPOTHESIS">Гіпотеза</option>
               </select>
             </div>
+
+            {/* Metric Search Status Filter */}
+            <div className="w-auto shrink-0">
+              <select
+                value={metricSearchStatusFilter}
+                onChange={(e) => setMetricSearchStatusFilter(e.target.value as any)}
+                className={`px-2.5 py-2 ${theme.inputBg} border ${
+                  metricSearchStatusFilter !== 'ALL' ? 'border-amber-500 ring-1 ring-amber-500/30' : theme.inputBorder
+                } rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-amber-500 cursor-pointer`}
+                title="Фільтр за статусом пошуку метрик та архівних документів"
+              >
+                <option value="ALL">📜 Метрики: Всі</option>
+                {METRIC_SEARCH_STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.icon} {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Row 2: Gender + Life State + Sort By + Direction + View Mode */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-12 gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Gender Filter */}
-            <div className="lg:col-span-3">
+            <div className="w-auto shrink-0">
               <select
                 value={genderFilter}
                 onChange={(e) => setGenderFilter(e.target.value as any)}
-                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+                className={`px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
               >
                 <option value="ALL">Будь-яка стать</option>
                 <option value="M">Чоловіча стать</option>
@@ -494,11 +563,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </div>
 
             {/* Status Filter */}
-            <div className="lg:col-span-3">
+            <div className="w-auto shrink-0">
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as any)}
-                className={`w-full px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+                className={`px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
               >
                 <option value="ALL">Будь-який стан</option>
                 <option value="LIVING">Нині живі</option>
@@ -507,11 +576,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </div>
 
             {/* Sort Select */}
-            <div className="col-span-2 sm:col-span-1 lg:col-span-4 flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 w-auto shrink-0">
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className={`flex-1 min-w-0 px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+                className={`px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
               >
                 <option value="surname">За прізвищем</option>
                 <option value="tag">За хештегом (А-Я)</option>
@@ -532,7 +601,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             </div>
 
             {/* View Mode Toggle (Table / Cards) */}
-            <div className="col-span-2 sm:col-span-3 lg:col-span-2 flex items-center justify-end">
+            <div className="ml-auto flex items-center shrink-0">
               <div className={`flex border ${theme.borderSubtle} rounded-lg overflow-hidden ${theme.surfaceBg} shrink-0`}>
                 <button
                   type="button"
@@ -615,6 +684,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               setGenderFilter('ALL');
               setStatusFilter('ALL');
               setResearchStatusFilter('ALL');
+              setMetricSearchStatusFilter('ALL');
               setTagFilter('ALL');
             }}
             className={`px-3.5 py-1.5 ${theme.surfaceBg} hover:brightness-110 ${theme.textPrimary} border ${theme.borderSubtle} rounded-lg text-xs font-medium transition-colors cursor-pointer`}
@@ -631,7 +701,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   <th className="py-3 px-4">ПІБ / Особа</th>
                   <th className="py-3 px-4">Стать</th>
                   <th className="py-3 px-4">Роки життя</th>
-                  <th className="py-3 px-4">Статус дослідження</th>
+                  <th className="py-3 px-4">Дослідження</th>
+                  <th className="py-3 px-4">Метрики / Пошук</th>
                   <th className="py-3 px-4">Місце народження</th>
                   <th className="py-3 px-4">Професія / Статус</th>
                   <th className="py-3 px-4 text-center">Подій</th>
@@ -899,6 +970,73 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         )}
                       </td>
 
+                      {/* Metric Search Status Column */}
+                      <td className="py-3 px-4 relative" onClick={(e) => e.stopPropagation()}>
+                        {isMasked ? (
+                          <span className={theme.textMuted}>—</span>
+                        ) : (() => {
+                          const mStatus = getMetricSearchStatus(p);
+                          const mCfg = getMetricStatusConfig(mStatus);
+                          return (
+                            <div className="relative inline-flex items-center">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  if (!canEdit) return;
+                                  e.stopPropagation();
+                                  setMetricMenuPersonId(metricMenuPersonId === p.id ? null : p.id);
+                                }}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all cursor-pointer shadow-xs ${
+                                  isDark ? mCfg.badgeClassDark : mCfg.badgeClass
+                                } ${canEdit ? 'hover:scale-[1.03] active:scale-95' : 'cursor-default'}`}
+                                title={`Пошук метрик: ${mCfg.label} — ${mCfg.description}${canEdit ? ' (натисніть, щоб змінити)' : ''}`}
+                              >
+                                <span className={`w-2 h-2 rounded-full ${mCfg.dotClass} shrink-0`} />
+                                <span className="truncate max-w-[130px]">{mCfg.shortLabel}</span>
+                                {canEdit && (
+                                  <ChevronDown className="w-2.5 h-2.5 opacity-60 ml-0.5 shrink-0" />
+                                )}
+                              </button>
+
+                              {/* Metric Dropdown Menu */}
+                              {canEdit && metricMenuPersonId === p.id && (
+                                <div
+                                  className={`absolute left-0 top-full mt-1.5 z-40 min-w-[240px] rounded-xl shadow-2xl border p-1.5 backdrop-blur-md ${
+                                    isDark ? 'bg-neutral-900/98 border-neutral-700 text-neutral-200' : 'bg-white/98 border-neutral-200 text-neutral-800 shadow-neutral-300/60'
+                                  }`}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div className="px-2 py-1 text-[10px] font-semibold text-neutral-400 uppercase tracking-wider border-b border-neutral-500/20 mb-1">
+                                    Статус пошуку метрик
+                                  </div>
+                                  {METRIC_SEARCH_STATUS_OPTIONS.map((opt) => {
+                                    const isCurrent = mStatus === opt.id;
+                                    return (
+                                      <button
+                                        key={opt.id}
+                                        type="button"
+                                        onClick={(e) => handleSetMetricSearchStatus(p, opt.id, e)}
+                                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer ${
+                                          isCurrent
+                                            ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400 font-bold'
+                                            : 'hover:bg-neutral-500/10 text-neutral-700 dark:text-neutral-300'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span className={`w-2 h-2 rounded-full ${opt.dotClass}`} />
+                                          <div>{opt.label}</div>
+                                        </div>
+                                        {isCurrent && <Check className="w-3.5 h-3.5 text-amber-500 ml-2" />}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+
                       <td className={`py-3 px-4 ${theme.textMuted} max-w-[160px] truncate`}>
                         {isMasked ? '🔒 Скрито' : (p.birthPlace || '—')}
                       </td>
@@ -1087,7 +1225,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       )}
 
                       {!isMasked && (
-                        <div className="mt-2 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="mt-2 flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
                           {isAdmin ? (
                             <button
                               type="button"
@@ -1135,6 +1273,66 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                               )}
                             </span>
                           )}
+
+                          {/* Metric Search Status Badge in Card */}
+                          {(() => {
+                            const mStatus = getMetricSearchStatus(p);
+                            const mCfg = getMetricStatusConfig(mStatus);
+                            return (
+                              <div className="relative inline-flex items-center">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    if (!canEdit) return;
+                                    e.stopPropagation();
+                                    setMetricMenuPersonId(metricMenuPersonId === p.id ? null : p.id);
+                                  }}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer shadow-xs ${
+                                    isDark ? mCfg.badgeClassDark : mCfg.badgeClass
+                                  } ${canEdit ? 'hover:scale-105 active:scale-95' : 'cursor-default'}`}
+                                  title={`Метрики: ${mCfg.label} — ${mCfg.description}${canEdit ? ' (натисніть для зміни)' : ''}`}
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${mCfg.dotClass} shrink-0`} />
+                                  <span className="truncate max-w-[110px]">{mCfg.shortLabel}</span>
+                                  {canEdit && <ChevronDown className="w-2.5 h-2.5 opacity-60 ml-0.5 shrink-0" />}
+                                </button>
+
+                                {canEdit && metricMenuPersonId === p.id && (
+                                  <div
+                                    className={`absolute left-0 top-full mt-1.5 z-40 min-w-[220px] rounded-xl shadow-2xl border p-1.5 backdrop-blur-md ${
+                                      isDark ? 'bg-neutral-900/98 border-neutral-700 text-neutral-200' : 'bg-white/98 border-neutral-200 text-neutral-800 shadow-neutral-300/60'
+                                    }`}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <div className="px-2 py-1 text-[10px] font-semibold text-neutral-400 uppercase tracking-wider border-b border-neutral-500/20 mb-1">
+                                      Статус пошуку метрик
+                                    </div>
+                                    {METRIC_SEARCH_STATUS_OPTIONS.map((opt) => {
+                                      const isCurrent = mStatus === opt.id;
+                                      return (
+                                        <button
+                                          key={opt.id}
+                                          type="button"
+                                          onClick={(e) => handleSetMetricSearchStatus(p, opt.id, e)}
+                                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer ${
+                                            isCurrent
+                                              ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400 font-bold'
+                                              : 'hover:bg-neutral-500/10 text-neutral-700 dark:text-neutral-300'
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <span className={`w-2 h-2 rounded-full ${opt.dotClass}`} />
+                                            <div>{opt.label}</div>
+                                          </div>
+                                          {isCurrent && <Check className="w-3.5 h-3.5 text-amber-500 ml-2" />}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
