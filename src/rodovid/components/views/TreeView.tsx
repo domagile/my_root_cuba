@@ -45,16 +45,24 @@ import {
   Target,
   Minimize2,
   GitCommit,
-  SlidersHorizontal
+  GitMerge,
+  SlidersHorizontal,
+  History
 } from 'lucide-react';
 import {
   GenealogyDatabase,
   TreeLayoutType,
   Person
 } from '../../types/genealogy';
+import { DuplicatePair } from '../../../types';
 import { TreeIcon, FanIcon } from '../../../components/common/GenealogyIcons';
 import { downloadGedcom, parseGedcom } from '../../utils/gedcom';
 import { useGenealogyStore } from '../../../stores/useGenealogyStore';
+import { GedcomMergeModal } from '../modals/GedcomMergeModal';
+import { SmartMergeModal } from '../modals/SmartMergeModal';
+import { detectDuplicatePersons } from '../../../utils/duplicateDetector';
+import { ImportHistoryModal } from '../modals/ImportHistoryModal';
+import { MergeResult } from '../../utils/mergeDatabase';
 import {
   calculateClassicFamilyTreeLayout,
   calculateAncestorsLayout,
@@ -141,7 +149,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const dropdownPersons = useMemo(() => {
     const rawList = Object.values(database.persons || {}) as Person[];
-    const list = isWhitelisted ? rawList : rawList.map((p) => getPrivacySafePerson(p, false));
+    const seen = new Set<string>();
+    const uniqueRaw: Person[] = [];
+    for (const p of rawList) {
+      if (p && p.id && !seen.has(p.id)) {
+        seen.add(p.id);
+        uniqueRaw.push(p);
+      }
+    }
+    const list = isWhitelisted ? uniqueRaw : uniqueRaw.map((p) => getPrivacySafePerson(p, false));
     const sorted = sortPersonsBySurnameAndBirthDesc(list);
     const rootP = sorted.find((p) => p.id === rootPersonId);
     if (rootP) {
@@ -170,6 +186,28 @@ export const TreeView: React.FC<TreeViewProps> = ({
     }
     return 'vertical';
   });
+
+  const setPersons = useGenealogyStore((s) => s.setPersons);
+  const setFamilies = useGenealogyStore((s) => s.setFamilies);
+  const mergePersons = useGenealogyStore((s) => s.mergePersons);
+  const [activeMergePair, setActiveMergePair] = useState<DuplicatePair | null>(null);
+
+  const duplicatePairs = useMemo(() => {
+    const pList = Object.values(database.persons || {}) as Person[];
+    if (pList.length < 2) return [];
+    return detectDuplicatePersons(pList);
+  }, [database.persons]);
+
+  const duplicatesByPersonId = useMemo(() => {
+    const map = new Map<string, DuplicatePair>();
+    for (const pair of duplicatePairs) {
+      if (pair.confidence >= 50) {
+        if (!map.has(pair.personA.id)) map.set(pair.personA.id, pair);
+        if (!map.has(pair.personB.id)) map.set(pair.personB.id, pair);
+      }
+    }
+    return map;
+  }, [duplicatePairs]);
 
   // Generation options list: 1 to 4 in dropdown, plus custom if selected
   const treeGenOptions = useMemo(() => {
@@ -1140,6 +1178,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
   // GEDCOM Import File Input Ref & Logic
   const gedcomFileInputRef = useRef<HTMLInputElement>(null);
   const [importNotification, setImportNotification] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [showImportHistoryModal, setShowImportHistoryModal] = useState<boolean>(false);
+  const [pendingMerge, setPendingMerge] = useState<{
+    incomingDb: GenealogyDatabase;
+    fileName?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!importNotification) return;
@@ -1174,23 +1217,33 @@ export const TreeView: React.FC<TreeViewProps> = ({
           return;
         }
 
-        if (onImportDatabase) {
-          onImportDatabase(parsedDb);
+        const existingCount = Object.keys(database.persons || {}).length;
+        if (existingCount > 0) {
+          // Trigger smart merge comparison modal
+          setPendingMerge({
+            incomingDb: parsedDb,
+            fileName: file.name
+          });
         } else {
-          useGenealogyStore.getState().loadGenealogyDatabase(parsedDb);
+          // Direct initial import into empty tree
+          if (onImportDatabase) {
+            onImportDatabase(parsedDb);
+          } else {
+            useGenealogyStore.getState().loadGenealogyDatabase(parsedDb);
+          }
+
+          if (parsedDb.rootPersonId) {
+            onChangeRoot(parsedDb.rootPersonId);
+          }
+
+          setImportNotification({
+            message: `Успішно імпортовано: ${personCount} осіб, ${Object.keys(parsedDb.families || {}).length} родин.`
+          });
+
+          setTimeout(() => {
+            centerTree();
+          }, 200);
         }
-
-        if (parsedDb.rootPersonId) {
-          onChangeRoot(parsedDb.rootPersonId);
-        }
-
-        setImportNotification({
-          message: `Успішно імпортовано: ${personCount} осіб, ${Object.keys(parsedDb.families || {}).length} родин.`
-        });
-
-        setTimeout(() => {
-          centerTree();
-        }, 200);
       } catch (err: any) {
         setImportNotification({
           message: `Помилка імпорту GEDCOM: ${err.message || 'Некоректний файл'}`,
@@ -1203,7 +1256,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
       }
     };
     reader.readAsText(file);
-  }, [onImportDatabase, onChangeRoot, centerTree]);
+  }, [database.persons, onImportDatabase, onChangeRoot, centerTree]);
 
   // Focus camera directly and smoothly onto a specific person card (defaulting to root person)
   const focusOnPerson = useCallback((personId?: string, preferredScale?: number) => {
@@ -2305,6 +2358,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
               <span className="sm:hidden">Імпорт</span>
             </button>
 
+            {/* Import History Modal Button */}
+            <button
+              type="button"
+              onClick={() => setShowImportHistoryModal(true)}
+              className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238] hover:border-sky-500/50 shrink-0"
+              title="Історія імпорту, звіт про доданих осіб та розв'язані конфлікти"
+            >
+              <History className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span className="hidden sm:inline">Історія</span>
+            </button>
+
             {/* Export Button (Direct GEDCOM .ged download) */}
             <button
               type="button"
@@ -2333,18 +2397,34 @@ export const TreeView: React.FC<TreeViewProps> = ({
               className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-lg px-2 sm:px-2.5 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[150px] sm:max-w-[210px] truncate cursor-pointer shadow-xs"
               title="Вибрати особу як корінь родоводу"
             >
-              {dropdownPersons.map((p) => {
+              {dropdownPersons.map((p, pIdx) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
                 const isMasked = !isWhitelisted && isLiving;
                 const isRoot = p.id === rootPersonId;
                 return (
-                  <option key={p.id} value={p.id}>
+                  <option key={`${p.id}_${pIdx}`} value={p.id}>
                     {isRoot ? '👑 ' : ''}{isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}{isRoot ? ' (Корінь)' : ''}
                   </option>
                 );
               })}
             </select>
           </div>
+
+          {/* Duplicates Notification Badge & Quick Access */}
+          {duplicatePairs.length > 0 && (
+            <button
+              type="button"
+              onClick={() => useUIStore.getState().setRodovidView('duplicates')}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0"
+              title={`Знайдено ${duplicatePairs.length} потенційних дублікатів у родоводу. Натисніть для перегляду та об'єднання.`}
+            >
+              <GitMerge className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Дублікати:</span>
+              <span className="bg-amber-500 text-stone-950 font-bold text-[11px] px-1.5 py-0.2 rounded-full">
+                {duplicatePairs.length}
+              </span>
+            </button>
+          )}
 
           {/* Zoom Controls + All Options button */}
           <div className="flex items-center gap-1 shrink-0">
@@ -2520,7 +2600,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             className="overflow-visible pointer-events-none absolute inset-0"
             style={{ width: layout.width, height: layout.height }}
           >
-            {visibleLinks.map((link) => {
+            {visibleLinks.map((link, lIdx) => {
               const pathData = link.path || `M ${link.sourceX} ${link.sourceY} L ${link.targetX} ${link.targetY}`;
               const isMarriage = link.type === 'marriage';
               const isDirectHovered = Boolean(
@@ -2599,7 +2679,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 : (isDimmed ? 0.14 : isLinkFocused ? 1.0 : 0.95);
 
               return (
-                <g key={link.id} opacity={opacity} className="transition-opacity duration-200">
+                <g key={`${link.id}_${lIdx}`} opacity={opacity} className="transition-opacity duration-200">
                   {isMarriage ? (
                     <g>
                       {/* Marriage glowing halo when highlighted */}
@@ -2754,6 +2834,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
               return lifespanStr;
             })();
 
+            const matchedDuplicate = duplicatesByPersonId.get(p.id);
+
             const isNodeInBloodline = bloodlineData.isActive && bloodlineData.bloodlinePersonIds.has(p.id);
             const isHoveredTarget = bloodlineData.isActive && hoveredPersonId === p.id;
             const isAncestorOfHovered = bloodlineData.isActive && bloodlineData.ancestorIds.has(p.id);
@@ -2768,7 +2850,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             if (isMicroLOD) {
               return (
                 <div
-                  key={node.id}
+                  key={`${node.id}_${node.x}_${node.y}`}
                   style={{
                     position: 'absolute',
                     left: `${node.x}px`,
@@ -2845,7 +2927,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
             if (isPillLOD) {
               return (
                 <div
-                  key={node.id}
+                  key={`${node.id}_${node.x}_${node.y}`}
                   style={{
                     position: 'absolute',
                     left: `${node.x}px`,
@@ -3005,7 +3087,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
             return (
               <div
-                key={node.id}
+                key={`${node.id}_${node.x}_${node.y}`}
                 style={{
                   position: 'absolute',
                   left: `${node.x}px`,
@@ -3510,6 +3592,21 @@ export const TreeView: React.FC<TreeViewProps> = ({
                             </button>
                           </div>
                         )}
+
+                        {/* Duplicate badge in compact mode */}
+                        {matchedDuplicate && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMergePair(matchedDuplicate);
+                            }}
+                            className="p-0.5 rounded bg-amber-500 hover:bg-amber-400 text-stone-950 shrink-0 cursor-pointer shadow-xs ml-0.5"
+                            title={`Виявлено дублікат (${matchedDuplicate.confidence}%). Клікніть для об'єднання.`}
+                          >
+                            <GitMerge className="w-2.5 h-2.5 stroke-[2.5]" />
+                          </button>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between gap-1 mt-0.5 min-w-0">
@@ -3640,6 +3737,28 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       }`}>
                         {fsCode}
                       </div>
+
+                      {/* Duplicate Alert Pill */}
+                      {matchedDuplicate && (
+                        <div className="flex justify-center mt-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMergePair(matchedDuplicate);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/25 hover:bg-amber-500/40 border border-amber-500/60 text-amber-300 hover:text-amber-200 font-bold text-[9.5px] cursor-pointer transition-transform hover:scale-105 shadow-xs"
+                            title={`Виявлено дублікат (${matchedDuplicate.confidence}%): ${
+                              matchedDuplicate.personB.id === p.id
+                                ? `${matchedDuplicate.personA.lastName || ''} ${matchedDuplicate.personA.firstName || ''}`
+                                : `${matchedDuplicate.personB.lastName || ''} ${matchedDuplicate.personB.firstName || ''}`
+                            }. Натисніть, щоб об'єднати.`}
+                          >
+                            <GitMerge className="w-2.5 h-2.5 text-amber-400 stroke-[2.5]" />
+                            <span>Об'єднати ({matchedDuplicate.confidence}%)</span>
+                          </button>
+                        </div>
+                      )}
 
                       {/* Multiple Hashtags Pill List */}
                       {p.tags && p.tags.length > 0 && (
@@ -3772,6 +3891,25 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           >
                             <Target className="w-3 h-3" />
                           </button>
+
+                          {/* Quick Duplicate Merge Button */}
+                          {matchedDuplicate && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMergePair(matchedDuplicate);
+                              }}
+                              className="w-5 h-5 rounded-md flex items-center justify-center border transition-all cursor-pointer bg-amber-500 hover:bg-amber-400 text-stone-950 border-amber-300 shadow-xs"
+                              title={`Знайдено дублікат (${matchedDuplicate.confidence}%): ${
+                                matchedDuplicate.personB.id === p.id
+                                  ? `${matchedDuplicate.personA.lastName || ''} ${matchedDuplicate.personA.firstName || ''}`
+                                  : `${matchedDuplicate.personB.lastName || ''} ${matchedDuplicate.personB.firstName || ''}`
+                              }. Натисніть для об'єднання.`}
+                            >
+                              <GitMerge className="w-3 h-3 stroke-[2.5]" />
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -3977,7 +4115,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
                           {/* Individual Siblings List */}
                           <div className="space-y-1 max-h-48 overflow-y-auto">
-                            {collateralSiblings.map((sib) => {
+                            {collateralSiblings.map((sib, sIdx) => {
                               const isCollapsed = collapsedSiblings.has(sib.id) || !showSiblings;
                               const sibMaiden = (sib.name?.maidenName || sib.maidenName || '').trim();
                               const sibMaidenStr = sibMaiden && sibMaiden.toLowerCase() !== (sib.lastName || '').toLowerCase() ? ` (${sibMaiden})` : '';
@@ -3985,7 +4123,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                               const relationLabel = sib.gender === 'female' ? 'сестра' : 'брат';
                               return (
                                 <div
-                                  key={sib.id}
+                                  key={`${sib.id}_${sIdx}`}
                                   className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#22262c] border border-[#2e343c] text-xs hover:border-slate-500 transition-colors"
                                 >
                                   <div className="flex items-center gap-1.5 min-w-0 pr-1">
@@ -4122,7 +4260,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   }}
                 >
                   {/* Miniature Node dots */}
-                  {layout.nodes.map((n) => {
+                  {layout.nodes.map((n, nIdx) => {
                     const isMale = n.person.gender === 'male' || n.person.gender === 'M';
                     const isFemale = n.person.gender === 'female' || n.person.gender === 'F';
                     const isRoot = n.person.id === activePersonId;
@@ -4136,7 +4274,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
                     return (
                       <div
-                        key={n.id}
+                        key={`mini_${n.id}_${n.x}_${n.y}_${nIdx}`}
                         style={{
                           left: `${miniX}px`,
                           top: `${miniY}px`,
@@ -4388,6 +4526,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 <Check className="w-4 h-4 text-emerald-400 shrink-0" />
               )}
               <span>{importNotification.message}</span>
+              {!importNotification.isError && (
+                <button
+                  type="button"
+                  onClick={() => setShowImportHistoryModal(true)}
+                  className="underline hover:text-white font-bold ml-1.5 cursor-pointer text-emerald-200"
+                >
+                  Звіт історії →
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setImportNotification(null)}
@@ -4409,6 +4556,83 @@ export const TreeView: React.FC<TreeViewProps> = ({
           onSelectPerson={(id) => {
             onSelectPerson(id);
             setReportPersonId(null);
+          }}
+        />
+      )}
+
+      {/* Import History Modal */}
+      {showImportHistoryModal && (
+        <ImportHistoryModal
+          isOpen={showImportHistoryModal}
+          onClose={() => setShowImportHistoryModal(false)}
+          onSelectPerson={(id) => {
+            onSelectPerson(id);
+            setShowImportHistoryModal(false);
+          }}
+        />
+      )}
+
+      {/* Smart Merge Modal */}
+      {pendingMerge && (
+        <GedcomMergeModal
+          currentDatabase={database}
+          incomingDatabase={pendingMerge.incomingDb}
+          fileName={pendingMerge.fileName}
+          onClose={() => setPendingMerge(null)}
+          onApplyMerge={(result: MergeResult) => {
+            useGenealogyStore.getState().mergeGenealogyDatabase(pendingMerge.incomingDb, result, {
+              fileName: pendingMerge.fileName
+            });
+            const conflictMsg = result.conflictsResolvedCount > 0 ? `, вирішено ${result.conflictsResolvedCount} розбіжностей` : '';
+            setImportNotification({
+              message: `Успішно об'єднано: ${result.matchedCount} збігів доповнено даними${conflictMsg}, додано ${result.newPersonsCount} нових родичів!`
+            });
+            setPendingMerge(null);
+            setTimeout(() => {
+              centerTree();
+            }, 250);
+          }}
+          onApplyReplace={(incomingDb) => {
+            if (onImportDatabase) {
+              onImportDatabase(incomingDb);
+            } else {
+              useGenealogyStore.getState().loadGenealogyDatabase(incomingDb, {
+                fileName: pendingMerge.fileName
+              });
+            }
+            if (incomingDb.rootPersonId) {
+              onChangeRoot(incomingDb.rootPersonId);
+            }
+            setImportNotification({
+              message: `Успішно замінено дерево: завантажено ${Object.keys(incomingDb.persons || {}).length} осіб.`
+            });
+            setPendingMerge(null);
+            setTimeout(() => {
+              centerTree();
+            }, 250);
+          }}
+        />
+      )}
+
+      {/* Interactive Smart Merge Modal */}
+      {activeMergePair && (
+        <SmartMergeModal
+          pair={activeMergePair}
+          allPersons={Object.values(database.persons || {}) as Person[]}
+          allFamilies={database.families || {}}
+          isOpen={Boolean(activeMergePair)}
+          onClose={() => setActiveMergePair(null)}
+          onMergeComplete={(updatedPersons, updatedFamilies, masterName, extra) => {
+            mergePersons({
+              updatedPersons,
+              updatedFamilies,
+              masterPerson: extra?.masterPerson,
+              deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : []
+            });
+            setActiveMergePair(null);
+            setImportNotification({
+              message: `Особи успішно об'єднані в профіль «${masterName}».`
+            });
           }}
         />
       )}

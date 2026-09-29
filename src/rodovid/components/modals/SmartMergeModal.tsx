@@ -32,7 +32,12 @@ interface SmartMergeModalProps {
   allFamilies: Record<string, Family>;
   isOpen: boolean;
   onClose: () => void;
-  onMergeComplete: (updatedPersons: Person[], updatedFamilies: Record<string, Family>, masterName: string) => void;
+  onMergeComplete: (
+    updatedPersons: Person[],
+    updatedFamilies: Record<string, Family>,
+    masterName: string,
+    extra?: { masterPerson?: Person; deletedPersonId?: string }
+  ) => void;
 }
 
 export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
@@ -104,7 +109,10 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
       );
 
       const chosenMasterName = masterTarget === 'A' ? nameA : nameB;
-      onMergeComplete(result.updatedPersons, result.updatedFamilies, chosenMasterName);
+      onMergeComplete(result.updatedPersons, result.updatedFamilies, chosenMasterName, {
+        masterPerson: result.masterPerson,
+        deletedPersonId: result.deletedPersonId
+      });
       onClose();
     } catch (err) {
       console.error('Merge error:', err);

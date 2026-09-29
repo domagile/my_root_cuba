@@ -186,12 +186,12 @@ export const BulkEditPersonsModal: React.FC<BulkEditPersonsModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2 flex-wrap max-h-28 overflow-y-auto pr-1">
-              {selectedPersons.map((p) => {
+              {selectedPersons.map((p, pIdx) => {
                 const feminine = isPersonFemale(p, persons);
                 const initials = `${p.lastName?.[0] || ''}${p.firstName?.[0] || ''}`.toUpperCase();
                 return (
                   <span
-                    key={p.id}
+                    key={`bulk_p_${p.id}_${pIdx}`}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#262626] border border-[#383838] text-xs font-medium text-[#E5E5E5] group hover:border-[#B88E3E]/50 transition-colors"
                   >
                     <span

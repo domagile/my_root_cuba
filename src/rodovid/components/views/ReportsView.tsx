@@ -300,7 +300,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
                 return (
                   <div
-                    key={person.id}
+                    key={`${person.id}_${index}`}
                     className={`p-4 rounded-lg border ${theme.borderSubtle} ${theme.surfaceBg} hover:border-amber-500/50 transition-colors`}
                   >
                     <div className="flex items-start justify-between">
@@ -380,8 +380,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     onChange={(e) => setSelectedPersonId(e.target.value)}
                     className={`w-full text-xs font-semibold px-3 py-2 rounded-lg border ${theme.borderSubtle} bg-black/5 dark:bg-white/5 ${theme.textPrimary} focus:ring-1 focus:ring-amber-500 cursor-pointer`}
                   >
-                    {persons.map((p) => (
-                      <option key={p.id} value={p.id} className="text-neutral-900 bg-white">
+                    {persons.map((p, pIdx) => (
+                      <option key={`${p.id}_${pIdx}`} value={p.id} className="text-neutral-900 bg-white">
                         {getFullName(p)} {formatPersonLifespan(p)}
                       </option>
                     ))}

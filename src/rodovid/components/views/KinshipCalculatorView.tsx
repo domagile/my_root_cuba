@@ -95,11 +95,11 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
               onChange={(e) => setPersonAId(e.target.value)}
               className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
             >
-              {dropdownPersons.map((p) => {
+              {dropdownPersons.map((p, pIdx) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
                 const isMasked = !isWhitelisted && isLiving;
                 return (
-                  <option key={p.id} value={p.id}>
+                  <option key={`kin_a_${p.id}_${pIdx}`} value={p.id}>
                     {isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}
                   </option>
                 );
@@ -127,11 +127,11 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
               onChange={(e) => setPersonBId(e.target.value)}
               className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
             >
-              {dropdownPersons.map((p) => {
+              {dropdownPersons.map((p, pIdx) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
                 const isMasked = !isWhitelisted && isLiving;
                 return (
-                  <option key={p.id} value={p.id}>
+                  <option key={`kin_b_${p.id}_${pIdx}`} value={p.id}>
                     {isMasked ? '🔒 Скрито (Жива особа)' : `${getFullName(p)}${p.birthYear ? ` (${p.birthYear})` : ''}`}
                   </option>
                 );
@@ -405,14 +405,14 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
                 Найближчий спільний предок (вершина гілки):
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {result.commonAncestors.map((rawAnc) => {
+                {result.commonAncestors.map((rawAnc, aIdx) => {
                   const isLiving = isPersonLiving(rawAnc);
                   const isMasked = !isWhitelisted && isLiving;
                   const anc = isMasked ? getPrivacySafePerson(rawAnc, false) : rawAnc;
 
                   return (
                     <div
-                      key={anc.id}
+                      key={`${anc.id}_${aIdx}`}
                       onClick={() => onSelectPerson(anc.id)}
                       className={`flex items-center gap-3 p-3 ${theme.surfaceBg} border ${theme.borderSubtle} rounded-lg hover:border-amber-500 cursor-pointer text-xs transition-colors`}
                     >

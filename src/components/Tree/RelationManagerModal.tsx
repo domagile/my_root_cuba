@@ -732,9 +732,9 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                     Не знайдено відповідних осіб у базі
                   </div>
                 ) : (
-                  candidatePersons.map((cand) => (
+                  candidatePersons.map((cand, candIdx) => (
                     <div
-                      key={cand.id}
+                      key={`cand_${cand.id}_${candIdx}`}
                       onClick={() => handleAttachExisting(cand)}
                       className="p-2 rounded-xl border border-neutral-100 dark:border-neutral-800 hover:border-[#B88E3E] hover:bg-amber-50/40 dark:hover:bg-slate-800/80 flex items-center justify-between cursor-pointer transition-colors"
                     >
@@ -813,7 +813,7 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                   )}
 
                   {linkedSpouses.map((sp, idx) => (
-                    <div key={sp.id} className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-slate-800/40 flex items-center justify-between">
+                    <div key={`sp_${sp.id}_${idx}`} className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-slate-800/40 flex items-center justify-between">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-pink-600 dark:text-pink-400">
@@ -838,8 +838,8 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                     </div>
                   ))}
 
-                  {linkedChildren.map((ch) => (
-                    <div key={ch.id} className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-slate-800/40 flex items-center justify-between">
+                  {linkedChildren.map((ch, chIdx) => (
+                    <div key={`ch_${ch.id}_${chIdx}`} className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-slate-800/40 flex items-center justify-between">
                       <div className="min-w-0">
                         <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 block">Дитина:</span>
                         <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate block">
@@ -890,8 +890,8 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
                   ))}
 
                   {/* Хрещеники */}
-                  {linkedGodchildren.map((ch) => (
-                    <div key={`gchild-${ch.id}`} className="p-2.5 rounded-xl border border-amber-200/60 dark:border-amber-900/30 bg-amber-50/20 dark:bg-amber-950/10 flex items-center justify-between">
+                  {linkedGodchildren.map((ch, chIdx) => (
+                    <div key={`gchild_${ch.id}_${chIdx}`} className="p-2.5 rounded-xl border border-amber-200/60 dark:border-amber-900/30 bg-amber-50/20 dark:bg-amber-950/10 flex items-center justify-between">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">

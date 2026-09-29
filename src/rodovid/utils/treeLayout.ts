@@ -201,8 +201,8 @@ export function getGenealogyCode(person: Person): string {
  * Format Lifespan string matching classic genealogical notation (e.g. "1882–1928" or "1874–Померла")
  */
 export function formatLifespan(person: Person): string {
-  const birth = person.birthYear || (person.birthDate ? person.birthDate.slice(0, 4) : null);
-  const death = person.deathYear || (person.deathDate ? person.deathDate.slice(0, 4) : null);
+  const birth = person.birthYear || (person.birthDate ? String(person.birthDate).slice(0, 4) : null);
+  const death = person.deathYear || (person.deathDate ? String(person.deathDate).slice(0, 4) : null);
   
   if (person.isLiving) {
     return birth ? `${birth}–зараз` : 'Живий/а';
@@ -250,7 +250,7 @@ export function getPersonBirthYear(p?: Person | null): number {
   if (!p) return 9999;
   if (typeof p.birthYear === 'number' && p.birthYear > 0) return p.birthYear;
   if (p.birthDate) {
-    const match = p.birthDate.match(/(\d{4})/);
+    const match = String(p.birthDate).match(/(\d{4})/);
     if (match) return parseInt(match[1], 10);
   }
   if (p.events && Array.isArray(p.events)) {
@@ -258,7 +258,7 @@ export function getPersonBirthYear(p?: Person | null): number {
     if (birthEvent) {
       if (typeof birthEvent.year === 'number' && birthEvent.year > 0) return birthEvent.year;
       if (birthEvent.date) {
-        const match = birthEvent.date.match(/(\d{4})/);
+        const match = String(birthEvent.date).match(/(\d{4})/);
         if (match) return parseInt(match[1], 10);
       }
     }
@@ -284,8 +284,8 @@ export function comparePersonsByAge(pA?: Person | null, pB?: Person | null): num
 
   // If years are identical and known, compare month/day if available
   if (yearA !== 9999 && pA.birthDate && pB.birthDate) {
-    const matchA = pA.birthDate.match(/(\d{1,2})[./-](\d{1,2})/);
-    const matchB = pB.birthDate.match(/(\d{1,2})[./-](\d{1,2})/);
+    const matchA = String(pA.birthDate).match(/(\d{1,2})[./-](\d{1,2})/);
+    const matchB = String(pB.birthDate).match(/(\d{1,2})[./-](\d{1,2})/);
     if (matchA && matchB) {
       const mA = parseInt(matchA[2], 10);
       const mB = parseInt(matchB[2], 10);
@@ -786,11 +786,30 @@ export function calculateClassicFamilyTreeLayout(
         });
       }
 
+      if (database.families) {
+        Object.values(database.families).forEach((fam) => {
+          const isChild = (fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)) ||
+                          (Array.isArray(fam.childrenIds) && fam.childrenIds.includes(p.id));
+          if (isChild) {
+            const rawChildren = [
+              ...(Array.isArray(fam.children) ? fam.children : []),
+              ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+            ].map((c: any) => typeof c === 'string' ? c : c?.personId || c?.id).filter(Boolean);
+
+            rawChildren.forEach((sibId) => {
+              if (sibId !== p.id && !isPersonACollapsedSibling(sibId)) {
+                enqueuePerson(sibId, gen);
+              }
+            });
+          }
+        });
+      }
+
       Object.values(database.persons).forEach(cand => {
         if (cand.id !== p.id && !personGen.has(cand.id)) {
           const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
           const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-          const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id)) || (p.siblingIds && p.siblingIds.includes(cand.id));
+          const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id)) || (p.siblingIds && p.siblingIds.includes(cand.id)) || (p.parentFamilyId && cand.parentFamilyId && p.parentFamilyId === cand.parentFamilyId);
           if (isSibling && !isPersonACollapsedSibling(cand.id)) {
             enqueuePerson(cand.id, gen);
           }
@@ -895,14 +914,21 @@ export function calculateClassicFamilyTreeLayout(
 
         // Determine children for this specific marriage union
         const unionChildren = new Set<string>();
-        if (matchedFam?.children) {
-          matchedFam.children.forEach((c: any) => unionChildren.add(c.personId || c.id));
+        if (matchedFam?.childrenIds) {
+          matchedFam.childrenIds.forEach((cId: string) => unionChildren.add(cId));
         }
-        // Also check if any children have both p and sp as parents
+        if (matchedFam?.children) {
+          matchedFam.children.forEach((c: any) => {
+            const cId = typeof c === 'string' ? c : (c?.personId || c?.id);
+            if (cId) unionChildren.add(cId);
+          });
+        }
+        // Also check if any children have both p and sp as parents, or belong to this family
         Object.values(database.persons).forEach(candChild => {
           if (
             (candChild.fatherId === p.id && candChild.motherId === sp.id) ||
-            (candChild.fatherId === sp.id && candChild.motherId === p.id)
+            (candChild.fatherId === sp.id && candChild.motherId === p.id) ||
+            (matchedFam?.id && candChild.parentFamilyId === matchedFam.id)
           ) {
             unionChildren.add(candChild.id);
           }
@@ -942,16 +968,27 @@ export function calculateClassicFamilyTreeLayout(
         s.marriageOrder = idx + 1;
       });
 
-      // All children of primary person
+      // All children of primary person & spouses
       const allChildren = new Set<string>();
       if (p.childrenIds) p.childrenIds.forEach(c => allChildren.add(c));
       spousesInfo.forEach(s => s.childrenIds.forEach(c => allChildren.add(c)));
       if (p.spouseFamilyIds) {
         p.spouseFamilyIds.forEach(fId => {
           const fam = database.families[fId];
-          if (fam?.children) fam.children.forEach((c: any) => allChildren.add(c.personId || c.id));
+          if (fam?.childrenIds) fam.childrenIds.forEach((cId: string) => allChildren.add(cId));
+          if (fam?.children) {
+            fam.children.forEach((c: any) => {
+              const cId = typeof c === 'string' ? c : (c?.personId || c?.id);
+              if (cId) allChildren.add(cId);
+            });
+          }
         });
       }
+      Object.values(database.persons).forEach(candChild => {
+        if (candChild.fatherId === p.id || candChild.motherId === p.id) {
+          allChildren.add(candChild.id);
+        }
+      });
       const validAllChildren = Array.from(allChildren).filter(
         cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
       );
@@ -1029,13 +1066,28 @@ export function calculateClassicFamilyTreeLayout(
     if (!p) return { fatherId: undefined, motherId: undefined };
     let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
     let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-    if (!fId && !mId && database.families) {
-      const matchingFam = Object.values(database.families).find(fam => 
-        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
-      );
-      if (matchingFam) {
-        fId = matchingFam.husbandId;
-        mId = matchingFam.wifeId;
+    if ((!fId || !mId) && database.families) {
+      for (const fam of Object.values(database.families)) {
+        const rawChildren = [
+          ...(Array.isArray(fam.children) ? fam.children : []),
+          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
+        if (rawChildren.includes(p.id) || (p.parentFamilyId && fam.id === p.parentFamilyId)) {
+          if (!fId && fam.husbandId) fId = fam.husbandId;
+          if (!mId && fam.wifeId) mId = fam.wifeId;
+        }
+      }
+    }
+    if ((!fId || !mId) && database.persons) {
+      for (const parentCandidate of Object.values(database.persons)) {
+        const cIds = parentCandidate.childrenIds || [];
+        if (cIds.includes(p.id)) {
+          if (parentCandidate.gender === 'female' || parentCandidate.gender === 'F') {
+            if (!mId) mId = parentCandidate.id;
+          } else {
+            if (!fId) fId = parentCandidate.id;
+          }
+        }
       }
     }
     return { fatherId: fId, motherId: mId };
@@ -1047,12 +1099,35 @@ export function calculateClassicFamilyTreeLayout(
     const p2 = database.persons[pId2];
     if (!p1 || !p2) return false;
     if (p1.siblingIds?.includes(pId2) || p2.siblingIds?.includes(pId1)) return true;
+    if (p1.parentFamilyId && p2.parentFamilyId && p1.parentFamilyId === p2.parentFamilyId) return true;
     const par1 = getParentsOfPerson(pId1);
     const par2 = getParentsOfPerson(pId2);
-    return Boolean(
-      (par1.fatherId && par1.fatherId === par2.fatherId) ||
-      (par1.motherId && par1.motherId === par2.motherId)
-    );
+    if ((par1.fatherId && par1.fatherId === par2.fatherId) ||
+        (par1.motherId && par1.motherId === par2.motherId)) {
+      return true;
+    }
+    if (database.families) {
+      for (const fam of Object.values(database.families)) {
+        const rawChildren = [
+          ...(Array.isArray(fam.children) ? fam.children : []),
+          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
+        if (rawChildren.includes(pId1) && rawChildren.includes(pId2)) return true;
+      }
+    }
+    return false;
+  };
+
+  const unitsAreSiblings = (u1: Unit, u2: Unit): boolean => {
+    if (!u1 || !u2 || u1 === u2) return false;
+    const ids1 = [u1.primary.id, ...(u1.spouses?.map(s => s.spouse.id) || [])];
+    const ids2 = [u2.primary.id, ...(u2.spouses?.map(s => s.spouse.id) || [])];
+    for (const id1 of ids1) {
+      for (const id2 of ids2) {
+        if (areSiblings(id1, id2)) return true;
+      }
+    }
+    return false;
   };
 
   const getPersonCenterXInUnits = (personId: string, uList: Unit[]): number | undefined => {
@@ -1071,171 +1146,360 @@ export function calculateClassicFamilyTreeLayout(
     return undefined;
   };
 
-  // Initial horizontal placement per generation with family-aware clustering
-  // (Primary's siblings to the left, Spouse's siblings e.g. sister to the right)
-  genUnits.forEach((units, gen) => {
-    const orderedUnits: Unit[] = [];
-    const usedUnitPrimaries = new Set<string>();
+  // Family Cluster definition for strictly keeping siblings contiguous
+  interface FamilyCluster {
+    key: string;
+    parentUnit?: Unit;
+    parentSpouseId?: string;
+    parentUnitIndex: number;
+    units: Unit[];
+    width: number;
+    x: number;
+  }
 
-    const getUnitPersonIds = (u: Unit): string[] => {
-      const ids = [u.primary.id];
-      if (u.spouses) {
-        u.spouses.forEach(s => ids.push(s.spouse.id));
-      }
-      return ids;
-    };
+  interface ParentMatch {
+    parentUnit: Unit;
+    spouseId?: string;
+  }
 
-    const findSiblingUnitsOf = (personId: string, exclude: Unit[]): Unit[] => {
-      return units.filter(u => {
-        if (usedUnitPrimaries.has(u.primary.id)) return false;
-        if (exclude.some(ex => ex.primary.id === u.primary.id)) return false;
-        const pIds = getUnitPersonIds(u);
-        return pIds.some(pId => areSiblings(pId, personId));
-      });
-    };
-
-    // First, process couples so siblings cluster on the correct side
-    const coupleUnits = units.filter(u => (u.type === 'couple' || u.type === 'multi_spouse') && u.spouses.length > 0);
-
-    coupleUnits.forEach(cUnit => {
-      if (usedUnitPrimaries.has(cUnit.primary.id)) return;
-
-      // 1. Siblings of primary (husband) -> placed to the LEFT
-      const primarySiblings = findSiblingUnitsOf(cUnit.primary.id, [cUnit]);
-      primarySiblings.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
-
-      // 2. Siblings of spouse (wife, e.g. Евгения -> sister Штома) -> placed to the RIGHT
-      const spouseSiblings: Unit[] = [];
-      cUnit.spouses.forEach(sp => {
-        const sibs = findSiblingUnitsOf(sp.spouse.id, [cUnit, ...primarySiblings, ...spouseSiblings]);
-        sibs.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
-        spouseSiblings.push(...sibs);
-      });
-
-      primarySiblings.forEach(u => usedUnitPrimaries.add(u.primary.id));
-      usedUnitPrimaries.add(cUnit.primary.id);
-      spouseSiblings.forEach(u => usedUnitPrimaries.add(u.primary.id));
-
-      orderedUnits.push(...primarySiblings, cUnit, ...spouseSiblings);
-    });
-
-    // Append remaining single/unconnected units
-    const remainingUnits = units.filter(u => !usedUnitPrimaries.has(u.primary.id));
-    remainingUnits.sort((uA, uB) => {
-      const share = areSiblings(uA.primary.id, uB.primary.id);
-      if (share) {
-        return comparePersonsByAge(uA.primary, uB.primary);
-      }
-      return 0;
-    });
-    orderedUnits.push(...remainingUnits);
-
-    units.splice(0, units.length, ...orderedUnits);
-
-    let currentX = 100;
-    units.forEach((unit, idx) => {
-      unit.x = currentX;
-      const isNextDifferentFamily = idx < units.length - 1 && units[idx + 1].primary.parentFamilyId !== unit.primary.parentFamilyId;
-      currentX += unit.width + (isNextDifferentFamily ? FAMILY_GAP : SIBLING_GAP);
-    });
-    maxTreeWidth = Math.max(maxTreeWidth, currentX + 100);
-  });
-
-  // Center levels relative to each other (align parents above children & children under parents)
-  for (let pass = 0; pass < 3; pass++) {
-    // Bottom-up pass: align parents above children
-    for (let gen = totalGens - 2; gen >= 0; gen--) {
-      const parentUnits = genUnits.get(gen) || [];
-      const childUnits = genUnits.get(gen + 1) || [];
-
-      parentUnits.forEach((pUnit) => {
-        if (pUnit.childrenIds.length > 0) {
-          const childCenters: number[] = [];
-          pUnit.childrenIds.forEach(cId => {
-            const cx = getPersonCenterXInUnits(cId, childUnits);
-            if (cx !== undefined) childCenters.push(cx);
-          });
-
-          if (childCenters.length > 0) {
-            const minCx = Math.min(...childCenters);
-            const maxCx = Math.max(...childCenters);
-            const childrenCenterX = (minCx + maxCx) / 2;
-            pUnit.x = childrenCenterX - pUnit.width / 2;
+  const getParentMatchForPerson = (personId: string, parentUnits: Unit[]): ParentMatch | undefined => {
+    // 1. Direct union check
+    for (const pu of parentUnits) {
+      if (pu.spouses && pu.spouses.length > 0) {
+        for (const sp of pu.spouses) {
+          if (sp.childrenIds && sp.childrenIds.includes(personId)) {
+            return { parentUnit: pu, spouseId: sp.spouse.id };
           }
         }
-      });
+      }
+      if (pu.childrenIds && pu.childrenIds.includes(personId)) {
+        return { parentUnit: pu, spouseId: pu.spouses?.[0]?.spouse.id };
+      }
+    }
 
-      // Sort parent units horizontally to match left-to-right positions of their children branches
-      parentUnits.sort((uA, uB) => uA.x - uB.x);
-
-      // Prevent overlapping within the same generation
-      for (let i = 1; i < parentUnits.length; i++) {
-        const prev = parentUnits[i - 1];
-        const curr = parentUnits[i];
-        const gap = (prev.primary.parentFamilyId && curr.primary.parentFamilyId && prev.primary.parentFamilyId === curr.primary.parentFamilyId)
-          ? SIBLING_GAP
-          : FAMILY_GAP;
-        if (curr.x < prev.x + prev.width + gap) {
-          curr.x = prev.x + prev.width + gap;
+    // 2. Father & Mother lookup
+    const { fatherId, motherId } = getParentsOfPerson(personId);
+    for (const pu of parentUnits) {
+      const isPrimaryFather = fatherId && pu.primary.id === fatherId;
+      const isPrimaryMother = motherId && pu.primary.id === motherId;
+      if (isPrimaryFather || isPrimaryMother) {
+        const matchingSpouse = pu.spouses?.find(sp => (motherId && sp.spouse.id === motherId) || (fatherId && sp.spouse.id === fatherId));
+        return { parentUnit: pu, spouseId: matchingSpouse?.spouse.id || pu.spouses?.[0]?.spouse.id };
+      }
+      if (pu.spouses) {
+        for (const sp of pu.spouses) {
+          if ((fatherId && sp.spouse.id === fatherId) || (motherId && sp.spouse.id === motherId)) {
+            return { parentUnit: pu, spouseId: sp.spouse.id };
+          }
         }
       }
     }
 
-    // Top-down pass: align child groups under parent units
-    for (let gen = 0; gen < totalGens - 1; gen++) {
-      const parentUnits = genUnits.get(gen) || [];
-      const childUnits = genUnits.get(gen + 1) || [];
-
-      parentUnits.forEach((pUnit) => {
-        if (pUnit.childrenIds.length > 0) {
-          const childUnitMatches = childUnits.filter(cu => 
-            pUnit.childrenIds.includes(cu.primary.id) || (cu.spouses && cu.spouses.some(s => pUnit.childrenIds.includes(s.spouse.id)))
-          );
-
-          if (childUnitMatches.length > 0) {
-            const coupleWithSpouseChild = childUnitMatches.find(cu => 
-              cu.spouses && cu.spouses.some(s => pUnit.childrenIds.includes(s.spouse.id))
-            );
-
-            if (coupleWithSpouseChild) {
-              // The spouse is on the right of the couple. Sibling children (like the sister) are aligned to the right
-              const otherSiblings = childUnitMatches.filter(cu => cu.primary.id !== coupleWithSpouseChild.primary.id);
-              let nextSibX = coupleWithSpouseChild.x + coupleWithSpouseChild.width + SIBLING_GAP;
-              otherSiblings.forEach(sibUnit => {
-                sibUnit.x = nextSibX;
-                nextSibX += sibUnit.width + SIBLING_GAP;
-              });
-            } else {
-              childUnitMatches.sort((cuA, cuB) => {
-                const childA = cuA.primary;
-                const childB = cuB.primary;
-                return comparePersonsByAge(childA, childB);
-              });
-
-              const parentCenterX = pUnit.x + pUnit.width / 2;
-              const totalChildGroupWidth = childUnitMatches.reduce((acc, cu) => acc + cu.width, 0) + (childUnitMatches.length - 1) * SIBLING_GAP;
-              let startChildX = parentCenterX - totalChildGroupWidth / 2;
-
-              childUnitMatches.forEach((cu) => {
-                cu.x = startChildX;
-                startChildX += cu.width + SIBLING_GAP;
-              });
+    // 3. Family lookup
+    if (database.families) {
+      for (const fam of Object.values(database.families)) {
+        const rawChildren = [
+          ...(Array.isArray(fam.children) ? fam.children : []),
+          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
+        if (rawChildren.includes(personId)) {
+          for (const pu of parentUnits) {
+            const hasHusband = fam.husbandId && (pu.primary.id === fam.husbandId || pu.spouses?.some(s => s.spouse.id === fam.husbandId));
+            const hasWife = fam.wifeId && (pu.primary.id === fam.wifeId || pu.spouses?.some(s => s.spouse.id === fam.wifeId));
+            if (hasHusband || hasWife) {
+              const spouse = pu.spouses?.find(s => s.spouse.id === fam.husbandId || s.spouse.id === fam.wifeId);
+              return { parentUnit: pu, spouseId: spouse?.spouse.id || pu.spouses?.[0]?.spouse.id };
             }
           }
         }
+      }
+    }
+    return undefined;
+  };
+
+  const getParentUnitForPerson = (personId: string, parentUnits: Unit[]): Unit | undefined => {
+    return getParentMatchForPerson(personId, parentUnits)?.parentUnit;
+  };
+
+  const getParentStemX = (pUnit: Unit, spouseId?: string): number => {
+    if (pUnit.type === 'single' || !pUnit.spouses || pUnit.spouses.length === 0) {
+      return pUnit.x + cardWidth / 2;
+    }
+    if (spouseId) {
+      const spIdx = pUnit.spouses.findIndex(s => s.spouse.id === spouseId);
+      if (spIdx !== -1) {
+        return pUnit.x + (cardWidth + SPOUSE_GAP) * spIdx + cardWidth + SPOUSE_GAP / 2;
+      }
+    }
+    return pUnit.x + cardWidth + SPOUSE_GAP / 2;
+  };
+
+  const getChildPersonInUnit = (u: Unit, pUnit?: Unit): Person => {
+    if (!pUnit) return u.primary;
+    if (pUnit.childrenIds && pUnit.childrenIds.includes(u.primary.id)) return u.primary;
+    if (u.spouses) {
+      for (const sp of u.spouses) {
+        if (pUnit.childrenIds && pUnit.childrenIds.includes(sp.spouse.id)) return sp.spouse;
+        if (sp.childrenIds && sp.childrenIds.includes(u.primary.id)) return u.primary;
+      }
+    }
+    const { fatherId, motherId } = getParentsOfPerson(u.primary.id);
+    const puIds = [pUnit.primary.id, ...(pUnit.spouses?.map(s => s.spouse.id) || [])];
+    if ((fatherId && puIds.includes(fatherId)) || (motherId && puIds.includes(motherId))) {
+      return u.primary;
+    }
+    if (u.spouses) {
+      for (const sp of u.spouses) {
+        const spPars = getParentsOfPerson(sp.spouse.id);
+        if ((spPars.fatherId && puIds.includes(spPars.fatherId)) || (spPars.motherId && puIds.includes(spPars.motherId))) {
+          return sp.spouse;
+        }
+      }
+    }
+    return u.primary;
+  };
+
+  // Initial horizontal placement per generation with strict family-aware clustering
+  const genClusters = new Map<number, FamilyCluster[]>();
+
+  for (let gen = 0; gen < totalGens; gen++) {
+    const units = genUnits.get(gen) || [];
+    if (units.length === 0) continue;
+
+    if (gen === 0) {
+      // Oldest generation (no parents above in tree)
+      const clusters: FamilyCluster[] = [];
+      const usedPrimaries = new Set<string>();
+
+      // Group sibling units together
+      units.forEach(u => {
+        if (usedPrimaries.has(u.primary.id)) return;
+        const sibs = units.filter(cand => !usedPrimaries.has(cand.primary.id) && (cand.primary.id === u.primary.id || unitsAreSiblings(u, cand)));
+        sibs.forEach(s => usedPrimaries.add(s.primary.id));
+        sibs.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
+        const cWidth = sibs.reduce((acc, s) => acc + s.width, 0) + (sibs.length - 1) * SIBLING_GAP;
+        clusters.push({
+          key: `c_gen0_${u.primary.id}`,
+          parentUnitIndex: clusters.length,
+          units: sibs,
+          width: cWidth,
+          x: 100
+        });
       });
 
-      // Prevent overlapping in children generation
-      childUnits.sort((a, b) => a.x - b.x);
-      for (let i = 1; i < childUnits.length; i++) {
-        const prev = childUnits[i - 1];
-        const curr = childUnits[i];
-        const gap = (prev.primary.parentFamilyId && curr.primary.parentFamilyId && prev.primary.parentFamilyId === curr.primary.parentFamilyId)
+      let curX = 100;
+      clusters.forEach(c => {
+        c.x = curX;
+        let unitX = c.x;
+        c.units.forEach(u => {
+          u.x = unitX;
+          unitX += u.width + SIBLING_GAP;
+        });
+        curX += c.width + FAMILY_GAP;
+      });
+
+      genClusters.set(gen, clusters);
+      units.splice(0, units.length, ...clusters.flatMap(c => c.units));
+    } else {
+      const parentUnits = genUnits.get(gen - 1) || [];
+      const clusterMap = new Map<string, FamilyCluster>();
+
+      units.forEach(u => {
+        // 1. Direct parent unit lookup for primary and spouse
+        let parentMatch = getParentMatchForPerson(u.primary.id, parentUnits);
+        if (!parentMatch && u.spouses) {
+          for (const sp of u.spouses) {
+            const m = getParentMatchForPerson(sp.spouse.id, parentUnits);
+            if (m) {
+              parentMatch = m;
+              break;
+            }
+          }
+        }
+
+        // 2. Sibling unity: check if u is a sibling of an already clustered unit
+        let siblingClusterKey: string | undefined;
+        let siblingParentUnit: Unit | undefined;
+        let siblingSpouseId: string | undefined;
+
+        for (const [existingKey, existingCluster] of clusterMap.entries()) {
+          if (existingCluster.units.some(eu => unitsAreSiblings(u, eu))) {
+            siblingClusterKey = existingKey;
+            siblingParentUnit = existingCluster.parentUnit;
+            siblingSpouseId = existingCluster.parentSpouseId;
+            break;
+          }
+        }
+
+        let chosenParentUnit: Unit | undefined;
+        let chosenSpouseId: string | undefined;
+        let clusterKey: string;
+
+        if (siblingClusterKey && clusterMap.has(siblingClusterKey)) {
+          // Keep strictly with siblings!
+          clusterKey = siblingClusterKey;
+          chosenParentUnit = siblingParentUnit;
+          chosenSpouseId = siblingSpouseId;
+        } else if (parentMatch) {
+          chosenParentUnit = parentMatch.parentUnit;
+          chosenSpouseId = parentMatch.spouseId;
+          clusterKey = `parent_${chosenParentUnit.primary.id}_${chosenSpouseId || 'single'}`;
+        } else {
+          // Check if any sibling in the same generation has a parent match
+          for (const otherUnit of units) {
+            if (otherUnit !== u && unitsAreSiblings(u, otherUnit)) {
+              const otherMatch = getParentMatchForPerson(otherUnit.primary.id, parentUnits) ||
+                (otherUnit.spouses?.[0] ? getParentMatchForPerson(otherUnit.spouses[0].spouse.id, parentUnits) : undefined);
+              if (otherMatch) {
+                chosenParentUnit = otherMatch.parentUnit;
+                chosenSpouseId = otherMatch.spouseId;
+                break;
+              }
+            }
+          }
+
+          if (chosenParentUnit) {
+            clusterKey = `parent_${chosenParentUnit.primary.id}_${chosenSpouseId || 'single'}`;
+          } else {
+            // Find canonical sibling ID among unaffiliated siblings so they stay together
+            const siblingIds = units
+              .filter(cand => cand === u || unitsAreSiblings(u, cand))
+              .map(cand => cand.primary.id)
+              .sort();
+            clusterKey = `unaffiliated_sibs_${siblingIds[0] || u.primary.id}`;
+          }
+        }
+
+        if (!clusterMap.has(clusterKey)) {
+          const parentIdx = chosenParentUnit
+            ? parentUnits.findIndex(pu => pu.primary.id === chosenParentUnit!.primary.id)
+            : 9999;
+          clusterMap.set(clusterKey, {
+            key: clusterKey,
+            parentUnit: chosenParentUnit,
+            parentSpouseId: chosenSpouseId,
+            parentUnitIndex: parentIdx !== -1 ? parentIdx : 9999,
+            units: [],
+            width: 0,
+            x: 0
+          });
+        }
+        clusterMap.get(clusterKey)!.units.push(u);
+      });
+
+      const clusters = Array.from(clusterMap.values());
+
+      // Sort units WITHIN each cluster chronologically by child age (oldest to youngest)
+      clusters.forEach(c => {
+        c.units.sort((uA, uB) => {
+          const childA = getChildPersonInUnit(uA, c.parentUnit);
+          const childB = getChildPersonInUnit(uB, c.parentUnit);
+          return comparePersonsByAge(childA, childB);
+        });
+
+        c.width = c.units.reduce((acc, u) => acc + u.width, 0) + (c.units.length - 1) * SIBLING_GAP;
+      });
+
+      // Sort clusters strictly by their parent's stem X coordinate to prevent crossings
+      clusters.sort((cA, cB) => {
+        if (cA.parentUnit && cB.parentUnit) {
+          const stemA = getParentStemX(cA.parentUnit, cA.parentSpouseId);
+          const stemB = getParentStemX(cB.parentUnit, cB.parentSpouseId);
+          if (stemA !== stemB) return stemA - stemB;
+          return (cA.parentSpouseId || '').localeCompare(cB.parentSpouseId || '');
+        }
+        if (cA.parentUnit) return -1;
+        if (cB.parentUnit) return 1;
+        return cA.key.localeCompare(cB.key);
+      });
+
+      let minClusterX = 100;
+      clusters.forEach(c => {
+        if (c.parentUnit) {
+          const stemX = getParentStemX(c.parentUnit, c.parentSpouseId);
+          c.x = stemX - c.width / 2;
+        } else {
+          c.x = minClusterX;
+        }
+        if (c.x < minClusterX) {
+          c.x = minClusterX;
+        }
+        minClusterX = c.x + c.width + FAMILY_GAP;
+
+        let curUnitX = c.x;
+        c.units.forEach(u => {
+          u.x = curUnitX;
+          curUnitX += u.width + SIBLING_GAP;
+        });
+      });
+
+      genClusters.set(gen, clusters);
+      units.splice(0, units.length, ...clusters.flatMap(c => c.units));
+    }
+  }
+
+  // Center levels relative to each other (align parents above children & children under parents)
+  // Preserving unbroken sibling clusters!
+  for (let pass = 0; pass < 3; pass++) {
+    // Bottom-up pass: align parents above their children clusters
+    for (let gen = totalGens - 2; gen >= 0; gen--) {
+      const parentUnits = genUnits.get(gen) || [];
+      const childClusters = genClusters.get(gen + 1) || [];
+
+      parentUnits.forEach((pUnit) => {
+        const matchedClusters = childClusters.filter(c => c.parentUnit && c.parentUnit.primary.id === pUnit.primary.id);
+        if (matchedClusters.length > 0) {
+          const minX = Math.min(...matchedClusters.map(c => c.x));
+          const maxX = Math.max(...matchedClusters.map(c => c.x + c.width));
+          const childrenCenter = (minX + maxX) / 2;
+          pUnit.x = childrenCenter - pUnit.width / 2;
+        }
+      });
+
+      // Prevent overlapping while preserving parent order
+      let pMinX = 100;
+      for (let i = 0; i < parentUnits.length; i++) {
+        const pu = parentUnits[i];
+        if (pu.x < pMinX) pu.x = pMinX;
+        const nextGap = (i < parentUnits.length - 1 && unitsAreSiblings(pu, parentUnits[i + 1]))
           ? SIBLING_GAP
           : FAMILY_GAP;
-        if (curr.x < prev.x + prev.width + gap) {
-          curr.x = prev.x + prev.width + gap;
+        pMinX = pu.x + pu.width + nextGap;
+      }
+    }
+
+    // Top-down pass: align child clusters under parent units
+    for (let gen = 0; gen < totalGens - 1; gen++) {
+      const childClusters = genClusters.get(gen + 1) || [];
+
+      childClusters.forEach((c) => {
+        if (c.parentUnit) {
+          const stemX = getParentStemX(c.parentUnit, c.parentSpouseId);
+          c.x = stemX - c.width / 2;
         }
+      });
+
+      // Sort clusters strictly by target position so clusters never invert or cross!
+      childClusters.sort((a, b) => a.x - b.x);
+
+      // Prevent overlapping while preserving cluster order
+      let cMinX = 100;
+      for (let i = 0; i < childClusters.length; i++) {
+        const c = childClusters[i];
+        if (c.x < cMinX) c.x = cMinX;
+        cMinX = c.x + c.width + FAMILY_GAP;
+
+        let curUnitX = c.x;
+        c.units.forEach((u) => {
+          u.x = curUnitX;
+          curUnitX += u.width + SIBLING_GAP;
+        });
+      }
+
+      // Update genUnits order to match sorted clusters
+      const genUnitsList = genUnits.get(gen + 1);
+      if (genUnitsList) {
+        genUnitsList.splice(0, genUnitsList.length, ...childClusters.flatMap(c => c.units));
       }
     }
   }
@@ -1300,7 +1564,15 @@ export function calculateClassicFamilyTreeLayout(
         (fId && (cand.fatherId === fId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.husbandId === fId))) ||
         (mId && (cand.motherId === mId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.wifeId === mId))) ||
         (p.siblingIds && p.siblingIds.includes(cand.id)) ||
-        (cand.siblingIds && cand.siblingIds.includes(p.id))
+        (cand.siblingIds && cand.siblingIds.includes(p.id)) ||
+        (p.parentFamilyId && cand.parentFamilyId && p.parentFamilyId === cand.parentFamilyId) ||
+        (database.families && Object.values(database.families).some(fam => {
+          const rawChildren = [
+            ...(Array.isArray(fam.children) ? fam.children : []),
+            ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+          ].map((c: any) => typeof c === 'string' ? c : c?.personId || c?.id).filter(Boolean);
+          return rawChildren.includes(p.id) && rawChildren.includes(cand.id);
+        }))
       )
     );
     siblingCount = sibs.length;
@@ -1488,8 +1760,8 @@ export function calculateClassicFamilyTreeLayout(
       const unitColor = FAMILY_LINE_COLORS[(gen * 3 + unitIdx) % FAMILY_LINE_COLORS.length];
       const pY = unit.y;
       // Stagger horizontal junction Y levels so neighboring family bus bars NEVER overlap horizontally
-      const baseJunctionY = pY + cardHeight + (isCompact ? 18 : 36);
-      const junctionY = baseJunctionY + (unitIdx % 4) * (isCompact ? 12 : 22);
+      const baseJunctionY = pY + cardHeight + (isCompact ? 18 : 32);
+      const junctionY = baseJunctionY + (unitIdx % 3) * (isCompact ? 10 : 18);
 
       if ((unit.type === 'couple' || unit.type === 'multi_spouse') && unit.spouses.length > 0) {
         unit.spouses.forEach((spInfo, spIdx) => {
@@ -1526,31 +1798,56 @@ export function calculateClassicFamilyTreeLayout(
               .filter(c => c && c.centerX !== undefined);
 
             if (childCoords.length > 0) {
-              const unionJunctionY = junctionY + (spIdx * 16);
-              // Vertical stem from marriage midpoint down to staggered junctionY
-              links.push({
-                id: `stem_${unit.primary.id}_${spInfo.spouse.id}`,
-                sourceX: marriageMidX,
-                sourceY: marriageMidY,
-                targetX: marriageMidX,
-                targetY: unionJunctionY,
-                type: 'stem',
-                color: unitColor,
-                familyId: spInfo.family?.id || unit.primary.id,
-                sourcePersonId: unit.primary.id,
-                targetPersonId: spInfo.spouse.id,
-                marriageOrder: spInfo.marriageOrder,
-                path: `M ${marriageMidX} ${marriageMidY} L ${marriageMidX} ${unionJunctionY}`
-              });
+              const unionJunctionY = junctionY + (spIdx * (isCompact ? 10 : 16));
 
-              // Calculate horizontal span of bus bar
-              const minChildX = Math.min(...childCoords.map(c => c.centerX));
-              const maxChildX = Math.max(...childCoords.map(c => c.centerX));
-              const busLeft = Math.min(marriageMidX, minChildX);
-              const busRight = Math.max(marriageMidX, maxChildX);
+              if (childCoords.length === 1) {
+                // Single child: direct clean drop line (straight or clean orthogonal step)
+                const child = childCoords[0];
+                const isDirectLine = Math.abs(marriageMidX - child.centerX) < 3;
+                const pathStr = isDirectLine
+                  ? `M ${marriageMidX} ${marriageMidY} L ${child.centerX} ${child.y}`
+                  : `M ${marriageMidX} ${marriageMidY} L ${marriageMidX} ${unionJunctionY} L ${child.centerX} ${unionJunctionY} L ${child.centerX} ${child.y}`;
 
-              // Horizontal sibling bus bar (only for this specific family)
-              if (busLeft !== busRight || childCoords.length > 1) {
+                links.push({
+                  id: `drop_${spInfo.spouse.id}_${child.id}`,
+                  sourceX: marriageMidX,
+                  sourceY: marriageMidY,
+                  targetX: child.centerX,
+                  targetY: child.y,
+                  type: 'drop',
+                  color: unitColor,
+                  familyId: spInfo.family?.id || unit.primary.id,
+                  sourcePersonId: unit.primary.id,
+                  targetPersonId: spInfo.spouse.id,
+                  childPersonId: child.id,
+                  arrow: 'down',
+                  arrowX: child.centerX,
+                  arrowY: child.y,
+                  path: pathStr
+                });
+              } else {
+                // Multiple siblings: vertical stem, horizontal sibling bus bar, perpendicular drops
+                links.push({
+                  id: `stem_${unit.primary.id}_${spInfo.spouse.id}`,
+                  sourceX: marriageMidX,
+                  sourceY: marriageMidY,
+                  targetX: marriageMidX,
+                  targetY: unionJunctionY,
+                  type: 'stem',
+                  color: unitColor,
+                  familyId: spInfo.family?.id || unit.primary.id,
+                  sourcePersonId: unit.primary.id,
+                  targetPersonId: spInfo.spouse.id,
+                  marriageOrder: spInfo.marriageOrder,
+                  path: `M ${marriageMidX} ${marriageMidY} L ${marriageMidX} ${unionJunctionY}`
+                });
+
+                // Calculate horizontal span of bus bar
+                const minChildX = Math.min(...childCoords.map(c => c.centerX));
+                const maxChildX = Math.max(...childCoords.map(c => c.centerX));
+                const busLeft = Math.min(marriageMidX, minChildX);
+                const busRight = Math.max(marriageMidX, maxChildX);
+
                 links.push({
                   id: `bus_${unit.primary.id}_${spInfo.spouse.id}`,
                   sourceX: busLeft,
@@ -1564,27 +1861,27 @@ export function calculateClassicFamilyTreeLayout(
                   marriageOrder: spInfo.marriageOrder,
                   path: `M ${busLeft} ${unionJunctionY} L ${busRight} ${unionJunctionY}`
                 });
-              }
 
-              // Drop lines to each child
-              childCoords.forEach(child => {
-                links.push({
-                  id: `drop_${spInfo.spouse.id}_${child.id}`,
-                  sourceX: child.centerX,
-                  sourceY: unionJunctionY,
-                  targetX: child.centerX,
-                  targetY: child.y,
-                  type: 'drop',
-                  color: unitColor,
-                  familyId: spInfo.family?.id || unit.primary.id,
-                  sourcePersonId: unit.primary.id,
-                  childPersonId: child.id,
-                  arrow: 'down',
-                  arrowX: child.centerX,
-                  arrowY: child.y,
-                  path: `M ${child.centerX} ${unionJunctionY} L ${child.centerX} ${child.y}`
+                // Drop lines to each child
+                childCoords.forEach(child => {
+                  links.push({
+                    id: `drop_${spInfo.spouse.id}_${child.id}`,
+                    sourceX: child.centerX,
+                    sourceY: unionJunctionY,
+                    targetX: child.centerX,
+                    targetY: child.y,
+                    type: 'drop',
+                    color: unitColor,
+                    familyId: spInfo.family?.id || unit.primary.id,
+                    sourcePersonId: unit.primary.id,
+                    childPersonId: child.id,
+                    arrow: 'down',
+                    arrowX: child.centerX,
+                    arrowY: child.y,
+                    path: `M ${child.centerX} ${unionJunctionY} L ${child.centerX} ${child.y}`
+                  });
                 });
-              });
+              }
             }
           }
         });
@@ -1601,26 +1898,49 @@ export function calculateClassicFamilyTreeLayout(
             .filter(c => c && c.centerX !== undefined);
 
           if (childCoords.length > 0) {
-            // Vertical stem down to staggered junctionY
-            links.push({
-              id: `stem_${unit.primary.id}`,
-              sourceX: stemX,
-              sourceY: stemY,
-              targetX: stemX,
-              targetY: junctionY,
-              type: 'stem',
-              color: unitColor,
-              familyId: unit.primary.id,
-              sourcePersonId: unit.primary.id,
-              path: `M ${stemX} ${stemY} L ${stemX} ${junctionY}`
-            });
+            if (childCoords.length === 1) {
+              const child = childCoords[0];
+              const isDirectLine = Math.abs(stemX - child.centerX) < 3;
+              const pathStr = isDirectLine
+                ? `M ${stemX} ${stemY} L ${child.centerX} ${child.y}`
+                : `M ${stemX} ${stemY} L ${stemX} ${junctionY} L ${child.centerX} ${junctionY} L ${child.centerX} ${child.y}`;
 
-            const minChildX = Math.min(...childCoords.map(c => c.centerX));
-            const maxChildX = Math.max(...childCoords.map(c => c.centerX));
-            const busLeft = Math.min(stemX, minChildX);
-            const busRight = Math.max(stemX, maxChildX);
+              links.push({
+                id: `drop_${unit.primary.id}_${child.id}`,
+                sourceX: stemX,
+                sourceY: stemY,
+                targetX: child.centerX,
+                targetY: child.y,
+                type: 'drop',
+                color: unitColor,
+                familyId: unit.primary.id,
+                sourcePersonId: unit.primary.id,
+                childPersonId: child.id,
+                arrow: 'down',
+                arrowX: child.centerX,
+                arrowY: child.y,
+                path: pathStr
+              });
+            } else {
+              // Vertical stem down to staggered junctionY
+              links.push({
+                id: `stem_${unit.primary.id}`,
+                sourceX: stemX,
+                sourceY: stemY,
+                targetX: stemX,
+                targetY: junctionY,
+                type: 'stem',
+                color: unitColor,
+                familyId: unit.primary.id,
+                sourcePersonId: unit.primary.id,
+                path: `M ${stemX} ${stemY} L ${stemX} ${junctionY}`
+              });
 
-            if (busLeft !== busRight || childCoords.length > 1) {
+              const minChildX = Math.min(...childCoords.map(c => c.centerX));
+              const maxChildX = Math.max(...childCoords.map(c => c.centerX));
+              const busLeft = Math.min(stemX, minChildX);
+              const busRight = Math.max(stemX, maxChildX);
+
               links.push({
                 id: `bus_${unit.primary.id}`,
                 sourceX: busLeft,
@@ -1633,26 +1953,26 @@ export function calculateClassicFamilyTreeLayout(
                 sourcePersonId: unit.primary.id,
                 path: `M ${busLeft} ${junctionY} L ${busRight} ${junctionY}`
               });
-            }
 
-            childCoords.forEach(child => {
-              links.push({
-                id: `drop_${unit.primary.id}_${child.id}`,
-                sourceX: child.centerX,
-                sourceY: junctionY,
-                targetX: child.centerX,
-                targetY: child.y,
-                type: 'drop',
-                color: unitColor,
-                familyId: unit.primary.id,
-                sourcePersonId: unit.primary.id,
-                childPersonId: child.id,
-                arrow: 'down',
-                arrowX: child.centerX,
-                arrowY: child.y,
-                path: `M ${child.centerX} ${junctionY} L ${child.centerX} ${child.y}`
+              childCoords.forEach(child => {
+                links.push({
+                  id: `drop_${unit.primary.id}_${child.id}`,
+                  sourceX: child.centerX,
+                  sourceY: junctionY,
+                  targetX: child.centerX,
+                  targetY: child.y,
+                  type: 'drop',
+                  color: unitColor,
+                  familyId: unit.primary.id,
+                  sourcePersonId: unit.primary.id,
+                  childPersonId: child.id,
+                  arrow: 'down',
+                  arrowX: child.centerX,
+                  arrowY: child.y,
+                  path: `M ${child.centerX} ${junctionY} L ${child.centerX} ${child.y}`
+                });
               });
-            });
+            }
           }
         }
       }
@@ -1665,6 +1985,24 @@ export function calculateClassicFamilyTreeLayout(
   nodes.forEach(n => {
     finalMaxX = Math.max(finalMaxX, n.x + n.width + 120);
     finalMaxY = Math.max(finalMaxY, n.y + n.height + 120);
+  });
+
+  // Guarantee strictly unique node and link IDs within layout
+  const seenNodeIds = new Map<string, number>();
+  nodes.forEach((n, idx) => {
+    const count = (seenNodeIds.get(n.id) || 0) + 1;
+    seenNodeIds.set(n.id, count);
+    if (count > 1) {
+      n.id = `${n.id}__node_${count}_${idx}`;
+    }
+  });
+  const seenLinkIds = new Map<string, number>();
+  links.forEach((l, idx) => {
+    const count = (seenLinkIds.get(l.id) || 0) + 1;
+    seenLinkIds.set(l.id, count);
+    if (count > 1) {
+      l.id = `${l.id}__link_${count}_${idx}`;
+    }
   });
 
   return {
@@ -2116,11 +2454,29 @@ export function calculateHorizontalFamilyTreeLayout(
           if (!isPersonACollapsedSibling(sId)) enqueuePerson(sId, gen);
         });
       }
+      if (database.families) {
+        Object.values(database.families).forEach((fam) => {
+          const isChild = (fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)) ||
+                          (Array.isArray(fam.childrenIds) && fam.childrenIds.includes(p.id));
+          if (isChild) {
+            const rawChildren = [
+              ...(Array.isArray(fam.children) ? fam.children : []),
+              ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+            ].map((c: any) => typeof c === 'string' ? c : c?.personId || c?.id).filter(Boolean);
+
+            rawChildren.forEach((sibId) => {
+              if (sibId !== p.id && !isPersonACollapsedSibling(sibId)) {
+                enqueuePerson(sibId, gen);
+              }
+            });
+          }
+        });
+      }
       Object.values(database.persons).forEach(cand => {
         if (cand.id !== p.id && !personGen.has(cand.id)) {
           const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
           const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-          const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id)) || (p.siblingIds && p.siblingIds.includes(cand.id));
+          const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id)) || (p.siblingIds && p.siblingIds.includes(cand.id)) || (p.parentFamilyId && cand.parentFamilyId && p.parentFamilyId === cand.parentFamilyId);
           if (isSibling && !isPersonACollapsedSibling(cand.id)) {
             enqueuePerson(cand.id, gen);
           }
@@ -2219,13 +2575,20 @@ export function calculateHorizontalFamilyTreeLayout(
         }
 
         const unionChildren = new Set<string>();
+        if (matchedFam?.childrenIds) {
+          matchedFam.childrenIds.forEach((cId: string) => unionChildren.add(cId));
+        }
         if (matchedFam?.children) {
-          matchedFam.children.forEach((c: any) => unionChildren.add(c.personId || c.id));
+          matchedFam.children.forEach((c: any) => {
+            const cId = typeof c === 'string' ? c : (c?.personId || c?.id);
+            if (cId) unionChildren.add(cId);
+          });
         }
         Object.values(database.persons).forEach(candChild => {
           if (
             (candChild.fatherId === p.id && candChild.motherId === sp.id) ||
-            (candChild.fatherId === sp.id && candChild.motherId === p.id)
+            (candChild.fatherId === sp.id && candChild.motherId === p.id) ||
+            (matchedFam?.id && candChild.parentFamilyId === matchedFam.id)
           ) {
             unionChildren.add(candChild.id);
           }
@@ -2267,7 +2630,13 @@ export function calculateHorizontalFamilyTreeLayout(
       if (p.spouseFamilyIds) {
         p.spouseFamilyIds.forEach(fId => {
           const fam = database.families[fId];
-          if (fam?.children) fam.children.forEach((c: any) => allChildren.add(c.personId || c.id));
+          if (fam?.childrenIds) fam.childrenIds.forEach((cId: string) => allChildren.add(cId));
+          if (fam?.children) {
+            fam.children.forEach((c: any) => {
+              const cId = typeof c === 'string' ? c : (c?.personId || c?.id);
+              if (cId) allChildren.add(cId);
+            });
+          }
         });
       }
       Object.values(database.persons).forEach(candChild => {
@@ -2345,13 +2714,28 @@ export function calculateHorizontalFamilyTreeLayout(
     if (!p) return { fatherId: undefined, motherId: undefined };
     let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
     let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-    if (!fId && !mId && database.families) {
-      const matchingFam = Object.values(database.families).find(fam =>
-        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
-      );
-      if (matchingFam) {
-        fId = matchingFam.husbandId;
-        mId = matchingFam.wifeId;
+    if ((!fId || !mId) && database.families) {
+      for (const fam of Object.values(database.families)) {
+        const rawChildren = [
+          ...(Array.isArray(fam.children) ? fam.children : []),
+          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
+        if (rawChildren.includes(p.id) || (p.parentFamilyId && fam.id === p.parentFamilyId)) {
+          if (!fId && fam.husbandId) fId = fam.husbandId;
+          if (!mId && fam.wifeId) mId = fam.wifeId;
+        }
+      }
+    }
+    if ((!fId || !mId) && database.persons) {
+      for (const parentCandidate of Object.values(database.persons)) {
+        const cIds = parentCandidate.childrenIds || [];
+        if (cIds.includes(p.id)) {
+          if (parentCandidate.gender === 'female' || parentCandidate.gender === 'F') {
+            if (!mId) mId = parentCandidate.id;
+          } else {
+            if (!fId) fId = parentCandidate.id;
+          }
+        }
       }
     }
     return { fatherId: fId, motherId: mId };
@@ -2363,12 +2747,35 @@ export function calculateHorizontalFamilyTreeLayout(
     const p2 = database.persons[pId2];
     if (!p1 || !p2) return false;
     if (p1.siblingIds?.includes(pId2) || p2.siblingIds?.includes(pId1)) return true;
+    if (p1.parentFamilyId && p2.parentFamilyId && p1.parentFamilyId === p2.parentFamilyId) return true;
     const par1 = getParentsOfPerson(pId1);
     const par2 = getParentsOfPerson(pId2);
-    return Boolean(
-      (par1.fatherId && par1.fatherId === par2.fatherId) ||
-      (par1.motherId && par1.motherId === par2.motherId)
-    );
+    if ((par1.fatherId && par1.fatherId === par2.fatherId) ||
+        (par1.motherId && par1.motherId === par2.motherId)) {
+      return true;
+    }
+    if (database.families) {
+      for (const fam of Object.values(database.families)) {
+        const rawChildren = [
+          ...(Array.isArray(fam.children) ? fam.children : []),
+          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
+        if (rawChildren.includes(pId1) && rawChildren.includes(pId2)) return true;
+      }
+    }
+    return false;
+  };
+
+  const unitsAreSiblings = (u1: Unit, u2: Unit): boolean => {
+    if (!u1 || !u2 || u1 === u2) return false;
+    const ids1 = [u1.primary.id, ...(u1.spouses?.map(s => s.spouse.id) || [])];
+    const ids2 = [u2.primary.id, ...(u2.spouses?.map(s => s.spouse.id) || [])];
+    for (const id1 of ids1) {
+      for (const id2 of ids2) {
+        if (areSiblings(id1, id2)) return true;
+      }
+    }
+    return false;
   };
 
   const getPersonCenterYInUnits = (personId: string, uList: Unit[]): number | undefined => {
@@ -2387,136 +2794,293 @@ export function calculateHorizontalFamilyTreeLayout(
     return undefined;
   };
 
-  // Initial vertical placement per generation with family-aware clustering
-  genUnits.forEach((units) => {
-    const orderedUnits: Unit[] = [];
-    const usedUnitPrimaries = new Set<string>();
+  // Family Cluster definition for strictly keeping siblings contiguous in horizontal layout
+  interface HorizontalFamilyCluster {
+    key: string;
+    parentUnit?: Unit;
+    parentUnitIndex: number;
+    units: Unit[];
+    height: number;
+    y: number;
+  }
 
-    const getUnitPersonIds = (u: Unit): string[] => {
-      const ids = [u.primary.id];
-      if (u.spouses) {
-        u.spouses.forEach(s => ids.push(s.spouse.id));
+  const getParentUnitForPersonH = (personId: string, parentUnits: Unit[]): Unit | undefined => {
+    for (const pu of parentUnits) {
+      if (pu.childrenIds && pu.childrenIds.includes(personId)) return pu;
+      if (pu.spouses) {
+        for (const sp of pu.spouses) {
+          if (sp.childrenIds && sp.childrenIds.includes(personId)) return pu;
+        }
       }
-      return ids;
-    };
+    }
+    const { fatherId, motherId } = getParentsOfPerson(personId);
+    for (const pu of parentUnits) {
+      const puIds = [pu.primary.id, ...(pu.spouses?.map(s => s.spouse.id) || [])];
+      if ((fatherId && puIds.includes(fatherId)) || (motherId && puIds.includes(motherId))) {
+        return pu;
+      }
+    }
+    if (database.families) {
+      for (const fam of Object.values(database.families)) {
+        const rawChildren = [
+          ...(Array.isArray(fam.children) ? fam.children : []),
+          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
+        if (rawChildren.includes(personId)) {
+          for (const pu of parentUnits) {
+            const puIds = [pu.primary.id, ...(pu.spouses?.map(s => s.spouse.id) || [])];
+            if ((fam.husbandId && puIds.includes(fam.husbandId)) || (fam.wifeId && puIds.includes(fam.wifeId))) {
+              return pu;
+            }
+          }
+        }
+      }
+    }
+    return undefined;
+  };
 
-    const findSiblingUnitsOf = (personId: string, exclude: Unit[]): Unit[] => {
-      return units.filter(u => {
-        if (usedUnitPrimaries.has(u.primary.id)) return false;
-        if (exclude.some(ex => ex.primary.id === u.primary.id)) return false;
-        const pIds = getUnitPersonIds(u);
-        return pIds.some(pId => areSiblings(pId, personId));
-      });
-    };
+  const getChildPersonInUnitH = (u: Unit, pUnit?: Unit): Person => {
+    if (!pUnit) return u.primary;
+    if (pUnit.childrenIds && pUnit.childrenIds.includes(u.primary.id)) return u.primary;
+    if (u.spouses) {
+      for (const sp of u.spouses) {
+        if (pUnit.childrenIds && pUnit.childrenIds.includes(sp.spouse.id)) return sp.spouse;
+        if (sp.childrenIds && sp.childrenIds.includes(u.primary.id)) return u.primary;
+      }
+    }
+    const { fatherId, motherId } = getParentsOfPerson(u.primary.id);
+    const puIds = [pUnit.primary.id, ...(pUnit.spouses?.map(s => s.spouse.id) || [])];
+    if ((fatherId && puIds.includes(fatherId)) || (motherId && puIds.includes(motherId))) {
+      return u.primary;
+    }
+    if (u.spouses) {
+      for (const sp of u.spouses) {
+        const spPars = getParentsOfPerson(sp.spouse.id);
+        if ((spPars.fatherId && puIds.includes(spPars.fatherId)) || (spPars.motherId && puIds.includes(spPars.motherId))) {
+          return sp.spouse;
+        }
+      }
+    }
+    return u.primary;
+  };
 
-    const coupleUnits = units.filter(u => (u.type === 'couple' || u.type === 'multi_spouse') && u.spouses.length > 0);
+  // Initial vertical placement per generation with strict family-aware clustering
+  const genClustersH = new Map<number, HorizontalFamilyCluster[]>();
 
-    coupleUnits.forEach(cUnit => {
-      if (usedUnitPrimaries.has(cUnit.primary.id)) return;
-      const primarySiblings = findSiblingUnitsOf(cUnit.primary.id, [cUnit]);
-      primarySiblings.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
+  for (let gen = 0; gen < totalGens; gen++) {
+    const units = genUnits.get(gen) || [];
+    if (units.length === 0) continue;
 
-      const spouseSiblings: Unit[] = [];
-      cUnit.spouses.forEach(sp => {
-        const sibs = findSiblingUnitsOf(sp.spouse.id, [cUnit, ...primarySiblings, ...spouseSiblings]);
+    if (gen === 0) {
+      const clusters: HorizontalFamilyCluster[] = [];
+      const usedPrimaries = new Set<string>();
+
+      // Group sibling units together
+      units.forEach(u => {
+        if (usedPrimaries.has(u.primary.id)) return;
+        const sibs = units.filter(cand => !usedPrimaries.has(cand.primary.id) && (cand.primary.id === u.primary.id || unitsAreSiblings(u, cand)));
+        sibs.forEach(s => usedPrimaries.add(s.primary.id));
         sibs.sort((a, b) => comparePersonsByAge(a.primary, b.primary));
-        spouseSiblings.push(...sibs);
+        const cHeight = sibs.reduce((acc, s) => acc + s.height, 0) + (sibs.length - 1) * HORIZONTAL_SIBLING_GAP;
+        clusters.push({
+          key: `c_gen0_${u.primary.id}`,
+          parentUnitIndex: clusters.length,
+          units: sibs,
+          height: cHeight,
+          y: 80
+        });
       });
 
-      primarySiblings.forEach(u => usedUnitPrimaries.add(u.primary.id));
-      usedUnitPrimaries.add(cUnit.primary.id);
-      spouseSiblings.forEach(u => usedUnitPrimaries.add(u.primary.id));
+      let curY = 80;
+      clusters.forEach(c => {
+        c.y = curY;
+        let unitY = c.y;
+        c.units.forEach(u => {
+          u.y = unitY;
+          unitY += u.height + HORIZONTAL_SIBLING_GAP;
+        });
+        curY += c.height + HORIZONTAL_FAMILY_GAP;
+      });
 
-      orderedUnits.push(...primarySiblings, cUnit, ...spouseSiblings);
-    });
+      genClustersH.set(gen, clusters);
+      units.splice(0, units.length, ...clusters.flatMap(c => c.units));
+    } else {
+      const parentUnits = genUnits.get(gen - 1) || [];
+      const clusterMap = new Map<string, HorizontalFamilyCluster>();
 
-    const remainingUnits = units.filter(u => !usedUnitPrimaries.has(u.primary.id));
-    remainingUnits.sort((uA, uB) => {
-      const share = areSiblings(uA.primary.id, uB.primary.id);
-      if (share) return comparePersonsByAge(uA.primary, uB.primary);
-      return 0;
-    });
-    orderedUnits.push(...remainingUnits);
-    units.splice(0, units.length, ...orderedUnits);
+      units.forEach(u => {
+        // 1. Direct parent unit lookup for primary and spouse
+        const pUnitForPrimary = getParentUnitForPersonH(u.primary.id, parentUnits);
+        let pUnitForSpouse: Unit | undefined;
+        if (u.spouses) {
+          for (const sp of u.spouses) {
+            const found = getParentUnitForPersonH(sp.spouse.id, parentUnits);
+            if (found) {
+              pUnitForSpouse = found;
+              break;
+            }
+          }
+        }
 
-    let currentY = 80;
-    units.forEach((unit, idx) => {
-      unit.y = currentY;
-      const isNextDifferentFamily = idx < units.length - 1 && units[idx + 1].primary.parentFamilyId !== unit.primary.parentFamilyId;
-      currentY += unit.height + (isNextDifferentFamily ? HORIZONTAL_FAMILY_GAP : HORIZONTAL_SIBLING_GAP);
-    });
-  });
+        // 2. Sibling unity: check if u is a sibling of an already clustered unit
+        let siblingParentUnit: Unit | undefined;
+        let siblingClusterKey: string | undefined;
+        for (const [existingKey, existingCluster] of clusterMap.entries()) {
+          if (existingCluster.units.some(eu => unitsAreSiblings(u, eu))) {
+            siblingParentUnit = existingCluster.parentUnit;
+            siblingClusterKey = existingKey;
+            break;
+          }
+        }
+
+        let chosenParentUnit: Unit | undefined;
+        let clusterKey: string;
+
+        if (siblingClusterKey && clusterMap.has(siblingClusterKey)) {
+          clusterKey = siblingClusterKey;
+          chosenParentUnit = siblingParentUnit;
+        } else {
+          if (pUnitForPrimary && pUnitForSpouse && pUnitForPrimary !== pUnitForSpouse) {
+            const primarySibCount = units.filter(cand => cand !== u && cand.primary.id !== u.primary.id && (cand.primary.id === pUnitForPrimary.primary.id || unitsAreSiblings(u, cand))).length;
+            const spouseSibCount = units.filter(cand => cand !== u && cand.primary.id !== u.primary.id && (cand.primary.id === pUnitForSpouse!.primary.id || unitsAreSiblings(u, cand))).length;
+            if (primarySibCount >= spouseSibCount) {
+              chosenParentUnit = pUnitForPrimary;
+            } else {
+              chosenParentUnit = pUnitForSpouse;
+            }
+          } else {
+            chosenParentUnit = pUnitForPrimary || pUnitForSpouse;
+          }
+
+          if (!chosenParentUnit) {
+            for (const otherUnit of units) {
+              if (otherUnit !== u && unitsAreSiblings(u, otherUnit)) {
+                const otherPUnit = getParentUnitForPersonH(otherUnit.primary.id, parentUnits) ||
+                  (otherUnit.spouses?.[0] ? getParentUnitForPersonH(otherUnit.spouses[0].spouse.id, parentUnits) : undefined);
+                if (otherPUnit) {
+                  chosenParentUnit = otherPUnit;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (chosenParentUnit) {
+            clusterKey = `parent_${chosenParentUnit.primary.id}`;
+          } else {
+            const siblingIds = units
+              .filter(cand => cand === u || unitsAreSiblings(u, cand))
+              .map(cand => cand.primary.id)
+              .sort();
+            clusterKey = `unaffiliated_sibs_${siblingIds[0] || u.primary.id}`;
+          }
+        }
+
+        if (!clusterMap.has(clusterKey)) {
+          const parentIdx = chosenParentUnit
+            ? parentUnits.findIndex(pu => pu.primary.id === chosenParentUnit!.primary.id)
+            : 9999;
+          clusterMap.set(clusterKey, {
+            key: clusterKey,
+            parentUnit: chosenParentUnit,
+            parentUnitIndex: parentIdx !== -1 ? parentIdx : 9999,
+            units: [],
+            height: 0,
+            y: 0
+          });
+        }
+        clusterMap.get(clusterKey)!.units.push(u);
+      });
+
+      const clusters = Array.from(clusterMap.values());
+      clusters.sort((cA, cB) => cA.parentUnitIndex - cB.parentUnitIndex);
+
+      // Sort units WITHIN each cluster chronologically by child age (oldest to youngest)
+      clusters.forEach(c => {
+        c.units.sort((uA, uB) => {
+          const childA = getChildPersonInUnitH(uA, c.parentUnit);
+          const childB = getChildPersonInUnitH(uB, c.parentUnit);
+          return comparePersonsByAge(childA, childB);
+        });
+
+        c.height = c.units.reduce((acc, u) => acc + u.height, 0) + (c.units.length - 1) * HORIZONTAL_SIBLING_GAP;
+      });
+
+      let minClusterY = 80;
+      clusters.forEach(c => {
+        if (c.parentUnit) {
+          const pCenter = c.parentUnit.y + c.parentUnit.height / 2;
+          c.y = pCenter - c.height / 2;
+        } else {
+          c.y = minClusterY;
+        }
+        if (c.y < minClusterY) {
+          c.y = minClusterY;
+        }
+        minClusterY = c.y + c.height + HORIZONTAL_FAMILY_GAP;
+
+        let curUnitY = c.y;
+        c.units.forEach(u => {
+          u.y = curUnitY;
+          curUnitY += u.height + HORIZONTAL_SIBLING_GAP;
+        });
+      });
+
+      genClustersH.set(gen, clusters);
+      units.splice(0, units.length, ...clusters.flatMap(c => c.units));
+    }
+  }
 
   // Vertical Centering & Alignment passes
   for (let pass = 0; pass < 3; pass++) {
     // Bottom-up pass: align parents to children's vertical center
     for (let gen = totalGens - 2; gen >= 0; gen--) {
       const parentUnits = genUnits.get(gen) || [];
-      const childUnits = genUnits.get(gen + 1) || [];
+      const childClusters = genClustersH.get(gen + 1) || [];
 
       parentUnits.forEach((pUnit) => {
-        if (pUnit.childrenIds.length > 0) {
-          const childCenters: number[] = [];
-          pUnit.childrenIds.forEach(cId => {
-            const cy = getPersonCenterYInUnits(cId, childUnits);
-            if (cy !== undefined) childCenters.push(cy);
-          });
-          if (childCenters.length > 0) {
-            const minCy = Math.min(...childCenters);
-            const maxCy = Math.max(...childCenters);
-            const childrenCenterY = (minCy + maxCy) / 2;
-            pUnit.y = childrenCenterY - pUnit.height / 2;
-          }
+        const matchedCluster = childClusters.find(c => c.parentUnit && c.parentUnit.primary.id === pUnit.primary.id);
+        if (matchedCluster) {
+          const clusterCenter = matchedCluster.y + matchedCluster.height / 2;
+          pUnit.y = clusterCenter - pUnit.height / 2;
         }
       });
 
-      // Prevent overlapping along Y
-      parentUnits.sort((a, b) => a.y - b.y);
-      for (let i = 1; i < parentUnits.length; i++) {
-        const prev = parentUnits[i - 1];
-        const curr = parentUnits[i];
-        const gap = (prev.primary.parentFamilyId && curr.primary.parentFamilyId && prev.primary.parentFamilyId === curr.primary.parentFamilyId)
+      // Prevent overlapping along Y while preserving parent order
+      let pMinY = 80;
+      for (let i = 0; i < parentUnits.length; i++) {
+        const pu = parentUnits[i];
+        if (pu.y < pMinY) pu.y = pMinY;
+        const nextGap = (i < parentUnits.length - 1 && unitsAreSiblings(pu, parentUnits[i + 1]))
           ? HORIZONTAL_SIBLING_GAP
           : HORIZONTAL_FAMILY_GAP;
-        if (curr.y < prev.y + prev.height + gap) {
-          curr.y = prev.y + prev.height + gap;
-        }
+        pMinY = pu.y + pu.height + nextGap;
       }
     }
 
     // Top-down pass: align children under parents
     for (let gen = 0; gen < totalGens - 1; gen++) {
-      const parentUnits = genUnits.get(gen) || [];
-      const childUnits = genUnits.get(gen + 1) || [];
+      const childClusters = genClustersH.get(gen + 1) || [];
 
-      parentUnits.forEach((pUnit) => {
-        if (pUnit.childrenIds.length > 0) {
-          const parentCenterY = pUnit.y + pUnit.height / 2;
-          const directChildUnits = childUnits.filter(cu => pUnit.childrenIds.includes(cu.primary.id));
-          if (directChildUnits.length > 0) {
-            const childCenters = directChildUnits.map(cu => cu.y + cu.height / 2);
-            const minCy = Math.min(...childCenters);
-            const maxCy = Math.max(...childCenters);
-            const currChildrenCenterY = (minCy + maxCy) / 2;
-            const shiftY = parentCenterY - currChildrenCenterY;
-            directChildUnits.forEach(cu => {
-              cu.y += shiftY;
-            });
-          }
+      childClusters.forEach((c) => {
+        if (c.parentUnit) {
+          const parentCenter = c.parentUnit.y + c.parentUnit.height / 2;
+          c.y = parentCenter - c.height / 2;
         }
       });
 
-      // Prevent overlapping along Y
-      childUnits.sort((a, b) => a.y - b.y);
-      for (let i = 1; i < childUnits.length; i++) {
-        const prev = childUnits[i - 1];
-        const curr = childUnits[i];
-        const gap = (prev.primary.parentFamilyId && curr.primary.parentFamilyId && prev.primary.parentFamilyId === curr.primary.parentFamilyId)
-          ? HORIZONTAL_SIBLING_GAP
-          : HORIZONTAL_FAMILY_GAP;
-        if (curr.y < prev.y + prev.height + gap) {
-          curr.y = prev.y + prev.height + gap;
-        }
+      // Prevent overlapping along Y while preserving cluster order
+      let cMinY = 80;
+      for (let i = 0; i < childClusters.length; i++) {
+        const c = childClusters[i];
+        if (c.y < cMinY) c.y = cMinY;
+        cMinY = c.y + c.height + HORIZONTAL_FAMILY_GAP;
+
+        let curUnitY = c.y;
+        c.units.forEach((u) => {
+          u.y = curUnitY;
+          curUnitY += u.height + HORIZONTAL_SIBLING_GAP;
+        });
       }
     }
   }
@@ -2579,7 +3143,15 @@ export function calculateHorizontalFamilyTreeLayout(
         (fId && (cand.fatherId === fId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.husbandId === fId))) ||
         (mId && (cand.motherId === mId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.wifeId === mId))) ||
         (p.siblingIds && p.siblingIds.includes(cand.id)) ||
-        (cand.siblingIds && cand.siblingIds.includes(p.id))
+        (cand.siblingIds && cand.siblingIds.includes(p.id)) ||
+        (p.parentFamilyId && cand.parentFamilyId && p.parentFamilyId === cand.parentFamilyId) ||
+        (database.families && Object.values(database.families).some(fam => {
+          const rawChildren = [
+            ...(Array.isArray(fam.children) ? fam.children : []),
+            ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+          ].map((c: any) => typeof c === 'string' ? c : c?.personId || c?.id).filter(Boolean);
+          return rawChildren.includes(p.id) && rawChildren.includes(cand.id);
+        }))
       )
     );
     siblingCount = sibs.length;
@@ -2927,6 +3499,24 @@ export function calculateHorizontalFamilyTreeLayout(
   nodes.forEach(n => {
     finalMaxX = Math.max(finalMaxX, n.x + n.width + 160);
     finalMaxY = Math.max(finalMaxY, n.y + n.height + 160);
+  });
+
+  // Guarantee strictly unique node and link IDs within layout
+  const seenNodeIds = new Map<string, number>();
+  nodes.forEach((n, idx) => {
+    const count = (seenNodeIds.get(n.id) || 0) + 1;
+    seenNodeIds.set(n.id, count);
+    if (count > 1) {
+      n.id = `${n.id}__node_${count}_${idx}`;
+    }
+  });
+  const seenLinkIds = new Map<string, number>();
+  links.forEach((l, idx) => {
+    const count = (seenLinkIds.get(l.id) || 0) + 1;
+    seenLinkIds.set(l.id, count);
+    if (count > 1) {
+      l.id = `${l.id}__link_${count}_${idx}`;
+    }
   });
 
   return {

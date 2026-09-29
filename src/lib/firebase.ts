@@ -1,6 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
-  initializeFirestore,
   getFirestore,
   doc,
   collection,
@@ -77,27 +76,8 @@ export function getDbInstance(): Firestore | null {
     const config = getFirebaseConfig();
     const dbId = config.firestoreDatabaseId;
 
-    try {
-      if (dbId) {
-        cachedDb = initializeFirestore(
-          app,
-          {
-            experimentalAutoDetectLongPolling: true
-          },
-          dbId
-        );
-      } else {
-        cachedDb = initializeFirestore(app, {
-          experimentalAutoDetectLongPolling: true
-        });
-      }
-    } catch {
-      try {
-        cachedDb = dbId ? getFirestore(app, dbId) : getFirestore(app);
-      } catch {
-        cachedDb = getFirestore(app);
-      }
-    }
+    // Use standard Firestore client with default auto-negotiating transport according to Firebase skill
+    cachedDb = dbId ? getFirestore(app, dbId) : getFirestore(app);
   } catch (e) {
     console.warn('Firebase Firestore initialization warning:', e);
   }
@@ -121,15 +101,28 @@ export function getFirebaseAuth(): Auth | null {
 export const db = getDbInstance();
 
 // Test connection on boot according to skill guidelines
-if (typeof window !== 'undefined') {
-  setTimeout(() => {
+export async function testConnection() {
+  if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
+    return;
+  }
+  try {
     const firestore = getDbInstance();
     if (firestore) {
-      getDocFromServer(doc(firestore, 'projects', 'healthCheck'))
-        .catch(() => {
-          // Silent offline / cache resilience
-        });
+      await getDocFromServer(doc(firestore, 'test', 'connection'));
     }
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (errMsg.includes('the client is offline') || (error as any)?.code === 'unavailable' || errMsg.includes('unavailable')) {
+      // Gracefully silent: Firestore operates in local/offline cache mode
+    } else {
+      console.warn('Firestore connection check notice:', errMsg);
+    }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    testConnection().catch(() => {});
   }, 1000);
 }
 
@@ -147,16 +140,53 @@ export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const currentAuth = getFirebaseAuth();
+  const currentUser = currentAuth?.currentUser;
+  const errMsg = error instanceof Error ? error.message : String(error);
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     operationType,
-    path
+    path,
+    authInfo: {
+      userId: currentUser?.uid || null,
+      email: currentUser?.email || null,
+      emailVerified: currentUser?.emailVerified || null,
+      isAnonymous: currentUser?.isAnonymous || null,
+      tenantId: currentUser?.tenantId || null,
+      providerInfo:
+        currentUser?.providerData?.map((p) => ({
+          providerId: p.providerId,
+          email: p.email
+        })) || []
+    }
   };
-  console.warn('Firestore Error Notice: ', JSON.stringify(errInfo));
-  return errInfo;
+
+  const isPermissionDenied =
+    errMsg.toLowerCase().includes('missing or insufficient permissions') ||
+    errMsg.toLowerCase().includes('permission-denied');
+
+  if (isPermissionDenied) {
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    throw new Error(JSON.stringify(errInfo));
+  } else {
+    console.warn('Firestore Notice: ', JSON.stringify(errInfo));
+    return errInfo;
+  }
 }
 
 // Authentication Helpers
@@ -917,6 +947,7 @@ export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_P
     families?: any[];
     events?: any[];
     sources?: any[];
+    places?: any[];
     metricRecords?: any[];
     documents?: any[];
     tasks?: any[];

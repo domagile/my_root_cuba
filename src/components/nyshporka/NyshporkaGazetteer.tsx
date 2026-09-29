@@ -731,11 +731,11 @@ export const NyshporkaGazetteer: React.FC<NyshporkaGazetteerProps> = ({ theme, o
                         У вашому дереві зафіксовано осіб із цією локацією:
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {relatedPersons.map((p) => {
+                        {relatedPersons.map((p, pIdx) => {
                           const pName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''}`.trim();
                           return (
                             <span
-                              key={p.id}
+                              key={`rel_p_${p.id}_${pIdx}`}
                               className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
                             >
                               <strong>{pName}</strong>

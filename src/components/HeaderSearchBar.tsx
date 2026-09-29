@@ -360,7 +360,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
 
                 return (
                   <div
-                    key={person.id}
+                    key={`${person.id}_${idx}`}
                     onClick={() => handleSelectPersonInTree(person.id)}
                     className={`group p-2.5 sm:px-3 sm:py-2.5 flex items-start justify-between gap-2.5 transition-all cursor-pointer ${
                       isSelected 

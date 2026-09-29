@@ -339,9 +339,9 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
                       </div>
 
                       <div className="flex flex-wrap gap-1 pt-1">
-                        {clan.persons.slice(0, 3).map((p) => (
+                        {clan.persons.slice(0, 3).map((p, pIdx) => (
                           <button
-                            key={p.id}
+                            key={`${p.id}_${pIdx}`}
                             type="button"
                             onClick={() => onSelectPerson(p.id)}
                             className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors truncate max-w-[140px] cursor-pointer ${
@@ -721,7 +721,7 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {stats.longestLived.map((item, idx) => (
                   <div
-                    key={item.person.id}
+                    key={`${item.person.id}_${idx}`}
                     onClick={() => onSelectPerson(item.person.id)}
                     className={`p-3.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} hover:border-amber-500/50 transition-all cursor-pointer space-y-1.5 group`}
                   >
@@ -762,7 +762,7 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {stats.oldestLiving.map((item, idx) => (
                   <div
-                    key={item.person.id}
+                    key={`${item.person.id}_${idx}`}
                     onClick={() => onSelectPerson(item.person.id)}
                     className={`p-3.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} hover:border-emerald-500/50 transition-all cursor-pointer space-y-1.5 group`}
                     title="Натисніть для переходу до анкети особи"

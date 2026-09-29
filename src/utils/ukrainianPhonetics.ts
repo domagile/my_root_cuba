@@ -240,6 +240,112 @@ export function areSurnamesEquivalent(surnameA: string, surnameB: string): boole
 }
 
 /**
+ * Normalizes general Cyrillic text across Ukrainian and Russian genealogical records:
+ * Unifies archaic imperial letters, vowel shifts, and soft glides.
+ */
+export function normalizeBilingualCyrillic(text: string): string {
+  if (!text) return '';
+  let s = text
+    .toLowerCase()
+    .replace(/[`'’ʼ«»""()]/g, '')
+    .replace(/ѣ/g, 'і') // Ять -> і
+    .replace(/ѳ/g, 'ф') // Фіта -> ф
+    .replace(/ѵ/g, 'і') // Іжиця -> і
+    .replace(/ъ/g, '')  // Єр -> видаляємо
+    .replace(/ы/g, 'и') // російське ы -> укр и
+    .replace(/э/g, 'е')
+    .replace(/ё/g, 'е')
+    .replace(/i/g, 'і')
+    .replace(/[\u0300-\u036f]/g, '') // наголоси
+    .trim();
+
+  // Cross-lingual Russian-Ukrainian historical root alternations:
+  s = s.replace(/бело/g, 'біло')
+       .replace(/черно/g, 'чорно')
+       .replace(/седо/g, 'сиво')
+       .replace(/дед/g, 'дід')
+       .replace(/кот/g, 'кіт')
+       .replace(/волк/g, 'вовк')
+       .replace(/нос/g, 'ніс');
+
+  // Phonetic vowel harmonisation:
+  // Unify і, ї, и -> і
+  // Unify е, є -> е
+  s = s.replace(/[иії]/g, 'і')
+       .replace(/[еє]/g, 'е');
+
+  return s;
+}
+
+/**
+ * Normalizes surname for bilingual (Ukrainian <-> Russian) comparison:
+ * Handles adjectival endings (-ский/-ський, -цкий/-цький, -ый/-ий/-ая/-а),
+ * patronymic endings (-ова/-ов, -ева/-ев, -єва/-єв, -енков/-енко),
+ * and phonetics.
+ */
+export function normalizeSurnameForBilingualComparison(surname: string): string {
+  if (!surname) return '';
+  let s = surname.replace(/^(?:Рід|рід|Сім'я|сім'я)\s+/i, '').trim().toLowerCase();
+  if (!s) return '';
+
+  // 1. Remove quotes, accents and apostrophes for phonetic alignment
+  s = s.replace(/[`'’ʼ]/g, '').replace(/[«»""()]/g, '');
+
+  // 2. Standardize imperial & gender suffixes:
+  // -ський, -ська, -ських, -ські, -ский, -ская, -ских, -ские, -скій, -скої, -ської -> 'ськ'
+  s = s.replace(/(?:ськи[йхм]|ська|ської|ських|ські|ски[йхм]|ская|ской|ских|ские|скі[йя])$/g, 'ськ');
+  s = s.replace(/(?:цьки[йхм]|цька|цької|цьких|цькі|цки[йхм]|цкая|цкой|цких|цкие|цкі[йя])$/g, 'цьк');
+  s = s.replace(/(?:зьки[йхм]|зька|зької|зьких|зькі|зки[йхм]|зкая|зкой|зких|зкие|зкі[йя])$/g, 'зьк');
+
+  // -енков, -енкова -> -енко
+  s = s.replace(/енков[аеуы]?$/g, 'енко');
+
+  // Feminine patronymic endings: -ова -> -ов, -ева/-єва -> -ев
+  s = s.replace(/ова$/g, 'ов').replace(/[еє]ва$/g, 'ев');
+  s = s.replace(/[иі]на$/g, 'ин');
+
+  // Adjectival endings -ый/-ий/-ая/-яя/-а
+  s = s.replace(/[ыиі]й$/g, 'ий').replace(/(?:ая|яя)$/g, 'а');
+
+  // 3. Apply bilingual phonetic normalization
+  return normalizeBilingualCyrillic(s);
+}
+
+/**
+ * Check if two surnames are equivalent across Ukrainian and Russian languages:
+ * e.g. "Пирковский" ~ "Пірковський", "Белоус" ~ "Білоус", "Кузнецов" ~ "Кузнєцов",
+ * "Ковалева" ~ "Ковальова", "Лысенко" ~ "Лисенко", "Шевченко" ~ "Шевченко".
+ */
+export function areSurnamesBilingualEquivalent(surnameA: string | undefined | null, surnameB: string | undefined | null): boolean {
+  if (!surnameA || !surnameB) return false;
+  const a = surnameA.trim();
+  const b = surnameB.trim();
+  if (!a || !b) return false;
+  if (a.toLowerCase() === b.toLowerCase()) return true;
+
+  // 1. Check existing Ukrainian canonical & gender equivalence
+  if (areSurnamesEquivalent(a, b)) return true;
+
+  // 2. Normalize bilingually
+  const bNormA = normalizeSurnameForBilingualComparison(a);
+  const bNormB = normalizeSurnameForBilingualComparison(b);
+  if (bNormA && bNormB && bNormA === bNormB) return true;
+
+  // 3. Check Levenshtein on bilingual normalized strings
+  if (bNormA.length >= 3 && bNormB.length >= 3) {
+    const sim = getLevenshteinSimilarity(bNormA, bNormB);
+    if (sim >= 0.82) return true;
+  }
+
+  // 4. Check phonetic roots
+  const rootA = extractUkrainianSurnameRoot(bNormA);
+  const rootB = extractUkrainianSurnameRoot(bNormB);
+  if (rootA && rootB && rootA.length >= 3 && rootA === rootB) return true;
+
+  return false;
+}
+
+/**
  * Normalizes Ukrainian settlement/location names by stripping administrative prefixes,
  * prepositions, parish/district tails, and grammatical locative declensions
  * (e.g. "м.Бердянськ", "у с. Чернечий Яр", "Чернечому Яру", "с. Базилівка (Полтавська губ.)", "смт. Опішня" -> clean standard name)
@@ -297,10 +403,30 @@ export function normalizeUkrainianPlace(place: string): string {
     p = 'Маріуполь';
   } else if (lower === 'полтаві') {
     p = 'Полтава';
-  } else if (lower === 'києві') {
+  } else if (lower === 'києві' || lower === 'киев') {
     p = 'Київ';
-  } else if (lower === 'харкові') {
+  } else if (lower === 'харкові' || lower === 'харьков') {
     p = 'Харків';
+  } else if (lower === 'чернігові' || lower === 'чернигов') {
+    p = 'Чернігів';
+  } else if (lower === 'миколаєві' || lower === 'николаев') {
+    p = 'Миколаїв';
+  } else if (lower === 'львові' || lower === 'львов') {
+    p = 'Львів';
+  } else if (lower === 'одесі' || lower === 'одесса') {
+    p = 'Одеса';
+  } else if (lower === 'запоріжжі' || lower === 'запорожье') {
+    p = 'Запоріжжя';
+  } else if (lower === 'кривому розі' || lower === 'кривой рог') {
+    p = 'Кривий Ріг';
+  } else if (lower === 'кременчуці' || lower === 'кременчуг') {
+    p = 'Кременчук';
+  } else if (lower === 'дніпрі' || lower === 'днепр' || lower === 'днепропетровск') {
+    p = 'Дніпро';
+  } else if (lower === 'вінниці' || lower === 'винница') {
+    p = 'Вінниця';
+  } else if (lower === 'житомирі' || lower === 'житомир') {
+    p = 'Житомир';
   } else if (lower.endsWith('івці') && lower.length > 5) {
     // Базилівці -> Базилівка, Яремівці -> Яремівка
     p = `${p.slice(0, -4)}івка`;
@@ -466,6 +592,15 @@ export function areSurnamesPhoneticallyRelated(surnameA: string, surnameB: strin
       isMatch: true,
       score: 98,
       reason: `Єдине родове прізвище (чоловіча/жіноча форма): «${surnameA}» та «${surnameB}»`
+    };
+  }
+
+  // 1c. Bilingual Ukrainian <-> Russian equivalence (e.g. Пирковский / Пірковський, Белоус / Білоус)
+  if (areSurnamesBilingualEquivalent(surnameA, surnameB)) {
+    return {
+      isMatch: true,
+      score: 95,
+      reason: `Мовна відповідність прізвища (укр/рос): «${surnameA}» ~ «${surnameB}»`
     };
   }
 

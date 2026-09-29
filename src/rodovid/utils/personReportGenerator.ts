@@ -33,8 +33,8 @@ const DEFAULT_OPTIONS: PersonReportOptions = {
  */
 export function formatPersonLifespan(p?: Person | null): string {
   if (!p) return '';
-  const birthYear = p.birthYear || (p.birthDate ? p.birthDate.match(/\b(1\d{3}|20\d{2})\b/)?.[1] : undefined);
-  const deathYear = p.deathYear || (p.deathDate ? p.deathDate.match(/\b(1\d{3}|20\d{2})\b/)?.[1] : undefined);
+  const birthYear = p.birthYear || (p.birthDate ? String(p.birthDate).match(/\b(1\d{3}|20\d{2})\b/)?.[1] : undefined);
+  const deathYear = p.deathYear || (p.deathDate ? String(p.deathDate).match(/\b(1\d{3}|20\d{2})\b/)?.[1] : undefined);
   const isLiving = p.isLiving === true || (!deathYear && !p.deathDate && birthYear && Number(birthYear) > 1925);
 
   const bNum = birthYear ? Number(birthYear) : undefined;

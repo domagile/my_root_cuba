@@ -80,6 +80,10 @@ export const SettingsView: React.FC = () => {
     setAccessLockConfig,
     lockAppSession,
     syncStatus,
+    syncMode,
+    setSyncMode,
+    hasUnsavedChanges,
+    unsavedChangesCount,
     lastSyncTime,
     lastSyncError,
     isManualPushing,
@@ -604,23 +608,92 @@ export const SettingsView: React.FC = () => {
         )}
 
         <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-6`}>
-          {/* Cloud Info & Atomic Specs Banner */}
+          {/* Sync Mode Selection: Manual (Safe) vs Auto */}
+          <div className="p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-[#B88E3E]" />
+                <h4 className={`text-sm font-bold ${theme.cardTitle}`}>Режим синхронізації з Firestore</h4>
+              </div>
+              <div className="flex items-center gap-1.5 p-1 bg-black/10 dark:bg-white/10 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setSyncMode('manual')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    syncMode === 'manual'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : `${theme.cardSubtext} hover:opacity-100`
+                  }`}
+                >
+                  🛡️ Ручний (За кнопкою «Вивантажити»)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSyncMode('auto')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    syncMode === 'auto'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : `${theme.cardSubtext} hover:opacity-100`
+                  }`}
+                >
+                  ⚡ Автоматичний
+                </button>
+              </div>
+            </div>
+
+            <p className={`text-xs ${theme.cardSubtext} leading-relaxed`}>
+              {syncMode === 'manual' ? (
+                <span>
+                  <strong>Ручний безпечний режим активний:</strong> ваші локальні зміни (редагування осіб, імпорт дерева, очищення дублікатів) зберігаються локально в браузері і не перезаписують базу даних на сервері автоматично. Запис у Firestore відбудеться лише тоді, коли ви особисто натиснете <strong>«Вивантажити в Firestore»</strong>.
+                </span>
+              ) : (
+                <span>
+                  <strong>Автоматичний режим активний:</strong> зміни синхронізуються з базою даних через 10 секунд після редагування.
+                </span>
+              )}
+            </p>
+
+            {/* Unsaved Changes Banner */}
+            {syncMode === 'manual' && hasUnsavedChanges && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-amber-500/20 border border-amber-500/40 rounded-xl text-xs">
+                <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    У вас є <strong>{unsavedChangesCount}</strong> незбережених у Firestore змін (додані або змінені записи).
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleManualUpload}
+                  disabled={isManualPushing}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg shadow-xs cursor-pointer disabled:opacity-50 shrink-0 flex items-center justify-center gap-1.5"
+                >
+                  <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />
+                  <span>{isManualPushing ? 'Вивантаження...' : 'Вивантажити зміни в Firestore'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Cloud Info & Specs Banner */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Zap className="w-4 h-4 text-[#B88E3E]" />
-                <strong className={`text-xs font-bold ${theme.cardTitle}`}>Атомарна синхронізація в реальному часі</strong>
+                <strong className={`text-xs font-bold ${theme.cardTitle}`}>
+                  {syncMode === 'manual' ? 'Контрольований захист даних' : 'Атомарна синхронізація в реальному часі'}
+                </strong>
                 <span className="px-2 py-0.5 text-[9px] bg-[#B88E3E]/20 text-[#B88E3E] rounded font-mono font-bold uppercase">
-                  Atomic Active
+                  {syncMode === 'manual' ? 'Manual Guard Active' : 'Auto Active'}
                 </span>
               </div>
               <p className={`text-[11px] ${theme.cardSubtext} max-w-xl leading-relaxed`}>
-                Кожна дія (додавання особи, зміна родинних зв'язків, нова метрика чи документ) миттєво зберігається окремим документом у хмарі Firestore без затримок та потреби перезавантажувати сторінку.
+                Перед кожним вивантаженням або завантаженням автоматично створюється безпечна резервна копія дерева (знімок) у сховищі IndexedDB. Якщо щось піде не так, ви завжди можете відновити дерево у вкладці «Резервні копії».
               </p>
             </div>
 
             <div className="text-left md:text-right shrink-0 space-y-0.5">
-              <span className={`text-[10px] ${theme.cardSubtext} block`}>Останній успішний запис:</span>
+              <span className={`text-[10px] ${theme.cardSubtext} block`}>Останній сеанс Firestore:</span>
               <strong className={`text-xs font-mono font-bold ${theme.cardTitle}`}>
                 {lastSyncTime ? new Date(lastSyncTime).toLocaleString('uk-UA') : 'Тільки що'}
               </strong>

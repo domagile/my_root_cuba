@@ -296,9 +296,9 @@ export const PersonReportModal: React.FC<PersonReportModalProps> = ({
 
                 <div className="max-h-56 overflow-y-auto space-y-1">
                   {searchResults.length > 0 ? (
-                    searchResults.map((p) => (
+                    searchResults.map((p, pIdx) => (
                       <button
-                        key={p.id}
+                        key={`rep_p_${p.id}_${pIdx}`}
                         type="button"
                         onClick={() => {
                           setActivePersonId(p.id);

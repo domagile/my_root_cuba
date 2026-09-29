@@ -8,25 +8,41 @@ import {
   RefreshCw,
   FolderOpen,
   Sparkles,
-  TreeDeciduous
+  TreeDeciduous,
+  History,
+  ArrowRight
 } from 'lucide-react';
 import { GenealogyDatabase } from '../../types/genealogy';
 import { parseGedcom, exportToGedcom } from '../../utils/gedcom';
+import { GedcomMergeModal } from './GedcomMergeModal';
+import { ImportHistoryView } from './ImportHistoryView';
+import { useGenealogyStore } from '../../../stores/useGenealogyStore';
+import { MergeResult } from '../../utils/mergeDatabase';
 
 interface GedcomModalProps {
   database: GenealogyDatabase;
   onClose: () => void;
   onImportDatabase: (newDb: GenealogyDatabase) => void;
+  initialTab?: 'import' | 'export' | 'history';
+  onSelectPerson?: (personId: string) => void;
 }
 
 export const GedcomModal: React.FC<GedcomModalProps> = ({
   database,
   onClose,
-  onImportDatabase
+  onImportDatabase,
+  initialTab = 'import',
+  onSelectPerson
 }) => {
-  const [activeTab, setActiveTab] = useState<'import' | 'export'>('import');
+  const [activeTab, setActiveTab] = useState<'import' | 'export' | 'history'>(initialTab);
   const [pastedGedcom, setPastedGedcom] = useState('');
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [pendingMerge, setPendingMerge] = useState<{
+    incomingDb: GenealogyDatabase;
+    fileName?: string;
+  } | null>(null);
+
+  const importHistory = useGenealogyStore((state) => state.importHistory || []);
 
   // File Upload handler
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -37,15 +53,21 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
+        let parsedDb: GenealogyDatabase;
         if (file.name.endsWith('.json')) {
-          const parsedJson = JSON.parse(text);
-          onImportDatabase(parsedJson);
-          setImportStatus(`Успішно завантажено базу JSON: ${parsedJson.title}`);
+          parsedDb = JSON.parse(text);
         } else {
-          const parsedDb = parseGedcom(text);
-          onImportDatabase(parsedDb);
-          setImportStatus(`Успішно імпортовано GEDCOM: ${Object.keys(parsedDb.persons).length} осіб.`);
+          parsedDb = parseGedcom(text);
         }
+
+        const personCount = Object.keys(parsedDb.persons || {}).length;
+        if (personCount === 0) {
+          setImportStatus('Файл не містить записів осіб (INDI).');
+          return;
+        }
+
+        // Open merge & branch filter modal to allow conflict resolution and ancestor exclusion
+        setPendingMerge({ incomingDb: parsedDb, fileName: file.name });
       } catch (err: any) {
         setImportStatus(`Помилка під час читання файлу: ${err.message}`);
       }
@@ -57,9 +79,14 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
     if (!pastedGedcom.trim()) return;
     try {
       const parsedDb = parseGedcom(pastedGedcom);
-      onImportDatabase(parsedDb);
-      setImportStatus(`Успішно імпортовано GEDCOM: ${Object.keys(parsedDb.persons).length} осіб.`);
-      setPastedGedcom('');
+      const personCount = Object.keys(parsedDb.persons || {}).length;
+      if (personCount === 0) {
+        setImportStatus('Введений текст не містить записів осіб (INDI).');
+        return;
+      }
+
+      // Open merge & branch filter modal to allow conflict resolution and ancestor exclusion
+      setPendingMerge({ incomingDb: parsedDb, fileName: 'Вставлений текст GEDCOM' });
     } catch (err: any) {
       setImportStatus(`Помилка під час парсингу: ${err.message}`);
     }
@@ -95,7 +122,9 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-150">
+      <div className={`bg-slate-900 border border-slate-800 rounded-2xl w-full shadow-2xl overflow-hidden my-8 transition-all duration-200 animate-in fade-in zoom-in-95 ${
+        activeTab === 'history' ? 'max-w-4xl' : 'max-w-xl'
+      }`}>
         {/* Header */}
         <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
           <div className="flex items-center gap-2">
@@ -106,7 +135,7 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -116,7 +145,7 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
         <div className="flex border-b border-slate-800 bg-slate-950 px-5 gap-4 text-xs font-semibold">
           <button
             onClick={() => setActiveTab('import')}
-            className={`py-3 border-b-2 transition-colors ${
+            className={`py-3 border-b-2 transition-colors cursor-pointer ${
               activeTab === 'import'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -126,7 +155,7 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('export')}
-            className={`py-3 border-b-2 transition-colors ${
+            className={`py-3 border-b-2 transition-colors cursor-pointer ${
               activeTab === 'export'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -134,15 +163,56 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
           >
             Експорт бази
           </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`py-3 border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'history'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Історія імпорту</span>
+            {importHistory.length > 0 && (
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                activeTab === 'history'
+                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                  : 'bg-slate-800 text-slate-400'
+              }`}>
+                {importHistory.length}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Tab Content */}
-        <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto scrollbar-thin">
+        <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto scrollbar-thin">
           {importStatus && (
-            <div className="p-3 bg-emerald-950/60 border border-emerald-800/80 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>{importStatus}</span>
+            <div className="p-3 bg-emerald-950/60 border border-emerald-800/80 rounded-xl text-emerald-300 text-xs flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>{importStatus}</span>
+              </div>
+              {importHistory.length > 0 && activeTab !== 'history' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('history')}
+                  className="text-xs font-semibold text-emerald-300 hover:text-white underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Переглянути звіт в історії імпорту</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              )}
             </div>
+          )}
+
+          {activeTab === 'history' && (
+            <ImportHistoryView
+              onSelectPerson={onSelectPerson}
+              onClose={onClose}
+              onOpenImport={() => setActiveTab('import')}
+              isInsideModal={true}
+            />
           )}
 
           {activeTab === 'import' && (
@@ -236,6 +306,40 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Smart Merge Modal */}
+      {pendingMerge && (
+        <GedcomMergeModal
+          currentDatabase={database}
+          incomingDatabase={pendingMerge.incomingDb}
+          fileName={pendingMerge.fileName}
+          onClose={() => setPendingMerge(null)}
+          onApplyMerge={(result: MergeResult) => {
+            useGenealogyStore.getState().mergeGenealogyDatabase(pendingMerge.incomingDb, result, {
+              fileName: pendingMerge.fileName
+            });
+            const conflictMsg = result.conflictsResolvedCount > 0 ? `, вирішено ${result.conflictsResolvedCount} розбіжностей` : '';
+            setImportStatus(
+              `Успішно об'єднано: знайдено ${result.matchedCount} спільних осіб${conflictMsg}, додано ${result.newPersonsCount} нових родичів!`
+            );
+            setPendingMerge(null);
+            setPastedGedcom('');
+          }}
+          onApplyReplace={(incomingDb) => {
+            useGenealogyStore.getState().loadGenealogyDatabase(incomingDb, {
+              fileName: pendingMerge.fileName
+            });
+            if (onImportDatabase) {
+              onImportDatabase(incomingDb);
+            }
+            setImportStatus(
+              `Успішно замінено дерево: завантажено ${Object.keys(incomingDb.persons || {}).length} осіб.`
+            );
+            setPendingMerge(null);
+            setPastedGedcom('');
+          }}
+        />
+      )}
     </div>
   );
 };

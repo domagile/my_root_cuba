@@ -76,7 +76,21 @@ export const FamilyTreeView: React.FC = () => {
       )
       .sort((a, b) => comparePersonsByAge(a, b));
 
-    return { parents, spouses, children, siblings };
+    const uniqById = (list: Person[]) => {
+      const seen = new Set<string>();
+      return list.filter((p) => {
+        if (!p || !p.id || seen.has(p.id)) return false;
+        seen.add(p.id);
+        return true;
+      });
+    };
+
+    return {
+      parents: uniqById(parents),
+      spouses: uniqById(spouses),
+      children: uniqById(children),
+      siblings: uniqById(siblings)
+    };
   }, [activePerson, persons]);
 
   return (
@@ -172,9 +186,9 @@ export const FamilyTreeView: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-8 justify-center">
-                {familyData.parents.map((parent) => (
+                {familyData.parents.map((parent, idx) => (
                   <div
-                    key={parent.id}
+                    key={`${parent.id}_${idx}`}
                     onClick={() => setSelectedPersonId(parent.id)}
                     className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:shadow-xl hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1.5 relative group`}
                   >
@@ -256,9 +270,9 @@ export const FamilyTreeView: React.FC = () => {
                 </button>
               </div>
               <div className="flex flex-wrap justify-center gap-4">
-                {familyData.siblings.map((sibling) => (
+                {familyData.siblings.map((sibling, idx) => (
                   <div
-                    key={sibling.id}
+                    key={`${sibling.id}_${idx}`}
                     onClick={() => setSelectedPersonId(sibling.id)}
                     className={`p-3.5 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-md hover:border-sky-500 transition-all cursor-pointer w-56 text-center space-y-1 relative group`}
                   >
@@ -371,9 +385,9 @@ export const FamilyTreeView: React.FC = () => {
               </div>
             )}
 
-            {familyData.spouses.map((spouse) => (
+            {familyData.spouses.map((spouse, idx) => (
               <div
-                key={spouse.id}
+                key={`${spouse.id}_${idx}`}
                 onClick={() => setSelectedPersonId(spouse.id)}
                 className={`p-5 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1 relative group`}
               >
@@ -453,9 +467,9 @@ export const FamilyTreeView: React.FC = () => {
                 </button>
               </div>
               <div className="flex flex-wrap justify-center gap-4">
-                {familyData.children.map((child) => (
+                {familyData.children.map((child, idx) => (
                   <div
-                    key={child.id}
+                    key={`${child.id}_${idx}`}
                     onClick={() => setSelectedPersonId(child.id)}
                     className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-md hover:border-[#B88E3E] transition-all cursor-pointer w-56 text-center space-y-1 relative group`}
                   >

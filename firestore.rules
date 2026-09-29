@@ -153,6 +153,11 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // Healthcheck and connection validation
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+
     // Default deny catch-all
     match /{document=**} {
       allow read, write: if false;

@@ -711,7 +711,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 </tr>
               </thead>
               <tbody className={`divide-y ${theme.borderSubtle}`}>
-                {sortedPersons.map((rawP) => {
+                {sortedPersons.map((rawP, pIdx) => {
                   const isLiving = isPersonLiving(rawP);
                   const isMasked = !isWhitelisted && isLiving;
                   const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
@@ -721,7 +721,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
                   return (
                     <tr
-                      key={p.id}
+                      key={`${p.id}_${pIdx}`}
                       onClick={() => onSelectPerson(p.id)}
                       className={`hover:bg-neutral-500/5 cursor-pointer transition-colors`}
                     >
@@ -1122,7 +1122,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sortedPersons.map((rawP) => {
+          {sortedPersons.map((rawP, pIdx) => {
             const isLiving = isPersonLiving(rawP);
             const isMasked = !isWhitelisted && isLiving;
             const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
@@ -1132,7 +1132,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
             return (
               <div
-                key={p.id}
+                key={`${p.id}_${pIdx}`}
                 onClick={() => onSelectPerson(p.id)}
                 className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 hover:border-emerald-500/60 cursor-pointer shadow-xs transition-all flex flex-col justify-between`}
               >

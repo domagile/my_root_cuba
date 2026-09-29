@@ -43,6 +43,7 @@ import { quickMergePersons, batchMergeSafeDuplicates } from '../../../utils/pers
 import { SmartMergeModal } from '../modals/SmartMergeModal';
 import { PersonDetailModal } from '../../../components/Tree/PersonDetailModal';
 import { MergePersonsByIdModal } from '../../../components/modals/MergePersonsByIdModal';
+import { useGenealogyStore } from '../../../stores/useGenealogyStore';
 
 interface ConflictsViewProps {
   persons: Person[];
@@ -61,6 +62,8 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
   onUpdateFamilies,
   onSelectPerson
 }) => {
+  const mergePersons = useGenealogyStore(s => s.mergePersons);
+
   // Navigation tabs within this view
   const [activeSubTab, setActiveSubTab] = useState<'health' | 'duplicates'>(initialSubTab);
 
@@ -151,6 +154,12 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
   // Quick 1-click merge
   const handleQuickMerge = (pair: DuplicatePair) => {
     const res = quickMergePersons(pair.personA, pair.personB, persons, families);
+    mergePersons({
+      updatedPersons: res.updatedPersons,
+      updatedFamilies: res.updatedFamilies,
+      masterPerson: res.masterPerson,
+      deletedPersonIds: [res.deletedPersonId]
+    });
     onUpdatePersons(res.updatedPersons);
     if (onUpdateFamilies) {
       onUpdateFamilies(res.updatedFamilies);
@@ -168,6 +177,11 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
       return;
     }
     const res = batchMergeSafeDuplicates(safeBatchPairs, persons, families, 85);
+    mergePersons({
+      updatedPersons: res.updatedPersons,
+      updatedFamilies: res.updatedFamilies,
+      deletedPersonIds: res.deletedPersonIds
+    });
     onUpdatePersons(res.updatedPersons);
     if (onUpdateFamilies) {
       onUpdateFamilies(res.updatedFamilies);
@@ -271,8 +285,15 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
   const handleMergeComplete = (
     updatedPersons: Person[],
     updatedFamilies: Record<string, Family>,
-    masterName: string
+    masterName: string,
+    extra?: { masterPerson?: Person; deletedPersonId?: string }
   ) => {
+    mergePersons({
+      updatedPersons,
+      updatedFamilies,
+      masterPerson: extra?.masterPerson,
+      deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : []
+    });
     onUpdatePersons(updatedPersons);
     if (onUpdateFamilies) {
       onUpdateFamilies(updatedFamilies);
@@ -1174,11 +1195,11 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                 Для кожної пари алгоритм автоматично обере найповніший запис за головний профіль, перенесе всі родинні звʼязки (батьків, подружжя, дітей), події та джерела.
               </p>
               <div className="max-h-48 overflow-y-auto space-y-1.5 p-3 rounded-xl bg-neutral-950/80 border border-neutral-800">
-                {safeBatchPairs.map(p => {
+                {safeBatchPairs.map((p, pIdx) => {
                   const nA = `${p.personA.name?.surname || p.personA.lastName || ''} ${p.personA.name?.given || p.personA.firstName || ''}`.trim() || p.personA.id;
                   const nB = `${p.personB.name?.surname || p.personB.lastName || ''} ${p.personB.name?.given || p.personB.firstName || ''}`.trim() || p.personB.id;
                   return (
-                    <div key={p.id} className="flex items-center justify-between text-[11px] py-1 border-b border-neutral-900 last:border-0">
+                    <div key={`${p.id}_${pIdx}`} className="flex items-center justify-between text-[11px] py-1 border-b border-neutral-900 last:border-0">
                       <span className="font-medium text-white truncate max-w-[280px]">
                         {nA} ⟷ {nB}
                       </span>

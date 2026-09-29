@@ -1017,17 +1017,17 @@ export const OriginStatsMap: React.FC<OriginStatsMapProps> = ({
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {selectedPersons.filter((p): p is Person => Boolean(p && p.id)).map((p) => {
+                {selectedPersons.filter((p): p is Person => Boolean(p && p.id)).map((p, pIdx) => {
                   const isMale = isPersonMale(p, database);
                   const isFemale = isPersonFemale(p, database);
                   const name = getFullName(p);
-                  const birthYr = p.birthYear || (p.birthDate ? p.birthDate.slice(0, 4) : null);
-                  const deathYr = p.deathYear || (p.deathDate ? p.deathDate.slice(0, 4) : null);
+                  const birthYr = p.birthYear || (p.birthDate ? String(p.birthDate).slice(0, 4) : null);
+                  const deathYr = p.deathYear || (p.deathDate ? String(p.deathDate).slice(0, 4) : null);
                   const datesStr = birthYr || deathYr ? `${birthYr || '?'} — ${deathYr || (p.isLiving !== false ? 'н.ч.' : '?')}` : '';
 
                   return (
                     <button
-                      key={p.id}
+                      key={`${p.id}_${pIdx}`}
                       type="button"
                       onClick={() => onSelectPerson(p.id)}
                       className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${

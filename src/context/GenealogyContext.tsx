@@ -18,16 +18,17 @@ import {
   GitConfig,
   AccessLockConfig
 } from '../types';
-import { subscribeToProjectData, saveProjectDataToCloud, fetchAllProjectDataFromCloud } from '../lib/firebase';
+import { subscribeToProjectData, saveProjectDataToCloud, fetchAllProjectDataFromCloud, savePersonDoc, deletePersonDoc } from '../lib/firebase';
 import { useUIStore } from '../stores/useUIStore';
 import { useGenealogyStore, normalizePerson, INITIAL_PERSONS } from '../stores/useGenealogyStore';
 import { useResearchStore, INITIAL_METRICS, INITIAL_DOCUMENTS, INITIAL_TASKS, INITIAL_FINDINGS, INITIAL_HYPOTHESES, INITIAL_REQUESTS, INITIAL_MATRIX } from '../stores/useResearchStore';
-import { useCloudSyncStore, CloudSyncStatus } from '../stores/useCloudSyncStore';
+import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode } from '../stores/useCloudSyncStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { findRootPersonId } from '../rodovid/utils/relationship';
-import { getSavedUserTreeState } from '../utils/userTreeState';
+import { getSavedUserTreeState, resolveInitialPersonId } from '../utils/userTreeState';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent, isDemoResearchItem, purgeDemoStorage } from '../utils/demoPurge';
+import { saveSnapshot } from '../utils/persistentBackup';
 
 export { useUIStore } from '../stores/useUIStore';
 export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore';
@@ -37,6 +38,10 @@ export { useCloudSyncStore } from '../stores/useCloudSyncStore';
 export interface GenealogyContextType {
   // Cloud Sync
   syncStatus: CloudSyncStatus;
+  syncMode: CloudSyncMode;
+  setSyncMode: (mode: CloudSyncMode) => void;
+  hasUnsavedChanges: boolean;
+  unsavedChangesCount: number;
   lastSyncTime: string | null;
   lastSyncError: string | null;
   isManualPushing: boolean;
@@ -77,6 +82,12 @@ export interface GenealogyContextType {
   permanentlyDeletePersons: (ids: string[]) => void;
   emptyTrash: () => void;
   getPersonById: (id: string) => Person | undefined;
+  mergePersons: (payload: {
+    updatedPersons: Person[];
+    updatedFamilies: Record<string, any>;
+    masterPerson?: Person;
+    deletedPersonIds: string[];
+  }) => void;
 
   // Families, Sources & Events (Unified Domain Layer)
   families: Record<string, any>;
@@ -195,6 +206,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const permanentlyDeletePersons = useGenealogyStore((s) => s.permanentlyDeletePersons);
   const emptyTrash = useGenealogyStore((s) => s.emptyTrash);
   const getPersonById = useGenealogyStore((s) => s.getPersonById);
+  const mergePersons = useGenealogyStore((s) => s.mergePersons);
   const gitConfig = useGenealogyStore((s) => s.gitConfig);
   const setGitConfig = useGenealogyStore((s) => s.setGitConfig);
   const googleDriveEmail = useGenealogyStore((s) => s.googleDriveEmail);
@@ -274,6 +286,10 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const purgeDemoResearchData = useResearchStore((s) => s.purgeDemoResearchData);
 
   const syncStatus = useCloudSyncStore((s) => s.status);
+  const syncMode = useCloudSyncStore((s) => s.syncMode);
+  const setSyncMode = useCloudSyncStore((s) => s.setSyncMode);
+  const hasUnsavedChanges = useCloudSyncStore((s) => s.hasUnsavedChanges);
+  const unsavedChangesCount = useCloudSyncStore((s) => s.unsavedChangesCount);
   const lastSyncTime = useCloudSyncStore((s) => s.lastSyncTime);
   const lastSyncError = useCloudSyncStore((s) => s.lastError);
   const isManualPushing = useCloudSyncStore((s) => s.isManualPushing);
@@ -306,9 +322,9 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setSelectedPersonId(rootId);
         }
       } else if (!currentUser || !currentUser.isAuthenticated) {
-        // Guest or logged out: reset tree focus to root person
-        const rootId = findRootPersonId(persons);
-        setSelectedPersonId(rootId);
+        // Guest or preview session: restore last selected person if available, or fallback to root person
+        const initialId = resolveInitialPersonId(persons);
+        setSelectedPersonId(initialId);
       }
     }
   }, [currentUser, whitelist, persons, setSelectedPersonId]);
@@ -317,15 +333,56 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     const unsubscribe = subscribeToProjectData((cloudData) => {
       if (!cloudData) return;
+
+      // Safe Guard: If in manual sync mode and user has unsaved local changes,
+      // do not let background sync clobber their work!
+      const currentSync = useCloudSyncStore.getState();
+      if (currentSync.syncMode === 'manual' && currentSync.hasUnsavedChanges) {
+        return;
+      }
       if (cloudData.persons && Array.isArray(cloudData.persons) && cloudData.persons.length > 0) {
-        setPersons(cloudData.persons.filter((p: any) => !isDemoPerson(p)).map(normalizePerson));
+        setPersons((prevPersons: Person[]) => {
+          const trashIds = new Set(useGenealogyStore.getState().trashPersons.map((p) => p.id));
+          let mergedIdsMap: Record<string, string> = {};
+          try {
+            const raw = localStorage.getItem('genealogy_merged_person_ids');
+            if (raw) mergedIdsMap = JSON.parse(raw);
+          } catch {}
+          const mergedIds = new Set(Object.keys(mergedIdsMap));
+
+          // Proactively delete any cloud records that were merged or moved to trash locally
+          cloudData.persons.forEach((p: any) => {
+            if (p?.id && (trashIds.has(p.id) || mergedIds.has(p.id))) {
+              deletePersonDoc(p.id);
+            }
+          });
+
+          // Filter out demo persons, trashed persons, and merged duplicate persons
+          const cloudList = cloudData.persons
+            .filter((p: any) => p?.id && !isDemoPerson(p) && !trashIds.has(p.id) && !mergedIds.has(p.id))
+            .map(normalizePerson);
+          const cloudMap = new Map(cloudList.map((p) => [p.id, p]));
+          const merged: Person[] = [...cloudList];
+
+          // Preserve local persons that have not synced yet or exist in local store
+          for (const localP of prevPersons) {
+            if (!cloudMap.has(localP.id) && !isDemoPerson(localP) && !trashIds.has(localP.id) && !mergedIds.has(localP.id)) {
+              merged.push(localP);
+              // Proactively upload missing local person to cloud
+              savePersonDoc(localP);
+            }
+          }
+          return merged;
+        });
       }
       if (cloudData.families && Array.isArray(cloudData.families)) {
-        const famMap: Record<string, any> = {};
-        cloudData.families.forEach((f: any) => {
-          if (f && f.id && !isDemoFamily(f.id, f)) famMap[f.id] = f;
+        setFamilies((prevFamilies: Record<string, any>) => {
+          const famMap: Record<string, any> = { ...prevFamilies };
+          cloudData.families.forEach((f: any) => {
+            if (f && f.id && !isDemoFamily(f.id, f)) famMap[f.id] = f;
+          });
+          return famMap;
         });
-        setFamilies(famMap);
       }
       if (cloudData.events && Array.isArray(cloudData.events)) {
         const evMap: Record<string, any> = {};
@@ -380,8 +437,12 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, [setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
 
-  // Debounced auto-sync to Firestore
+  // Debounced auto-sync to Firestore (ONLY active when user explicitly chooses 'auto' mode)
   useEffect(() => {
+    if (syncMode !== 'auto') {
+      return;
+    }
+
     const timer = setTimeout(() => {
       saveProjectDataToCloud({
         persons,
@@ -401,23 +462,47 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (ok) {
           setStatus('synced');
           setLastSyncTime(new Date().toISOString());
+          useCloudSyncStore.getState().clearUnsavedChanges();
         }
       });
-    }, 2500);
+    }, 10000);
 
     return () => clearTimeout(timer);
-  }, [persons, families, events, sources, places, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime]);
+  }, [syncMode, persons, families, events, sources, places, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime]);
 
   // Manual Trigger: Force Upload to Cloud
   const triggerUploadToCloud = useCallback(async (): Promise<{ success: boolean; message: string }> => {
     setIsManualPushing(true);
     setStatus('syncing');
     try {
+      // Create local snapshot point before cloud push
+      try {
+        await saveSnapshot({
+          persons,
+          families,
+          sources,
+          events,
+          whitelist: [],
+          researchData: {
+            metricRecords,
+            documents,
+            tasks,
+            findings,
+            hypotheses,
+            requests,
+            matrixEntries
+          }
+        }, `Точка перед вивантаженням у Firestore (${persons.length} осіб)`);
+      } catch (snapErr) {
+        console.warn('Snapshot backup failed before push:', snapErr);
+      }
+
       const ok = await saveProjectDataToCloud({
         persons,
         families: Object.values(families || {}),
         events: Object.values(events || {}),
         sources: Object.values(sources || {}),
+        places: Object.values(places || {}),
         metricRecords,
         documents,
         tasks,
@@ -431,8 +516,9 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (ok) {
         setStatus('synced');
         setLastSyncTime(new Date().toISOString());
+        useCloudSyncStore.getState().clearUnsavedChanges();
         setIsManualPushing(false);
-        return { success: true, message: `Успішно вивантажено ${persons.length} осіб, ${Object.keys(families).length} родин та ${metricRecords.length} метричних записів у Firestore!` };
+        return { success: true, message: `Успішно вивантажено ${persons.length} осіб, ${Object.keys(families).length} родин у Firestore! Створено точку відновлення.` };
       } else {
         setStatus('error', 'Помилка запису в Firestore');
         setIsManualPushing(false);
@@ -444,13 +530,35 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setIsManualPushing(false);
       return { success: false, message: msg };
     }
-  }, [persons, families, events, sources, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime, setIsManualPushing]);
+  }, [persons, families, events, sources, places, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime, setIsManualPushing]);
 
   // Manual Trigger: Force Download from Cloud
   const triggerDownloadFromCloud = useCallback(async (): Promise<{ success: boolean; message: string; count?: number }> => {
     setIsManualPulling(true);
     setStatus('syncing');
     try {
+      // Save snapshot of current local state before pulling from cloud
+      try {
+        await saveSnapshot({
+          persons,
+          families,
+          sources,
+          events,
+          whitelist: [],
+          researchData: {
+            metricRecords,
+            documents,
+            tasks,
+            findings,
+            hypotheses,
+            requests,
+            matrixEntries
+          }
+        }, `Резервна точка перед завантаженням з хмари (${persons.length} осіб)`);
+      } catch (e) {
+        console.warn('Backup snapshot before pull error:', e);
+      }
+
       const res = await fetchAllProjectDataFromCloud();
       if (res.success && res.data) {
         const d = res.data;
@@ -482,6 +590,16 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
           setSources(srcMap);
         }
+        if (Array.isArray(d.places)) {
+          const plMap: Record<string, any> = {};
+          d.places.forEach((p: any) => {
+            if (p && (p.id || p.placeName)) {
+              const k = p.id || p.placeName.trim();
+              plMap[k] = p;
+            }
+          });
+          setPlaces(plMap);
+        }
         if (Array.isArray(d.metricRecords)) {
           const validMetrics = d.metricRecords.filter((m: any) => !isDemoResearchItem(m));
           setMetricRecords(validMetrics);
@@ -496,6 +614,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         setStatus('synced');
         setLastSyncTime(new Date().toISOString());
+        useCloudSyncStore.getState().clearUnsavedChanges();
         setIsManualPulling(false);
         return {
           success: true,
@@ -513,7 +632,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setIsManualPulling(false);
       return { success: false, message: msg };
     }
-  }, [setPersons, setFamilies, setEvents, setSources, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus, setLastSyncTime, setIsManualPulling]);
+  }, [setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus, setLastSyncTime, setIsManualPulling]);
 
   // Export JSON
   const exportJsonData = useCallback(() => {
@@ -590,6 +709,10 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const value = useMemo(
     () => ({
       syncStatus,
+      syncMode,
+      setSyncMode,
+      hasUnsavedChanges,
+      unsavedChangesCount,
       lastSyncTime,
       lastSyncError,
       isManualPushing,
@@ -624,6 +747,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       permanentlyDeletePersons,
       emptyTrash,
       getPersonById,
+      mergePersons,
       families,
       setFamilies,
       saveFamily,
@@ -686,6 +810,10 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }),
     [
       syncStatus,
+      syncMode,
+      setSyncMode,
+      hasUnsavedChanges,
+      unsavedChangesCount,
       lastSyncTime,
       lastSyncError,
       isManualPushing,
@@ -719,6 +847,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       permanentlyDeletePersons,
       emptyTrash,
       getPersonById,
+      mergePersons,
       families,
       setFamilies,
       saveFamily,

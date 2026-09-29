@@ -96,8 +96,8 @@ export const EditFamilyModal: React.FC<EditFamilyModalProps> = ({
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
               >
                 <option value="">-- Не вказано --</option>
-                {menList.map((p) => (
-                  <option key={p.id} value={p.id}>
+                {menList.map((p, pIdx) => (
+                  <option key={`men_${p.id}_${pIdx}`} value={p.id}>
                     {getFullName(p)} {p.birthYear ? `(${p.birthYear})` : ''}
                   </option>
                 ))}
@@ -114,8 +114,8 @@ export const EditFamilyModal: React.FC<EditFamilyModalProps> = ({
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
               >
                 <option value="">-- Не вказано --</option>
-                {womenList.map((p) => (
-                  <option key={p.id} value={p.id}>
+                {womenList.map((p, pIdx) => (
+                  <option key={`women_${p.id}_${pIdx}`} value={p.id}>
                     {getFullName(p)} {p.birthYear ? `(${p.birthYear})` : ''}
                   </option>
                 ))}
@@ -158,11 +158,11 @@ export const EditFamilyModal: React.FC<EditFamilyModalProps> = ({
               Діти цієї сім'ї (обрано: {childrenIds.length}):
             </span>
             <div className="max-h-36 overflow-y-auto bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-1 scrollbar-thin">
-              {allPersons.map((p) => {
+              {allPersons.map((p, pIdx) => {
                 const isSelected = childrenIds.includes(p.id);
                 return (
                   <label
-                    key={p.id}
+                    key={`${p.id}_${pIdx}`}
                     className="flex items-center gap-2 p-1.5 hover:bg-slate-900 rounded cursor-pointer text-xs text-slate-300"
                   >
                     <input

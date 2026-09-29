@@ -408,11 +408,13 @@ export function batchMergeSafeDuplicates(
   updatedPersons: Person[];
   updatedFamilies: Record<string, Family>;
   mergedNames: string[];
+  deletedPersonIds: string[];
 } {
   let currentPersons = [...allPersons];
   let currentFamilies = { ...allFamilies };
   let mergedCount = 0;
   const mergedNames: string[] = [];
+  const deletedPersonIds: string[] = [];
   const processedPersonIds = new Set<string>();
 
   for (const pair of pairs) {
@@ -431,6 +433,7 @@ export function batchMergeSafeDuplicates(
     const res = quickMergePersons(freshA, freshB, currentPersons, currentFamilies);
     currentPersons = res.updatedPersons;
     currentFamilies = res.updatedFamilies;
+    deletedPersonIds.push(res.deletedPersonId);
     processedPersonIds.add(pair.personA.id);
     processedPersonIds.add(pair.personB.id);
     mergedCount++;
@@ -444,7 +447,8 @@ export function batchMergeSafeDuplicates(
     mergedCount,
     updatedPersons: currentPersons,
     updatedFamilies: currentFamilies,
-    mergedNames
+    mergedNames,
+    deletedPersonIds
   };
 }
 

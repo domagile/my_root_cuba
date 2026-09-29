@@ -240,7 +240,7 @@ export const ClanMembersModal: React.FC<ClanMembersModalProps> = ({
               Осіб за даним фільтром чи запитом не знайдено
             </div>
           ) : (
-            filteredMembers.map(({ person: p, isInFan, ahnentafelNumber, generation, kinshipTitle }) => {
+            filteredMembers.map(({ person: p, isInFan, ahnentafelNumber, generation, kinshipTitle }, mIdx) => {
               const isFemale = p.gender === 'female' || p.gender === 'F';
               const maiden = (p.name?.maidenName || p.maidenName || '').trim();
               const maidenFormatted = isFemale && maiden ? `(${maiden})` : '';
@@ -262,7 +262,7 @@ export const ClanMembersModal: React.FC<ClanMembersModalProps> = ({
 
               return (
                 <div
-                  key={p.id}
+                  key={`${p.id}_${mIdx}`}
                   onClick={() => {
                     onSelectPerson(p.id);
                     onClose();

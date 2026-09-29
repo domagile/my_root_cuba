@@ -1289,7 +1289,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
                   return (
                     <tr
-                      key={p.id}
+                      key={`${p.id}_${virtualRow.index}`}
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
                       onClick={() => onInspectPerson?.(p.id)}
@@ -1596,7 +1596,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       ) : (
         /* GRID VIEW ("Плитка") */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {sortedPersons.map((p) => {
+          {sortedPersons.map((p, pIdx) => {
             const isChecked = selectedIds.has(p.id);
             const feminine = isPersonFemale(p, persons);
             const initials = `${p.lastName?.[0] || ''}${p.firstName?.[0] || ''}`.toUpperCase();
@@ -1606,7 +1606,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
             return (
               <div
-                key={p.id}
+                key={`${p.id}_${pIdx}`}
                 onClick={() => onInspectPerson?.(p.id)}
                 className={`p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative ${
                   isCentral

@@ -299,7 +299,8 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
     p: Person,
     isActive: boolean = false,
     roleLabel?: string,
-    onEdit?: () => void
+    onEdit?: () => void,
+    keyOverride?: string
   ) => {
     const pIsMale = isPersonMale(p);
     const pIsFemale = isPersonFemale(p);
@@ -326,7 +327,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
 
     return (
       <div
-        key={p.id}
+        key={keyOverride || `${p.id}_${roleLabel || ''}`}
         onClick={() => {
           if (!isActive && onSelectPerson) {
             onSelectPerson(p.id);
@@ -649,9 +650,9 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                 {/* Spouses List */}
                 <div className="space-y-3">
                   {spouses.length > 0 ? (
-                    spouses.map((sp) => (
-                      <div key={sp.id} className="space-y-3">
-                        {renderPersonCard(sp, false, 'Подружжя')}
+                    spouses.map((sp, spIdx) => (
+                      <div key={`sp_wrap_${sp.id}_${spIdx}`} className="space-y-3">
+                        {renderPersonCard(sp, false, 'Подружжя', undefined, `sp_card_${sp.id}_${spIdx}`)}
                       </div>
                     ))
                   ) : (
@@ -661,7 +662,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                   )}
 
                   {/* Highlighted Active Person Card */}
-                  {renderPersonCard(person, true, 'Вибрана особа', onStartEdit)}
+                  {renderPersonCard(person, true, 'Вибрана особа', onStartEdit, `active_${person.id}`)}
 
                   {!isReadOnly && onOpenAddRelation && (
                     <button
@@ -692,7 +693,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                   {isSpouseChildrenOpen && (
                     <div className="space-y-2.5 pl-2 border-l-2 border-slate-200 dark:border-[#2d333b]">
                       {allChildren.length > 0 ? (
-                        allChildren.map((ch) => renderPersonCard(ch, false, isPersonFemale(ch) ? 'Донька' : 'Син'))
+                        allChildren.map((ch, chIdx) => renderPersonCard(ch, false, isPersonFemale(ch) ? 'Донька' : 'Син', undefined, `all_ch_${ch.id}_${chIdx}`))
                       ) : (
                         <div className="text-xs text-slate-400 py-1 italic">Дітей не записано</div>
                       )}
@@ -740,7 +741,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                 {/* Parents Section */}
                 <div className="space-y-2.5">
                   {father ? (
-                    renderPersonCard(father, false, 'Батько')
+                    renderPersonCard(father, false, 'Батько', undefined, `father_${father.id}`)
                   ) : (
                     !isReadOnly && onOpenAddRelation && (
                       <button
@@ -755,7 +756,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                   )}
 
                   {mother ? (
-                    renderPersonCard(mother, false, 'Мати')
+                    renderPersonCard(mother, false, 'Мати', undefined, `mother_${mother.id}`)
                   ) : (
                     !isReadOnly && onOpenAddRelation && (
                       <button
@@ -791,13 +792,14 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
 
                   {isParentsChildrenOpen && (
                     <div className="space-y-2.5 pl-2 border-l-2 border-slate-200 dark:border-[#2d333b]">
-                      {parentsChildren.map((ch) => {
+                      {parentsChildren.map((ch, pcIdx) => {
                         const isThisPerson = ch.id === person.id;
                         return renderPersonCard(
                           ch,
                           isThisPerson,
                           isThisPerson ? 'Вибрана особа' : isPersonFemale(ch) ? 'Сестра' : 'Брат',
-                          isThisPerson ? onStartEdit : undefined
+                          isThisPerson ? onStartEdit : undefined,
+                          `parent_ch_${ch.id}_${pcIdx}`
                         );
                       })}
 
@@ -858,7 +860,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                     <div className="space-y-2">
                       {godparentsList.map((gp, idx) => (
                         <div
-                          key={gp.id || idx}
+                          key={`gp_${gp.id || ''}_${idx}`}
                           onClick={() => {
                             if (gp.person && onSelectPerson) onSelectPerson(gp.person.id);
                           }}
@@ -892,9 +894,9 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                   </div>
                   {godchildrenList.length > 0 ? (
                     <div className="space-y-2">
-                      {godchildrenList.map((gc) => (
+                      {godchildrenList.map((gc, gcIdx) => (
                         <div
-                          key={gc.id}
+                          key={`gc_${gc.id}_${gcIdx}`}
                           onClick={() => {
                             if (onSelectPerson) onSelectPerson(gc.id);
                           }}

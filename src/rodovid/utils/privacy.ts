@@ -130,7 +130,7 @@ export const getPrivacyPersonOptionLabel = (person: Person, isWhitelisted: boole
     return '🔒 Скрито (Жива особа)';
   }
   const fullName = getFullName(person);
-  const bYear = person.birthYear || (person.birthDate ? person.birthDate.match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
+  const bYear = person.birthYear || (person.birthDate ? String(person.birthDate).match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
   return bYear ? `${fullName} (${bYear})` : fullName;
 };
 
@@ -167,12 +167,12 @@ export const getPrivacyLifespan = (person: Person, isWhitelisted: boolean): stri
   }
 
   if (isLiving) {
-    const bYear = person.birthYear || (person.birthDate ? person.birthDate.match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
+    const bYear = person.birthYear || (person.birthDate ? String(person.birthDate).match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
     return bYear ? `нар. ${bYear} (живий/а)` : 'Нині живий(а)';
   }
 
-  const bYear = person.birthYear || (person.birthDate ? person.birthDate.match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
-  const dYear = person.deathYear || (person.deathDate ? person.deathDate.match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
+  const bYear = person.birthYear || (person.birthDate ? String(person.birthDate).match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
+  const dYear = person.deathYear || (person.deathDate ? String(person.deathDate).match(/\b(1\d{3}|20\d{2})\b/)?.[1] : '');
 
   if (bYear && dYear) return `${bYear} – ${dYear}`;
   if (bYear) return `нар. ${bYear}`;

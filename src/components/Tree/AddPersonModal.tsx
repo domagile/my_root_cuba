@@ -3032,7 +3032,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  {potentialDuplicates.slice(0, 3).map((match) => {
+                  {potentialDuplicates.slice(0, 3).map((match, mIdx) => {
                     const matchPerson = match.person;
                     const matchName = `${matchPerson.name?.surname || matchPerson.lastName || ''} ${matchPerson.name?.given || matchPerson.firstName || ''} ${matchPerson.name?.patronymic || matchPerson.patronymic || ''}`.trim() || 'Без імені';
                     const father = persons.find((p) => p.id === matchPerson.fatherId);
@@ -3040,7 +3040,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
                     return (
                       <div
-                        key={matchPerson.id}
+                        key={`pot_dup_top_${matchPerson.id}_${mIdx}`}
                         className="p-3 rounded-xl bg-white/80 dark:bg-slate-850/90 border border-amber-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs"
                       >
                         <div className="space-y-1 min-w-0">
@@ -3940,8 +3940,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
                     >
                       <option value="">-- Оберіть батька зі списку осіб --</option>
-                      {malePersons.map((p) => (
-                        <option key={p.id} value={p.id}>
+                      {malePersons.map((p, pIdx) => (
+                        <option key={`father_opt_${p.id}_${pIdx}`} value={p.id}>
                           {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
                         </option>
                       ))}
@@ -3968,8 +3968,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
                     >
                       <option value="">-- Оберіть матір зі списку осіб --</option>
-                      {femalePersons.map((p) => (
-                        <option key={p.id} value={p.id}>
+                      {femalePersons.map((p, pIdx) => (
+                        <option key={`mother_opt_${p.id}_${pIdx}`} value={p.id}>
                           {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
                         </option>
                       ))}
@@ -4068,8 +4068,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
                   >
                     <option value="">-- Оберіть партнера/подружжя зі списку осіб --</option>
-                    {otherEligiblePersons.map((p) => (
-                      <option key={p.id} value={p.id}>
+                    {otherEligiblePersons.map((p, pIdx) => (
+                      <option key={`spouse_opt_${p.id}_${pIdx}`} value={p.id}>
                         {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
                       </option>
                     ))}
@@ -4179,12 +4179,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                             className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] truncate`}
                           >
                             <option value="">-- Оберіть особу з дерева ({filteredGodparentPersons.length}) --</option>
-                            {filteredGodparentPersons.map((p) => {
+                            {filteredGodparentPersons.map((p, pIdx) => {
                               const genderSym = p.gender === 'female' ? '♀' : p.gender === 'male' ? '♂' : '?';
                               const lifespan = p.birthYear ? `(${p.birthYear})` : '';
                               const pName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.trim() || 'Без імені';
                               return (
-                                <option key={p.id} value={p.id}>
+                                <option key={`gp_person_opt_${p.id}_${pIdx}`} value={p.id}>
                                   {genderSym} {pName} {lifespan}
                                 </option>
                               );
@@ -4323,7 +4323,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
                             return (
                               <div
-                                key={gp.id || idx}
+                                key={`gp_disp_${gp.id || gp.personId || ''}_${idx}`}
                                 className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 flex items-center justify-between gap-2 text-xs hover:border-[#B88E3E]/40 transition-colors"
                               >
                                 <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
@@ -4414,12 +4414,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                             className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] truncate`}
                           >
                             <option value="">-- Оберіть хресника з дерева ({filteredGodchildPersons.length}) --</option>
-                            {filteredGodchildPersons.map((p) => {
+                            {filteredGodchildPersons.map((p, pIdx) => {
                               const genderSym = p.gender === 'female' ? '♀' : p.gender === 'male' ? '♂' : '?';
                               const lifespan = p.birthYear ? `(${p.birthYear})` : '';
                               const pName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.trim() || 'Без імені';
                               return (
-                                <option key={p.id} value={p.id}>
+                                <option key={`gc_person_opt_${p.id}_${pIdx}`} value={p.id}>
                                   {genderSym} {pName} {lifespan}
                                 </option>
                               );
@@ -4535,13 +4535,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       {/* Compact List of Linked Godchildren */}
                       {allDisplayGodchildren.length > 0 ? (
                         <div className="space-y-1.5">
-                          {allDisplayGodchildren.map(({ person: ch, roleLabel, notes: chNotes, parentsLabel }) => {
+                          {allDisplayGodchildren.map(({ person: ch, roleLabel, notes: chNotes, parentsLabel }, idx) => {
                             const fullName = `${ch.name?.surname || ch.lastName || ''} ${ch.name?.given || ch.firstName || ''} ${ch.name?.patronymic || ch.patronymic || ''}`.trim() || 'Без імені';
                             const lifespan = ch.birthDate || ch.birthYear ? `(${ch.birthDate || ch.birthYear})` : '';
 
                             return (
                               <div
-                                key={ch.id}
+                                key={`all_disp_gc_${ch.id}_${idx}`}
                                 className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 flex items-center justify-between gap-2 text-xs hover:border-[#B88E3E]/40 transition-colors"
                               >
                                 <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
@@ -4632,12 +4632,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                             className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E] truncate`}
                           >
                             <option value="">-- Оберіть особу, для якої була свідком ({filteredWitnessPersons.length}) --</option>
-                            {filteredWitnessPersons.map((p) => {
+                            {filteredWitnessPersons.map((p, pIdx) => {
                               const genderSym = p.gender === 'female' ? '♀' : p.gender === 'male' ? '♂' : '?';
                               const lifespan = p.birthYear ? `(${p.birthYear})` : '';
                               const pName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.trim() || 'Без імені';
                               return (
-                                <option key={p.id} value={p.id}>
+                                <option key={`wit_person_opt_${p.id}_${pIdx}`} value={p.id}>
                                   {genderSym} {pName} {lifespan}
                                 </option>
                               );
@@ -4667,13 +4667,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       {/* Compact List of Witnessed Persons */}
                       {allDisplayWitnessedPersons.length > 0 ? (
                         <div className="space-y-1.5">
-                          {allDisplayWitnessedPersons.map(({ person: wp, notes: wNotes, roleLabel, eventLabel }) => {
+                          {allDisplayWitnessedPersons.map(({ person: wp, notes: wNotes, roleLabel, eventLabel }, idx) => {
                             const fullName = `${wp.name?.surname || wp.lastName || ''} ${wp.name?.given || wp.firstName || ''} ${wp.name?.patronymic || wp.patronymic || ''}`.trim() || 'Без імені';
                             const lifespan = wp.birthDate || wp.birthYear ? `(${wp.birthDate || wp.birthYear})` : '';
 
                             return (
                               <div
-                                key={wp.id}
+                                key={`all_disp_wp_${wp.id}_${idx}`}
                                 className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 flex items-center justify-between gap-2 text-xs hover:border-[#B88E3E]/40 transition-colors"
                               >
                                 <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
@@ -6036,11 +6036,11 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             </div>
 
             <div className="max-h-48 overflow-y-auto space-y-2 border border-neutral-200 dark:border-neutral-800 rounded-xl p-2 bg-neutral-50 dark:bg-neutral-950">
-              {potentialDuplicates.slice(0, 3).map((match) => {
+              {potentialDuplicates.slice(0, 3).map((match, idx) => {
                 const mp = match.person;
                 const mpName = `${mp.name?.surname || mp.lastName || ''} ${mp.name?.given || mp.firstName || ''} ${mp.name?.patronymic || mp.patronymic || ''}`.trim() || 'Без імені';
                 return (
-                  <div key={mp.id} className="p-2.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 text-xs">
+                  <div key={`pot_dup_btm_${mp.id}_${idx}`} className="p-2.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 text-xs">
                     <div>
                       <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
                         <span>{mpName}</span>

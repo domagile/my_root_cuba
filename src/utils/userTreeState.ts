@@ -114,5 +114,15 @@ export function resolveInitialPersonId(
     }
   }
 
+  // Also check for last selected person in local storage for guest or preview sessions
+  if (typeof window !== 'undefined') {
+    try {
+      const savedSelected = localStorage.getItem('genealogy_workstation_data_v4_familio_selectedPersonId');
+      if (savedSelected && persons.some((p) => p.id === savedSelected)) {
+        return savedSelected;
+      }
+    } catch {}
+  }
+
   return rootId;
 }

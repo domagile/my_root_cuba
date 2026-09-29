@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Lock, Flame, X, MoreVertical } from 'lucide-react';
+import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudCheck, CloudOff, RefreshCw, Upload, Download, Check, AlertCircle, Lock, Flame, X, MoreVertical, History } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
+import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { useAuthStore, isMasterAdminEmail } from '../stores/useAuthStore';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { ThemePalette } from '../types';
@@ -27,6 +28,10 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
     setThemePalette,
     setActiveTab,
     syncStatus,
+    syncMode,
+    setSyncMode,
+    hasUnsavedChanges,
+    unsavedChangesCount,
     lastSyncTime,
     lastSyncError,
     isManualPushing,
@@ -64,11 +69,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showGedcomModal, setShowGedcomModal] = useState(false);
+  const [gedcomInitialTab, setGedcomInitialTab] = useState<'import' | 'export' | 'history'>('import');
   const [showGlobalSearchModal, setShowGlobalSearchModal] = useState(false);
   const [showCloudPopover, setShowCloudPopover] = useState(false);
   const [showMobileMore, setShowMobileMore] = useState(false);
   const [cloudActionMsg, setCloudActionMsg] = useState<{ text: string; isError?: boolean } | null>(null);
   const [toastNotice, setToastNotice] = useState<string | null>(null);
+
+  const importHistory = useGenealogyStore((s) => s.importHistory || []);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const mobileMoreRef = useRef<HTMLDivElement>(null);
@@ -197,6 +205,33 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
           onOpenGlobalModal={() => setShowGlobalSearchModal(true)}
         />
 
+        {/* Direct Upload Button (Manual Mode or Pending Changes) */}
+        {syncMode === 'manual' && (
+          <button
+            id="header-direct-upload-btn"
+            onClick={handleHeaderPush}
+            disabled={isManualPushing || isSyncingActive}
+            className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs shadow-xs transition-all cursor-pointer ${
+              hasUnsavedChanges
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 ring-2 ring-amber-400/40 animate-pulse'
+                : 'bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 hover:bg-black/10 text-[#B88E3E] dark:text-amber-400'
+            }`}
+            title={
+              hasUnsavedChanges
+                ? `Вивантажити ${unsavedChangesCount} незбережених змін у Firestore`
+                : 'Всі зміни збережені у Firestore. Натисніть для оновлення'
+            }
+          >
+            <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />
+            <span>Вивантажити</span>
+            {hasUnsavedChanges && (
+              <span className="px-1.5 py-0.5 bg-slate-950 text-amber-400 rounded-full text-[10px] font-mono leading-none">
+                {unsavedChangesCount}
+              </span>
+            )}
+          </button>
+        )}
+
         {/* Quick Cloud Sync Status Flame Icon Button */}
         <div className="relative flex items-center">
           <button
@@ -207,6 +242,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                 ? 'bg-amber-500/20 border-amber-500/50 text-amber-500 hover:bg-amber-500/30 ring-2 ring-amber-400/40'
                 : syncStatus === 'error'
                 ? 'bg-rose-500/20 border-rose-500/50 text-rose-500 hover:bg-rose-500/30'
+                : hasUnsavedChanges && syncMode === 'manual'
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-400/30'
                 : 'bg-amber-500/10 dark:bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25'
             }`}
             title={
@@ -214,6 +251,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                 ? 'Firestore: Синхронізація з БД триває...'
                 : syncStatus === 'error'
                 ? 'Firestore: Помилка синхронізації'
+                : hasUnsavedChanges && syncMode === 'manual'
+                ? `Firestore: Є ${unsavedChangesCount} незбережених змін — Натисніть «Вивантажити»`
                 : `Firestore: Синхронізовано з БД (${persons.length} осіб) — Натисніть для меню`
             }
           >
@@ -222,6 +261,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
             ) : syncStatus === 'error' ? (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+            ) : hasUnsavedChanges && syncMode === 'manual' ? (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
             ) : (
               <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             )}
@@ -238,7 +279,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
               <div 
                 ref={popoverRef}
-                className={`absolute top-full mt-2.5 right-0 sm:left-1/2 sm:-translate-x-1/2 w-84 sm:w-92 max-w-[calc(100vw-20px)] rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-4 z-[100] space-y-3.5 ${theme.cardTitle} animate-in fade-in zoom-in-95 duration-150`}
+                className={`absolute top-full mt-2.5 right-0 sm:left-1/2 sm:-translate-x-1/2 w-88 sm:w-96 max-w-[calc(100vw-20px)] rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-2xl p-4 z-[100] space-y-3.5 ${theme.cardTitle} animate-in fade-in zoom-in-95 duration-150`}
               >
                 {/* Popover Header */}
                 <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-2.5">
@@ -259,6 +300,58 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                     <X className="w-4 h-4" />
                   </button>
                 </div>
+
+                {/* Sync Mode Switcher */}
+                <div className="p-2.5 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold">Режим збереження в БД:</span>
+                    <div className="flex items-center gap-1 bg-black/10 dark:bg-white/10 p-0.5 rounded-lg text-[10px]">
+                      <button
+                        onClick={() => setSyncMode('manual')}
+                        className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer ${
+                          syncMode === 'manual'
+                            ? 'bg-amber-500 text-slate-950 shadow-xs'
+                            : 'opacity-70 hover:opacity-100'
+                        }`}
+                        title="Зберігати в базу даних лише коли ви натискаєте кнопку «Вивантажити»"
+                      >
+                        Ручний (за кнопкою)
+                      </button>
+                      <button
+                        onClick={() => setSyncMode('auto')}
+                        className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer ${
+                          syncMode === 'auto'
+                            ? 'bg-amber-500 text-slate-950 shadow-xs'
+                            : 'opacity-70 hover:opacity-100'
+                        }`}
+                        title="Зберігати автоматично"
+                      >
+                        Авто
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[10px] opacity-70 leading-tight">
+                    {syncMode === 'manual'
+                      ? '🛡️ Безпечний режим: зміни накопичуються локально і потрапляють у Firestore тільки за вашою командою «Вивантажити».'
+                      : '⚡ Автоматичний режим: зміни синхронізуються з Firestore у фоновому режимі.'}
+                  </p>
+                </div>
+
+                {/* Unsaved Changes Banner */}
+                {syncMode === 'manual' && hasUnsavedChanges && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] flex items-center justify-between gap-2">
+                    <span className="font-semibold">
+                      Є незбережені зміни ({unsavedChangesCount})
+                    </span>
+                    <button
+                      onClick={handleHeaderPush}
+                      disabled={isManualPushing}
+                      className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] shadow-xs cursor-pointer disabled:opacity-50"
+                    >
+                      {isManualPushing ? 'Запис...' : 'Вивантажити зараз'}
+                    </button>
+                  </div>
+                )}
 
                 {/* Status and Metrics List */}
                 <div className="space-y-2 text-[11px] opacity-95">
@@ -319,39 +412,28 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                   </div>
                 )}
 
-                {/* Primary Sync Button: Full Sync Now */}
-                <button
-                  id="primary-sync-now-btn"
-                  onClick={handleFullSync}
-                  disabled={isSyncingActive}
-                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-bold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50`}
-                >
-                  <RefreshCw className={`w-4 h-4 ${isSyncingActive ? 'animate-spin' : ''}`} />
-                  <span>{isSyncingActive ? 'Синхронізація з БД...' : 'Синхронізувати зараз'}</span>
-                </button>
-
-                {/* Granular Quick Actions inside Popover */}
+                {/* Action Buttons inside Popover */}
                 <div className="grid grid-cols-2 gap-2 pt-0.5">
                   <button
                     id="popover-push-cloud-btn"
                     onClick={handleHeaderPush}
                     disabled={isSyncingActive}
-                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-[11px] transition-all cursor-pointer disabled:opacity-50 shadow-xs`}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all cursor-pointer disabled:opacity-50 shadow-xs`}
                     title="Зберегти всі локальні зміни в базу даних Firestore"
                   >
                     <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />
-                    <span>{isManualPushing ? 'Запис...' : 'Вивантажити'}</span>
+                    <span>{isManualPushing ? 'Запис...' : 'Вивантажити в БД'}</span>
                   </button>
 
                   <button
                     id="popover-pull-cloud-btn"
                     onClick={handleHeaderPull}
                     disabled={isSyncingActive}
-                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-[11px] transition-all cursor-pointer hover:opacity-90 disabled:opacity-50 shadow-xs`}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl ${theme.badgeBg} ${theme.badgeText} border ${theme.cardBorder} font-bold text-xs transition-all cursor-pointer hover:opacity-90 disabled:opacity-50 shadow-xs`}
                     title="Отримати найновіші дані з бази даних Firestore"
                   >
                     <Download className={`w-3.5 h-3.5 ${isManualPulling ? 'animate-bounce' : ''}`} />
-                    <span>{isManualPulling ? 'Читання...' : 'Завантажити'}</span>
+                    <span>{isManualPulling ? 'Читання...' : 'Завантажити з БД'}</span>
                   </button>
                 </div>
 
@@ -395,7 +477,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
           {/* GEDCOM / Database Import & Export Button (Desktop/Tablet) */}
           <button
-            onClick={isWhitelisted ? () => setShowGedcomModal(true) : () => openAuthModal('Імпорт / Експорт GEDCOM')}
+            onClick={() => {
+              setGedcomInitialTab('import');
+              if (isWhitelisted) {
+                setShowGedcomModal(true);
+              } else {
+                openAuthModal('Імпорт / Експорт GEDCOM');
+              }
+            }}
             className={`hidden sm:flex p-1.5 sm:p-2 rounded-xl transition-colors shrink-0 cursor-pointer ${
               theme.category === 'dark'
                 ? 'hover:bg-white/10 text-emerald-400'
@@ -404,6 +493,29 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             title="Імпорт / Експорт GEDCOM та бази даних"
           >
             <Upload className="w-4 h-4" />
+          </button>
+
+          {/* Import / Merge History Button */}
+          <button
+            onClick={() => {
+              setGedcomInitialTab('history');
+              if (isWhitelisted) {
+                setShowGedcomModal(true);
+              } else {
+                openAuthModal('Історія імпорту');
+              }
+            }}
+            className={`hidden sm:flex p-1.5 sm:p-2 rounded-xl transition-colors shrink-0 cursor-pointer relative ${
+              theme.category === 'dark'
+                ? 'hover:bg-white/10 text-sky-400'
+                : 'hover:bg-black/10 text-sky-600'
+            }`}
+            title="Історія імпорту та злиття даних"
+          >
+            <History className="w-4 h-4" />
+            {importHistory.length > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 shadow-sm" />
+            )}
           </button>
 
           {/* Mobile Secondary Actions More Menu (Only on small screens < sm) */}
@@ -436,6 +548,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                   <button
                     onClick={() => {
                       setShowMobileMore(false);
+                      setGedcomInitialTab('import');
                       if (isWhitelisted) {
                         setShowGedcomModal(true);
                       } else {
@@ -446,6 +559,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                   >
                     <Upload className="w-3.5 h-3.5 text-emerald-500" />
                     <span>GEDCOM імпорт/експорт</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileMore(false);
+                      setGedcomInitialTab('history');
+                      if (isWhitelisted) {
+                        setShowGedcomModal(true);
+                      } else {
+                        openAuthModal('Історія імпорту');
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer text-left"
+                  >
+                    <History className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Історія імпорту ({importHistory.length})</span>
                   </button>
                 </div>
               </>
@@ -620,6 +748,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
       {showGedcomModal && (
         <GedcomModal
           database={getGenealogyDatabase()}
+          initialTab={gedcomInitialTab}
+          onSelectPerson={onInspectPerson}
           onClose={() => setShowGedcomModal(false)}
           onImportDatabase={(newDb) => {
             loadGenealogyDatabase(newDb);

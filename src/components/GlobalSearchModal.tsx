@@ -363,7 +363,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 
                 return (
                   <div
-                    key={p.id}
+                    key={`search_res_${p.id}_${idx}`}
                     onClick={() => handleSelectInTree(p.id)}
                     className={`pt-2.5 first:pt-0 rounded-2xl p-3 transition-all cursor-pointer border ${
                       isSelected

@@ -367,8 +367,8 @@ export const ExpressPersonForm: React.FC<ExpressPersonFormProps> = ({
                 className={`w-full px-2.5 py-1.5 text-xs rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText}`}
               >
                 <option value="">-- Без батька / Невідомо --</option>
-                {availableFathers.map((f) => (
-                  <option key={f.id} value={f.id}>
+                {availableFathers.map((f, fIdx) => (
+                  <option key={`exp_f_${f.id}_${fIdx}`} value={f.id}>
                     {f.name?.given || f.firstName} {f.name?.surname || f.lastName} {f.birthYear ? `(${f.birthYear} р.)` : ''}
                   </option>
                 ))}
@@ -383,8 +383,8 @@ export const ExpressPersonForm: React.FC<ExpressPersonFormProps> = ({
                 className={`w-full px-2.5 py-1.5 text-xs rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText}`}
               >
                 <option value="">-- Без матері / Невідомо --</option>
-                {availableMothers.map((m) => (
-                  <option key={m.id} value={m.id}>
+                {availableMothers.map((m, mIdx) => (
+                  <option key={`exp_m_${m.id}_${mIdx}`} value={m.id}>
                     {m.name?.given || m.firstName} {m.name?.surname || m.lastName} {m.birthYear ? `(${m.birthYear} р.)` : ''}
                   </option>
                 ))}

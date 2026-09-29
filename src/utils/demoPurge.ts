@@ -55,48 +55,65 @@ export function isDemoPerson(person: any): boolean {
   const deathPlace = String(person.deathPlace || '').toLowerCase();
   const notes = String(person.notes || person.bio || '').toLowerCase();
 
-  // IDs p1, p2, ... p15 were from sampleData.ts (Коваленки)
-  if (/^p[0-9]+$/.test(id)) return true;
-  if (lastName === 'коваленко') return true;
-  if (lastName === 'шевченко' && (birthPlace.includes('чернечий яр') || deathPlace.includes('чернечий яр'))) return true;
-  if (firstName === 'остап' && lastName.includes('коваленк')) return true;
-  if (birthPlace.includes('чернечий яр') || deathPlace.includes('чернечий яр')) return true;
-  if (notes.includes('чернечий яр') || notes.includes('кузні біля річки ворскла')) return true;
+  // ONLY identify actual sample demo persons from the old Chernechyi Yar Kovalenko mock dataset
+  const hasChernechyiYar =
+    birthPlace.includes('чернечий яр') ||
+    deathPlace.includes('чернечий яр') ||
+    notes.includes('чернечий яр') ||
+    notes.includes('кузні біля річки ворскла');
+
+  if (id.startsWith('p_demo_')) return true;
+
+  if (hasChernechyiYar) {
+    if (lastName.includes('коваленк') || firstName === 'остап' || lastName === 'шевченко') {
+      return true;
+    }
+    // IDs p1...p15 were specifically from the original Chernechyi Yar demo data
+    if (/^p([1-9]|1[0-5])$/.test(id)) {
+      return true;
+    }
+  }
 
   return false;
 }
 
 export function isDemoFamily(familyId: string, family?: any): boolean {
   const id = String(familyId || family?.id || '').trim();
-  // f1 ... f10 were demo families from sampleData.ts
-  if (/^f[0-9]+$/.test(id)) return true;
-  if (family?.husbandId && /^p[0-9]+$/.test(family.husbandId)) return true;
-  if (family?.wifeId && /^p[0-9]+$/.test(family.wifeId)) return true;
+  if (id.startsWith('fam_demo_')) return true;
+  // Only purge demo families if associated with the specific demo Kovalenko dataset
+  if (/^f([1-9]|10)$/.test(id)) {
+    if (
+      family?.husbandId &&
+      (/^p([1-9]|1[0-5])$/.test(family.husbandId) || family.husbandId.startsWith('p_demo_'))
+    ) {
+      return true;
+    }
+  }
   return false;
 }
 
 export function isDemoEvent(eventId: string, event?: any): boolean {
   const id = String(eventId || event?.id || '').trim();
-  if (/^e[0-9]+$/i.test(id)) return true;
+  if (id.startsWith('e_demo_')) return true;
   const text = String(
     (event?.title || '') + ' ' +
     (event?.description || '') + ' ' +
     (event?.place || '')
   ).toLowerCase();
-  if (text.includes('коваленк') || text.includes('чернечий яр') || text.includes('диканьк') || text.includes('лисенк')) return true;
+  if (text.includes('чернечий яр') && (text.includes('коваленк') || text.includes('ворскл'))) return true;
   return false;
 }
 
 export function isDemoSource(sourceId: string, source?: any): boolean {
   const id = String(sourceId || source?.id || '').trim();
-  if (/^s[0-9]+$/i.test(id)) return true;
+  if (id.startsWith('s_demo_')) return true;
   const text = String(
     (source?.title || '') + ' ' +
     (source?.name || '') + ' ' +
     (source?.notes || '') + ' ' +
     (source?.archiveReference || '')
   ).toLowerCase();
-  if (text.includes('коваленк') || text.includes('чернечий яр') || text.includes('диканьк') || text.includes('покровської церкви 1878')) return true;
+  if (text.includes('чернечий яр') && text.includes('покровської церкви 1878')) return true;
   return false;
 }
 

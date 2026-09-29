@@ -13,7 +13,9 @@ import { Person, DuplicatePair, DuplicatePairCriteria } from '../types';
 import {
   normalizeArchaicUkrainian,
   getLevenshteinSimilarity,
-  areSurnamesPhoneticallyRelated
+  areSurnamesPhoneticallyRelated,
+  normalizeBilingualCyrillic,
+  areSurnamesBilingualEquivalent
 } from './ukrainianPhonetics';
 import { extractYear } from './treeAudit';
 
@@ -27,61 +29,94 @@ export interface PersonDuplicateMatch {
 }
 
 /**
- * Common Ukrainian historical / ecclesiastical given name variants and canonical roots
+ * Common Ukrainian and Russian historical / ecclesiastical given name variants and canonical roots
  */
 const UKRAINIAN_NAME_VARIANTS: Record<string, string[]> = {
-  'іван': ['іван', 'ян', 'івась', 'іванко', 'іоанн', 'іоан', 'йоганн', 'іванка'],
-  'олександр': ['олександр', 'олекса', 'сашко', 'саня', 'александр', 'алексей'],
-  'олексій': ['олексій', 'олекса', 'алексій', 'алексей', 'олесь'],
-  'микола': ['микола', 'миколай', 'ніколай', 'миколка', 'кола'],
-  'михайло': ['михайло', 'михаїл', 'михал', 'михайлик'],
-  'дмитро': ['дмитро', 'димитрій', 'дмитрій', 'митько'],
-  'василь': ['василь', 'василій', 'васько', 'василько'],
-  'григорій': ['григорій', 'григір', 'гриць', 'грицько', 'григорий'],
-  'петро': ['петро', 'петрик', 'петр'],
-  'степан': ['степан', 'стефан', 'стець', 'степко'],
-  'федір': ['федір', 'феодор', 'теодор', 'федот', 'федя'],
-  'семен': ['семен', 'симеон', 'семко', 'сьома'],
-  'яків': ['яків', 'іаков', 'якуб', 'яша'],
-  'юрій': ['юрій', 'георгій', 'юрко', 'єгор', 'юрчик'],
-  'павло': ['павло', 'павлик', 'павел'],
-  'роман': ['роман', 'ромко', 'романко'],
-  'андрій': ['андрій', 'андрей', 'андрійко'],
-  'володимир': ['володимир', 'владимир', 'володя'],
+  'іван': ['іван', 'иван', 'ян', 'івась', 'іванко', 'іоанн', 'іоан', 'йоганн', 'іванка', 'ваня'],
+  'олександр': ['олександр', 'олекса', 'сашко', 'саня', 'александр', 'олесь', 'саша'],
+  'олексій': ['олексій', 'олекса', 'алексій', 'алексей', 'олесь', 'льоша'],
+  'микола': ['микола', 'миколай', 'ніколай', 'николай', 'миколка', 'кола', 'коля'],
+  'михайло': ['михайло', 'михаїл', 'михал', 'михаил', 'михайлик', 'миша'],
+  'дмитро': ['дмитро', 'димитрій', 'дмитрій', 'дмитрий', 'митько', 'дима'],
+  'василь': ['василь', 'василій', 'васько', 'василько', 'василий', 'вася'],
+  'григорій': ['григорій', 'григір', 'гриць', 'грицько', 'григорий', 'гриша'],
+  'петро': ['петро', 'петрик', 'петр', 'пётр', 'петя'],
+  'степан': ['степан', 'стефан', 'стець', 'степко', 'стёпа'],
+  'федір': ['федір', 'федор', 'фёдор', 'феодор', 'теодор', 'федот', 'федя'],
+  'семен': ['семен', 'симеон', 'семко', 'сьома', 'семён', 'семенко', 'сеня'],
+  'яків': ['яків', 'яков', 'іаков', 'якуб', 'яша'],
+  'юрій': ['юрій', 'юрий', 'георгій', 'георгий', 'юрко', 'єгор', 'егор', 'юрчик'],
+  'павло': ['павло', 'павел', 'павлик', 'паша'],
+  'роман': ['роман', 'рома', 'ромко', 'романко'],
+  'андрій': ['андрій', 'андрей', 'андрійко', 'андрюша'],
+  'володимир': ['володимир', 'владимир', 'володя', 'вова'],
   'тарас': ['тарас', 'тарасик'],
-  'ігнат': ['ігнат', 'ігнатій', 'ігнацій'],
-  'тимофій': ['тимофій', 'тиміш', 'тимофей'],
-  'кирило': ['кирило', 'кирил', 'кирилочко'],
-  'данило': ['данило', 'даниїл', 'данил'],
-  'костянтин': ['костянтин', 'констянтин', 'кость'],
-  'лука': ['лука', 'лукіян', 'лукаш'],
-  'максим': ['максим', 'максимко'],
-  'матвій': ['матвій', 'матфей', 'матюша'],
-  'прокіп': ['прокіп', 'прокопій', 'прокоп'],
-  'пилип': ['пилип', 'філіп', 'філіпп'],
-  'захар': ['захар', 'захарій', 'захарія'],
-  'ілля': ['ілля', 'ілія', 'ілья'],
+  'ігнат': ['ігнат', 'игнат', 'гнат', 'ігнатій', 'игнатий', 'ігнацій'],
+  'тимофій': ['тимофій', 'тиміш', 'тимофей', 'тима'],
+  'кирило': ['кирило', 'кирил', 'кирилл', 'кирилочко'],
+  'данило': ['данило', 'даниїл', 'данил', 'даниил', 'даня'],
+  'костянтин': ['костянтин', 'констянтин', 'константин', 'кость', 'костя'],
+  'лука': ['лука', 'лукіян', 'лукиан', 'лукаш'],
+  'максим': ['максим', 'максимко', 'макс'],
+  'матвій': ['матвій', 'матвей', 'матфей', 'матюша', 'мотя'],
+  'прокіп': ['прокіп', 'прокопій', 'прокоп', 'прокофий', 'прокофій'],
+  'пилип': ['пилип', 'филипп', 'филип', 'філіп', 'філіпп'],
+  'захар': ['захар', 'захарій', 'захария', 'захарий'],
+  'ілля': ['ілля', 'илья', 'ілія', 'илиа', 'ілья'],
+  'сергій': ['сергій', 'сергей', 'сергійко', 'серьожа', 'сергий'],
+  'євген': ['євген', 'евгений', 'євгеній', 'євгенко', 'женя'],
+  'микита': ['микита', 'никита', 'нікіта'],
+  'хома': ['хома', 'фома', 'том'],
+  'опанас': ['опанас', 'афанасій', 'афанасий', 'панас'],
+  'артем': ['артем', 'артём', 'артемій', 'артемий'],
+  'антон': ['антон', 'антоній', 'антоний', 'антось'],
+  'борис': ['борис', 'боря'],
+  'віктор': ['віктор', 'виктор', 'вітя'],
+  'віталій': ['віталій', 'виталий', 'віталік'],
+  'геннадій': ['геннадій', 'геннадий', 'гена'],
+  'денис': ['денис', 'дионисий', 'діонісій'],
+  'кузьма': ['кузьма', 'козьма', 'косма'],
+  'лаврентій': ['лаврентій', 'лаврентий', 'лаврін'],
+  'леонід': ['леонід', 'леонид', 'льоня'],
+  'макар': ['макар', 'макарій', 'макарий'],
+  'назар': ['назар', 'назарій', 'назарий'],
+  'остап': ['остап', 'евстафий', 'євстафій'],
+  'платон': ['платон', 'платоша'],
+  'сава': ['сава', 'савва'],
+  'сидір': ['сидір', 'сидор', 'ісидор', 'исидор'],
+  'ярослав': ['ярослав', 'славик'],
   'ганна': ['ганна', 'анна', 'ганя', 'галина', 'аня'],
-  'марія': ['марія', 'маріка', 'маруся', 'мар\'я', 'марійка'],
-  'катерина': ['катерина', 'катря', 'катя', 'катрина'],
-  'оксана': ['оксана', 'ксенія', 'аксинья', 'оксанка'],
+  'марія': ['марія', 'мария', 'маріка', 'маруся', 'мар\'я', 'марья', 'марійка', 'маша'],
+  'катерина': ['катерина', 'екатерина', 'катря', 'катя', 'катрина'],
+  'оксана': ['оксана', 'ксенія', 'ксения', 'аксинья', 'оксанка'],
   'тетяна': ['тетяна', 'татьяна', 'таня', 'тетєна'],
-  'олена': ['олена', 'єлена', 'алена', 'ілона', 'оленка'],
-  'наталія': ['наталія', 'наталя', 'наталья', 'наталка'],
-  'євдокія': ['євдокія', 'явдоха', 'ярина', 'докія', 'євдокія'],
-  'пелагея': ['пелагея', 'палажка', 'палагна', 'пелагія'],
+  'олена': ['олена', 'елена', 'єлена', 'алена', 'алёна', 'ілона', 'оленка', 'лена'],
+  'наталія': ['наталія', 'наталя', 'наталья', 'наталия', 'наталка', 'наташа'],
+  'євдокія': ['євдокія', 'евдокия', 'явдоха', 'ярина', 'докія', 'дуня'],
+  'пелагея': ['пелагея', 'палажка', 'палагна', 'пелагія', 'пелагия'],
   'варвара': ['варвара', 'варка', 'варя'],
-  'параскева': ['параскева', 'параска', 'прасковія'],
-  'софія': ['софія', 'соня', 'зофія'],
+  'параскева': ['параскева', 'параска', 'прасковья', 'прасковія', 'паня'],
+  'софія': ['софія', 'софия', 'софья', 'соня', 'зофія'],
   'христина': ['христина', 'христя', 'кристина'],
-  'юстина': ['юстина', 'устина', 'юстинія'],
-  'анастасія': ['анастасія', 'настя', 'настася'],
-  'меланія': ['меланія', 'маланка', 'меланка'],
-  'уляна': ['уляна', 'юліана', 'улянка']
+  'юстина': ['юстина', 'устина', 'устинья', 'юстинія'],
+  'анастасія': ['анастасія', 'анастасия', 'настя', 'настася'],
+  'меланія': ['меланія', 'мелания', 'маланка', 'меланка'],
+  'уляна': ['уляна', 'ульяна', 'юліана', 'юлиана', 'улянка'],
+  'надія': ['надія', 'надежда', 'надійка', 'надя'],
+  'віра': ['віра', 'вера', 'вірочка'],
+  'любов': ['любов', 'любовь', 'люба'],
+  'світлана': ['світлана', 'светлана', 'свєта', 'света'],
+  'ольга': ['ольга', 'олька', 'оля'],
+  'дарина': ['дарина', 'дарья', 'дарія', 'одарка', 'даша'],
+  'поліна': ['поліна', 'полина', 'поля'],
+  'євгенія': ['євгенія', 'евгения', 'женя'],
+  'людмила': ['людмила', 'люда', 'міла'],
+  'марфа': ['марфа', 'марта'],
+  'ірина': ['ірина', 'ирина', 'ярина', 'іра']
 };
 
 /**
- * Check if two Ukrainian given names are equivalent variants
+ * Check if two Ukrainian or Russian given names are equivalent variants
  */
 export function areGivenNamesEquivalent(nameA: string, nameB: string): { isMatch: boolean; similarity: number } {
   const a = normalizeArchaicUkrainian(nameA.trim().toLowerCase());
@@ -89,13 +124,25 @@ export function areGivenNamesEquivalent(nameA: string, nameB: string): { isMatch
   if (!a || !b) return { isMatch: false, similarity: 0 };
   if (a === b) return { isMatch: true, similarity: 1.0 };
 
-  // Check dictionary
+  // 1. Check dictionary of Ukrainian / Russian variants
   for (const list of Object.values(UKRAINIAN_NAME_VARIANTS)) {
     const hasA = list.some(v => a === v || a.startsWith(v) || v.startsWith(a));
     const hasB = list.some(v => b === v || b.startsWith(v) || v.startsWith(b));
     if (hasA && hasB) {
       return { isMatch: true, similarity: 0.95 };
     }
+  }
+
+  // 2. Check bilingual Cyrillic normalization (e.g. "иван" and "іван", "вячеслав" and "в'ячеслав")
+  const bNormA = normalizeBilingualCyrillic(a);
+  const bNormB = normalizeBilingualCyrillic(b);
+  if (bNormA && bNormB && bNormA === bNormB) {
+    return { isMatch: true, similarity: 0.95 };
+  }
+
+  const bLev = getLevenshteinSimilarity(bNormA, bNormB);
+  if (bLev >= 0.75) {
+    return { isMatch: true, similarity: bLev };
   }
 
   const lev = getLevenshteinSimilarity(a, b);
@@ -131,6 +178,56 @@ export function extractFatherGivenNameFromPatronymic(patronymic: string): string
   }
 
   return null;
+}
+
+/**
+ * Check if two patronymics are equivalent across Ukrainian and Russian
+ * e.g. "Иванович" ~ "Іванович", "Николаевич" ~ "Миколайович", "Григорьевич" ~ "Григорович",
+ * "Васильевич" ~ "Васильович", "Николаевна" ~ "Миколаївна", "Александрович" ~ "Олександрович"
+ */
+export function arePatronymicsEquivalent(patronA: string | undefined | null, patronB: string | undefined | null): boolean {
+  if (!patronA || !patronB) return false;
+  const a = patronA.trim().toLowerCase();
+  const b = patronB.trim().toLowerCase();
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  // 1. Direct bilingual phonetic check
+  const bNormA = normalizeBilingualCyrillic(a);
+  const bNormB = normalizeBilingualCyrillic(b);
+  if (bNormA === bNormB) return true;
+
+  // 2. Extract father name stems and check equivalence
+  const stemA = extractFatherGivenNameFromPatronymic(a);
+  const stemB = extractFatherGivenNameFromPatronymic(b);
+  if (stemA && stemB) {
+    if (stemA === stemB) return true;
+    const stemMatch = areGivenNamesEquivalent(stemA, stemB);
+    if (stemMatch.isMatch) return true;
+
+    const bStemA = normalizeBilingualCyrillic(stemA);
+    const bStemB = normalizeBilingualCyrillic(stemB);
+    if (bStemA === bStemB) return true;
+    if (getLevenshteinSimilarity(bStemA, bStemB) >= 0.75) return true;
+  }
+
+  // 3. Patronymic suffix normalization + Levenshtein
+  const cleanPatrA = a
+    .replace(/(?:ович|евич|йович|овичу|евичу|ич|іч)$/, '')
+    .replace(/(?:івна|ївна|овна|евна|ична|ічна)$/, '');
+  const cleanPatrB = b
+    .replace(/(?:ович|евич|йович|овичу|евичу|ич|іч)$/, '')
+    .replace(/(?:івна|ївна|овна|евна|ична|ічна)$/, '');
+
+  if (cleanPatrA && cleanPatrB) {
+    const bA = normalizeBilingualCyrillic(cleanPatrA);
+    const bB = normalizeBilingualCyrillic(cleanPatrB);
+    if (bA === bB) return true;
+    if (areGivenNamesEquivalent(bA, bB).isMatch) return true;
+    if (getLevenshteinSimilarity(bA, bB) >= 0.75) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -260,14 +357,20 @@ export function comparePersonPair(
   let patronScore = 0;
   let patronMatch = false;
   if (patronA && patronB) {
-    const pSim = getLevenshteinSimilarity(
-      normalizeArchaicUkrainian(patronymicNormalize(patronA)),
-      normalizeArchaicUkrainian(patronymicNormalize(patronB))
-    );
-    if (pSim >= 0.8) {
-      patronScore = Math.round(pSim * 12);
+    if (arePatronymicsEquivalent(patronA, patronB)) {
+      patronScore = 12;
       patronMatch = true;
-      reasons.push(`Збіг по батькові: «${patronA}» ~ «${patronB}»`);
+      reasons.push(`Збіг по батькові (укр/рос): «${patronA}» ~ «${patronB}»`);
+    } else {
+      const pSim = getLevenshteinSimilarity(
+        normalizeArchaicUkrainian(patronymicNormalize(patronA)),
+        normalizeArchaicUkrainian(patronymicNormalize(patronB))
+      );
+      if (pSim >= 0.8) {
+        patronScore = Math.round(pSim * 12);
+        patronMatch = true;
+        reasons.push(`Збіг по батькові: «${patronA}» ~ «${patronB}»`);
+      }
     }
   }
 

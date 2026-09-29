@@ -163,9 +163,9 @@ export const PlaceDossierOverview: React.FC<PlaceDossierOverviewProps> = ({
 
         {placeObj && placeObj.persons.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {placeObj.persons.map((person) => (
+            {placeObj.persons.map((person, pIdx) => (
               <div
-                key={person.id}
+                key={`${person.id}_${pIdx}`}
                 onClick={() => onSelectPerson(person.id)}
                 className={`p-4 rounded-xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all cursor-pointer flex items-center justify-between shadow-xs`}
               >

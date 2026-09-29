@@ -626,8 +626,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
               className="px-2.5 py-1.5 bg-[#121212] border border-[#333333] rounded-lg text-xs font-semibold text-[#E5E5E5] focus:outline-none focus:border-[#B88E3E] cursor-pointer max-w-[220px]"
             >
               <option value="all">Усі особи ({persons.length})</option>
-              {persons.map((p) => (
-                <option key={p.id} value={p.id}>
+              {persons.map((p, pIdx) => (
+                <option key={`tl_person_${p.id}_${pIdx}`} value={p.id}>
                   {p.lastName} {p.firstName} {p.birthDate ? `(${String(p.birthDate).slice(0, 4)})` : ''}
                 </option>
               ))}
@@ -1082,7 +1082,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
           </div>
 
           <div className="space-y-3">
-            {persons.map((p) => {
+            {persons.map((p, pIdx) => {
               const bYear = parseYear(p.birthDate || (p as any).birthYear) || minYear;
               const dYear = parseYear(p.deathDate || (p as any).deathYear) || new Date().getFullYear();
               const totalSpan = Math.max(1, maxYear - minYear);
@@ -1094,7 +1094,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
               const age = birthY && deathY ? deathY - birthY : null;
 
               return (
-                <div key={p.id} className="space-y-1">
+                <div key={`lifespan_${p.id}_${pIdx}`} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <button
                       onClick={() => onInspectPerson?.(p.id)}

@@ -548,9 +548,9 @@ export const FamilyQuickAddModal: React.FC<FamilyQuickAddModalProps> = ({
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                         <span>Можливий дублікат у дереві ({fatherDuplicates[0].confidence}% збіг)</span>
                       </div>
-                      {fatherDuplicates.map((dup) => (
+                      {fatherDuplicates.map((dup, idx) => (
                         <div
-                          key={dup.person.id}
+                          key={`f_dup_${dup.person.id}_${idx}`}
                           className="p-2 rounded-lg bg-black/20 border border-amber-500/20 text-xs flex items-center justify-between gap-2"
                         >
                           <div className="min-w-0">
@@ -729,9 +729,9 @@ export const FamilyQuickAddModal: React.FC<FamilyQuickAddModalProps> = ({
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                         <span>Можливий дублікат у дереві ({motherDuplicates[0].confidence}% збіг)</span>
                       </div>
-                      {motherDuplicates.map((dup) => (
+                      {motherDuplicates.map((dup, idx) => (
                         <div
-                          key={dup.person.id}
+                          key={`m_dup_${dup.person.id}_${idx}`}
                           className="p-2 rounded-lg bg-black/20 border border-amber-500/20 text-xs flex items-center justify-between gap-2"
                         >
                           <div className="min-w-0">

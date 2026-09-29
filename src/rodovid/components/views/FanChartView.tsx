@@ -26,6 +26,9 @@ import { TreeIcon } from '../../../components/common/GenealogyIcons';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { downloadGedcom, parseGedcom } from '../../utils/gedcom';
 import { useGenealogyStore } from '../../../stores/useGenealogyStore';
+import { GedcomMergeModal } from '../modals/GedcomMergeModal';
+import { ImportHistoryModal } from '../modals/ImportHistoryModal';
+import { MergeResult } from '../../utils/mergeDatabase';
 import {
   calculateFanChart,
   extractFanChartClans,
@@ -597,6 +600,11 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
   // GEDCOM Import File Input Ref & Logic
   const gedcomFileInputRef = useRef<HTMLInputElement>(null);
   const [importNotification, setImportNotification] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [showImportHistoryModal, setShowImportHistoryModal] = useState<boolean>(false);
+  const [pendingMerge, setPendingMerge] = useState<{
+    incomingDb: GenealogyDatabase;
+    fileName?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!importNotification) return;
@@ -631,19 +639,27 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
           return;
         }
 
-        if (onImportDatabase) {
-          onImportDatabase(parsedDb);
+        const existingCount = Object.keys(database.persons || {}).length;
+        if (existingCount > 0) {
+          setPendingMerge({
+            incomingDb: parsedDb,
+            fileName: file.name
+          });
         } else {
-          useGenealogyStore.getState().loadGenealogyDatabase(parsedDb);
-        }
+          if (onImportDatabase) {
+            onImportDatabase(parsedDb);
+          } else {
+            useGenealogyStore.getState().loadGenealogyDatabase(parsedDb);
+          }
 
-        if (parsedDb.rootPersonId) {
-          onChangeRoot(parsedDb.rootPersonId);
-        }
+          if (parsedDb.rootPersonId) {
+            onChangeRoot(parsedDb.rootPersonId);
+          }
 
-        setImportNotification({
-          message: `Успішно імпортовано: ${personCount} осіб, ${Object.keys(parsedDb.families || {}).length} родин.`
-        });
+          setImportNotification({
+            message: `Успішно імпортовано: ${personCount} осіб, ${Object.keys(parsedDb.families || {}).length} родин.`
+          });
+        }
       } catch (err: any) {
         setImportNotification({
           message: `Помилка імпорту GEDCOM: ${err.message || 'Некоректний файл'}`,
@@ -656,7 +672,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
       }
     };
     reader.readAsText(file);
-  }, [onImportDatabase, onChangeRoot]);
+  }, [database.persons, onImportDatabase, onChangeRoot]);
 
   // Check if sector matches the active clan highlight filter
   const activeFocusClanId = hoveredClanId || selectedClanId;
@@ -1143,13 +1159,13 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               className={`${theme.surfaceBg} ${theme.textPrimary} text-xs border ${theme.borderSubtle} rounded-lg px-2 sm:px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 max-w-[150px] sm:max-w-[210px] truncate cursor-pointer shadow-xs`}
               title="Вибрати центральну особу родоводу для віяла"
             >
-              {dropdownPersons.map((p) => {
+              {dropdownPersons.map((p, pIdx) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
                 const isMasked = !isWhitelisted && isLiving;
                 const isRoot = p.id === defaultRootId;
                 return (
                   <option
-                    key={p.id}
+                    key={`${p.id}_${pIdx}`}
                     value={p.id}
                     className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-neutral-900'}
                   >
@@ -1335,8 +1351,8 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                     const given = isMasked ? 'Скрито' : (sec.person.name?.given || sec.person.firstName || '');
                     const patronymic = isMasked ? '' : (sec.person.name?.patronymic || sec.person.patronymic || '');
                     const maiden = isMasked ? '' : (sec.person.name?.maidenName || sec.person.maidenName || '');
-                    const birth = isMasked ? '' : (sec.person.birthYear || (sec.person.birthDate ? sec.person.birthDate.slice(0, 4) : ''));
-                    const death = isMasked ? '' : (sec.person.deathYear || (sec.person.deathDate ? sec.person.deathDate.slice(0, 4) : ''));
+                    const birth = isMasked ? '' : (sec.person.birthYear || (sec.person.birthDate ? String(sec.person.birthDate).slice(0, 4) : ''));
+                    const death = isMasked ? '' : (sec.person.deathYear || (sec.person.deathDate ? String(sec.person.deathDate).slice(0, 4) : ''));
                     const isFemale = sec.person.gender === 'female' || sec.person.gender === 'F';
 
                     const statusStr = isMasked
@@ -1910,7 +1926,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                           </div>
 
                           <div className="max-h-52 overflow-y-auto space-y-1 pr-0.5 custom-scrollbar">
-                            {members.map(({ person: p, isInFan, ahnentafelNumber, generation, kinshipTitle }) => {
+                            {members.map(({ person: p, isInFan, ahnentafelNumber, generation, kinshipTitle }, pIdx) => {
                               const isFemale = p.gender === 'female' || p.gender === 'F';
                               const maiden = (p.name?.maidenName || p.maidenName || '').trim();
                               const maidenFormatted = isFemale && maiden ? `(${maiden})` : '';
@@ -1932,7 +1948,7 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
 
                               return (
                                 <div
-                                  key={p.id}
+                                  key={`${p.id}_${pIdx}`}
                                   onClick={() => onSelectPerson(p.id)}
                                   onMouseEnter={() => {
                                     const matchingSec = sectors.find((s) => s.person?.id === p.id);
@@ -2212,6 +2228,15 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                 <Check className="w-4 h-4 text-emerald-400 shrink-0" />
               )}
               <span>{importNotification.message}</span>
+              {!importNotification.isError && (
+                <button
+                  type="button"
+                  onClick={() => setShowImportHistoryModal(true)}
+                  className="underline hover:text-white font-bold ml-1.5 cursor-pointer text-emerald-200"
+                >
+                  Звіт історії →
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setImportNotification(null)}
@@ -2221,6 +2246,54 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
               </button>
             </div>
           </div>
+        )}
+
+        {/* Import History Modal */}
+        {showImportHistoryModal && (
+          <ImportHistoryModal
+            isOpen={showImportHistoryModal}
+            onClose={() => setShowImportHistoryModal(false)}
+            onSelectPerson={(id) => {
+              onSelectPerson(id);
+              setShowImportHistoryModal(false);
+            }}
+          />
+        )}
+
+        {/* Smart Merge Modal */}
+        {pendingMerge && (
+          <GedcomMergeModal
+            currentDatabase={database}
+            incomingDatabase={pendingMerge.incomingDb}
+            fileName={pendingMerge.fileName}
+            onClose={() => setPendingMerge(null)}
+            onApplyMerge={(result: MergeResult) => {
+              useGenealogyStore.getState().mergeGenealogyDatabase(pendingMerge.incomingDb, result, {
+                fileName: pendingMerge.fileName
+              });
+              const conflictMsg = result.conflictsResolvedCount > 0 ? `, вирішено ${result.conflictsResolvedCount} розбіжностей` : '';
+              setImportNotification({
+                message: `Успішно об'єднано: ${result.matchedCount} збігів доповнено даними${conflictMsg}, додано ${result.newPersonsCount} нових родичів!`
+              });
+              setPendingMerge(null);
+            }}
+            onApplyReplace={(incomingDb) => {
+              if (onImportDatabase) {
+                onImportDatabase(incomingDb);
+              } else {
+                useGenealogyStore.getState().loadGenealogyDatabase(incomingDb, {
+                  fileName: pendingMerge.fileName
+                });
+              }
+              if (incomingDb.rootPersonId) {
+                onChangeRoot(incomingDb.rootPersonId);
+              }
+              setImportNotification({
+                message: `Успішно замінено дерево: завантажено ${Object.keys(incomingDb.persons || {}).length} осіб.`
+              });
+              setPendingMerge(null);
+            }}
+          />
         )}
       </div>
     </div>

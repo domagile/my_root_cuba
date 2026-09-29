@@ -45,7 +45,7 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
   initialPersonBId,
   onMergeSuccess
 }) => {
-  const { persons, setPersons, families, setFamilies, themePalette, setSelectedPersonId } = useGenealogy();
+  const { persons, setPersons, families, setFamilies, themePalette, setSelectedPersonId, mergePersons } = useGenealogy();
   const theme = getThemeConfig(themePalette);
   const isDark = themePalette.includes('dark');
 
@@ -176,10 +176,12 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
         masterTarget
       );
 
-      setPersons(result.updatedPersons);
-      if (result.updatedFamilies && Object.keys(result.updatedFamilies).length > 0) {
-        setFamilies(result.updatedFamilies);
-      }
+      mergePersons({
+        updatedPersons: result.updatedPersons,
+        updatedFamilies: result.updatedFamilies,
+        masterPerson: result.masterPerson,
+        deletedPersonIds: [result.deletedPersonId]
+      });
 
       setSelectedPersonId(result.masterPerson.id);
       if (onMergeSuccess) {
@@ -195,12 +197,16 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
   const handleDetailedMergeComplete = (
     updatedPersons: Person[],
     updatedFamilies: Record<string, Family>,
-    masterName: string
+    masterName: string,
+    extra?: { masterPerson?: Person; deletedPersonId?: string }
   ) => {
-    setPersons(updatedPersons);
-    if (updatedFamilies && Object.keys(updatedFamilies).length > 0) {
-      setFamilies(updatedFamilies);
-    }
+    const deletedId = extra?.deletedPersonId || (masterTarget === 'A' ? personB?.id : personA?.id);
+    mergePersons({
+      updatedPersons,
+      updatedFamilies,
+      masterPerson: extra?.masterPerson,
+      deletedPersonIds: deletedId ? [deletedId] : []
+    });
     const targetId = masterTarget === 'A' ? personA?.id : personB?.id;
     if (targetId) setSelectedPersonId(targetId);
 

@@ -2,11 +2,23 @@ import { create } from 'zustand';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig, PlaceDossier } from '../types';
 import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
 import { savePersonDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc, savePlaceDoc, deletePlaceDoc } from '../lib/firebase';
+import { useCloudSyncStore } from './useCloudSyncStore';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { useAuthStore } from './useAuthStore';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
+import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord } from '../rodovid/utils/mergeDatabase';
+
+function notifySyncChange(action?: () => void) {
+  try {
+    const syncStore = useCloudSyncStore.getState();
+    syncStore.markUnsavedChange();
+    if (syncStore.syncMode === 'auto' && action) {
+      action();
+    }
+  } catch {}
+}
 
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
 
@@ -30,8 +42,11 @@ export const normalizePerson = (p: Person): Person => {
   const avatar = p.avatarUrl || p.avatar || p.photoUrl;
   const estate = p.estateOrSocialStatus || p.estate || p.socialStatus;
 
-  let deathYear = p.deathYear === null ? undefined : p.deathYear;
-  let deathDate = p.deathDate === null ? undefined : p.deathDate;
+  const rawBirth = p.birthDate !== undefined && p.birthDate !== null ? String(p.birthDate).trim() : undefined;
+  const rawDeath = p.deathDate !== undefined && p.deathDate !== null ? String(p.deathDate).trim() : undefined;
+
+  let deathYear = p.deathYear === null || p.deathYear === undefined ? undefined : Number(p.deathYear);
+  let deathDate = rawDeath;
 
   // Clean phantom death year for persons where the user did not enter a death date
   // (e.g. Maria Nadtochey's phantom 1962 from earlier tests)
@@ -50,10 +65,15 @@ export const normalizePerson = (p: Person): Person => {
     deathDate = undefined;
   }
 
+  if (!p.isLiving && deathYear === undefined && deathDate) {
+    const deathYearMatch = deathDate.match(/\b(1\d{3}|20\d{2})\b/);
+    if (deathYearMatch) deathYear = parseInt(deathYearMatch[1], 10);
+  }
+
   // Ensure birthDate is never empty if birthYear exists, and birthYear is extracted from birthDate
-  const birthDate = p.birthDate || (p.birthYear ? String(p.birthYear) : undefined);
-  const birthYearMatch = birthDate ? String(birthDate).match(/\b(1\d{3}|20\d{2})\b/) : null;
-  const birthYear = p.birthYear !== undefined && p.birthYear !== null ? p.birthYear : (birthYearMatch ? parseInt(birthYearMatch[1], 10) : undefined);
+  const birthDate = rawBirth || (p.birthYear ? String(p.birthYear) : undefined);
+  const birthYearMatch = birthDate ? birthDate.match(/\b(1\d{3}|20\d{2})\b/) : null;
+  const birthYear = p.birthYear !== undefined && p.birthYear !== null ? Number(p.birthYear) : (birthYearMatch ? parseInt(birthYearMatch[1], 10) : undefined);
 
   return {
     ...p,
@@ -108,6 +128,12 @@ export interface GenealogyDataState {
   permanentlyDeletePersons: (ids: string[]) => void;
   emptyTrash: () => void;
   getPersonById: (id: string) => Person | undefined;
+  mergePersons: (payload: {
+    updatedPersons: Person[];
+    updatedFamilies: Record<string, Family>;
+    masterPerson?: Person;
+    deletedPersonIds: string[];
+  }) => void;
 
   // Family Actions
   setFamilies: (families: Record<string, Family> | ((prev: Record<string, Family>) => Record<string, Family>)) => void;
@@ -131,7 +157,11 @@ export interface GenealogyDataState {
 
   // Whole Database & Integrations
   getGenealogyDatabase: () => GenealogyDatabase;
-  loadGenealogyDatabase: (db: GenealogyDatabase) => void;
+  loadGenealogyDatabase: (db: GenealogyDatabase, meta?: { fileName?: string }) => void;
+  mergeGenealogyDatabase: (db: GenealogyDatabase, precalculatedResult?: MergeResult, meta?: { fileName?: string }) => MergeResult;
+  importHistory: ImportHistorySession[];
+  addImportHistorySession: (session: ImportHistorySession) => void;
+  clearImportHistory: () => void;
   setGitConfig: (config: GitConfig) => void;
   setGoogleDriveEmail: (email: string) => void;
   exportGedcomData: () => void;
@@ -153,18 +183,26 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
           const cleaned = parsed.filter((p) => !isDemoPerson(p));
           if (cleaned.length > 0) {
             const normalizedList = cleaned.map(normalizePerson);
+            const seen = new Set<string>();
+            const deduplicated: Person[] = [];
+            for (const p of normalizedList) {
+              if (p && p.id && !seen.has(p.id)) {
+                seen.add(p.id);
+                deduplicated.push(p);
+              }
+            }
             try {
-              localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(normalizedList));
+              localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(deduplicated));
             } catch {}
             // Clean up any cloud docs that had phantom values
             setTimeout(() => {
-              normalizedList.forEach((p) => {
+              deduplicated.forEach((p) => {
                 if (p.lastName?.includes('Надточей') && p.deathYear === undefined) {
                   savePersonDoc(p);
                 }
               });
             }, 1000);
-            return normalizedList;
+            return deduplicated;
           }
         }
       }
@@ -261,6 +299,10 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     try {
       const personsSaved = localStorage.getItem(`${STORAGE_KEY}_persons`);
       const personsList: Person[] = personsSaved ? JSON.parse(personsSaved) : INITIAL_PERSONS;
+      const savedSelected = localStorage.getItem(`${STORAGE_KEY}_selectedPersonId`);
+      if (savedSelected && personsList.some((p) => p.id === savedSelected)) {
+        return savedSelected;
+      }
       return resolveInitialPersonId(personsList);
     } catch {
       return 'p_bom_olga';
@@ -282,10 +324,19 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const nextPersons = typeof updater === 'function' ? updater(state.persons) : updater;
       const normalized = nextPersons.map(normalizePerson);
+      const seen = new Set<string>();
+      const deduplicated: Person[] = [];
+      for (const p of normalized) {
+        if (p && p.id && !seen.has(p.id)) {
+          seen.add(p.id);
+          deduplicated.push(p);
+        }
+      }
       try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(normalized));
+        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(deduplicated));
       } catch {}
-      return { persons: normalized };
+
+      return { persons: deduplicated };
     }),
 
   setSelectedPersonId: (selectedPersonId) => {
@@ -298,8 +349,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         saveUserTreeState(currentUser.email, { selectedPersonId });
       }
 
-      // Also keep fallback key for backward compatibility when authorized
-      if (isAuth && selectedPersonId) {
+      // Persist to localStorage so the focused person is preserved across reloads
+      if (selectedPersonId) {
         localStorage.setItem(`${STORAGE_KEY}_selectedPersonId`, selectedPersonId);
       }
     } catch {}
@@ -309,11 +360,14 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   addPerson: (person) =>
     set((state) => {
       const normalized = normalizePerson(person);
-      const next = [...state.persons, normalized];
+      const exists = state.persons.some((p) => p.id === normalized.id);
+      const next = exists
+        ? state.persons.map((p) => (p.id === normalized.id ? normalized : p))
+        : [...state.persons, normalized];
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
       } catch {}
-      savePersonDoc(normalized);
+      notifySyncChange(() => savePersonDoc(normalized));
       return { persons: next };
     }),
 
@@ -324,7 +378,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
       } catch {}
-      savePersonDoc(normalized);
+      notifySyncChange(() => savePersonDoc(normalized));
       return { persons: next };
     }),
 
@@ -334,7 +388,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       updatedPersons.forEach((p) => {
         const norm = normalizePerson(p);
         normalizedMap.set(norm.id, norm);
-        savePersonDoc(norm);
+      });
+      notifySyncChange(() => {
+        updatedPersons.forEach((p) => savePersonDoc(normalizePerson(p)));
       });
       const next = state.persons.map((p) => normalizedMap.get(p.id) || p);
       try {
@@ -368,7 +424,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
       } catch {}
-      deletePersonDoc(id);
+      notifySyncChange(() => deletePersonDoc(id));
 
       return { persons: nextPersons, trashPersons: nextTrash, families: nextFamilies };
     }),
@@ -386,7 +442,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      ids.forEach((id) => deletePersonDoc(id));
+      notifySyncChange(() => ids.forEach((id) => deletePersonDoc(id)));
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -409,7 +465,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      savePersonDoc(normalizedRestored);
+      notifySyncChange(() => savePersonDoc(normalizedRestored));
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -429,7 +485,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      restored.forEach((r) => savePersonDoc(r));
+      notifySyncChange(() => restored.forEach((r) => savePersonDoc(r)));
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -440,7 +496,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      deletePersonDoc(id);
+      notifySyncChange(() => deletePersonDoc(id));
       return { trashPersons: nextTrash };
     }),
 
@@ -450,7 +506,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      ids.forEach((id) => deletePersonDoc(id));
+      notifySyncChange(() => ids.forEach((id) => deletePersonDoc(id)));
       return { trashPersons: nextTrash };
     }),
 
@@ -464,6 +520,83 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   getPersonById: (id) => get().persons.find((p) => p.id === id),
 
+  mergePersons: (payload) =>
+    set((state) => {
+      const deletedIds = payload.deletedPersonIds || [];
+      const deletedSet = new Set(deletedIds);
+
+      // Filter deleted from updated persons
+      const nextPersons = payload.updatedPersons
+        .filter((p) => p && p.id && !deletedSet.has(p.id))
+        .map(normalizePerson);
+
+      const seen = new Set<string>();
+      const deduplicated: Person[] = [];
+      for (const p of nextPersons) {
+        if (!seen.has(p.id)) {
+          seen.add(p.id);
+          deduplicated.push(p);
+        }
+      }
+
+      // Add deleted targets to trash
+      const targets = state.persons.filter((p) => deletedSet.has(p.id));
+      const masterName = payload.masterPerson?.name?.given || payload.masterPerson?.id || 'основним профілем';
+      const newTrashItems = targets.map((t) => ({
+        ...t,
+        isDeleted: true,
+        deletedAt: new Date().toISOString(),
+        notes: (t.notes ? t.notes + ' • ' : '') + `Об'єднано з ${masterName}`
+      }));
+      const nextTrash = [...state.trashPersons, ...newTrashItems];
+
+      // Record in genealogy_merged_person_ids
+      try {
+        let mergedMap: Record<string, string> = {};
+        const raw = localStorage.getItem('genealogy_merged_person_ids');
+        if (raw) mergedMap = JSON.parse(raw);
+        deletedIds.forEach((id) => {
+          mergedMap[id] = payload.masterPerson?.id || 'merged';
+        });
+        localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(mergedMap));
+      } catch {}
+
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(deduplicated));
+        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
+        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(payload.updatedFamilies));
+      } catch {}
+
+      // Fire synchronization: delete all duplicate docs from Firestore and save master & updated docs
+      notifySyncChange(() => {
+        deletedIds.forEach((id) => deletePersonDoc(id));
+        if (payload.masterPerson) {
+          savePersonDoc(normalizePerson(payload.masterPerson));
+        }
+        // Save updated persons
+        deduplicated.forEach((p) => {
+          const prev = state.persons.find((op) => op.id === p.id);
+          if (!prev || JSON.stringify(prev) !== JSON.stringify(p)) {
+            savePersonDoc(p);
+          }
+        });
+        // Save updated families
+        Object.values(payload.updatedFamilies).forEach((f) => {
+          const prev = state.families[f.id];
+          if (!prev || JSON.stringify(prev) !== JSON.stringify(f)) {
+            saveFamilyDoc(f);
+          }
+        });
+      });
+
+      return {
+        persons: deduplicated,
+        trashPersons: nextTrash,
+        families: payload.updatedFamilies,
+        selectedPersonId: payload.masterPerson?.id || state.selectedPersonId
+      };
+    }),
+
   // Families
   setFamilies: (updater) =>
     set((state) => {
@@ -471,6 +604,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
       } catch {}
+
       return { families: nextFamilies };
     }),
 
@@ -526,7 +660,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         }
 
         if (personChanged) {
-          savePersonDoc(normalizePerson(updated));
+          notifySyncChange(() => savePersonDoc(normalizePerson(updated)));
         }
         return updated;
       });
@@ -535,7 +669,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
       } catch {}
-      saveFamilyDoc(family);
+      notifySyncChange(() => saveFamilyDoc(family));
 
       return { families: nextFamilies, persons: nextPersons };
     }),
@@ -547,7 +681,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
       } catch {}
-      deleteFamilyDoc(id);
+      notifySyncChange(() => deleteFamilyDoc(id));
       return { families: nextFamilies };
     }),
 
@@ -567,7 +701,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
       } catch {}
-      saveSourceDoc(source);
+      notifySyncChange(() => saveSourceDoc(source));
       return { sources: nextSources };
     }),
 
@@ -578,7 +712,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
       } catch {}
-      deleteSourceDoc(id);
+      notifySyncChange(() => deleteSourceDoc(id));
       return { sources: nextSources };
     }),
 
@@ -598,7 +732,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
       } catch {}
-      saveEventDoc(event);
+      notifySyncChange(() => saveEventDoc(event));
       return { events: nextEvents };
     }),
 
@@ -609,7 +743,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
       } catch {}
-      deleteEventDoc(id);
+      notifySyncChange(() => deleteEventDoc(id));
       return { events: nextEvents };
     }),
 
@@ -630,7 +764,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
       } catch {}
-      savePlaceDoc(updatedPlace);
+      notifySyncChange(() => savePlaceDoc(updatedPlace));
       return { places: nextPlaces };
     }),
 
@@ -641,7 +775,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
       } catch {}
-      deletePlaceDoc(idOrName);
+      notifySyncChange(() => deletePlaceDoc(idOrName));
       return { places: nextPlaces };
     }),
 
@@ -670,13 +804,36 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     };
   },
 
-  loadGenealogyDatabase: (db: GenealogyDatabase) =>
-    set(() => {
-      const incomingPersons = db.persons ? Object.values(db.persons).map(normalizePerson) : [];
+  loadGenealogyDatabase: (db: GenealogyDatabase, meta?: { fileName?: string }) =>
+    set((state) => {
+      const rawIncoming = db.persons ? Object.values(db.persons).map(normalizePerson) : [];
+      const seen = new Set<string>();
+      const incomingPersons: Person[] = [];
+      for (const p of rawIncoming) {
+        if (p && p.id && !seen.has(p.id)) {
+          seen.add(p.id);
+          incomingPersons.push(p);
+        }
+      }
       const incomingFamilies = db.families || {};
       const incomingSources = db.sources || {};
       const incomingEvents = db.events || {};
       const incomingPlaces = db.places || {};
+
+      const newSession: ImportHistorySession = {
+        id: `import_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: new Date().toISOString(),
+        fileName: meta?.fileName || 'Повна заміна бази (GEDCOM / JSON)',
+        importType: 'replace',
+        totalIncomingCount: incomingPersons.length,
+        matchedCount: 0,
+        newPersonsCount: incomingPersons.length,
+        conflictsResolvedCount: 0,
+        familiesMergedCount: 0,
+        familiesAddedCount: Object.keys(incomingFamilies).length,
+        resolvedPersonsWithConflicts: []
+      };
+      const updatedHistory = [newSession, ...(state.importHistory || [])].slice(0, 50);
 
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(incomingPersons));
@@ -684,7 +841,14 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(incomingSources));
         localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(incomingEvents));
         localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(incomingPlaces));
+        localStorage.setItem(`${STORAGE_KEY}_importHistory`, JSON.stringify(updatedHistory));
       } catch {}
+
+      // Synchronize to Firestore docs only if in auto mode; in manual mode marks unsaved changes for manual push
+      notifySyncChange(() => {
+        incomingPersons.forEach((p) => savePersonDoc(p));
+        Object.values(incomingFamilies).forEach((f) => saveFamilyDoc(f));
+      });
 
       return {
         persons: incomingPersons,
@@ -692,8 +856,90 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         sources: incomingSources,
         events: incomingEvents,
         places: incomingPlaces,
+        importHistory: updatedHistory,
         selectedPersonId: db.rootPersonId || incomingPersons[0]?.id || null
       };
+    }),
+
+  mergeGenealogyDatabase: (db: GenealogyDatabase, precalculatedResult?: MergeResult, meta?: { fileName?: string }): MergeResult => {
+    const currentDb = get().getGenealogyDatabase();
+    const result = precalculatedResult || executeMerge(currentDb, db);
+    const mergedPersons = Object.values(result.database.persons || {}).map(normalizePerson);
+    const mergedFamilies = result.database.families || {};
+    const mergedSources = result.database.sources || {};
+    const mergedEvents = result.database.events || {};
+    const mergedPlaces = result.database.places || {};
+
+    const newSession: ImportHistorySession = {
+      id: `import_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: new Date().toISOString(),
+      fileName: meta?.fileName || 'Об\'єднання GEDCOM / JSON',
+      importType: 'merge',
+      totalIncomingCount: Object.keys(db.persons || {}).length,
+      matchedCount: result.matchedCount,
+      newPersonsCount: result.newPersonsCount,
+      conflictsResolvedCount: result.conflictsResolvedCount,
+      familiesMergedCount: result.familiesMergedCount,
+      familiesAddedCount: result.familiesAddedCount,
+      resolvedPersonsWithConflicts: result.resolvedPersonsWithConflicts || []
+    };
+
+    const updatedHistory = [newSession, ...(get().importHistory || [])].slice(0, 50);
+
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(mergedPersons));
+      localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(mergedFamilies));
+      localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(mergedSources));
+      localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(mergedEvents));
+      localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(mergedPlaces));
+      localStorage.setItem(`${STORAGE_KEY}_importHistory`, JSON.stringify(updatedHistory));
+    } catch {}
+
+    // Synchronize merged/new persons and families to Firestore docs only if in auto mode; in manual mode marks unsaved changes
+    notifySyncChange(() => {
+      mergedPersons.forEach((p) => savePersonDoc(p));
+      Object.values(mergedFamilies).forEach((f) => saveFamilyDoc(f));
+    });
+
+    set({
+      persons: mergedPersons,
+      families: mergedFamilies,
+      sources: mergedSources,
+      events: mergedEvents,
+      places: mergedPlaces,
+      importHistory: updatedHistory,
+      selectedPersonId: result.database.rootPersonId || mergedPersons[0]?.id || null
+    });
+
+    return result;
+  },
+
+  importHistory: (() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_importHistory`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  })(),
+
+  addImportHistorySession: (session: ImportHistorySession) =>
+    set((state) => {
+      const updated = [session, ...(state.importHistory || [])].slice(0, 50);
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_importHistory`, JSON.stringify(updated));
+      } catch {}
+      return { importHistory: updated };
+    }),
+
+  clearImportHistory: () =>
+    set(() => {
+      try {
+        localStorage.removeItem(`${STORAGE_KEY}_importHistory`);
+      } catch {}
+      return { importHistory: [] };
     }),
 
   setGitConfig: (gitConfig) => {

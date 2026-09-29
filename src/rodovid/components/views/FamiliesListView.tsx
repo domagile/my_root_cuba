@@ -319,7 +319,7 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
                     <p className={`text-[11px] ${theme.textMuted} italic`}>Дітей не додано</p>
                   ) : (
                     <div className="flex flex-wrap gap-2">
-                      {fam.children.map((childObj) => {
+                      {fam.children.map((childObj, cIdx) => {
                         const child = database.persons[childObj.personId];
                         if (!child) return null;
                         const isLiving = isPersonLiving(child);
@@ -327,7 +327,7 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
 
                         return (
                           <div
-                            key={child.id}
+                            key={`${child.id}_${cIdx}`}
                             onClick={() => onSelectPerson(child.id)}
                             className={`flex items-center gap-1.5 px-2.5 py-1.5 ${theme.surfaceBg} border ${theme.borderSubtle} rounded-lg hover:border-emerald-600 cursor-pointer text-xs transition-colors`}
                           >
