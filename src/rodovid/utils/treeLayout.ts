@@ -929,6 +929,11 @@ export function calculateClassicFamilyTreeLayout(
         }
         // Also check if any children have both p and sp as parents, or belong to this family
         Object.values(database.persons).forEach(candChild => {
+          // If candidate child explicitly has another father or mother assigned, do NOT link to this union
+          const hasDifferentFather = candChild.fatherId && candChild.fatherId !== p.id && candChild.fatherId !== sp.id;
+          const hasDifferentMother = candChild.motherId && candChild.motherId !== p.id && candChild.motherId !== sp.id;
+          if (hasDifferentFather || hasDifferentMother) return;
+
           if (
             (candChild.fatherId === p.id && candChild.motherId === sp.id) ||
             (candChild.fatherId === sp.id && candChild.motherId === p.id) ||
@@ -1779,7 +1784,7 @@ export function calculateClassicFamilyTreeLayout(
       const pY = unit.y;
       // Stagger horizontal junction Y levels so neighboring family bus bars NEVER overlap horizontally
       const baseJunctionY = pY + cardHeight + (isCompact ? 18 : 32);
-      const junctionY = baseJunctionY + (unitIdx % 3) * (isCompact ? 10 : 18);
+      const junctionY = baseJunctionY + (unitIdx % 6) * (isCompact ? 12 : 20);
 
       if ((unit.type === 'couple' || unit.type === 'multi_spouse') && unit.spouses.length > 0) {
         unit.spouses.forEach((spInfo, spIdx) => {
@@ -2610,6 +2615,11 @@ export function calculateHorizontalFamilyTreeLayout(
           });
         }
         Object.values(database.persons).forEach(candChild => {
+          // If candidate child explicitly has another father or mother assigned, do NOT link to this union
+          const hasDifferentFather = candChild.fatherId && candChild.fatherId !== p.id && candChild.fatherId !== sp.id;
+          const hasDifferentMother = candChild.motherId && candChild.motherId !== p.id && candChild.motherId !== sp.id;
+          if (hasDifferentFather || hasDifferentMother) return;
+
           if (
             (candChild.fatherId === p.id && candChild.motherId === sp.id) ||
             (candChild.fatherId === sp.id && candChild.motherId === p.id) ||
@@ -3403,7 +3413,7 @@ export function calculateHorizontalFamilyTreeLayout(
             const unionColor = FAMILY_LINE_COLORS[(gen * 3 + unitIdx + spIdx) % FAMILY_LINE_COLORS.length];
             const stemStartX = Math.max(pNode.x, sNode.x) + cardWidth;
             const stemStartY = marriageMidY;
-            const junctionX = stemStartX + (isCompact ? 20 : 36) + ((unitIdx + spIdx) % 4) * (isCompact ? 12 : 20);
+            const junctionX = stemStartX + (isCompact ? 20 : 36) + ((unitIdx + spIdx) % 6) * (isCompact ? 14 : 22);
 
             const childNodes = spInfo.childrenIds
               .filter(cId => nodeMap.has(cId))

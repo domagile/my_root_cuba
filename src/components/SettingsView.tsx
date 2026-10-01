@@ -114,7 +114,14 @@ export const SettingsView: React.FC = () => {
 
   const handleManualUpload = async () => {
     setCloudFeedback(null);
-    const res = await triggerUploadToCloud();
+    const res = await triggerUploadToCloud({ forceFull: false });
+    setCloudFeedback({ text: res.message, isError: !res.success });
+    setTimeout(() => setCloudFeedback(null), 5000);
+  };
+
+  const handleForcedFullUpload = async () => {
+    setCloudFeedback(null);
+    const res = await triggerUploadToCloud({ forceFull: true });
     setCloudFeedback({ text: res.message, isError: !res.success });
     setTimeout(() => setCloudFeedback(null), 5000);
   };
@@ -797,7 +804,7 @@ export const SettingsView: React.FC = () => {
           {/* Manual Push / Pull Trigger Buttons */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-black/10 dark:border-white/10">
             <button
-              onClick={handleManualUpload}
+              onClick={handleForcedFullUpload}
               disabled={isManualPushing || isManualPulling}
               className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl ${theme.accentBtn} ${theme.accentBtnText} font-bold text-xs shadow-sm transition-all cursor-pointer hover:opacity-90 disabled:opacity-50`}
             >

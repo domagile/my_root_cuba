@@ -220,8 +220,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             }`}
             title={
               hasUnsavedChanges
-                ? `Вивантажити ${unsavedChangesCount} незбережених змін у Firestore`
-                : 'Всі зміни збережені у Firestore. Натисніть для оновлення'
+                ? `Розумне вивантаження: записати лише ${unsavedChangesCount} нових/змінених значень у Firestore`
+                : 'Всі дані актуалізовані у Firestore. Немає нових змін'
             }
           >
             <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />

@@ -1053,16 +1053,27 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setCollapsedChildren(new Set());
   }, []);
 
-  // Viewport Culling Bounding Box
+  // High-Performance Quantized Viewport Culling Bounding Box
+  // Uses 550px safety margin and quantizes pan shifts to 180px steps
+  // This allows the GPU to translate the canvas smoothly at 60-120 FPS without React re-filtering nodes/links on every single pixel mouse move!
   const visibleBounds = useMemo(() => {
-    const margin = 250;
+    const margin = 550;
+    const quantStep = 180;
+    const qX = Math.round(pan.x / quantStep) * quantStep;
+    const qY = Math.round(pan.y / quantStep) * quantStep;
     return {
-      minX: (-pan.x - margin) / scale,
-      maxX: (-pan.x + containerDimensions.width + margin) / scale,
-      minY: (-pan.y - margin) / scale,
-      maxY: (-pan.y + containerDimensions.height + margin) / scale
+      minX: (-qX - margin) / scale,
+      maxX: (-qX + containerDimensions.width + margin) / scale,
+      minY: (-qY - margin) / scale,
+      maxY: (-qY + containerDimensions.height + margin) / scale
     };
-  }, [pan.x, pan.y, scale, containerDimensions]);
+  }, [
+    Math.round(pan.x / 180),
+    Math.round(pan.y / 180),
+    scale,
+    containerDimensions.width,
+    containerDimensions.height
+  ]);
 
   // Culled Nodes: Only render nodes that intersect visible viewport
   const visibleNodes = useMemo(() => {
@@ -1083,10 +1094,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const visibleLinks = useMemo(() => {
     if (layout.links.length < 25) return layout.links;
     return layout.links.filter((link) => {
-      const minX = Math.min(link.sourceX, link.targetX) - 20;
-      const maxX = Math.max(link.sourceX, link.targetX) + 20;
-      const minY = Math.min(link.sourceY, link.targetY) - 20;
-      const maxY = Math.max(link.sourceY, link.targetY) + 20;
+      const minX = Math.min(link.sourceX, link.targetX) - 30;
+      const maxX = Math.max(link.sourceX, link.targetX) + 30;
+      const minY = Math.min(link.sourceY, link.targetY) - 30;
+      const maxY = Math.max(link.sourceY, link.targetY) + 30;
       return (
         maxX >= visibleBounds.minX &&
         minX <= visibleBounds.maxX &&
@@ -1096,9 +1107,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
     });
   }, [layout.links, visibleBounds]);
 
-  // Level of Detail (LOD) - 60 FPS optimization for large trees
-  const isPillLOD = lodMode === 'always' || (lodMode === 'auto' && scale < 0.50);
-  const isMicroLOD = lodMode === 'always' ? false : (lodMode === 'auto' && scale < 0.28);
+  // Adaptive Level of Detail (LOD) - 60 FPS optimization for large trees (250-1000+ persons)
+  const isLargeTree = layout.nodes.length > 70;
+  const pillThreshold = isLargeTree ? 0.62 : 0.48;
+  const microThreshold = isLargeTree ? 0.32 : 0.26;
+
+  const isPillLOD = lodMode === 'always' || (lodMode === 'auto' && scale < pillThreshold);
+  const isMicroLOD = lodMode === 'always' ? false : (lodMode === 'auto' && scale < microThreshold);
 
   const themePalette = useUIStore((s) => s.themePalette);
   const theme = getThemeConfig(themePalette);
@@ -2634,11 +2649,12 @@ export const TreeView: React.FC<TreeViewProps> = ({
           </div>
         )}
 
-        {/* World Transform Layer */}
+        {/* World Transform Layer with Hardware GPU Acceleration */}
         <div
-          className="absolute origin-top-left transition-transform duration-75"
+          className={`absolute origin-top-left ${isDragging ? '' : 'transition-transform duration-75'}`}
           style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`
+            transform: `translate3d(${pan.x}px, ${pan.y}px, 0px) scale(${scale})`,
+            willChange: isDragging ? 'transform' : 'auto'
           }}
         >
           {/* SVG Orthogonal Links (Image 2 style) */}

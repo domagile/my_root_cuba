@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig, PlaceDossier } from '../types';
 import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
 import { savePersonDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc, savePlaceDoc, deletePlaceDoc } from '../lib/firebase';
-import { useCloudSyncStore } from './useCloudSyncStore';
+import { useCloudSyncStore, EntitySyncType } from './useCloudSyncStore';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
@@ -10,10 +10,37 @@ import { useAuthStore } from './useAuthStore';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
 import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord } from '../rodovid/utils/mergeDatabase';
 
-function notifySyncChange(action?: () => void) {
+export function notifySyncChange(
+  arg1?: (() => void) | EntitySyncType,
+  arg2?: string | (() => void),
+  arg3?: () => void
+) {
   try {
     const syncStore = useCloudSyncStore.getState();
-    syncStore.markUnsavedChange();
+    if (typeof arg1 === 'string' && typeof arg2 === 'string') {
+      syncStore.markDirty(arg1 as EntitySyncType, arg2);
+      if (syncStore.syncMode === 'auto' && arg3) {
+        arg3();
+      }
+    } else if (typeof arg1 === 'function') {
+      syncStore.markUnsavedChange();
+      if (syncStore.syncMode === 'auto') {
+        arg1();
+      }
+    } else {
+      syncStore.markUnsavedChange();
+    }
+  } catch {}
+}
+
+export function notifySyncDelete(
+  type: EntitySyncType,
+  id: string,
+  action?: () => void
+) {
+  try {
+    const syncStore = useCloudSyncStore.getState();
+    syncStore.markDeleted(type, id);
     if (syncStore.syncMode === 'auto' && action) {
       action();
     }
@@ -396,7 +423,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
       } catch {}
-      notifySyncChange(() => savePersonDoc(normalized));
+      notifySyncChange('persons', normalized.id, () => savePersonDoc(normalized));
       return { persons: next };
     }),
 
@@ -407,7 +434,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
       } catch {}
-      notifySyncChange(() => savePersonDoc(normalized));
+      notifySyncChange('persons', normalized.id, () => savePersonDoc(normalized));
       return { persons: next };
     }),
 
@@ -417,9 +444,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       updatedPersons.forEach((p) => {
         const norm = normalizePerson(p);
         normalizedMap.set(norm.id, norm);
-      });
-      notifySyncChange(() => {
-        updatedPersons.forEach((p) => savePersonDoc(normalizePerson(p)));
+        notifySyncChange('persons', norm.id, () => savePersonDoc(norm));
       });
       const next = state.persons.map((p) => normalizedMap.get(p.id) || p);
       try {
@@ -454,7 +479,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
       } catch {}
-      notifySyncChange(() => deletePersonDoc(id));
+      notifySyncDelete('persons', id, () => deletePersonDoc(id));
 
       return { persons: nextPersons, trashPersons: nextTrash, families: nextFamilies };
     }),
@@ -473,7 +498,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      notifySyncChange(() => ids.forEach((id) => deletePersonDoc(id)));
+      ids.forEach((id) => notifySyncDelete('persons', id, () => deletePersonDoc(id)));
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -497,7 +522,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      notifySyncChange(() => savePersonDoc(normalizedRestored));
+      notifySyncChange('persons', normalizedRestored.id, () => savePersonDoc(normalizedRestored));
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -517,7 +542,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      notifySyncChange(() => restored.forEach((r) => savePersonDoc(r)));
+      restored.forEach((r) => notifySyncChange('persons', r.id, () => savePersonDoc(r)));
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -694,7 +719,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         }
 
         if (personChanged) {
-          notifySyncChange(() => savePersonDoc(normalizePerson(updated)));
+          notifySyncChange('persons', updated.id, () => savePersonDoc(normalizePerson(updated)));
         }
         return updated;
       });
@@ -703,7 +728,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
       } catch {}
-      notifySyncChange(() => saveFamilyDoc(family));
+      notifySyncChange('families', family.id, () => saveFamilyDoc(family));
 
       return { families: nextFamilies, persons: nextPersons };
     }),
@@ -715,7 +740,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
       } catch {}
-      notifySyncChange(() => deleteFamilyDoc(id));
+      notifySyncDelete('families', id, () => deleteFamilyDoc(id));
       return { families: nextFamilies };
     }),
 
@@ -735,7 +760,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
       } catch {}
-      notifySyncChange(() => saveSourceDoc(source));
+      notifySyncChange('sources', source.id, () => saveSourceDoc(source));
       return { sources: nextSources };
     }),
 
@@ -746,7 +771,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
       } catch {}
-      notifySyncChange(() => deleteSourceDoc(id));
+      notifySyncDelete('sources', id, () => deleteSourceDoc(id));
       return { sources: nextSources };
     }),
 
@@ -766,7 +791,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
       } catch {}
-      notifySyncChange(() => saveEventDoc(event));
+      notifySyncChange('events', event.id, () => saveEventDoc(event));
       return { events: nextEvents };
     }),
 
@@ -777,7 +802,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
       } catch {}
-      notifySyncChange(() => deleteEventDoc(id));
+      notifySyncDelete('events', id, () => deleteEventDoc(id));
       return { events: nextEvents };
     }),
 
@@ -798,7 +823,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
       } catch {}
-      notifySyncChange(() => savePlaceDoc(updatedPlace));
+      notifySyncChange('places', updatedPlace.id, () => savePlaceDoc(updatedPlace));
       return { places: nextPlaces };
     }),
 
@@ -809,7 +834,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       try {
         localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
       } catch {}
-      notifySyncChange(() => deletePlaceDoc(idOrName));
+      notifySyncDelete('places', idOrName, () => deletePlaceDoc(idOrName));
       return { places: nextPlaces };
     }),
 

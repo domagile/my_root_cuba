@@ -18,11 +18,21 @@ import {
   GitConfig,
   AccessLockConfig
 } from '../types';
-import { subscribeToProjectData, saveProjectDataToCloud, fetchAllProjectDataFromCloud, savePersonDoc, deletePersonDoc } from '../lib/firebase';
+import {
+  subscribeToProjectData,
+  saveProjectDataToCloud,
+  fetchAllProjectDataFromCloud,
+  savePersonDoc,
+  deletePersonDoc,
+  deleteFamilyDoc,
+  deleteEventDoc,
+  deleteSourceDoc,
+  deletePlaceDoc
+} from '../lib/firebase';
 import { useUIStore } from '../stores/useUIStore';
 import { useGenealogyStore, normalizePerson, INITIAL_PERSONS, getTombstoneIds } from '../stores/useGenealogyStore';
 import { useResearchStore, INITIAL_METRICS, INITIAL_DOCUMENTS, INITIAL_TASKS, INITIAL_FINDINGS, INITIAL_HYPOTHESES, INITIAL_REQUESTS, INITIAL_MATRIX } from '../stores/useResearchStore';
-import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode } from '../stores/useCloudSyncStore';
+import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode, countDirtyItems } from '../stores/useCloudSyncStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { getSavedUserTreeState, resolveInitialPersonId } from '../utils/userTreeState';
@@ -46,7 +56,7 @@ export interface GenealogyContextType {
   lastSyncError: string | null;
   isManualPushing: boolean;
   isManualPulling: boolean;
-  triggerUploadToCloud: () => Promise<{ success: boolean; message: string }>;
+  triggerUploadToCloud: (options?: { forceFull?: boolean }) => Promise<{ success: boolean; message: string }>;
   triggerDownloadFromCloud: () => Promise<{ success: boolean; message: string; count?: number }>;
 
   // UI & View State
@@ -464,10 +474,15 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => clearTimeout(timer);
   }, [syncMode, persons, families, events, sources, places, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime]);
 
-  // Manual Trigger: Force Upload to Cloud
-  const triggerUploadToCloud = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+  // Manual Trigger: Smart Delta Upload or Forced Full Upload to Cloud
+  const triggerUploadToCloud = useCallback(async (options?: { forceFull?: boolean }): Promise<{ success: boolean; message: string }> => {
+    const isForceFull = options?.forceFull === true;
+    const syncStore = useCloudSyncStore.getState();
+    const tracker = syncStore.dirtyTracker;
+    const totalDirty = countDirtyItems(tracker);
+
     // If quota is already exhausted today, save snapshot locally and clear unsaved changes peacefully
-    if (useCloudSyncStore.getState().isQuotaExceeded) {
+    if (syncStore.isQuotaExceeded) {
       try {
         await saveSnapshot({
           persons,
@@ -486,12 +501,20 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           }
         }, `Локальна точка захисту (${persons.length} осіб)`);
       } catch {}
-      useCloudSyncStore.getState().clearUnsavedChanges();
+      syncStore.clearDirty();
       setStatus('offline');
       setLastSyncTime(new Date().toISOString());
       return {
         success: true,
-        message: 'Зміни (включно з видаленням 18 осіб) надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально і не повернуться назад.'
+        message: 'Зміни надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально.'
+      };
+    }
+
+    // Smart Delta Guard: if not forceFull and there are no dirty changes
+    if (!isForceFull && totalDirty === 0 && !syncStore.hasUnsavedChanges) {
+      return {
+        success: true,
+        message: 'Усі дані вже синхронізовані! Немає нових змін для запису у Firestore.'
       };
     }
 
@@ -520,57 +543,126 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         console.warn('Snapshot backup failed before push:', snapErr);
       }
 
-      // Explicitly delete all trashed persons from Firestore so they cannot resurrect
-      const trash = useGenealogyStore.getState().trashPersons;
-      if (trash && trash.length > 0) {
-        await Promise.allSettled(trash.map((t) => deletePersonDoc(t.id)));
-      }
+      if (isForceFull) {
+        // FULL FORCE UPLOAD: Push all entities
+        const trash = useGenealogyStore.getState().trashPersons;
+        if (trash && trash.length > 0) {
+          await Promise.allSettled(trash.map((t) => deletePersonDoc(t.id)));
+        }
 
-      const ok = await saveProjectDataToCloud({
-        persons,
-        families: Object.values(families || {}),
-        events: Object.values(events || {}),
-        sources: Object.values(sources || {}),
-        places: Object.values(places || {}),
-        metricRecords,
-        documents,
-        tasks,
-        findings,
-        hypotheses,
-        requests,
-        matrixEntries,
-        lastUpdated: new Date().toISOString()
-      });
+        const ok = await saveProjectDataToCloud({
+          persons,
+          families: Object.values(families || {}),
+          events: Object.values(events || {}),
+          sources: Object.values(sources || {}),
+          places: Object.values(places || {}),
+          metricRecords,
+          documents,
+          tasks,
+          findings,
+          hypotheses,
+          requests,
+          matrixEntries,
+          lastUpdated: new Date().toISOString()
+        });
 
-      if (ok) {
-        setStatus('synced');
-        setLastSyncTime(new Date().toISOString());
-        useCloudSyncStore.getState().clearUnsavedChanges();
-        setIsManualPushing(false);
-        return { success: true, message: `Успішно вивантажено ${persons.length} осіб, ${Object.keys(families).length} родин у Firestore! Створено точку відновлення.` };
-      } else {
-        if (useCloudSyncStore.getState().isQuotaExceeded) {
-          useCloudSyncStore.getState().clearUnsavedChanges();
-          setStatus('offline');
+        if (ok) {
+          setStatus('synced');
+          setLastSyncTime(new Date().toISOString());
+          syncStore.clearDirty();
           setIsManualPushing(false);
           return {
             success: true,
-            message: 'Зміни (включно з видаленням 18 осіб) надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально і не повернуться назад.'
+            message: `Повний знімок успішно вивантажено: ${persons.length} осіб, ${Object.keys(families).length} родин у Firestore!`
           };
         }
-        setStatus('error', 'Помилка запису в Firestore');
-        setIsManualPushing(false);
-        return { success: false, message: 'Помилка вивантаження даних у хмару Firestore.' };
+      } else {
+        // SMART DELTA UPLOAD: Push ONLY new & modified values!
+        const dirtyPersons = tracker.persons.length > 0
+          ? persons.filter((p) => tracker.persons.includes(p.id))
+          : [];
+        const dirtyFamilies = tracker.families.length > 0
+          ? Object.values(families || {}).filter((f) => tracker.families.includes(f.id))
+          : [];
+        const dirtyEvents = tracker.events.length > 0
+          ? Object.values(events || {}).filter((e) => tracker.events.includes(e.id))
+          : [];
+        const dirtySources = tracker.sources.length > 0
+          ? Object.values(sources || {}).filter((s) => tracker.sources.includes(s.id))
+          : [];
+        const dirtyPlaces = tracker.places.length > 0
+          ? Object.values(places || {}).filter((pl) => tracker.places.includes(pl.id))
+          : [];
+
+        // Handle deleted items
+        if (tracker.deletedPersons.length > 0) {
+          await Promise.allSettled(tracker.deletedPersons.map((id) => deletePersonDoc(id)));
+        }
+        if (tracker.deletedFamilies.length > 0) {
+          await Promise.allSettled(tracker.deletedFamilies.map((id) => deleteFamilyDoc(id)));
+        }
+        if (tracker.deletedEvents.length > 0) {
+          await Promise.allSettled(tracker.deletedEvents.map((id) => deleteEventDoc(id)));
+        }
+        if (tracker.deletedSources.length > 0) {
+          await Promise.allSettled(tracker.deletedSources.map((id) => deleteSourceDoc(id)));
+        }
+        if (tracker.deletedPlaces.length > 0) {
+          await Promise.allSettled(tracker.deletedPlaces.map((id) => deletePlaceDoc(id)));
+        }
+
+        // Upload only dirty entities
+        const ok = await saveProjectDataToCloud({
+          persons: dirtyPersons.length > 0 ? dirtyPersons : undefined,
+          families: dirtyFamilies.length > 0 ? dirtyFamilies : undefined,
+          events: dirtyEvents.length > 0 ? dirtyEvents : undefined,
+          sources: dirtySources.length > 0 ? dirtySources : undefined,
+          places: dirtyPlaces.length > 0 ? dirtyPlaces : undefined,
+          metricRecords: tracker.research.includes('metricRecords') ? metricRecords : undefined,
+          documents: tracker.research.includes('documents') ? documents : undefined,
+          tasks: tracker.research.includes('tasks') ? tasks : undefined,
+          findings: tracker.research.includes('findings') ? findings : undefined,
+          hypotheses: tracker.research.includes('hypotheses') ? hypotheses : undefined,
+          requests: tracker.research.includes('requests') ? requests : undefined,
+          matrixEntries: tracker.research.includes('matrixEntries') ? matrixEntries : undefined,
+          lastUpdated: new Date().toISOString()
+        });
+
+        if (ok) {
+          const writtenCount = dirtyPersons.length + dirtyFamilies.length + dirtyEvents.length + dirtySources.length + dirtyPlaces.length + tracker.deletedPersons.length;
+          const quotaSaved = Math.max(0, persons.length - writtenCount);
+          setStatus('synced');
+          setLastSyncTime(new Date().toISOString());
+          syncStore.clearDirty();
+          setIsManualPushing(false);
+          return {
+            success: true,
+            message: `Розумне збереження успішне: вивантажено тільки ${writtenCount} змінених записів! (Заощаджено ${quotaSaved} операцій квоти).`
+          };
+        }
       }
-    } catch (err: any) {
-      if (useCloudSyncStore.getState().isQuotaExceeded || err?.message?.includes('Quota') || err?.message?.includes('resource-exhausted')) {
-        useCloudSyncStore.getState().setQuotaExceeded(true);
-        useCloudSyncStore.getState().clearUnsavedChanges();
+
+      if (useCloudSyncStore.getState().isQuotaExceeded) {
+        useCloudSyncStore.getState().clearDirty();
         setStatus('offline');
         setIsManualPushing(false);
         return {
           success: true,
-          message: 'Зміни (включно з видаленням 18 осіб) надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально і не повернуться назад.'
+          message: 'Зміни надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально.'
+        };
+      }
+      setStatus('error', 'Помилка запису в Firestore');
+      setIsManualPushing(false);
+      return { success: false, message: 'Помилка вивантаження даних у хмару Firestore.' };
+    } catch (err: any) {
+      if (useCloudSyncStore.getState().isQuotaExceeded || err?.message?.includes('Quota') || err?.message?.includes('resource-exhausted')) {
+        useCloudSyncStore.getState().setQuotaExceeded(true);
+        useCloudSyncStore.getState().clearDirty();
+        setStatus('offline');
+        setIsManualPushing(false);
+        return {
+          success: true,
+          message: 'Зміни надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально.'
         };
       }
       const msg = err?.message || 'Помилка підключення до Firebase';
