@@ -21,6 +21,42 @@ function notifySyncChange(action?: () => void) {
 }
 
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
+export const TOMBSTONE_STORAGE_KEY = 'genealogy_deleted_tombstone_ids_v1';
+
+export function getTombstoneIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(TOMBSTONE_STORAGE_KEY);
+    const set = new Set<string>(raw ? JSON.parse(raw) : []);
+    const trashRaw = localStorage.getItem(`${STORAGE_KEY}_trashPersons`);
+    if (trashRaw) {
+      const trashList = JSON.parse(trashRaw);
+      if (Array.isArray(trashList)) {
+        trashList.forEach((t: any) => {
+          if (t && t.id) set.add(t.id);
+        });
+      }
+    }
+    return set;
+  } catch {
+    return new Set();
+  }
+}
+
+export function addTombstoneIds(ids: string[]): void {
+  try {
+    const current = getTombstoneIds();
+    ids.forEach((id) => current.add(id));
+    localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(Array.from(current)));
+  } catch {}
+}
+
+export function removeTombstoneId(id: string): void {
+  try {
+    const current = getTombstoneIds();
+    current.delete(id);
+    localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(Array.from(current)));
+  } catch {}
+}
 
 export const INITIAL_PERSONS: Person[] = FAMILIO_PERSONS.filter((p) => !isDemoPerson(p));
 export const INITIAL_FAMILIES: Record<string, Family> = Object.fromEntries(
@@ -180,13 +216,14 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          const cleaned = parsed.filter((p) => !isDemoPerson(p));
+          const tombstones = getTombstoneIds();
+          const cleaned = parsed.filter((p) => !isDemoPerson(p) && !tombstones.has(p.id));
           if (cleaned.length > 0) {
             const normalizedList = cleaned.map(normalizePerson);
             const seen = new Set<string>();
             const deduplicated: Person[] = [];
             for (const p of normalizedList) {
-              if (p && p.id && !seen.has(p.id)) {
+              if (p && p.id && !seen.has(p.id) && !tombstones.has(p.id)) {
                 seen.add(p.id);
                 deduplicated.push(p);
               }
@@ -194,14 +231,6 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
             try {
               localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(deduplicated));
             } catch {}
-            // Clean up any cloud docs that had phantom values
-            setTimeout(() => {
-              deduplicated.forEach((p) => {
-                if (p.lastName?.includes('Надточей') && p.deathYear === undefined) {
-                  savePersonDoc(p);
-                }
-              });
-            }, 1000);
             return deduplicated;
           }
         }
@@ -401,6 +430,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   deletePerson: (id) =>
     set((state) => {
+      addTombstoneIds([id]);
       const target = state.persons.find((p) => p.id === id);
       const nextTrash = target
         ? [...state.trashPersons, { ...target, isDeleted: true, deletedAt: new Date().toISOString() }]
@@ -431,6 +461,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   deletePersons: (ids) =>
     set((state) => {
+      addTombstoneIds(ids);
       const targets = state.persons.filter((p) => ids.includes(p.id));
       const nextTrash = [
         ...state.trashPersons,
@@ -449,6 +480,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   restorePerson: (id) =>
     set((state) => {
+      removeTombstoneId(id);
       const target = state.trashPersons.find((p) => p.id === id);
       if (!target) return state;
 
@@ -511,10 +543,12 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     }),
 
   emptyTrash: () =>
-    set(() => {
+    set((state) => {
+      const ids = state.trashPersons.map((p) => p.id);
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify([]));
       } catch {}
+      notifySyncChange(() => ids.forEach((id) => deletePersonDoc(id)));
       return { trashPersons: [] };
     }),
 

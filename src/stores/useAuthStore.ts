@@ -693,14 +693,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   initCloudAuthSync: () => {
-    // Proactively clean up any stale demo emails from Firestore whitelist
-    DEMO_EMAILS_TO_PURGE.forEach((demoEmail) => {
-      deleteWhitelistEntryFromCloud(demoEmail).catch(() => {});
-      deleteWhitelistEntryFromCloud(`w-${demoEmail}`).catch(() => {});
-      deleteWhitelistEntryFromCloud(`w-admin-${demoEmail}`).catch(() => {});
-    });
-    deleteAccessRequestFromCloud('req-1').catch(() => {});
-
     // 1. Subscribe to Cloud Whitelist
     const unsubWhitelist = subscribeToWhitelistCloud((cloudList) => {
       if (cloudList && Array.isArray(cloudList)) {

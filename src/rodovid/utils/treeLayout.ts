@@ -5,6 +5,7 @@
 
 import { GenealogyDatabase, Person } from '../types/genealogy';
 import { normalizeUkrainianSurnameGender, formatClanName, areSurnamesEquivalent } from '../../utils/ukrainianPhonetics';
+import { applyBridgeJumpsToLinks, LineCrossingCutout } from './treeLineBridges';
 
 export interface TreeNodeLayout {
   id: string;
@@ -52,6 +53,7 @@ export interface TreeLayoutFilterOptions {
   orientation?: 'vertical' | 'horizontal';
   isCompact?: boolean;
   directAncestorsOnly?: boolean;
+  enableLineBridges?: boolean;
 }
 
 export interface TreeLinkLayout {
@@ -79,6 +81,8 @@ export interface TreeLayoutResult {
   links: TreeLinkLayout[];
   width: number;
   height: number;
+  cutouts?: LineCrossingCutout[];
+  crossingCount?: number;
 }
 
 export interface FanChartSector {
@@ -1479,8 +1483,22 @@ export function calculateClassicFamilyTreeLayout(
         }
       });
 
-      // Sort clusters strictly by target position so clusters never invert or cross!
-      childClusters.sort((a, b) => a.x - b.x);
+      // Sort clusters strictly preserving parent stem order so lines never invert or cross!
+      childClusters.sort((a, b) => {
+        if (a.parentUnit && b.parentUnit) {
+          const stemA = getParentStemX(a.parentUnit, a.parentSpouseId);
+          const stemB = getParentStemX(b.parentUnit, b.parentSpouseId);
+          if (Math.abs(stemA - stemB) > 2) {
+            return stemA - stemB;
+          }
+          if (a.parentSpouseId && b.parentSpouseId && a.parentSpouseId !== b.parentSpouseId) {
+            return a.parentSpouseId.localeCompare(b.parentSpouseId);
+          }
+        }
+        if (a.parentUnit) return -1;
+        if (b.parentUnit) return 1;
+        return a.x - b.x;
+      });
 
       // Prevent overlapping while preserving cluster order
       let cMinX = 100;
@@ -2005,11 +2023,18 @@ export function calculateClassicFamilyTreeLayout(
     }
   });
 
+  const bridgeResult = applyBridgeJumpsToLinks(links, {
+    orientation: 'vertical',
+    enableBridges: options?.enableLineBridges ?? true
+  });
+
   return {
     nodes,
-    links,
+    links: bridgeResult.links,
     width: finalMaxX,
-    height: finalMaxY
+    height: finalMaxY,
+    cutouts: bridgeResult.cutouts,
+    crossingCount: bridgeResult.crossingCount
   };
 }
 
@@ -3069,6 +3094,20 @@ export function calculateHorizontalFamilyTreeLayout(
         }
       });
 
+      // Sort clusters preserving parent order so horizontal lines never invert or cross!
+      childClusters.sort((a, b) => {
+        if (a.parentUnit && b.parentUnit) {
+          const stemA = a.parentUnit.y + a.parentUnit.height / 2;
+          const stemB = b.parentUnit.y + b.parentUnit.height / 2;
+          if (Math.abs(stemA - stemB) > 2) {
+            return stemA - stemB;
+          }
+        }
+        if (a.parentUnit) return -1;
+        if (b.parentUnit) return 1;
+        return a.y - b.y;
+      });
+
       // Prevent overlapping along Y while preserving cluster order
       let cMinY = 80;
       for (let i = 0; i < childClusters.length; i++) {
@@ -3519,11 +3558,18 @@ export function calculateHorizontalFamilyTreeLayout(
     }
   });
 
+  const bridgeResult = applyBridgeJumpsToLinks(links, {
+    orientation: 'horizontal',
+    enableBridges: options?.enableLineBridges ?? true
+  });
+
   return {
     nodes,
-    links,
+    links: bridgeResult.links,
     width: finalMaxX,
-    height: finalMaxY
+    height: finalMaxY,
+    cutouts: bridgeResult.cutouts,
+    crossingCount: bridgeResult.crossingCount
   };
 }
 

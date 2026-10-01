@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
+  initializeFirestore,
   doc,
   collection,
   onSnapshot,
@@ -76,8 +77,18 @@ export function getDbInstance(): Firestore | null {
     const config = getFirebaseConfig();
     const dbId = config.firestoreDatabaseId;
 
-    // Use standard Firestore client with default auto-negotiating transport according to Firebase skill
-    cachedDb = dbId ? getFirestore(app, dbId) : getFirestore(app);
+    try {
+      cachedDb = initializeFirestore(
+        app,
+        {
+          experimentalAutoDetectLongPolling: true,
+          ignoreUndefinedProperties: true
+        },
+        dbId || undefined
+      );
+    } catch {
+      cachedDb = dbId ? getFirestore(app, dbId) : getFirestore(app);
+    }
   } catch (e) {
     console.warn('Firebase Firestore initialization warning:', e);
   }
@@ -105,6 +116,9 @@ export async function testConnection() {
   if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
     return;
   }
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return;
+  }
   try {
     const firestore = getDbInstance();
     if (firestore) {
@@ -112,8 +126,18 @@ export async function testConnection() {
     }
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    if (errMsg.includes('the client is offline') || (error as any)?.code === 'unavailable' || errMsg.includes('unavailable')) {
+    if (
+      errMsg.includes('the client is offline') || 
+      (error as any)?.code === 'unavailable' || 
+      errMsg.includes('unavailable')
+    ) {
       // Gracefully silent: Firestore operates in local/offline cache mode
+    } else if (
+      errMsg.toLowerCase().includes('quota exceeded') ||
+      errMsg.toLowerCase().includes('resource-exhausted') ||
+      (error as any)?.code === 'resource-exhausted'
+    ) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
     } else {
       console.warn('Firestore connection check notice:', errMsg);
     }
@@ -175,6 +199,18 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
         })) || []
     }
   };
+
+  const isQuotaExceeded =
+    errMsg.toLowerCase().includes('quota exceeded') ||
+    errMsg.toLowerCase().includes('resource-exhausted') ||
+    errMsg.toLowerCase().includes('resource_exhausted') ||
+    (error as any)?.code === 'resource-exhausted';
+
+  if (isQuotaExceeded) {
+    useCloudSyncStore.getState().setQuotaExceeded(true);
+    console.warn('Firestore Quota Notice: Free daily write quota reached. Switched to offline/local storage mode.');
+    return errInfo;
+  }
 
   const isPermissionDenied =
     errMsg.toLowerCase().includes('missing or insufficient permissions') ||
@@ -251,6 +287,9 @@ export async function saveEntityDoc(
   data: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   return trackAtomicSync(async () => {
     try {
       const db = getDbInstance();
@@ -287,6 +326,9 @@ export async function deleteEntityDoc(
   itemId: string,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   return trackAtomicSync(async () => {
     try {
       const db = getDbInstance();
@@ -392,6 +434,9 @@ export const getWhitelistDocId = (emailOrId: string) => {
 };
 
 export const saveWhitelistDoc = async (entry: any, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> => {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db || !entry?.email) return false;
@@ -417,6 +462,9 @@ export const saveWhitelistDoc = async (entry: any, projectId: string = DEFAULT_P
 };
 
 export const deleteWhitelistDoc = async (entryIdOrEmail: string, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> => {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db || !entryIdOrEmail) return false;
@@ -505,6 +553,9 @@ export function subscribeToWhitelistCloud(
 
 // Access Requests Helpers (both in project and top-level)
 export async function saveAccessRequestToCloud(req: any, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db || !req?.id) return false;
@@ -590,6 +641,9 @@ export async function saveWhitelistEntryToCloud(
   entry: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db || !entry?.id) return false;
@@ -613,6 +667,9 @@ export async function deleteWhitelistEntryFromCloud(
   entryId: string,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db || !entryId) return false;
@@ -633,6 +690,9 @@ export async function deleteAccessRequestFromCloud(
   requestId: string,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db || !requestId) return false;
@@ -653,6 +713,9 @@ export async function saveAccessConfigToCloud(
   config: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db) return false;
@@ -700,6 +763,9 @@ export async function batchSaveEntities(
   items: any[],
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db || !items || items.length === 0) return false;
@@ -869,6 +935,9 @@ export async function saveProjectDataToCloud(
   },
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
   try {
     const db = getDbInstance();
     if (!db) return false;
@@ -1056,6 +1125,14 @@ export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promis
   shareUrl: string;
   error?: string;
 }> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return {
+      success: false,
+      shareId: treeData.id,
+      shareUrl: '',
+      error: 'Добову квоту Firestore вичерпано. Публікація буде доступна після відновлення квоти.'
+    };
+  }
   try {
     const db = getDbInstance();
     if (!db) return { success: false, shareId: treeData.id, shareUrl: '', error: 'База Firestore недоступна' };

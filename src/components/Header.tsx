@@ -3,6 +3,7 @@ import { Search, UserPlus, Palette, LogOut, Bell, Menu, Sun, Moon, Cloud, CloudC
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { useAuthStore, isMasterAdminEmail } from '../stores/useAuthStore';
+import { useCloudSyncStore } from '../stores/useCloudSyncStore';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
@@ -51,6 +52,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
   const { currentUser, whitelist, accessRequests, logout } = useAuthStore();
   const isWhitelisted = isUserWhitelisted(currentUser, whitelist);
+  const isQuotaExceeded = useCloudSyncStore((s) => s.isQuotaExceeded);
 
   const isAdmin = Boolean(
     currentUser &&
@@ -240,6 +242,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             className={`p-2 rounded-xl border transition-all cursor-pointer shadow-xs relative flex items-center justify-center ${
               isSyncingActive
                 ? 'bg-amber-500/20 border-amber-500/50 text-amber-500 hover:bg-amber-500/30 ring-2 ring-amber-400/40'
+                : isQuotaExceeded
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-400/30'
                 : syncStatus === 'error'
                 ? 'bg-rose-500/20 border-rose-500/50 text-rose-500 hover:bg-rose-500/30'
                 : hasUnsavedChanges && syncMode === 'manual'
@@ -249,6 +253,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             title={
               isSyncingActive
                 ? 'Firestore: Синхронізація з БД триває...'
+                : isQuotaExceeded
+                ? 'Firestore: Автономний локальний режим (добову квоту вичерпано, локальні дані в безпеці)'
                 : syncStatus === 'error'
                 ? 'Firestore: Помилка синхронізації'
                 : hasUnsavedChanges && syncMode === 'manual'
@@ -259,6 +265,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             <Flame className={`w-4 h-4 ${isSyncingActive ? 'animate-pulse text-amber-400' : ''}`} />
             {isSyncingActive ? (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+            ) : isQuotaExceeded ? (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500"></span>
             ) : syncStatus === 'error' ? (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
             ) : hasUnsavedChanges && syncMode === 'manual' ? (
@@ -363,6 +371,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                           <RefreshCw className="w-3 h-3 animate-spin text-amber-500" />
                           <span className="text-amber-500">Йде синхронізація...</span>
                         </>
+                      ) : isQuotaExceeded ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                          <span className="text-amber-600 dark:text-amber-400">Автономний режим</span>
+                        </>
                       ) : syncStatus === 'error' ? (
                         <>
                           <AlertCircle className="w-3 h-3 text-rose-500" />
@@ -376,6 +389,28 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                       )}
                     </span>
                   </div>
+
+                  {/* Quota Notice Banner */}
+                  {isQuotaExceeded && (
+                    <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] space-y-1.5 leading-relaxed">
+                      <div className="flex items-center gap-1.5 font-bold text-xs">
+                        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                        <span>Локальний захищений режим</span>
+                      </div>
+                      <p className="text-[10px] opacity-90">
+                        Вичерпано добовий безкоштовний ліміт операцій запису Firestore. Ваші дані автоматично зберігаються в безпечному сховищі браузера (LocalStorage). Квота оновлюється щодня опівночі за тихоокеанським часом.
+                      </p>
+                      <a
+                        href="https://console.firebase.google.com/project/smiling-spanner-31ttq/firestore/databases/ai-studio-a567c750-fcc0-4247-9c87-f3613091d667/data?openUpgradeDialog=true"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:underline pt-0.5"
+                      >
+                        <span>Деталі квоти у консолі Firebase</span>
+                        <span>↗</span>
+                      </a>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between">
                     <span className="opacity-70">Останній сеанс:</span>

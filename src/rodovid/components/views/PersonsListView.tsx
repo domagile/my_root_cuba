@@ -48,6 +48,8 @@ import {
 } from '../../../utils/researchStatusUtils';
 import { normalizeUkrainianSurnameGender, areSurnamesEquivalent, formatClanName } from '../../../utils/ukrainianPhonetics';
 import { getPersonRodName } from '../../utils/treeLayout';
+import { detectDuplicatePersons } from '../../../utils/duplicateDetector';
+import { DuplicatePair } from '../../../types';
 
 interface PersonsListViewProps {
   database: GenealogyDatabase;
@@ -103,6 +105,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [researchStatusFilter, setResearchStatusFilter] = useState<'ALL' | 'CONFIRMED' | 'HYPOTHESIS'>('ALL');
   const [metricSearchStatusFilter, setMetricSearchStatusFilter] = useState<'ALL' | MetricSearchStatus>('ALL');
   const [tagFilter, setTagFilter] = useState<string>('ALL');
+  const [showDuplicatesOnly, setShowDuplicatesOnly] = useState<boolean>(false);
   const [sortBy, setSortBy] = useState<'surname' | 'birth' | 'events' | 'citations' | 'tag' | 'tagCount'>('surname');
   const [sortAsc, setSortAsc] = useState(true);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
@@ -206,6 +209,22 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     handleSetResearchStatus(p, nextStatus, e);
   };
 
+  // Detect duplicates across all persons
+  const duplicatePairs: DuplicatePair[] = useMemo(() => {
+    const pList = Object.values(database.persons || {}) as Person[];
+    if (pList.length < 2) return [];
+    return detectDuplicatePersons(pList);
+  }, [database.persons]);
+
+  const duplicatePersonIds = useMemo(() => {
+    const ids = new Set<string>();
+    duplicatePairs.forEach((pair) => {
+      ids.add(pair.personA.id);
+      ids.add(pair.personB.id);
+    });
+    return ids;
+  }, [duplicatePairs]);
+
   // Mobile-friendly filter collapse state
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -223,8 +242,9 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     if (metricSearchStatusFilter !== 'ALL') count++;
     if (genderFilter !== 'ALL') count++;
     if (statusFilter !== 'ALL') count++;
+    if (showDuplicatesOnly) count++;
     return count;
-  }, [searchTerm, personClanFilter, tagFilter, researchStatusFilter, metricSearchStatusFilter, genderFilter, statusFilter]);
+  }, [searchTerm, personClanFilter, tagFilter, researchStatusFilter, metricSearchStatusFilter, genderFilter, statusFilter, showDuplicatesOnly]);
 
   // Extract all tree hashtags with counts
   const availableHashtags = useMemo(() => {
@@ -338,9 +358,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         !cleanFilterTag ||
         (p.tags || []).some((t) => t.toLowerCase().replace(/^#+/, '') === cleanFilterTag);
 
-      return matchesSearch && matchesGender && matchesStatus && matchesResearchStatus && matchesMetricStatus && matchesTag;
+      // Duplicates filter
+      const matchesDuplicate = !showDuplicatesOnly || duplicatePersonIds.has(p.id);
+
+      return matchesSearch && matchesGender && matchesStatus && matchesResearchStatus && matchesMetricStatus && matchesTag && matchesDuplicate;
     });
-  }, [database.persons, searchTerm, personClanFilter, genderFilter, statusFilter, researchStatusFilter, metricSearchStatusFilter, tagFilter]);
+  }, [database.persons, searchTerm, personClanFilter, genderFilter, statusFilter, researchStatusFilter, metricSearchStatusFilter, tagFilter, showDuplicatesOnly, duplicatePersonIds]);
 
   const sortedPersons = useMemo(() => {
     return [...personsList].sort((a, b) => {
@@ -403,11 +426,20 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             <button
               type="button"
               onClick={() => useUIStore.getState().setRodovidView('duplicates')}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
-              title="Перевірити дублікати та об'єднати повтори"
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm shrink-0 ${
+                duplicatePairs.length > 0
+                  ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50'
+                  : 'bg-[#15181b] text-slate-400 border border-[#2d3238] hover:text-white'
+              }`}
+              title="Перейти до розділу об'єднання знайдених дублікатів"
             >
-              <GitMerge className="w-3.5 h-3.5" />
-              <span>Перевірити дублікати</span>
+              <GitMerge className="w-4 h-4 text-amber-400" />
+              <span>Дублікати</span>
+              {duplicatePairs.length > 0 && (
+                <span className="bg-amber-500 text-stone-950 font-bold text-[11px] px-1.5 py-0.2 rounded-full shadow-xs">
+                  {duplicatePairs.length}
+                </span>
+              )}
             </button>
             {canEdit && (
               <button
@@ -424,6 +456,50 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             )}
           </div>
         </div>
+
+        {/* Duplicates Notification & Quick Action Banner */}
+        {duplicatePairs.length > 0 && (
+          <div className="bg-gradient-to-r from-amber-950/50 via-amber-900/30 to-amber-950/50 border border-amber-500/40 rounded-xl p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md animate-in fade-in duration-200">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/50 flex items-center justify-center shrink-0 shadow-xs">
+                <GitMerge className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <div className="text-xs sm:text-sm font-bold text-amber-200 flex items-center gap-2 flex-wrap">
+                  <span>Виявлено потенційні дублікати: {duplicatePairs.length} пар</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/30 text-amber-300 font-semibold border border-amber-500/50">
+                    {duplicatePersonIds.size} осіб
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-300/80 mt-0.5">
+                  Система виявила схожі записи за іменами та датами. Ви можете відфільтрувати їх нижче або перейти до майстра об'єднання.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+              <button
+                type="button"
+                onClick={() => setShowDuplicatesOnly(!showDuplicatesOnly)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                  showDuplicatesOnly
+                    ? 'bg-amber-500 text-stone-950 border-amber-400 shadow-sm font-bold'
+                    : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/40'
+                }`}
+              >
+                {showDuplicatesOnly ? 'Показати всіх осіб' : `Тільки дублікати (${duplicatePersonIds.size})`}
+              </button>
+              <button
+                type="button"
+                onClick={() => useUIStore.getState().setRodovidView('duplicates')}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-stone-950 transition-all cursor-pointer shadow-md flex items-center gap-1.5 active:scale-95"
+              >
+                <span>Об'єднати</span>
+                <span className="text-xs">→</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Mobile-Only Collapsible Filter Toggle Header */}
         <div className="md:hidden flex items-center justify-between gap-2 pt-2 border-t border-slate-700/40">
@@ -575,6 +651,23 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               </select>
             </div>
 
+            {/* Duplicates Filter Chip */}
+            {duplicatePairs.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowDuplicatesOnly(!showDuplicatesOnly)}
+                className={`px-2.5 py-2 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                  showDuplicatesOnly
+                    ? 'bg-amber-500 text-stone-950 border-amber-400 font-bold shadow-xs'
+                    : 'bg-[#15181b] text-amber-400 hover:text-amber-300 border-amber-500/40 hover:bg-amber-500/10'
+                }`}
+                title="Показати лише тих осіб, для яких виявлено потенційні дублікати"
+              >
+                <GitMerge className="w-3.5 h-3.5" />
+                <span>Дублікати ({duplicatePersonIds.size})</span>
+              </button>
+            )}
+
             {/* Sort Select */}
             <div className="flex items-center gap-1.5 w-auto shrink-0">
               <select
@@ -686,6 +779,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               setResearchStatusFilter('ALL');
               setMetricSearchStatusFilter('ALL');
               setTagFilter('ALL');
+              setShowDuplicatesOnly(false);
             }}
             className={`px-3.5 py-1.5 ${theme.surfaceBg} hover:brightness-110 ${theme.textPrimary} border ${theme.borderSubtle} rounded-lg text-xs font-medium transition-colors cursor-pointer`}
           >
@@ -774,6 +868,18 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                               {!isMasked && p.name?.prefix && (
                                 <span className={`text-[10px] px-1.5 py-0.2 ${isDark ? 'bg-slate-800 text-amber-300' : 'bg-amber-100 text-amber-800'} rounded font-normal`}>
                                   {p.name.prefix}
+                                </span>
+                              )}
+                              {duplicatePersonIds.has(p.id) && (
+                                <span
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    useUIStore.getState().setRodovidView('duplicates');
+                                  }}
+                                  className="text-[10px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded font-semibold flex items-center gap-1 hover:bg-amber-500/30 transition-colors cursor-pointer"
+                                  title="Для цієї особи виявлено потенційний дублікат. Натисніть для перегляду та об'єднання."
+                                >
+                                  <GitMerge className="w-2.5 h-2.5 text-amber-400" /> Дублікат
                                 </span>
                               )}
                             </div>
@@ -1180,6 +1286,18 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         {isMasked && (
                           <span className="text-[10px] px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded font-normal flex items-center gap-1">
                             <Shield className="w-2.5 h-2.5" /> Скрито
+                          </span>
+                        )}
+                        {duplicatePersonIds.has(p.id) && (
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              useUIStore.getState().setRodovidView('duplicates');
+                            }}
+                            className="text-[10px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded font-semibold inline-flex items-center gap-1 hover:bg-amber-500/30 transition-colors cursor-pointer"
+                            title="Для цієї особи виявлено потенційний дублікат. Натисніть для перегляду та об'єднання."
+                          >
+                            <GitMerge className="w-2.5 h-2.5 text-amber-400" /> Дублікат
                           </span>
                         )}
                       </h3>

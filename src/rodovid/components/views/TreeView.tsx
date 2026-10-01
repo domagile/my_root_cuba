@@ -46,6 +46,7 @@ import {
   Minimize2,
   GitCommit,
   GitMerge,
+  GitBranch,
   SlidersHorizontal,
   History
 } from 'lucide-react';
@@ -191,6 +192,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const setFamilies = useGenealogyStore((s) => s.setFamilies);
   const mergePersons = useGenealogyStore((s) => s.mergePersons);
   const [activeMergePair, setActiveMergePair] = useState<DuplicatePair | null>(null);
+
+  // Line crossing avoidance: Bridges (line hops over crossings) enabled by default
+  const [enableLineBridges, setEnableLineBridges] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('rodovid_tree_line_bridges');
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return true;
+  });
 
   const duplicatePairs = useMemo(() => {
     const pList = Object.values(database.persons || {}) as Person[];
@@ -364,7 +374,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
       collapsedChildren,
       orientation,
       isCompact,
-      directAncestorsOnly
+      directAncestorsOnly,
+      enableLineBridges
     });
   }, [
     database,
@@ -378,7 +389,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
     collapsedChildren,
     orientation,
     isCompact,
-    directAncestorsOnly
+    directAncestorsOnly,
+    enableLineBridges
   ]);
 
   const setAnchorForPerson = useCallback((personId: string) => {
@@ -1415,6 +1427,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setIsCompact(false);
     setDirectAncestorsOnly(false);
     setEnableBloodlineHover(true);
+    setEnableLineBridges(true);
+    try {
+      localStorage.setItem('rodovid_tree_line_bridges', JSON.stringify(true));
+    } catch {}
     setFocusType('none');
     setSelectedClanId(null);
     setTimeout(() => focusOnPerson(activePersonId), 50);
@@ -1673,10 +1689,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   return (
     <div className="flex flex-col h-full w-full bg-[#23272b] overflow-hidden relative select-none">
-      {/* Top Toolbar: 2 rows on mobile, tablet & laptop (< 2xl), 1 row on large screen (>= 2xl) */}
-      <div className="w-full bg-[#1e2226] border-b border-[#323840] px-2.5 sm:px-4 py-1.5 sm:py-2 flex flex-col 2xl:flex-row 2xl:items-center 2xl:justify-between gap-1.5 sm:gap-2 z-20 shrink-0 print:hidden shadow-md">
-        {/* Row 1 (< 2xl) or Left Group (>= 2xl): Mode, Generations, Siblings, Clan Borders, Clan Legend, Theme, Export */}
-        <div className="flex items-center justify-between 2xl:justify-start gap-1.5 sm:gap-2 w-full 2xl:w-auto min-w-0">
+      {/* Top Toolbar: Fully responsive flex-wrap without overlaps or clashing */}
+      <div className="w-full bg-[#1e2226] border-b border-[#323840] px-2.5 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-y-2 gap-x-3 z-20 shrink-0 print:hidden shadow-md">
+        {/* Left Cluster: Mode, Generations, Siblings, Clan Borders, Clan Legend, Theme, Export */}
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
           <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0 flex-wrap">
             {/* Layout & Mode Switch */}
             <div className="flex items-center bg-[#15181b] p-0.5 rounded-lg border border-[#2d3238] shrink-0 shadow-xs">
@@ -2090,6 +2106,52 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           />
                         </div>
                       </button>
+
+                      {/* Bridge Jumps / No Crossings Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEnableLineBridges((prev) => {
+                            const next = !prev;
+                            try {
+                              localStorage.setItem('rodovid_tree_line_bridges', JSON.stringify(next));
+                            } catch {}
+                            return next;
+                          });
+                        }}
+                        className={`w-full flex items-center justify-between p-2 rounded-lg text-xs border transition-all cursor-pointer ${
+                          enableLineBridges
+                            ? 'bg-blue-950/40 text-blue-200 border-blue-800/50 hover:bg-blue-900/50'
+                            : 'bg-[#14171a] text-slate-400 border-[#2d3238] hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <GitBranch
+                            className={`w-4 h-4 shrink-0 ${
+                              enableLineBridges ? 'text-blue-400' : 'text-slate-400'
+                            }`}
+                          />
+                          <div className="text-left">
+                            <div className="font-semibold text-white">Обхід перетинів (Містки)</div>
+                            <div className="text-[10px] text-slate-400">
+                              {enableLineBridges
+                                ? 'Лінії не перетинаються (плавні дугові містки)'
+                                : 'Звичайні прямі лінії'}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          className={`w-8 h-4 rounded-full p-0.5 transition-colors shrink-0 ${
+                            enableLineBridges ? 'bg-blue-600' : 'bg-slate-700'
+                          }`}
+                        >
+                          <div
+                            className={`w-3 h-3 rounded-full bg-white transition-transform ${
+                              enableLineBridges ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </div>
+                      </button>
                     </div>
                   </div>
 
@@ -2386,15 +2448,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
           </div>
         </div>
 
-        {/* Row 2 (< 2xl) or Right Group (>= 2xl): Root Person Selector + Zoom Controls */}
-        <div className="flex items-center justify-between 2xl:justify-end gap-1.5 sm:gap-2 w-full 2xl:w-auto min-w-0 pt-1 2xl:pt-0 border-t border-slate-700/30 2xl:border-t-0">
+        {/* Right Cluster: Root Person Selector + Zoom Controls (Without overlapping) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0 ml-auto shrink-0">
           {/* Root Person Selector */}
-          <div className="flex items-center gap-1.5 min-w-0 flex-1 2xl:flex-initial">
+          <div className="flex items-center gap-1.5 min-w-0 shrink-0">
             <span className="text-xs text-slate-400 hidden sm:inline shrink-0 font-medium">Корінь:</span>
             <select
               value={activePersonId}
               onChange={(e) => onChangeRoot(e.target.value)}
-              className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-lg px-2 sm:px-2.5 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[150px] sm:max-w-[210px] truncate cursor-pointer shadow-xs"
+              className="bg-[#15181b] text-slate-200 border border-[#2d3238] text-xs rounded-lg px-2 sm:px-2.5 py-1.5 focus:outline-hidden focus:border-emerald-500 max-w-[150px] sm:max-w-[190px] truncate cursor-pointer shadow-xs"
               title="Вибрати особу як корінь родоводу"
             >
               {dropdownPersons.map((p, pIdx) => {
@@ -2409,22 +2471,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
               })}
             </select>
           </div>
-
-          {/* Duplicates Notification Badge & Quick Access */}
-          {duplicatePairs.length > 0 && (
-            <button
-              type="button"
-              onClick={() => useUIStore.getState().setRodovidView('duplicates')}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0"
-              title={`Знайдено ${duplicatePairs.length} потенційних дублікатів у родоводу. Натисніть для перегляду та об'єднання.`}
-            >
-              <GitMerge className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Дублікати:</span>
-              <span className="bg-amber-500 text-stone-950 font-bold text-[11px] px-1.5 py-0.2 rounded-full">
-                {duplicatePairs.length}
-              </span>
-            </button>
-          )}
 
           {/* Zoom Controls + All Options button */}
           <div className="flex items-center gap-1 shrink-0">
@@ -2600,6 +2646,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
             className="overflow-visible pointer-events-none absolute inset-0"
             style={{ width: layout.width, height: layout.height }}
           >
+            {/* Background clearance cutouts behind bridge arcs so crossing lines never touch */}
+            {enableLineBridges && layout.cutouts && layout.cutouts.map((cutout) => (
+              <circle
+                key={cutout.id}
+                cx={cutout.x}
+                cy={cutout.y}
+                r={cutout.r + 0.8}
+                fill={isLightCanvas ? (canvasTheme === 'parchment' ? '#fbf8f1' : '#ffffff') : '#14171a'}
+                className="pointer-events-none"
+              />
+            ))}
             {visibleLinks.map((link, lIdx) => {
               const pathData = link.path || `M ${link.sourceX} ${link.sourceY} L ${link.targetX} ${link.targetY}`;
               const isMarriage = link.type === 'marriage';

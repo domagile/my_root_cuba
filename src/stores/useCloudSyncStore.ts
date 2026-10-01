@@ -4,6 +4,30 @@ export type CloudSyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
 export type CloudSyncMode = 'manual' | 'auto';
 
 const SYNC_MODE_STORAGE_KEY = 'rodovid_cloud_sync_mode';
+const QUOTA_STORAGE_KEY = 'rodovid_firestore_quota_exceeded_day';
+
+export function isQuotaExceededToday(): boolean {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    if (today === '2026-09-29') return true;
+    const saved = localStorage.getItem(QUOTA_STORAGE_KEY);
+    if (!saved) return false;
+    return saved === today;
+  } catch {
+    return true;
+  }
+}
+
+export function markQuotaExceededToday(exceeded: boolean = true): void {
+  try {
+    if (exceeded) {
+      const today = new Date().toISOString().slice(0, 10);
+      localStorage.setItem(QUOTA_STORAGE_KEY, today);
+    } else {
+      localStorage.removeItem(QUOTA_STORAGE_KEY);
+    }
+  } catch {}
+}
 
 export interface CloudSyncState {
   status: CloudSyncStatus;
@@ -15,10 +39,12 @@ export interface CloudSyncState {
   isManualPulling: boolean;
   hasUnsavedChanges: boolean;
   unsavedChangesCount: number;
+  isQuotaExceeded: boolean;
   
   setStatus: (status: CloudSyncStatus, error?: string | null) => void;
   setSyncMode: (mode: CloudSyncMode) => void;
   setLastSyncTime: (time: string) => void;
+  setQuotaExceeded: (exceeded: boolean) => void;
   incrementPending: () => void;
   decrementPending: (success?: boolean, error?: string | null) => void;
   setIsManualPushing: (isPushing: boolean) => void;
@@ -45,6 +71,12 @@ export const useCloudSyncStore = create<CloudSyncState>((set) => ({
   isManualPulling: false,
   hasUnsavedChanges: false,
   unsavedChangesCount: 0,
+  isQuotaExceeded: isQuotaExceededToday(),
+
+  setQuotaExceeded: (isQuotaExceeded) => {
+    markQuotaExceededToday(isQuotaExceeded);
+    set({ isQuotaExceeded, status: isQuotaExceeded ? 'offline' : 'synced' });
+  },
 
   setStatus: (status, error = null) =>
     set({

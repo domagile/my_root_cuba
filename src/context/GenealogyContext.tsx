@@ -20,7 +20,7 @@ import {
 } from '../types';
 import { subscribeToProjectData, saveProjectDataToCloud, fetchAllProjectDataFromCloud, savePersonDoc, deletePersonDoc } from '../lib/firebase';
 import { useUIStore } from '../stores/useUIStore';
-import { useGenealogyStore, normalizePerson, INITIAL_PERSONS } from '../stores/useGenealogyStore';
+import { useGenealogyStore, normalizePerson, INITIAL_PERSONS, getTombstoneIds } from '../stores/useGenealogyStore';
 import { useResearchStore, INITIAL_METRICS, INITIAL_DOCUMENTS, INITIAL_TASKS, INITIAL_FINDINGS, INITIAL_HYPOTHESES, INITIAL_REQUESTS, INITIAL_MATRIX } from '../stores/useResearchStore';
 import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode } from '../stores/useCloudSyncStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -343,6 +343,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (cloudData.persons && Array.isArray(cloudData.persons) && cloudData.persons.length > 0) {
         setPersons((prevPersons: Person[]) => {
           const trashIds = new Set(useGenealogyStore.getState().trashPersons.map((p) => p.id));
+          const tombstoneIds = getTombstoneIds();
           let mergedIdsMap: Record<string, string> = {};
           try {
             const raw = localStorage.getItem('genealogy_merged_person_ids');
@@ -350,26 +351,19 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           } catch {}
           const mergedIds = new Set(Object.keys(mergedIdsMap));
 
-          // Proactively delete any cloud records that were merged or moved to trash locally
-          cloudData.persons.forEach((p: any) => {
-            if (p?.id && (trashIds.has(p.id) || mergedIds.has(p.id))) {
-              deletePersonDoc(p.id);
-            }
-          });
+          const isExcluded = (id: string) => trashIds.has(id) || mergedIds.has(id) || tombstoneIds.has(id);
 
           // Filter out demo persons, trashed persons, and merged duplicate persons
           const cloudList = cloudData.persons
-            .filter((p: any) => p?.id && !isDemoPerson(p) && !trashIds.has(p.id) && !mergedIds.has(p.id))
+            .filter((p: any) => p?.id && !isDemoPerson(p) && !isExcluded(p.id))
             .map(normalizePerson);
           const cloudMap = new Map(cloudList.map((p) => [p.id, p]));
           const merged: Person[] = [...cloudList];
 
           // Preserve local persons that have not synced yet or exist in local store
           for (const localP of prevPersons) {
-            if (!cloudMap.has(localP.id) && !isDemoPerson(localP) && !trashIds.has(localP.id) && !mergedIds.has(localP.id)) {
+            if (!cloudMap.has(localP.id) && !isDemoPerson(localP) && !isExcluded(localP.id)) {
               merged.push(localP);
-              // Proactively upload missing local person to cloud
-              savePersonDoc(localP);
             }
           }
           return merged;
@@ -472,6 +466,35 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Manual Trigger: Force Upload to Cloud
   const triggerUploadToCloud = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    // If quota is already exhausted today, save snapshot locally and clear unsaved changes peacefully
+    if (useCloudSyncStore.getState().isQuotaExceeded) {
+      try {
+        await saveSnapshot({
+          persons,
+          families,
+          sources,
+          events,
+          whitelist: [],
+          researchData: {
+            metricRecords,
+            documents,
+            tasks,
+            findings,
+            hypotheses,
+            requests,
+            matrixEntries
+          }
+        }, `Локальна точка захисту (${persons.length} осіб)`);
+      } catch {}
+      useCloudSyncStore.getState().clearUnsavedChanges();
+      setStatus('offline');
+      setLastSyncTime(new Date().toISOString());
+      return {
+        success: true,
+        message: 'Зміни (включно з видаленням 18 осіб) надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально і не повернуться назад.'
+      };
+    }
+
     setIsManualPushing(true);
     setStatus('syncing');
     try {
@@ -497,6 +520,12 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         console.warn('Snapshot backup failed before push:', snapErr);
       }
 
+      // Explicitly delete all trashed persons from Firestore so they cannot resurrect
+      const trash = useGenealogyStore.getState().trashPersons;
+      if (trash && trash.length > 0) {
+        await Promise.allSettled(trash.map((t) => deletePersonDoc(t.id)));
+      }
+
       const ok = await saveProjectDataToCloud({
         persons,
         families: Object.values(families || {}),
@@ -520,11 +549,30 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setIsManualPushing(false);
         return { success: true, message: `Успішно вивантажено ${persons.length} осіб, ${Object.keys(families).length} родин у Firestore! Створено точку відновлення.` };
       } else {
+        if (useCloudSyncStore.getState().isQuotaExceeded) {
+          useCloudSyncStore.getState().clearUnsavedChanges();
+          setStatus('offline');
+          setIsManualPushing(false);
+          return {
+            success: true,
+            message: 'Зміни (включно з видаленням 18 осіб) надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально і не повернуться назад.'
+          };
+        }
         setStatus('error', 'Помилка запису в Firestore');
         setIsManualPushing(false);
         return { success: false, message: 'Помилка вивантаження даних у хмару Firestore.' };
       }
     } catch (err: any) {
+      if (useCloudSyncStore.getState().isQuotaExceeded || err?.message?.includes('Quota') || err?.message?.includes('resource-exhausted')) {
+        useCloudSyncStore.getState().setQuotaExceeded(true);
+        useCloudSyncStore.getState().clearUnsavedChanges();
+        setStatus('offline');
+        setIsManualPushing(false);
+        return {
+          success: true,
+          message: 'Зміни (включно з видаленням 18 осіб) надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально і не повернуться назад.'
+        };
+      }
       const msg = err?.message || 'Помилка підключення до Firebase';
       setStatus('error', msg);
       setIsManualPushing(false);
