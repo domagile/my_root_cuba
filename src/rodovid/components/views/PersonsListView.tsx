@@ -99,7 +99,20 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
 
+  const [searchInputValue, setSearchInputValue] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Debounce search input by 160ms for instant typing feedback without UI lag
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setSearchTerm(searchInputValue);
+    }, 160);
+    return () => clearTimeout(handler);
+  }, [searchInputValue]);
+
+  const PAGE_SIZE = 40;
+  const [displayLimit, setDisplayLimit] = useState<number>(PAGE_SIZE);
+
   const [genderFilter, setGenderFilter] = useState<'ALL' | Gender>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'LIVING' | 'DECEASED'>('ALL');
   const [researchStatusFilter, setResearchStatusFilter] = useState<'ALL' | 'CONFIRMED' | 'HYPOTHESIS'>('ALL');
@@ -114,6 +127,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [toast, setToast] = useState<{ message: string; actionText?: string; onAction?: () => void } | null>(null);
   const [statusMenuPersonId, setStatusMenuPersonId] = useState<string | null>(null);
   const [metricMenuPersonId, setMetricMenuPersonId] = useState<string | null>(null);
+
+  // Reset display limit when search term or any filter changes
+  useEffect(() => {
+    setDisplayLimit(PAGE_SIZE);
+  }, [searchTerm, personClanFilter, genderFilter, statusFilter, researchStatusFilter, metricSearchStatusFilter, tagFilter, showDuplicatesOnly, sortBy, sortAsc]);
 
   useEffect(() => {
     if (!toast) return;
@@ -401,6 +419,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     });
   }, [personsList, sortBy, sortAsc]);
 
+  // Progressive slicing for 60 FPS DOM performance
+  const displayedPersons = useMemo(() => {
+    return sortedPersons.slice(0, displayLimit);
+  }, [sortedPersons, displayLimit]);
+
   const handleTagBadgeClick = (tag: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const clean = tag.replace(/^#+/, '');
@@ -539,16 +562,29 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         <div className={`flex flex-col gap-2 pt-2 border-t ${theme.borderSubtle} ${isFiltersCollapsed ? 'hidden md:flex' : 'flex'}`}>
           {/* Row 1: Search + Clan + Tag + Research Status + Metric Search Status */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Search Input */}
+            {/* Search Input with Debounce & Clear */}
             <div className="flex-1 min-w-[200px] relative">
               <Search className={`w-4 h-4 ${theme.textMuted} absolute left-3 top-1/2 -translate-y-1/2`} />
               <input
                 type="text"
                 placeholder="Пошук за ПІБ, родом, #хештегом..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className={`w-full pl-9 pr-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-400 focus:outline-none focus:border-emerald-500`}
+                value={searchInputValue}
+                onChange={(e) => setSearchInputValue(e.target.value)}
+                className={`w-full pl-9 pr-8 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-400 focus:outline-none focus:border-emerald-500`}
               />
+              {searchInputValue && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchInputValue('');
+                    setSearchTerm('');
+                  }}
+                  className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full ${theme.textMuted} hover:${theme.textPrimary} hover:bg-neutral-500/10 cursor-pointer`}
+                  title="Очистити пошук"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
             {/* Clan / Rod Filter Dropdown */}
@@ -805,7 +841,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 </tr>
               </thead>
               <tbody className={`divide-y ${theme.borderSubtle}`}>
-                {sortedPersons.map((rawP, pIdx) => {
+                {displayedPersons.map((rawP, pIdx) => {
                   const isLiving = isPersonLiving(rawP);
                   const isMasked = !isWhitelisted && isLiving;
                   const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
@@ -836,6 +872,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                             <img
                               src={p.avatarUrl}
                               alt=""
+                              loading="lazy"
+                              decoding="async"
                               className={`w-9 h-9 rounded-lg object-cover border ${theme.borderSubtle}`}
                             />
                           ) : (
@@ -1228,7 +1266,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sortedPersons.map((rawP, pIdx) => {
+          {displayedPersons.map((rawP, pIdx) => {
             const isLiving = isPersonLiving(rawP);
             const isMasked = !isWhitelisted && isLiving;
             const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
@@ -1259,6 +1297,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       <img
                         src={p.avatarUrl}
                         alt=""
+                        loading="lazy"
+                        decoding="async"
                         className={`w-14 h-14 rounded-lg object-cover border ${theme.borderSubtle} shrink-0`}
                       />
                     ) : (
@@ -1537,6 +1577,33 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           })}
         </div>
       )}
+
+      {/* Progressive Loading Controls for fast rendering */}
+      {sortedPersons.length > displayLimit && (
+        <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-xl ${theme.cardBg} border ${theme.cardBorder} shadow-xs`}>
+          <div className={`text-xs ${theme.textMuted}`}>
+            Показано <span className="font-semibold text-emerald-500">{displayedPersons.length}</span> з{' '}
+            <span className="font-semibold">{sortedPersons.length}</span> знайдених осіб
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setDisplayLimit((prev) => prev + PAGE_SIZE)}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+            >
+              <span>Показати ще (+{Math.min(PAGE_SIZE, sortedPersons.length - displayLimit)})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisplayLimit(sortedPersons.length)}
+              className={`px-3 py-2 rounded-xl border ${theme.borderSubtle} hover:${theme.textPrimary} text-xs font-medium transition-all ${theme.surfaceBg} ${theme.textSecondary} cursor-pointer`}
+            >
+              Показати всіх ({sortedPersons.length})
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Confirm Delete Person Modal */}
       {personToDelete && (
         <ConfirmDeleteModal

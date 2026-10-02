@@ -1458,6 +1458,40 @@ export const TreeView: React.FC<TreeViewProps> = ({
     midPoint: { x: number; y: number };
   } | null>(null);
 
+  // High-performance RAF throttle for mouse & touch pan to deliver constant 60/120 FPS without React jank
+  const panRafRef = useRef<number | null>(null);
+  const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
+
+  const schedulePanUpdate = useCallback((newPan: { x: number; y: number }) => {
+    pendingPanRef.current = newPan;
+    if (panRafRef.current === null) {
+      panRafRef.current = requestAnimationFrame(() => {
+        panRafRef.current = null;
+        if (pendingPanRef.current) {
+          setPan(pendingPanRef.current);
+        }
+      });
+    }
+  }, []);
+
+  const flushPanUpdate = useCallback(() => {
+    if (panRafRef.current !== null) {
+      cancelAnimationFrame(panRafRef.current);
+      panRafRef.current = null;
+    }
+    if (pendingPanRef.current) {
+      setPan(pendingPanRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (panRafRef.current !== null) {
+        cancelAnimationFrame(panRafRef.current);
+      }
+    };
+  }, []);
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0) {
       setIsDragging(true);
@@ -1467,7 +1501,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isDragging) {
-      setPan({
+      schedulePanUpdate({
         x: e.clientX - dragStart.x,
         y: e.clientY - dragStart.y
       });
@@ -1476,6 +1510,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const handleMouseUp = () => {
     setIsDragging(false);
+    flushPanUpdate();
   };
 
   // Touch Support for tablets and mobile (Smooth pinch-to-zoom anchored to midpoint)
@@ -1505,7 +1540,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (e.touches.length === 1 && isDragging) {
-      setPan({
+      schedulePanUpdate({
         x: e.touches[0].clientX - dragStart.x,
         y: e.touches[0].clientY - dragStart.y
       });
@@ -1534,7 +1569,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
       const newPanY = containerMidY - worldY * targetScale;
 
       setScale(targetScale);
-      setPan({
+      schedulePanUpdate({
         x: Math.round(newPanX),
         y: Math.round(newPanY)
       });
@@ -1545,8 +1580,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
     if (e.touches.length === 0) {
       setIsDragging(false);
       touchStateRef.current = null;
+      flushPanUpdate();
     } else if (e.touches.length === 1) {
       setIsDragging(true);
+      flushPanUpdate();
       setDragStart({
         x: e.touches[0].clientX - pan.x,
         y: e.touches[0].clientY - pan.y
@@ -2446,20 +2483,77 @@ export const TreeView: React.FC<TreeViewProps> = ({
               <span className="hidden sm:inline">Історія</span>
             </button>
 
-            {/* Export Button (Direct GEDCOM .ged download) */}
-            <button
-              type="button"
-              onClick={() => {
-                const dateStr = new Date().toISOString().slice(0, 10);
-                downloadGedcom(database, `rodovid_tree_${dateStr}.ged`);
-              }}
-              className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238] hover:border-emerald-500/50 shrink-0"
-              title="Експорт дерева у GEDCOM (.ged)"
-            >
-              <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="hidden sm:inline">Експорт (.ged)</span>
-              <span className="sm:hidden">.ged</span>
-            </button>
+            {/* Export Menu (Direct SVG / GEDCOM / Print) */}
+            <div className="relative shrink-0" ref={exportMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsExportOpen((prev) => !prev)}
+                className={`flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs ${
+                  isExportOpen
+                    ? 'bg-emerald-600 text-white border-emerald-500'
+                    : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238] hover:border-emerald-500/50'
+                }`}
+                title="Меню експорту родоводу (SVG, GEDCOM, друк)"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="hidden sm:inline">Експорт</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${isExportOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isExportOpen && (
+                <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-1.5 w-60 bg-[#1a1d21] border border-[#323840] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-[#2d3238] mb-1">
+                    Формати експорту
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportOpen(false);
+                      handleExportSvg();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <ImageIcon className="w-4 h-4 text-sky-400 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-white">Векторне дерево (.svg)</div>
+                      <div className="text-[10px] text-slate-400">Висока якість для друку будь-якого формату</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportOpen(false);
+                      const dateStr = new Date().toISOString().slice(0, 10);
+                      downloadGedcom(database, `rodovid_tree_${dateStr}.ged`);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-white">Стандартний GEDCOM (.ged)</div>
+                      <div className="text-[10px] text-slate-400">Для MyHeritage, FamilySearch, Gramps</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportOpen(false);
+                      handlePrint();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer border-t border-[#2d3238] mt-1 pt-2"
+                  >
+                    <Printer className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-white">Друк / Зберегти у PDF</div>
+                      <div className="text-[10px] text-slate-400">Швидкий попередній перегляд сторінки</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2654,7 +2748,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
           className={`absolute origin-top-left ${isDragging ? '' : 'transition-transform duration-75'}`}
           style={{
             transform: `translate3d(${pan.x}px, ${pan.y}px, 0px) scale(${scale})`,
-            willChange: isDragging ? 'transform' : 'auto'
+            willChange: isDragging ? 'transform' : 'auto',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            transformOrigin: '0 0'
           }}
         >
           {/* SVG Orthogonal Links (Image 2 style) */}
