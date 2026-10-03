@@ -48,7 +48,9 @@ import {
   GitMerge,
   GitBranch,
   SlidersHorizontal,
-  History
+  History,
+  ExternalLink,
+  Copy
 } from 'lucide-react';
 import {
   GenealogyDatabase,
@@ -61,7 +63,7 @@ import { downloadGedcom, parseGedcom } from '../../utils/gedcom';
 import { useGenealogyStore } from '../../../stores/useGenealogyStore';
 import { GedcomMergeModal } from '../modals/GedcomMergeModal';
 import { SmartMergeModal } from '../modals/SmartMergeModal';
-import { detectDuplicatePersons } from '../../../utils/duplicateDetector';
+import { detectDuplicatePersons, ignoreDuplicatePair } from '../../../utils/duplicateDetector';
 import { ImportHistoryModal } from '../modals/ImportHistoryModal';
 import { MergeResult } from '../../utils/mergeDatabase';
 import {
@@ -76,9 +78,9 @@ import {
   getPersonClanColor,
   getPersonRodName
 } from '../../utils/treeLayout';
-import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId } from '../../utils/relationship';
+import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId, calculateKinship } from '../../utils/relationship';
 import { getSavedUserTreeState, saveUserTreeState } from '../../../utils/userTreeState';
-import { useUIStore } from '../../../stores/useUIStore';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, getPrivacyLifespan, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
@@ -202,11 +204,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return true;
   });
 
+  const [ignoredRevision, setIgnoredRevision] = useState(0);
+  useEffect(() => {
+    const handleStorageChange = () => setIgnoredRevision((v) => v + 1);
+    window.addEventListener('rodovid_ignored_duplicates_changed', handleStorageChange);
+    return () => {
+      window.removeEventListener('rodovid_ignored_duplicates_changed', handleStorageChange);
+    };
+  }, []);
+
   const duplicatePairs = useMemo(() => {
     const pList = Object.values(database.persons || {}) as Person[];
     if (pList.length < 2) return [];
-    return detectDuplicatePersons(pList);
-  }, [database.persons]);
+    return detectDuplicatePersons(pList, true);
+  }, [database.persons, ignoredRevision]);
 
   const duplicatesByPersonId = useMemo(() => {
     const map = new Map<string, DuplicatePair>();
@@ -256,6 +267,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
   const [isFocusMenuOpen, setIsFocusMenuOpen] = useState<boolean>(false);
   const [isViewOptionsMenuOpen, setIsViewOptionsMenuOpen] = useState<boolean>(false);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    personId: string;
+  } | null>(null);
+
+  const handlePersonContextMenu = (e: React.MouseEvent, personId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      personId
+    });
+  };
+
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
   const focusMenuRef = useRef<HTMLDivElement>(null);
@@ -263,6 +290,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      setContextMenu(null);
       if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
         setIsExportOpen(false);
       }
@@ -276,8 +304,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
         setIsViewOptionsMenuOpen(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setContextMenu(null);
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -317,7 +354,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const selectiveParentsMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Focus & Lineage Highlighting States (Focus Highlights)
-  const [focusType, setFocusType] = useState<'none' | 'clan' | 'direct-ancestors' | 'direct-descendants' | 'patrilineal' | 'matrilineal'>('none');
+  const [focusType, setFocusType] = useState<'none' | 'clan' | 'direct-ancestors' | 'direct-descendants' | 'patrilineal' | 'matrilineal' | 'kinship-path'>('none');
   const [focusPersonId, setFocusPersonId] = useState<string>(activePersonId);
   const [selectedClanId, setSelectedClanId] = useState<string | null>(null);
   const [dimOthers, setDimOthers] = useState<boolean>(true);
@@ -335,6 +372,26 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return false;
   });
   const [directAncestorsOnly, setDirectAncestorsOnly] = useState<boolean>(false);
+
+  const hasCollapsedAny = useMemo(() => {
+    return (
+      collapsedChildren.size > 0 ||
+      collapsedParents.size > 0 ||
+      collapsedSiblings.size > 0 ||
+      !showDescendants ||
+      !showParents ||
+      !showSiblings ||
+      directAncestorsOnly
+    );
+  }, [
+    collapsedChildren.size,
+    collapsedParents.size,
+    collapsedSiblings.size,
+    showDescendants,
+    showParents,
+    showSiblings,
+    directAncestorsOnly
+  ]);
 
   useEffect(() => {
     if (focusType !== 'clan') {
@@ -604,6 +661,24 @@ export const TreeView: React.FC<TreeViewProps> = ({
           if (fam) mId = fam.wifeId;
         }
         curr = mId ? database.persons[mId] : undefined;
+      }
+    } else if (focusType === 'kinship-path') {
+      const aId = focusKinshipPair?.aId || rootPersonId;
+      const bId = focusKinshipPair?.bId || focusPersonId || activePersonId;
+      const personA = database.persons[aId] || database.persons[rootPersonId];
+      const personB = database.persons[bId] || targetPerson;
+      if (personA && personB) {
+        const kinship = calculateKinship(personA.id, personB.id, database);
+        color = '#38bdf8';
+        title = `Родинна лінія (${kinship?.relationshipName || 'Зв’язок'}): ${getFullName(personA)} ⟷ ${getFullName(personB)}`;
+        if (kinship && kinship.path && kinship.path.length > 0) {
+          kinship.path.forEach((step) => {
+            pIds.add(step.personId);
+          });
+        } else {
+          pIds.add(personA.id);
+          pIds.add(personB.id);
+        }
       }
     }
 
@@ -1051,6 +1126,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setCollapsedParents(new Set());
     setCollapsedSiblings(new Set());
     setCollapsedChildren(new Set());
+    setDirectAncestorsOnly(false);
+    setFocusType('none');
+    setGenerations(0);
   }, []);
 
   // High-Performance Quantized Viewport Culling Bounding Box
@@ -1325,6 +1403,48 @@ export const TreeView: React.FC<TreeViewProps> = ({
     focusOnPerson(rootPersonId, 0.95);
   }, [activePersonId, rootPersonId, onChangeRoot, focusOnPerson]);
 
+  const treeFocusKinshipPersonId = useUIStore((s) => s.treeFocusKinshipPersonId);
+  const setTreeFocusKinshipPersonId = useUIStore((s) => s.setTreeFocusKinshipPersonId);
+  const treeFocusKinshipPair = useUIStore((s) => s.treeFocusKinshipPair);
+  const setTreeFocusKinshipPair = useUIStore((s) => s.setTreeFocusKinshipPair);
+  const [focusKinshipPair, setFocusKinshipPair] = useState<{ aId: string; bId: string } | null>(null);
+
+  useEffect(() => {
+    if (treeFocusKinshipPair || treeFocusKinshipPersonId) {
+      const aId = treeFocusKinshipPair?.personAId || rootPersonId;
+      const bId = treeFocusKinshipPair?.personBId || treeFocusKinshipPersonId!;
+      setTreeFocusKinshipPair(null);
+      setTreeFocusKinshipPersonId(null);
+      const kinship = calculateKinship(aId, bId, database);
+      if (kinship && kinship.path) {
+        setCollapsedChildren((prev) => {
+          const next = new Set(prev);
+          kinship.path.forEach((step) => next.delete(step.personId));
+          return next;
+        });
+        setCollapsedParents((prev) => {
+          const next = new Set(prev);
+          kinship.path.forEach((step) => next.delete(step.personId));
+          return next;
+        });
+        setCollapsedSiblings((prev) => {
+          const next = new Set(prev);
+          kinship.path.forEach((step) => next.delete(step.personId));
+          return next;
+        });
+        setShowParents(true);
+        setShowSiblings(true);
+        setShowDescendants(true);
+      }
+      setFocusKinshipPair({ aId, bId });
+      setFocusPersonId(bId);
+      setFocusType('kinship-path');
+      setTimeout(() => {
+        focusOnPerson(bId, 0.95);
+      }, 150);
+    }
+  }, [treeFocusKinshipPair, treeFocusKinshipPersonId, rootPersonId, database, setTreeFocusKinshipPair, setTreeFocusKinshipPersonId, focusOnPerson]);
+
   const scrollStep = useCallback((direction: 'left' | 'right') => {
     const step = 380;
     setPan(prev => ({
@@ -1416,29 +1536,61 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return (
       orientation === 'horizontal' ||
       !showSiblings ||
+      !showParents ||
+      !showDescendants ||
       isCompact ||
       directAncestorsOnly ||
       !enableBloodlineHover ||
       focusType !== 'none' ||
-      collapsedSiblings.size > 0
+      collapsedSiblings.size > 0 ||
+      collapsedChildren.size > 0 ||
+      collapsedParents.size > 0
     );
-  }, [orientation, showSiblings, isCompact, directAncestorsOnly, enableBloodlineHover, focusType, collapsedSiblings.size]);
+  }, [
+    orientation,
+    showSiblings,
+    showParents,
+    showDescendants,
+    isCompact,
+    directAncestorsOnly,
+    enableBloodlineHover,
+    focusType,
+    collapsedSiblings.size,
+    collapsedChildren.size,
+    collapsedParents.size
+  ]);
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (orientation === 'horizontal') count++;
-    if (!showSiblings) count++;
+    if (!showSiblings || !showParents || !showDescendants) count++;
     if (isCompact) count++;
     if (directAncestorsOnly) count++;
     if (focusType !== 'none') count++;
-    if (collapsedSiblings.size > 0) count++;
+    if (collapsedSiblings.size > 0 || collapsedChildren.size > 0 || collapsedParents.size > 0) count++;
     return count;
-  }, [orientation, showSiblings, isCompact, directAncestorsOnly, focusType, collapsedSiblings.size]);
+  }, [
+    orientation,
+    showSiblings,
+    showParents,
+    showDescendants,
+    isCompact,
+    directAncestorsOnly,
+    focusType,
+    collapsedSiblings.size,
+    collapsedChildren.size,
+    collapsedParents.size
+  ]);
 
   const resetViewOptions = useCallback(() => {
     setOrientation('vertical');
     setShowSiblings(true);
+    setShowParents(true);
+    setShowDescendants(true);
     setCollapsedSiblings(new Set());
+    setCollapsedParents(new Set());
+    setCollapsedChildren(new Set());
+    setGenerations(0);
     setIsCompact(false);
     setDirectAncestorsOnly(false);
     setEnableBloodlineHover(true);
@@ -1775,6 +1927,31 @@ export const TreeView: React.FC<TreeViewProps> = ({
             <div className="flex items-center gap-1 text-xs text-slate-300 bg-[#15181b] border border-[#2d3238] px-2 py-1.5 rounded-lg shadow-xs shrink-0">
               <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
 
+              {/* Instant 1-click "Всі" button: guarantees restoring and showing all persons */}
+              <button
+                type="button"
+                onClick={handleExpandAll}
+                className={`px-2 py-0.5 rounded text-xs font-bold transition-all cursor-pointer ${
+                  generations === 0 && !hasCollapsedAny
+                    ? 'bg-emerald-600/40 text-emerald-300 border border-emerald-500/50 hover:bg-emerald-600/60'
+                    : hasCollapsedAny
+                    ? 'bg-amber-500/25 text-amber-300 border border-amber-500/60 hover:bg-amber-500/40 shadow-xs'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                }`}
+                title={
+                  hasCollapsedAny
+                    ? 'Показати всіх осіб (розгорнути згорнутих нащадків та гілки)'
+                    : 'Показати всіх осіб (повне дерево без обмежень)'
+                }
+              >
+                Всі
+                {hasCollapsedAny && (
+                  <span className="ml-1 text-[10px] px-1 py-0.2 rounded-full bg-amber-500/40 text-amber-200">
+                    +{collapsedChildren.size + collapsedSiblings.size + collapsedParents.size || '!'}
+                  </span>
+                )}
+              </button>
+
               {isCustomGenOpen ? (
                 <form
                   onSubmit={(e) => {
@@ -1817,20 +1994,34 @@ export const TreeView: React.FC<TreeViewProps> = ({
               ) : (
                 <div className="flex items-center gap-1">
                   <select
-                    value={generations}
+                    value={generations === 0 && hasCollapsedAny ? 'collapsed_active' : generations}
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val === 'custom') {
                         setCustomGenInput(String(generations > 0 ? generations : 4));
                         setIsCustomGenOpen(true);
+                      } else if (val === '0' || val === 'all' || val === 'collapsed_active') {
+                        handleExpandAll();
                       } else {
-                        setGenerations(Number(val));
+                        const num = Number(val);
+                        if (num === 0) {
+                          handleExpandAll();
+                        } else {
+                          setGenerations(num);
+                        }
                       }
                     }}
                     className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer py-0.5"
                     title="Кількість поколінь родоводу"
                   >
-                    <option value={0} className="bg-[#1b1f24] text-white">Всі</option>
+                    {generations === 0 && hasCollapsedAny && (
+                      <option value="collapsed_active" disabled hidden>
+                        Всі (є згорнуті: +{collapsedChildren.size + collapsedSiblings.size + collapsedParents.size})
+                      </option>
+                    )}
+                    <option value="0" className="bg-[#1b1f24] text-white font-semibold">
+                      Всі (показати всіх)
+                    </option>
                     {treeGenOptions.map((g) => (
                       <option key={g} value={g} className="bg-[#1b1f24] text-white">
                         {g} пок.
@@ -2063,19 +2254,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         </div>
                       </button>
 
-                      {/* Unfold Collapsed Branches */}
-                      {collapsedSiblings.size > 0 && (
+                      {/* Unfold Collapsed Branches & Descendants */}
+                      {hasCollapsedAny && (
                         <button
                           type="button"
-                          onClick={() => setCollapsedSiblings(new Set())}
-                          className="w-full flex items-center justify-between p-2 rounded-lg text-xs border bg-amber-950/60 text-amber-300 border-amber-600/70 hover:bg-amber-900/70 transition-all cursor-pointer"
+                          onClick={() => {
+                            handleExpandAll();
+                          }}
+                          className="w-full flex items-center justify-between p-2 rounded-lg text-xs border bg-amber-950/60 text-amber-300 border-amber-600/70 hover:bg-amber-900/70 transition-all cursor-pointer font-bold"
+                          title="Показати всіх осіб (розгорнути згорнутих нащадків та бічні гілки)"
                         >
                           <div className="flex items-center gap-2">
                             <Plus className="w-4 h-4 text-amber-400 shrink-0" />
-                            <span className="font-semibold">Розгорнути згорнуті гілки</span>
+                            <span>Показати всіх (Розгорнути нащадків та гілки)</span>
                           </div>
                           <span className="px-1.5 py-0.5 rounded bg-amber-600 text-white font-bold text-[10px]">
-                            {collapsedSiblings.size}
+                            Всі ({collapsedChildren.size + collapsedSiblings.size + collapsedParents.size || 1})
                           </span>
                         </button>
                       )}
@@ -2686,6 +2880,26 @@ export const TreeView: React.FC<TreeViewProps> = ({
           touchAction: 'none'
         }}
       >
+        {/* Floating Collapsed Branches / Descendants Banner with "Всі" action */}
+        {hasCollapsedAny && focusType === 'none' && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 bg-[#181b1f]/95 backdrop-blur-md border border-amber-500/50 shadow-2xl px-3.5 py-1.5 rounded-full text-xs animate-in fade-in slide-in-from-top-2 duration-200 select-none">
+            <span className="text-amber-300 font-medium">
+              {collapsedChildren.size > 0
+                ? `Згорнуто нащадків (${collapsedChildren.size})`
+                : 'Є приховані гілки'}
+            </span>
+            <button
+              type="button"
+              onClick={handleExpandAll}
+              className="px-2.5 py-0.5 rounded-full bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[11px] shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+              title="Розгорнути всіх нащадків та показати всіх осіб у родинному дереві"
+            >
+              <span>Всі</span>
+              <span className="text-[10px] font-semibold opacity-80">• Показати всіх</span>
+            </button>
+          </div>
+        )}
+
         {/* Floating Active Focus Status Banner */}
         {focusType !== 'none' && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#181b1f]/95 backdrop-blur-md border border-amber-500/60 shadow-2xl px-3.5 py-1.5 rounded-full text-xs animate-in fade-in slide-in-from-top-2 duration-200 select-none">
@@ -3054,10 +3268,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     onMouseLeave={() => setHoveredPersonId(null)}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(p.id);
+                        return;
+                      }
                       if (p.id !== activePersonId) {
                         onChangeRoot(p.id);
                       }
                     }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openPersonInNewWindow(p.id);
+                      }
+                    }}
+                    onContextMenu={(e) => handlePersonContextMenu(e, p.id)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       onSelectPerson(p.id);
@@ -3071,9 +3297,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/70 border-white/30'
                         : 'border-white/30'
                     }`}
-                    title={`${firstName} ${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку`}
+                    title={`${firstName} ${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку\n• Ctrl+клік / ПКМ: у новій вкладці`}
                   >
-                    <div className="flex items-center gap-1 truncate min-w-0">
+                    <div className="flex items-center gap-1 truncate min-w-0 flex-1">
                       {isTreeRoot ? (
                         <span className="text-[11px] shrink-0">👑</span>
                       ) : isMasked ? (
@@ -3084,10 +3310,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       </span>
                     </div>
                     {shortLifespan && (
-                      <span className="text-[9px] font-mono opacity-85 shrink-0">
+                      <span className="text-[9px] font-mono opacity-85 shrink-0 group-hover:hidden">
                         {shortLifespan}
                       </span>
                     )}
+                    <a
+                      href={getPersonUrl(p.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="hidden group-hover:flex items-center justify-center p-0.5 rounded hover:bg-white/25 text-white shrink-0 transition-all cursor-pointer"
+                      title="Відкрити особу у новій вкладці браузера"
+                    >
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
                   </div>
                 </div>
               );
@@ -3139,10 +3375,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     onMouseLeave={() => setHoveredPersonId(null)}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(p.id);
+                        return;
+                      }
                       if (p.id !== activePersonId) {
                         onChangeRoot(p.id);
                       }
                     }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openPersonInNewWindow(p.id);
+                      }
+                    }}
+                    onContextMenu={(e) => handlePersonContextMenu(e, p.id)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       onSelectPerson(p.id);
@@ -3168,7 +3416,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-900 shadow-amber-500/40 shadow-lg'
                         : ''
                     }`}
-                    title={`${firstName} ${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку`}
+                    title={`${firstName} ${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} (${lifespanStr})\n• Клік: фокусувати дерево\n• Подвійний клік: відкрити картку\n• Ctrl+клік / ПКМ: у новій вкладці`}
                   >
                     {/* Top row: Status/Crown + Name + Quick Edit */}
                     <div className="flex items-center justify-between gap-1 min-w-0">
@@ -3184,9 +3432,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
                             }`}
                           />
                         )}
-                        <span className="font-extrabold text-xs truncate leading-tight tracking-tight">
+                        <a
+                          href={getPersonUrl(p.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => {
+                            if (!e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onSelectPerson(p.id);
+                            }
+                          }}
+                          className="font-extrabold text-xs truncate leading-tight tracking-tight hover:underline cursor-pointer"
+                          title="Клік: відкрити картку • Ctrl+клік / ПКМ: у новій вкладці"
+                        >
                           {lastName} {maidenFormatted && <span className="font-semibold opacity-90">{maidenFormatted} </span>}{firstName !== '—' ? firstName : ''}
-                        </span>
+                        </a>
                       </div>
 
                       {!isMasked && (
@@ -3202,6 +3463,16 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           >
                             <Eye className="w-2.5 h-2.5" />
                           </button>
+                          <a
+                            href={getPersonUrl(p.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="p-0.5 rounded hover:bg-black/20 dark:hover:bg-white/20 shrink-0 cursor-pointer text-sky-400 hover:text-sky-300"
+                            title="Відкрити особу у новій вкладці браузера"
+                          >
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
                           <button
                             type="button"
                             onClick={(e) => {
@@ -3297,11 +3568,23 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 }`}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (e.metaKey || e.ctrlKey || e.button === 1) {
+                    openPersonInNewWindow(p.id);
+                    return;
+                  }
                   if (p.id !== activePersonId) {
                     onChangeRoot(p.id);
                   }
                 }}
-                title={p.id === activePersonId ? 'Поточна особа' : 'Зробити фокусом дерева'}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openPersonInNewWindow(p.id);
+                  }
+                }}
+                onContextMenu={(e) => handlePersonContextMenu(e, p.id)}
+                title={p.id === activePersonId ? 'Поточна особа • Ctrl+клік або ПКМ: у новій вкладці' : 'Зробити фокусом дерева • Ctrl+клік або ПКМ: у новій вкладці'}
               >
                 {/* Bloodline highlight role badge on hover */}
                 {bloodlineData.isActive && isNodeInBloodline && (
@@ -3680,7 +3963,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   /* Compact / Dense View: ПІБ, роки життя, стать, без надлишкових ID-кодів і великих відступів */
                   <div className="flex items-center gap-2 h-full my-auto px-1 min-w-0">
                     {/* Small avatar or gender badge */}
-                    <div className="relative shrink-0">
+                    <a
+                      href={getPersonUrl(p.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => {
+                        if (!e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onSelectPerson(p.id);
+                        }
+                      }}
+                      className="relative shrink-0 block cursor-pointer"
+                      title="Клік: відкрити картку • Ctrl+клік або ПКМ: у новій вкладці"
+                    >
                       {isMasked ? (
                         <div
                           className={`w-7 h-7 rounded-full flex items-center justify-center border shadow-xs ${
@@ -3717,21 +4013,31 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       {isRoot && (
                         <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full border border-[#22262a]" />
                       )}
-                    </div>
+                    </a>
 
                     {/* Full Name + Lifespan + Sex */}
                     <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <div className="flex items-center justify-between gap-1 min-w-0">
-                        <h4
-                          className={`font-bold text-[12px] leading-tight truncate transition-colors ${
+                        <a
+                          href={getPersonUrl(p.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => {
+                            if (!e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onSelectPerson(p.id);
+                            }
+                          }}
+                          className={`font-bold text-[12px] leading-tight truncate transition-colors hover:underline block cursor-pointer ${
                             isLightCanvas
-                              ? 'text-neutral-900 group-hover:text-emerald-700'
-                              : 'text-white group-hover:text-emerald-400'
+                              ? 'text-neutral-900 hover:text-sky-600'
+                              : 'text-white hover:text-sky-400'
                           }`}
-                          title={`${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} ${firstName}`}
+                          title={`${lastName}${maidenFormatted ? ` ${maidenFormatted}` : ''} ${firstName}\n• Клік: відкрити картку • Ctrl+клік або ПКМ: у новій вкладці`}
                         >
                           {lastName} {maidenFormatted && <span className={`font-semibold text-[11px] ${isLightCanvas ? 'text-amber-800' : 'text-amber-300'}`}>{maidenFormatted} </span>}{firstName !== '—' ? firstName : ''}
-                        </h4>
+                        </a>
                         {!isMasked && (
                           <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
@@ -3745,6 +4051,16 @@ export const TreeView: React.FC<TreeViewProps> = ({
                             >
                               <Eye className="w-2.5 h-2.5" />
                             </button>
+                            <a
+                              href={getPersonUrl(p.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 shrink-0 cursor-pointer text-sky-400 hover:text-sky-300"
+                              title="Відкрити особу у новій вкладці браузера"
+                            >
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
                             <button
                               type="button"
                               onClick={(e) => {
@@ -3813,7 +4129,20 @@ export const TreeView: React.FC<TreeViewProps> = ({
                   <>
                     {/* Centered Avatar (Image 2 style) */}
                     <div className="flex flex-col items-center mt-1">
-                      <div className="relative">
+                      <a
+                        href={getPersonUrl(p.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          if (!e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onSelectPerson(p.id);
+                          }
+                        }}
+                        className="relative block cursor-pointer hover:opacity-95 transition-opacity"
+                        title="Клік: відкрити картку • Ctrl+клік або ПКМ: у новій вкладці"
+                      >
                         {isMasked ? (
                           <div
                             className={`w-12 h-12 rounded-full flex items-center justify-center border shadow-inner ${
@@ -3850,7 +4179,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         {isRoot && (
                           <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#22262a]" />
                         )}
-                      </div>
+                      </a>
 
                       {/* Spouse Status Indicator (if divorced or widowed) */}
                       {node.isSpouseNode && (node.marriageStatus === 'Divorced' || node.marriageStatus === 'Widowed') && (
@@ -3871,28 +4200,43 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
                     {/* Name & Genealogical Information */}
                     <div className="text-center my-auto px-0.5">
-                      {/* First Name */}
-                      <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
-                        isLightCanvas
-                          ? 'text-neutral-900 group-hover:text-emerald-700'
-                          : 'text-white group-hover:text-emerald-400'
-                      }`}>
-                        {firstName}
-                      </h4>
-                      {/* Last Name & Maiden Name in () */}
-                      <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
-                        isLightCanvas
-                          ? 'text-neutral-900 group-hover:text-emerald-700'
-                          : 'text-white group-hover:text-emerald-400'
-                      }`} title={maidenFormatted ? `${lastName} ${maidenFormatted}` : lastName}>
-                        {lastName} {maidenFormatted && (
-                          <span className={`font-semibold text-[11px] ${
-                            isLightCanvas ? 'text-amber-800' : 'text-amber-300'
-                          }`}>
-                            {maidenFormatted}
-                          </span>
-                        )}
-                      </h4>
+                      <a
+                        href={getPersonUrl(p.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          if (!e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onSelectPerson(p.id);
+                          }
+                        }}
+                        className="block hover:underline cursor-pointer"
+                        title="Клік: відкрити картку • Ctrl+клік або ПКМ: у новій вкладці"
+                      >
+                        {/* First Name */}
+                        <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
+                          isLightCanvas
+                            ? 'text-neutral-900 group-hover:text-emerald-700'
+                            : 'text-white group-hover:text-emerald-400'
+                        }`}>
+                          {firstName}
+                        </h4>
+                        {/* Last Name & Maiden Name in () */}
+                        <h4 className={`font-bold text-[13px] leading-tight truncate transition-colors ${
+                          isLightCanvas
+                            ? 'text-neutral-900 group-hover:text-emerald-700'
+                            : 'text-white group-hover:text-emerald-400'
+                        }`} title={maidenFormatted ? `${lastName} ${maidenFormatted}` : lastName}>
+                          {lastName} {maidenFormatted && (
+                            <span className={`font-semibold text-[11px] ${
+                              isLightCanvas ? 'text-amber-800' : 'text-amber-300'
+                            }`}>
+                              {maidenFormatted}
+                            </span>
+                          )}
+                        </h4>
+                      </a>
 
                       {/* Lifespan */}
                       <div className={`text-[11px] mt-1.5 font-medium tracking-tight ${
@@ -3992,6 +4336,22 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           >
                             <Eye className="w-3 h-3" />
                           </button>
+
+                          {/* Open in new tab button */}
+                          <a
+                            href={getPersonUrl(p.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors cursor-pointer ${
+                              isLightCanvas
+                                ? 'bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white border-blue-300'
+                                : 'bg-blue-950/40 hover:bg-blue-600 text-blue-400 hover:text-white border-blue-800/60'
+                            }`}
+                            title="Відкрити картку цієї особи у новій вкладці браузера"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
 
                           {/* Person Card / Edit Badge (Pencil icon to open/edit person card) */}
                           <button
@@ -4793,6 +5153,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
           isOpen={Boolean(activeMergePair)}
           onClose={() => setActiveMergePair(null)}
           onMergeComplete={(updatedPersons, updatedFamilies, masterName, extra) => {
+            ignoreDuplicatePair(activeMergePair.personA.id, activeMergePair.personB.id);
+            if (extra?.deletedPersonId && extra?.masterPerson?.id) {
+              ignoreDuplicatePair(extra.deletedPersonId, extra.masterPerson.id);
+            }
             mergePersons({
               updatedPersons,
               updatedFamilies,
@@ -4804,8 +5168,144 @@ export const TreeView: React.FC<TreeViewProps> = ({
               message: `Особи успішно об'єднані в профіль «${masterName}».`
             });
           }}
+          onMarkNotDuplicate={(pair) => {
+            ignoreDuplicatePair(pair.personA.id, pair.personB.id);
+            setActiveMergePair(null);
+            setImportNotification({
+              message: `Пару позначено як «Не дублікат» і приховано зі списку.`
+            });
+          }}
         />
       )}
+
+      {/* Right-click Context Menu for Person Node in Tree */}
+      {contextMenu && database.persons[contextMenu.personId] && (() => {
+        const p = database.persons[contextMenu.personId];
+        const isMale = p.gender === 'male' || (p as any).sex === 'M';
+        const isFemale = p.gender === 'female' || (p as any).sex === 'F';
+        const name = `${p.lastName || ''} ${p.firstName || ''}`.trim() || 'Особа';
+        const personUrl = getPersonUrl(p.id);
+
+        return (
+          <div
+            className="fixed inset-0 z-50 pointer-events-auto"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu(null);
+            }}
+          >
+            <div
+              style={{
+                position: 'fixed',
+                left: `${Math.max(10, Math.min(contextMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 250))}px`,
+                top: `${Math.max(10, Math.min(contextMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 320))}px`
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-64 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden py-1.5 z-50 text-sm animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10 dark:ring-white/10"
+            >
+              <div className="px-3.5 py-2.5 border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-850">
+                <div className="flex items-center gap-1.5 font-bold text-neutral-900 dark:text-neutral-100 truncate text-xs">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${isMale ? 'bg-sky-500' : isFemale ? 'bg-rose-500' : 'bg-slate-400'}`} />
+                  <span className="truncate">{name}</span>
+                </div>
+                <div className="text-[10px] text-neutral-500 font-mono mt-0.5">
+                  ID: {p.id}
+                </div>
+              </div>
+
+              <div className="py-1">
+                {/* 1. Open in new tab - prominent anchor */}
+                <a
+                  href={personUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setContextMenu(null)}
+                  className="flex items-center gap-2.5 px-3.5 py-2 text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/40 font-semibold transition-colors cursor-pointer group"
+                >
+                  <ExternalLink className="w-4 h-4 shrink-0 text-sky-500 group-hover:scale-110 transition-transform" />
+                  <span>Відкрити в новій вкладці</span>
+                </a>
+
+                {/* 2. Open inspector modal */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectPerson(p.id);
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
+                >
+                  <Eye className="w-4 h-4 shrink-0 text-amber-500" />
+                  <span>Переглянути анкету</span>
+                </button>
+
+                {/* 3. Edit person */}
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onEditPerson) onEditPerson(p.id);
+                      else onSelectPerson(p.id);
+                      setContextMenu(null);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
+                  >
+                    <Pencil className="w-4 h-4 shrink-0 text-blue-500" />
+                    <span>Редагувати картку</span>
+                  </button>
+                )}
+
+                {/* 4. Center tree on this person */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChangeRoot(p.id);
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
+                >
+                  <Target className="w-4 h-4 shrink-0 text-emerald-500" />
+                  <span>Зробити центром дерева</span>
+                </button>
+
+                {/* 5. Add relative */}
+                {!isReadOnly && onOpenRelationManager && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenRelationManager(p.id);
+                      setContextMenu(null);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4 shrink-0 text-purple-500" />
+                    <span>Додати родича (+)</span>
+                  </button>
+                )}
+
+                <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+
+                {/* 6. Copy link */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const fullUrl = new URL(personUrl, window.location.origin).href;
+                      await navigator.clipboard.writeText(fullUrl);
+                    } catch {}
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left text-xs cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5 shrink-0" />
+                  <span>Копіювати посилання</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -5,6 +5,7 @@ import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { useAuthStore, isMasterAdminEmail } from '../stores/useAuthStore';
 import { useCloudSyncStore } from '../stores/useCloudSyncStore';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
+import { getTabUrl } from '../stores/useUIStore';
 import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { ShareTreeModal } from '../rodovid/components/modals/ShareTreeModal';
@@ -474,16 +475,20 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
                 {/* Footer Link to Settings */}
                 <div className="text-center pt-2 border-t border-black/5 dark:border-white/5">
-                  <button
-                    onClick={() => {
+                  <a
+                    href={getTabUrl('settings')}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                      e.preventDefault();
                       setShowCloudPopover(false);
                       setActiveTab('settings');
                     }}
                     className="text-[11px] text-[#B88E3E] hover:underline font-semibold cursor-pointer inline-flex items-center gap-1"
+                    title="Відкрити повні налаштування (Ctrl+клік для нової вкладки)"
                   >
                     <span>Відкрити повні налаштування Firestore</span>
                     <span>→</span>
-                  </button>
+                  </a>
                 </div>
               </div>
             </>
@@ -617,16 +622,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
           {/* Pending Requests Badge for Admin */}
           {(isAdmin || currentUser?.role === 'admin') && pendingRequestsCount > 0 && (
-            <button
-              onClick={() => setActiveTab('settings')}
+            <a
+              href={getTabUrl('requests')}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                e.preventDefault();
+                setActiveTab('requests');
+              }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse shrink-0 cursor-pointer"
-              title={`Є нові вхідні заявки на доступ (${pendingRequestsCount}). Натисніть для перегляду в Налаштуваннях`}
+              title={`Є нові вхідні заявки на доступ (${pendingRequestsCount}). Натисніть для перегляду (Ctrl+клік для нової вкладки)`}
             >
               <Bell className="w-3.5 h-3.5 text-amber-500" />
               <span className="text-[10px] font-mono px-1 py-0.2 rounded-full bg-amber-500 text-white leading-tight">
                 {pendingRequestsCount}
               </span>
-            </button>
+            </a>
           )}
 
           {/* Add Person Button - Icon Only */}

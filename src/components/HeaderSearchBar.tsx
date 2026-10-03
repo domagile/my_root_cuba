@@ -14,9 +14,11 @@ import {
   Briefcase,
   Zap,
   Layers,
-  Maximize2
+  Maximize2,
+  ExternalLink
 } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
+import { getPersonUrl, openPersonInNewWindow } from '../stores/useUIStore';
 import { Person } from '../types';
 import { getThemeConfig } from '../utils/theme';
 import { 
@@ -361,7 +363,19 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
                 return (
                   <div
                     key={`${person.id}_${idx}`}
-                    onClick={() => handleSelectPersonInTree(person.id)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(person.id);
+                        return;
+                      }
+                      handleSelectPersonInTree(person.id);
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        openPersonInNewWindow(person.id);
+                      }
+                    }}
                     className={`group p-2.5 sm:px-3 sm:py-2.5 flex items-start justify-between gap-2.5 transition-all cursor-pointer ${
                       isSelected 
                         ? 'bg-[#B88E3E]/15 dark:bg-[#B88E3E]/25' 
@@ -498,6 +512,17 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
                           <FileText className="w-3.5 h-3.5" />
                         </button>
                       )}
+
+                      <a
+                        href={getPersonUrl(person.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1.5 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-[#B88E3E] hover:text-white text-xs font-semibold transition-colors cursor-pointer text-blue-500 hover:text-white"
+                        title="Відкрити особу у новій вкладці браузера"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
                     </div>
                   </div>
                 );

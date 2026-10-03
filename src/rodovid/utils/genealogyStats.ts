@@ -531,7 +531,7 @@ export function computeComprehensiveStats(database: GenealogyDatabase): Comprehe
       ? fam.children.map((c) => (typeof c === 'string' ? c : c.personId))
       : fam.childrenIds || [];
 
-    const kids = rawChildrenIds.map((id) => personMap.get(id)).filter(Boolean) as Person[];
+    const kids = Array.from(new Set(rawChildrenIds.filter(Boolean))).map((id) => personMap.get(id)).filter(Boolean) as Person[];
     const count = kids.length;
 
     if (count > 0) {

@@ -23,6 +23,11 @@ import {
   saveProjectDataToCloud,
   fetchAllProjectDataFromCloud,
   savePersonDoc,
+  savePersonDeltaDoc,
+  saveFamilyDoc,
+  saveEventDoc,
+  saveSourceDoc,
+  savePlaceDoc,
   deletePersonDoc,
   deleteFamilyDoc,
   deleteEventDoc,
@@ -368,11 +373,12 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             .filter((p: any) => p?.id && !isDemoPerson(p) && !isExcluded(p.id))
             .map(normalizePerson);
           const cloudMap = new Map(cloudList.map((p) => [p.id, p]));
-          const merged: Person[] = [...cloudList];
+          const merged: Person[] = [...cloudMap.values()];
 
           // Preserve local persons that have not synced yet or exist in local store
           for (const localP of prevPersons) {
             if (!cloudMap.has(localP.id) && !isDemoPerson(localP) && !isExcluded(localP.id)) {
+              cloudMap.set(localP.id, localP);
               merged.push(localP);
             }
           }
@@ -442,37 +448,87 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
 
   // Debounced auto-sync to Firestore (ONLY active when user explicitly chooses 'auto' mode)
+  // Smart incremental strategy: push only the delta (changed fields) for specific updated persons!
   useEffect(() => {
     if (syncMode !== 'auto') {
       return;
     }
 
-    const timer = setTimeout(() => {
-      saveProjectDataToCloud({
-        persons,
-        families: Object.values(families || {}),
-        events: Object.values(events || {}),
-        sources: Object.values(sources || {}),
-        places: Object.values(places || {}),
-        metricRecords,
-        documents,
-        tasks,
-        findings,
-        hypotheses,
-        requests,
-        matrixEntries,
-        lastUpdated: new Date().toISOString()
-      }).then((ok) => {
-        if (ok) {
-          setStatus('synced');
-          setLastSyncTime(new Date().toISOString());
-          useCloudSyncStore.getState().clearUnsavedChanges();
+    const timer = setTimeout(async () => {
+      const syncStore = useCloudSyncStore.getState();
+      const tracker = syncStore.dirtyTracker;
+      const dirtyDeltas = syncStore.dirtyPersonsDelta;
+      const totalDirty = countDirtyItems(tracker);
+
+      if (totalDirty === 0 && Object.keys(dirtyDeltas).length === 0) {
+        return;
+      }
+
+      setStatus('syncing');
+
+      try {
+        // 1. Process deletions
+        if (tracker.deletedPersons.length > 0) {
+          await Promise.allSettled(tracker.deletedPersons.map((id) => deletePersonDoc(id)));
         }
-      });
-    }, 10000);
+        if (tracker.deletedFamilies.length > 0) {
+          await Promise.allSettled(tracker.deletedFamilies.map((id) => deleteFamilyDoc(id)));
+        }
+        if (tracker.deletedEvents.length > 0) {
+          await Promise.allSettled(tracker.deletedEvents.map((id) => deleteEventDoc(id)));
+        }
+        if (tracker.deletedSources.length > 0) {
+          await Promise.allSettled(tracker.deletedSources.map((id) => deleteSourceDoc(id)));
+        }
+        if (tracker.deletedPlaces.length > 0) {
+          await Promise.allSettled(tracker.deletedPlaces.map((id) => deletePlaceDoc(id)));
+        }
+
+        // 2. Incremental Person Delta Writes: Push ONLY changed fields for specific updated persons
+        const personPromises: Promise<boolean>[] = [];
+        for (const personId of tracker.persons) {
+          const delta = dirtyDeltas[personId];
+          if (delta && Object.keys(delta).length > 0) {
+            personPromises.push(savePersonDeltaDoc(personId, delta));
+          } else {
+            const p = persons.find((item) => item.id === personId);
+            if (p) {
+              personPromises.push(savePersonDoc(p));
+            }
+          }
+        }
+        await Promise.allSettled(personPromises);
+
+        // 3. Push dirty families if any
+        if (tracker.families.length > 0) {
+          const dirtyFams = tracker.families.map((id) => families[id]).filter(Boolean);
+          await Promise.allSettled(dirtyFams.map((f) => saveFamilyDoc(f)));
+        }
+
+        // 4. Push dirty events/sources/places if any
+        if (tracker.events.length > 0) {
+          const dirtyEvts = tracker.events.map((id) => events[id]).filter(Boolean);
+          await Promise.allSettled(dirtyEvts.map((e) => saveEventDoc(e)));
+        }
+        if (tracker.sources.length > 0) {
+          const dirtySrcs = tracker.sources.map((id) => sources[id]).filter(Boolean);
+          await Promise.allSettled(dirtySrcs.map((s) => saveSourceDoc(s)));
+        }
+        if (tracker.places.length > 0) {
+          const dirtyPlcs = tracker.places.map((id) => places[id]).filter(Boolean);
+          await Promise.allSettled(dirtyPlcs.map((pl) => savePlaceDoc(pl)));
+        }
+
+        setStatus('synced');
+        setLastSyncTime(new Date().toISOString());
+        syncStore.clearDirty();
+      } catch (err: any) {
+        setStatus('error', err?.message || 'Помилка фонової синхронізації');
+      }
+    }, 5000);
 
     return () => clearTimeout(timer);
-  }, [syncMode, persons, families, events, sources, places, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime]);
+  }, [syncMode, persons, families, events, sources, places, setStatus, setLastSyncTime]);
 
   // Manual Trigger: Smart Delta Upload or Forced Full Upload to Cloud
   const triggerUploadToCloud = useCallback(async (options?: { forceFull?: boolean }): Promise<{ success: boolean; message: string }> => {
@@ -578,6 +634,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       } else {
         // SMART DELTA UPLOAD: Push ONLY new & modified values!
+        const dirtyDeltas = syncStore.dirtyPersonsDelta;
         const dirtyPersons = tracker.persons.length > 0
           ? persons.filter((p) => tracker.persons.includes(p.id))
           : [];
@@ -611,9 +668,26 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           await Promise.allSettled(tracker.deletedPlaces.map((id) => deletePlaceDoc(id)));
         }
 
-        // Upload only dirty entities
+        // Incremental Person Delta Writes: Push only changed fields for specific updated persons
+        let deltaWrittenCount = 0;
+        const personPromises: Promise<boolean>[] = [];
+        for (const personId of tracker.persons) {
+          const delta = dirtyDeltas[personId];
+          if (delta && Object.keys(delta).length > 0) {
+            personPromises.push(savePersonDeltaDoc(personId, delta));
+            deltaWrittenCount++;
+          } else {
+            const p = persons.find((item) => item.id === personId);
+            if (p) {
+              personPromises.push(savePersonDoc(p));
+              deltaWrittenCount++;
+            }
+          }
+        }
+        await Promise.allSettled(personPromises);
+
+        // Upload only dirty families, events, sources, places
         const ok = await saveProjectDataToCloud({
-          persons: dirtyPersons.length > 0 ? dirtyPersons : undefined,
           families: dirtyFamilies.length > 0 ? dirtyFamilies : undefined,
           events: dirtyEvents.length > 0 ? dirtyEvents : undefined,
           sources: dirtySources.length > 0 ? dirtySources : undefined,
@@ -628,8 +702,8 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           lastUpdated: new Date().toISOString()
         });
 
-        if (ok) {
-          const writtenCount = dirtyPersons.length + dirtyFamilies.length + dirtyEvents.length + dirtySources.length + dirtyPlaces.length + tracker.deletedPersons.length;
+        if (ok || deltaWrittenCount > 0) {
+          const writtenCount = deltaWrittenCount + dirtyFamilies.length + dirtyEvents.length + dirtySources.length + dirtyPlaces.length + tracker.deletedPersons.length;
           const quotaSaved = Math.max(0, persons.length - writtenCount);
           setStatus('synced');
           setLastSyncTime(new Date().toISOString());
@@ -637,7 +711,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setIsManualPushing(false);
           return {
             success: true,
-            message: `Розумне збереження успішне: вивантажено тільки ${writtenCount} змінених записів! (Заощаджено ${quotaSaved} операцій квоти).`
+            message: `Розумне інкрементне збереження успішне: вивантажено тільки ${writtenCount} змінених записів (дельта полів)! Заощаджено ${quotaSaved} операцій квоти.`
           };
         }
       }

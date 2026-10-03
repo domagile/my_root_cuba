@@ -23,6 +23,7 @@ import { Person, GenealogyDatabase } from '../../types/genealogy';
 import { KinshipCalculationResult, KinshipPathStep, getFullName } from '../../utils/relationship';
 import { isPersonLiving, getPrivacySafePerson } from '../../utils/privacy';
 import { ThemeConfig } from '../../../utils/theme';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 
 interface VisualKinshipPathProps {
   database: GenealogyDatabase;
@@ -247,7 +248,19 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
                   <div
                     onMouseEnter={() => setHoveredStepIndex(idx)}
                     onMouseLeave={() => setHoveredStepIndex(null)}
-                    onClick={() => onSelectPerson(person.id)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(person.id);
+                        return;
+                      }
+                      onSelectPerson(person.id);
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        openPersonInNewWindow(person.id);
+                      }
+                    }}
                     className={`relative group w-52 p-3.5 rounded-xl border-2 cursor-pointer transition-all duration-200 shrink-0 select-none ${
                       isStart
                         ? isDark
@@ -357,9 +370,16 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
                           ? result.relationshipName
                           : step.relationFromPrevious || 'Родич'}
                       </span>
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 group-hover:underline flex items-center gap-0.5">
+                      <a
+                        href={getPersonUrl(person.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                        title="Відкрити картку у новій вкладці браузера"
+                      >
                         Картка <ExternalLink className="w-2.5 h-2.5" />
-                      </span>
+                      </a>
                     </div>
                   </div>
                 </React.Fragment>
@@ -413,7 +433,19 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
 
                   {/* Card row */}
                   <div
-                    onClick={() => onSelectPerson(person.id)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(person.id);
+                        return;
+                      }
+                      onSelectPerson(person.id);
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        openPersonInNewWindow(person.id);
+                      }
+                    }}
                     className={`flex items-center justify-between p-3.5 rounded-xl border-2 cursor-pointer transition-all hover:border-emerald-500 ${
                       isStart
                         ? isDark
@@ -500,7 +532,7 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
                       </div>
                     </div>
 
-                    <div className="text-right shrink-0 pl-2">
+                    <div className="text-right shrink-0 pl-2 flex items-center gap-1.5">
                       <span className={`text-xs font-semibold px-2.5 py-1 rounded-md ${
                         isStart
                           ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
@@ -512,6 +544,16 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
                       }`}>
                         {isStart ? 'Початок' : isEnd ? result.relationshipName : step.relationFromPrevious}
                       </span>
+                      <a
+                        href={getPersonUrl(person.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1 rounded text-neutral-400 hover:text-blue-500 hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                        title="Відкрити особу у новій вкладці браузера"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
                     </div>
                   </div>
                 </div>

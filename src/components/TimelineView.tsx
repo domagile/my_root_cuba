@@ -32,6 +32,7 @@ import {
   Send
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../stores/useUIStore';
 import { Person, MetricRecord, GenealogyDocument, YearMatrixEntry, ArchiveRequest } from '../types';
 import { getThemeConfig } from '../utils/theme';
 
@@ -880,12 +881,22 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
                         ) : (
                           <User className="w-4 h-4 text-[#B88E3E]" />
                         )}
-                        <button
-                          onClick={() => ev.personId && onInspectPerson?.(ev.personId)}
-                          className="text-xs font-bold text-[#E5E5E5] hover:text-[#B88E3E] transition-colors cursor-pointer underline decoration-dotted"
-                        >
-                          {ev.personName}
-                        </button>
+                        {ev.personId ? (
+                          <a
+                            href={getPersonUrl(ev.personId)}
+                            onClick={(e) => {
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                              e.preventDefault();
+                              onInspectPerson?.(ev.personId!);
+                            }}
+                            className="text-xs font-bold text-[#E5E5E5] hover:text-[#B88E3E] transition-colors cursor-pointer underline decoration-dotted"
+                            title="Переглянути профіль (Ctrl+клік для нової вкладки)"
+                          >
+                            {ev.personName}
+                          </a>
+                        ) : (
+                          <span className="text-xs font-bold text-[#E5E5E5]">{ev.personName}</span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -945,6 +956,19 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
                         <span>Профіль особи</span>
                       </button>
                     )}
+
+                    {ev.personId && (
+                      <a
+                        href={getPersonUrl(ev.personId)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 rounded-md bg-[#262626] hover:bg-[#333333] text-[#A3A3A3] hover:text-[#B88E3E] text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1"
+                        title="Відкрити особу у новій вкладці браузера"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span className="hidden sm:inline">У новій вкладці</span>
+                      </a>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1002,13 +1026,24 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {ev.personId && (
-                          <button
-                            onClick={() => onInspectPerson?.(ev.personId!)}
-                            className="p-1.5 text-neutral-400 hover:text-white rounded bg-neutral-800 hover:bg-neutral-700 cursor-pointer"
-                            title="Відкрити особу"
-                          >
-                            <User className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              onClick={() => onInspectPerson?.(ev.personId!)}
+                              className="p-1.5 text-neutral-400 hover:text-white rounded bg-neutral-800 hover:bg-neutral-700 cursor-pointer"
+                              title="Відкрити особу"
+                            >
+                              <User className="w-3.5 h-3.5" />
+                            </button>
+                            <a
+                              href={getPersonUrl(ev.personId)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 text-neutral-400 hover:text-[#B88E3E] rounded bg-neutral-800 hover:bg-neutral-700 cursor-pointer inline-flex items-center"
+                              title="Відкрити особу у новій вкладці браузера"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -1055,13 +1090,25 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
                         <p className="text-[11px] text-[#A3A3A3] line-clamp-2 mt-1">{ev.description}</p>
                       )}
                       {ev.personId && (
-                        <button
-                          onClick={() => onInspectPerson?.(ev.personId!)}
-                          className="mt-2 text-[10px] font-bold text-[#B88E3E] hover:underline flex items-center gap-1 cursor-pointer"
-                        >
-                          <span>Переглянути особу</span>
-                          <ChevronRight className="w-3 h-3" />
-                        </button>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            onClick={() => onInspectPerson?.(ev.personId!)}
+                            className="text-[10px] font-bold text-[#B88E3E] hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>Переглянути особу</span>
+                            <ChevronRight className="w-3 h-3" />
+                          </button>
+                          <a
+                            href={getPersonUrl(ev.personId)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-neutral-400 hover:text-[#B88E3E] flex items-center gap-1 cursor-pointer"
+                            title="Відкрити особу у новій вкладці"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>У новій вкладці</span>
+                          </a>
+                        </div>
                       )}
                     </div>
                   );
@@ -1096,13 +1143,19 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
               return (
                 <div key={`lifespan_${p.id}_${pIdx}`} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <button
-                      onClick={() => onInspectPerson?.(p.id)}
+                    <a
+                      href={getPersonUrl(p.id)}
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                        e.preventDefault();
+                        onInspectPerson?.(p.id);
+                      }}
                       className="font-bold text-[#E5E5E5] hover:text-[#B88E3E] transition-colors cursor-pointer flex items-center gap-1.5"
+                      title="Відкрити особу (Ctrl+клік для нової вкладки)"
                     >
                       <span>{p.lastName} {p.firstName}</span>
                       {age !== null && <span className="text-[10px] font-mono text-[#8C8C8C]">({age} р.)</span>}
-                    </button>
+                    </a>
                     <span className="font-mono text-[10px] text-[#8C8C8C]">
                       {p.birthDate?.slice(0, 4) || '???'} — {p.deathDate?.slice(0, 4) || 'нині'}
                     </span>

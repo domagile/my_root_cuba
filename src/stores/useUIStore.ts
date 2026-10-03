@@ -10,6 +10,11 @@ import {
   saveAccordionSections
 } from '../utils/accordionState';
 
+export interface KinshipFocusPair {
+  personAId?: string;
+  personBId: string;
+}
+
 export type { ModalSection, ModalAccordionState };
 export { DEFAULT_MODAL_ACCORDION_SECTIONS };
 
@@ -71,6 +76,65 @@ export const openTabInNewWindow = (tab: string, view?: ViewMode, user?: AuthUser
   window.open(targetUrl, '_blank', 'noopener,noreferrer');
 };
 
+export const getPersonUrl = (
+  personId: string,
+  options?: { mode?: 'view' | 'edit' | 'tree'; view?: ViewMode },
+  user?: AuthUser | null
+): string => {
+  if (typeof window === 'undefined') return `?personId=${personId}`;
+  const url = new URL(window.location.href);
+  url.searchParams.set('personId', personId);
+  if (options?.mode === 'tree') {
+    url.searchParams.set('tab', 'tree');
+    url.searchParams.set('root', personId);
+  } else if (options?.view) {
+    url.searchParams.set('tab', options.view);
+  } else {
+    const curTab = url.searchParams.get('tab');
+    if (!curTab) {
+      url.searchParams.set('tab', 'tree');
+    }
+  }
+
+  // Seamless cross-tab auth transfer: include session token if authenticated
+  let activeUser = user;
+  if (activeUser === undefined) {
+    try {
+      const saved = localStorage.getItem('genealogy_auth_security_v1_currentUser');
+      if (saved) activeUser = JSON.parse(saved);
+    } catch {}
+  }
+
+  if (activeUser && activeUser.isAuthenticated) {
+    const token = encodeSessionToken(activeUser);
+    if (token) {
+      url.searchParams.set('_auth_t', token);
+    }
+  }
+
+  return `${url.pathname}${url.search}`;
+};
+
+export const openPersonInNewWindow = (
+  personId: string,
+  options?: { mode?: 'view' | 'edit' | 'tree'; view?: ViewMode },
+  user?: AuthUser | null
+) => {
+  if (typeof window === 'undefined') return;
+  const targetUrl = getPersonUrl(personId, options, user);
+  window.open(targetUrl, '_blank', 'noopener,noreferrer');
+};
+
+export const getInitialPersonId = (): string | null => {
+  if (typeof window !== 'undefined') {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('personId') || params.get('person') || null;
+    } catch {}
+  }
+  return null;
+};
+
 const getInitialNav = (): { activeTab: string; rodovidView: ViewMode } => {
   if (typeof window !== 'undefined') {
     try {
@@ -126,6 +190,10 @@ export interface UIState {
   personClanFilter: string | null;
   setPersonClanFilter: (clan: string | null) => void;
 
+  // Active Person Modal Inspection (Deep-linkable via URL query)
+  activeInspectPersonId: string | null;
+  setInspectPersonId: (id: string | null) => void;
+
   // Actions
   setActiveTab: (tab: string) => void;
   setRodovidView: (view: ViewMode) => void;
@@ -147,11 +215,19 @@ export interface UIState {
   setAppEmblemVariant: (variant: number) => void;
   customEmblemImage: string | null;
   setCustomEmblemImage: (dataUrl: string | null) => void;
+  treeFocusKinshipPersonId: string | null;
+  setTreeFocusKinshipPersonId: (id: string | null) => void;
+  treeFocusKinshipPair: KinshipFocusPair | null;
+  setTreeFocusKinshipPair: (pair: KinshipFocusPair | null) => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
   activeTab: initialNav.activeTab,
   rodovidView: initialNav.rodovidView,
+  treeFocusKinshipPersonId: null,
+  setTreeFocusKinshipPersonId: (id: string | null) => set({ treeFocusKinshipPersonId: id }),
+  treeFocusKinshipPair: null,
+  setTreeFocusKinshipPair: (pair: KinshipFocusPair | null) => set({ treeFocusKinshipPair: pair }),
   isMobileMenuOpen: false,
   isSidebarVisible: true,
   isAuthModalOpen: false,
@@ -271,6 +347,23 @@ export const useUIStore = create<UIState>((set, get) => ({
   treeMode: 'hourglass',
   personClanFilter: null,
   setPersonClanFilter: (personClanFilter: string | null) => set({ personClanFilter }),
+
+  activeInspectPersonId: getInitialPersonId(),
+  setInspectPersonId: (id: string | null) => {
+    set({ activeInspectPersonId: id });
+    if (typeof window !== 'undefined') {
+      try {
+        const url = new URL(window.location.href);
+        if (id) {
+          url.searchParams.set('personId', id);
+        } else {
+          url.searchParams.delete('personId');
+          url.searchParams.delete('person');
+        }
+        window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+      } catch {}
+    }
+  },
   
   accessLockConfig: (() => {
     try {

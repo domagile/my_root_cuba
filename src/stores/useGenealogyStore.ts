@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig, PlaceDossier } from '../types';
 import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
-import { savePersonDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc, savePlaceDoc, deletePlaceDoc } from '../lib/firebase';
+import { savePersonDoc, savePersonDeltaDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc, savePlaceDoc, deletePlaceDoc } from '../lib/firebase';
 import { useCloudSyncStore, EntitySyncType } from './useCloudSyncStore';
+import { computePersonDelta } from '../utils/personDelta';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
@@ -85,7 +86,16 @@ export function removeTombstoneId(id: string): void {
   } catch {}
 }
 
-export const INITIAL_PERSONS: Person[] = FAMILIO_PERSONS.filter((p) => !isDemoPerson(p));
+export const INITIAL_PERSONS: Person[] = (() => {
+  const seen = new Set<string>();
+  return FAMILIO_PERSONS
+    .filter((p) => !isDemoPerson(p))
+    .filter((p) => {
+      if (!p || !p.id || seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+})();
 export const INITIAL_FAMILIES: Record<string, Family> = Object.fromEntries(
   Object.entries(FAMILIO_FAMILIES).filter(([k, v]) => !isDemoFamily(k, v))
 );
@@ -430,21 +440,49 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   updatePerson: (person) =>
     set((state) => {
       const normalized = normalizePerson(person);
+      const prevPerson = state.persons.find((p) => p.id === person.id);
+      const delta = computePersonDelta(prevPerson, normalized);
+
       const next = state.persons.map((p) => (p.id === person.id ? normalized : p));
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
       } catch {}
-      notifySyncChange('persons', normalized.id, () => savePersonDoc(normalized));
+
+      // Maintain local state tracking dirty objects and push only changed fields (delta)
+      const syncStore = useCloudSyncStore.getState();
+      syncStore.markPersonDirtyWithDelta(normalized.id, delta);
+
+      if (syncStore.syncMode === 'auto') {
+        savePersonDeltaDoc(normalized.id, delta).then((ok) => {
+          if (ok) {
+            syncStore.clearPersonDirtyDelta(normalized.id);
+          }
+        });
+      }
+
       return { persons: next };
     }),
 
   updatePersons: (updatedPersons) =>
     set((state) => {
       const normalizedMap = new Map<string, Person>();
+      const syncStore = useCloudSyncStore.getState();
+
       updatedPersons.forEach((p) => {
         const norm = normalizePerson(p);
         normalizedMap.set(norm.id, norm);
-        notifySyncChange('persons', norm.id, () => savePersonDoc(norm));
+        const prevPerson = state.persons.find((existing) => existing.id === norm.id);
+        const delta = computePersonDelta(prevPerson, norm);
+
+        syncStore.markPersonDirtyWithDelta(norm.id, delta);
+
+        if (syncStore.syncMode === 'auto') {
+          savePersonDeltaDoc(norm.id, delta).then((ok) => {
+            if (ok) {
+              syncStore.clearPersonDirtyDelta(norm.id);
+            }
+          });
+        }
       });
       const next = state.persons.map((p) => normalizedMap.get(p.id) || p);
       try {
@@ -549,31 +587,34 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   permanentlyDeletePerson: (id) =>
     set((state) => {
+      addTombstoneIds([id]);
       const nextTrash = state.trashPersons.filter((p) => p.id !== id);
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      notifySyncChange(() => deletePersonDoc(id));
+      notifySyncDelete('persons', id, () => deletePersonDoc(id));
       return { trashPersons: nextTrash };
     }),
 
   permanentlyDeletePersons: (ids) =>
     set((state) => {
+      addTombstoneIds(ids);
       const nextTrash = state.trashPersons.filter((p) => !ids.includes(p.id));
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      notifySyncChange(() => ids.forEach((id) => deletePersonDoc(id)));
+      ids.forEach((id) => notifySyncDelete('persons', id, () => deletePersonDoc(id)));
       return { trashPersons: nextTrash };
     }),
 
   emptyTrash: () =>
     set((state) => {
       const ids = state.trashPersons.map((p) => p.id);
+      addTombstoneIds(ids);
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify([]));
       } catch {}
-      notifySyncChange(() => ids.forEach((id) => deletePersonDoc(id)));
+      ids.forEach((id) => notifySyncDelete('persons', id, () => deletePersonDoc(id)));
       return { trashPersons: [] };
     }),
 
@@ -583,6 +624,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const deletedIds = payload.deletedPersonIds || [];
       const deletedSet = new Set(deletedIds);
+      if (deletedIds.length > 0) {
+        addTombstoneIds(deletedIds);
+      }
 
       // Filter deleted from updated persons
       const nextPersons = payload.updatedPersons
@@ -626,26 +670,30 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(payload.updatedFamilies));
       } catch {}
 
-      // Fire synchronization: delete all duplicate docs from Firestore and save master & updated docs
-      notifySyncChange(() => {
-        deletedIds.forEach((id) => deletePersonDoc(id));
-        if (payload.masterPerson) {
-          savePersonDoc(normalizePerson(payload.masterPerson));
+      // Fire synchronization: register deleted docs in dirtyTracker & delete from Firestore
+      deletedIds.forEach((id) => {
+        notifySyncDelete('persons', id, () => deletePersonDoc(id));
+      });
+
+      if (payload.masterPerson) {
+        const normMaster = normalizePerson(payload.masterPerson);
+        notifySyncChange('persons', normMaster.id, () => savePersonDoc(normMaster));
+      }
+
+      // Save other updated persons
+      deduplicated.forEach((p) => {
+        const prev = state.persons.find((op) => op.id === p.id);
+        if (!prev || JSON.stringify(prev) !== JSON.stringify(p)) {
+          notifySyncChange('persons', p.id, () => savePersonDoc(p));
         }
-        // Save updated persons
-        deduplicated.forEach((p) => {
-          const prev = state.persons.find((op) => op.id === p.id);
-          if (!prev || JSON.stringify(prev) !== JSON.stringify(p)) {
-            savePersonDoc(p);
-          }
-        });
-        // Save updated families
-        Object.values(payload.updatedFamilies).forEach((f) => {
-          const prev = state.families[f.id];
-          if (!prev || JSON.stringify(prev) !== JSON.stringify(f)) {
-            saveFamilyDoc(f);
-          }
-        });
+      });
+
+      // Save updated families
+      Object.values(payload.updatedFamilies).forEach((f) => {
+        const prev = state.families[f.id];
+        if (!prev || JSON.stringify(prev) !== JSON.stringify(f)) {
+          notifySyncChange('families', f.id, () => saveFamilyDoc(f));
+        }
       });
 
       return {

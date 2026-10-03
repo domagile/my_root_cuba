@@ -859,7 +859,7 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
 
                   {/* Хрещені батьки (Куми) */}
                   {linkedGodparents.map((gp, idx) => (
-                    <div key={gp.gpId || gp.personId || `gp-${idx}`} className="p-2.5 rounded-xl border border-amber-200/80 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 flex items-center justify-between">
+                    <div key={gp.gpId ? `gp_id_${gp.gpId}_${idx}` : gp.personId ? `gp_pid_${gp.personId}_${idx}` : `gp_idx_${idx}`} className="p-2.5 rounded-xl border border-amber-200/80 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 flex items-center justify-between">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
@@ -918,7 +918,7 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
 
                   {/* Свідки / поручителі */}
                   {linkedWitnesses.map((w, idx) => (
-                    <div key={w.gpId || w.personId || `w-${idx}`} className="p-2.5 rounded-xl border border-purple-200/80 dark:border-purple-900/40 bg-purple-50/40 dark:bg-purple-950/20 flex items-center justify-between">
+                    <div key={w.gpId ? `wit_id_${w.gpId}_${idx}` : w.personId ? `wit_pid_${w.personId}_${idx}` : `wit_idx_${idx}`} className="p-2.5 rounded-xl border border-purple-200/80 dark:border-purple-900/40 bg-purple-50/40 dark:bg-purple-950/20 flex items-center justify-between">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-purple-700 dark:text-purple-400">

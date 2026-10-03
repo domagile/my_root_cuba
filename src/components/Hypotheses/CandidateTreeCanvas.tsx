@@ -195,14 +195,14 @@ export const CandidateTreeCanvas: React.FC<CandidateTreeCanvasProps> = ({
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {nodesInGen.map(node => {
+                    {nodesInGen.map((node, nodeIdx) => {
                       const isSelected = node.id === selectedNodeId;
                       const hasGodchildren = node.godchildrenCandidateIds.length > 0;
                       const hasGodparents = node.godparentCandidateIds.length > 0;
 
                       return (
                         <div
-                          key={node.id}
+                          key={`cand_node_${node.id}_${nodeIdx}`}
                           onClick={() => {
                             setSelectedNodeId(node.id);
                             onSelectNode(node);

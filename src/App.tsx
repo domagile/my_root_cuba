@@ -82,6 +82,12 @@ function AppContent() {
       try {
         const params = new URLSearchParams(window.location.search);
         const tab = params.get('tab');
+        const pId = params.get('personId') || params.get('person');
+        if (pId) {
+          useUIStore.getState().setInspectPersonId(pId);
+        } else {
+          useUIStore.getState().setInspectPersonId(null);
+        }
         if (tab) {
           const rodovidViews = ['tree', 'fan', 'persons', 'timeline', 'places', 'sources', 'kinship', 'stats', 'reports', 'conflicts', 'duplicates'];
           if (rodovidViews.includes(tab)) {
@@ -96,7 +102,8 @@ function AppContent() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
+  const inspectPersonId = useUIStore((s) => s.activeInspectPersonId);
+  const setInspectPersonId = useUIStore((s) => s.setInspectPersonId);
   const [personToEdit, setPersonToEdit] = useState<Person | null>(null);
   const [relationManagerPerson, setRelationManagerPerson] = useState<Person | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -280,7 +287,7 @@ function AppContent() {
       </div>
 
       {/* Inspect Person Profile Modal */}
-      {inspectPersonId && (
+      {inspectPersonId && activeTab !== 'tree' && (
         <PersonDetailModal
           personId={inspectPersonId}
           onClose={() => setInspectPersonId(null)}

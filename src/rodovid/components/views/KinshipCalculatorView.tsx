@@ -15,11 +15,12 @@ import {
   Dna,
   Crown,
   Layers,
-  ChevronRight
+  ChevronRight,
+  ExternalLink
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { calculateKinship, getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
-import { useUIStore } from '../../../stores/useUIStore';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { getPrivacySafePerson, isPersonLiving, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
@@ -275,7 +276,19 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
                   return (
                     <div key={idx} className="flex items-center gap-3">
                       <div
-                        onClick={() => onSelectPerson(person.id)}
+                        onClick={(e) => {
+                          if (e.metaKey || e.ctrlKey || e.button === 1) {
+                            openPersonInNewWindow(person.id);
+                            return;
+                          }
+                          onSelectPerson(person.id);
+                        }}
+                        onAuxClick={(e) => {
+                          if (e.button === 1) {
+                            e.preventDefault();
+                            openPersonInNewWindow(person.id);
+                          }
+                        }}
                         className={`flex-1 p-3 rounded-lg border cursor-pointer transition-colors flex items-center justify-between text-xs ${
                           isStart || isEnd
                             ? `${theme.surfaceBg} border-emerald-500 shadow-xs`
@@ -329,6 +342,17 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
                           } font-medium rounded text-[11px]`}>
                             {step.relationFromPrevious}
                           </span>
+
+                          <a
+                            href={getPersonUrl(person.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="p-1 rounded text-neutral-400 hover:text-blue-500 hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                            title="Відкрити особу у новій вкладці браузера"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
                         </div>
                       </div>
                     </div>
@@ -413,20 +437,45 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
                   return (
                     <div
                       key={`${anc.id}_${aIdx}`}
-                      onClick={() => onSelectPerson(anc.id)}
-                      className={`flex items-center gap-3 p-3 ${theme.surfaceBg} border ${theme.borderSubtle} rounded-lg hover:border-amber-500 cursor-pointer text-xs transition-colors`}
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.button === 1) {
+                          openPersonInNewWindow(anc.id);
+                          return;
+                        }
+                        onSelectPerson(anc.id);
+                      }}
+                      onAuxClick={(e) => {
+                        if (e.button === 1) {
+                          e.preventDefault();
+                          openPersonInNewWindow(anc.id);
+                        }
+                      }}
+                      className={`flex items-center justify-between p-3 ${theme.surfaceBg} border ${theme.borderSubtle} rounded-lg hover:border-amber-500 cursor-pointer text-xs transition-colors`}
                     >
-                      <div className={`w-8 h-8 rounded ${isDark ? 'bg-amber-950/60 text-amber-300' : 'bg-amber-100 text-amber-800'} flex items-center justify-center shrink-0`}>
-                        {isMasked ? <Lock className="w-4 h-4 text-emerald-400" /> : <Crown className="w-4 h-4" />}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-8 h-8 rounded ${isDark ? 'bg-amber-950/60 text-amber-300' : 'bg-amber-100 text-amber-800'} flex items-center justify-center shrink-0`}>
+                          {isMasked ? <Lock className="w-4 h-4 text-emerald-400" /> : <Crown className="w-4 h-4" />}
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className={`font-semibold ${theme.textPrimary} truncate`}>
+                            {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(anc)}
+                          </h4>
+                          <p className={`text-[10px] ${theme.textMuted} font-mono truncate`}>
+                            {isMasked ? '🔒 Конфіденційно' : `${anc.birthYear || '?'} — ${anc.deathYear || '?'}`}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className={`font-semibold ${theme.textPrimary}`}>
-                          {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(anc)}
-                        </h4>
-                        <p className={`text-[10px] ${theme.textMuted} font-mono`}>
-                          {isMasked ? '🔒 Конфіденційно' : `${anc.birthYear || '?'} — ${anc.deathYear || '?'}`}
-                        </p>
-                      </div>
+
+                      <a
+                        href={getPersonUrl(anc.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1 rounded text-neutral-400 hover:text-blue-500 hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                        title="Відкрити особу у новій вкладці браузера"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
                     </div>
                   );
                 })}

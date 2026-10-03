@@ -19,6 +19,7 @@ import { Person } from '../../../types/genealogy';
 import { getFullName } from '../../../utils/relationship';
 import { PlaceDossier } from '../../../../types';
 import { ThemeConfig } from '../../../../utils/theme';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../../stores/useUIStore';
 
 interface PlaceEventDetail {
   personId: string;
@@ -166,7 +167,19 @@ export const PlaceDossierOverview: React.FC<PlaceDossierOverviewProps> = ({
             {placeObj.persons.map((person, pIdx) => (
               <div
                 key={`${person.id}_${pIdx}`}
-                onClick={() => onSelectPerson(person.id)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.button === 1) {
+                    openPersonInNewWindow(person.id);
+                    return;
+                  }
+                  onSelectPerson(person.id);
+                }}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    openPersonInNewWindow(person.id);
+                  }
+                }}
                 className={`p-4 rounded-xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all cursor-pointer flex items-center justify-between shadow-xs`}
               >
                 <div className="space-y-1 min-w-0">
@@ -186,9 +199,21 @@ export const PlaceDossierOverview: React.FC<PlaceDossierOverviewProps> = ({
                     </div>
                   )}
                 </div>
-                <span className="text-xs text-amber-600 hover:underline shrink-0 ml-3 font-medium">
-                  Профіль →
-                </span>
+                <div className="flex items-center gap-2 shrink-0 ml-3">
+                  <span className="text-xs text-amber-600 hover:underline font-medium">
+                    Профіль →
+                  </span>
+                  <a
+                    href={getPersonUrl(person.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="p-1 rounded text-neutral-400 hover:text-blue-500 hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Відкрити особу у новій вкладці браузера"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
               </div>
             ))}
           </div>
@@ -227,12 +252,24 @@ export const PlaceDossierOverview: React.FC<PlaceDossierOverviewProps> = ({
                   </p>
                 </div>
 
-                <button
-                  onClick={() => onSelectPerson(ev.personId)}
-                  className="text-[11px] font-medium text-amber-600 hover:underline cursor-pointer"
-                >
-                  Перейти
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => onSelectPerson(ev.personId)}
+                    className="text-[11px] font-medium text-amber-600 hover:underline cursor-pointer"
+                  >
+                    Перейти
+                  </button>
+                  <a
+                    href={getPersonUrl(ev.personId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="p-1 rounded text-neutral-400 hover:text-blue-500 hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Відкрити особу у новій вкладці браузера"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
               </div>
             ))}
           </div>

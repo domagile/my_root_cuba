@@ -91,7 +91,7 @@ import {
   ModalAccordionState,
   DEFAULT_MODAL_ACCORDION_SECTIONS
 } from '../../utils/accordionState';
-import { useUIStore } from '../../stores/useUIStore';
+import { useUIStore, getPersonUrl } from '../../stores/useUIStore';
 import {
   validatePersonFormDates,
   validateLifeEventDate

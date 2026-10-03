@@ -19,9 +19,11 @@ import {
   Pencil,
   Users,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  ExternalLink
 } from 'lucide-react';
 import { useGenealogy } from '../../context/GenealogyContext';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../stores/useUIStore';
 import { getThemeConfig } from '../../utils/theme';
 import { Person } from '../../types';
 import { RelationManagerModal } from './RelationManagerModal';
@@ -138,6 +140,23 @@ export const FamilyTreeView: React.FC = () => {
           <span>Діти ({familyData.children.length})</span>
         </button>
 
+        {/* Show All Persons / Uncollapse all branches */}
+        <button
+          onClick={() => {
+            setShowParents(true);
+            setShowSiblings(true);
+            setShowChildren(true);
+          }}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            showParents && showSiblings && showChildren
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/50 hover:bg-amber-500/30'
+          }`}
+          title="Показати всіх осіб (розгорнути дітей, батьків та родичів)"
+        >
+          <span>Всі</span>
+        </button>
+
         <div className="w-[1px] h-5 bg-neutral-200 dark:bg-neutral-700 mx-1" />
 
         <button
@@ -189,10 +208,33 @@ export const FamilyTreeView: React.FC = () => {
                 {familyData.parents.map((parent, idx) => (
                   <div
                     key={`${parent.id}_${idx}`}
-                    onClick={() => setSelectedPersonId(parent.id)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(parent.id);
+                        return;
+                      }
+                      setSelectedPersonId(parent.id);
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openPersonInNewWindow(parent.id);
+                      }
+                    }}
                     className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:shadow-xl hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1.5 relative group`}
                   >
                     <div className="absolute top-2 right-2 flex items-center gap-1">
+                      <a
+                        href={getPersonUrl(parent.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-6 h-6 rounded-md bg-blue-600/90 hover:bg-blue-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Відкрити особу у новій вкладці браузера"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -273,10 +315,33 @@ export const FamilyTreeView: React.FC = () => {
                 {familyData.siblings.map((sibling, idx) => (
                   <div
                     key={`${sibling.id}_${idx}`}
-                    onClick={() => setSelectedPersonId(sibling.id)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(sibling.id);
+                        return;
+                      }
+                      setSelectedPersonId(sibling.id);
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openPersonInNewWindow(sibling.id);
+                      }
+                    }}
                     className={`p-3.5 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-md hover:border-sky-500 transition-all cursor-pointer w-56 text-center space-y-1 relative group`}
                   >
                     <div className="absolute top-2 right-2 flex items-center gap-1">
+                      <a
+                        href={getPersonUrl(sibling.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-5 h-5 rounded-md bg-blue-600/90 hover:bg-blue-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Відкрити особу у новій вкладці браузера"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -332,6 +397,16 @@ export const FamilyTreeView: React.FC = () => {
                 className={`p-6 rounded-3xl border-2 border-[#B88E3E] ${theme.cardBg} shadow-2xl w-72 text-center space-y-2 relative overflow-hidden group`}
               >
                 <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
+                  <a
+                    href={getPersonUrl(activePerson.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                    title="Відкрити фокусну особу у новій вкладці браузера"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -388,10 +463,33 @@ export const FamilyTreeView: React.FC = () => {
             {familyData.spouses.map((spouse, idx) => (
               <div
                 key={`${spouse.id}_${idx}`}
-                onClick={() => setSelectedPersonId(spouse.id)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.button === 1) {
+                    openPersonInNewWindow(spouse.id);
+                    return;
+                  }
+                  setSelectedPersonId(spouse.id);
+                }}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openPersonInNewWindow(spouse.id);
+                  }
+                }}
                 className={`p-5 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-lg hover:border-[#B88E3E] transition-all cursor-pointer w-64 text-center space-y-1 relative group`}
               >
                 <div className="absolute top-2 right-2 flex items-center gap-1">
+                  <a
+                    href={getPersonUrl(spouse.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-6 h-6 rounded-md bg-blue-600/90 hover:bg-blue-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                    title="Відкрити особу у новій вкладці браузера"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -470,10 +568,33 @@ export const FamilyTreeView: React.FC = () => {
                 {familyData.children.map((child, idx) => (
                   <div
                     key={`${child.id}_${idx}`}
-                    onClick={() => setSelectedPersonId(child.id)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(child.id);
+                        return;
+                      }
+                      setSelectedPersonId(child.id);
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openPersonInNewWindow(child.id);
+                      }
+                    }}
                     className={`p-4 rounded-2xl border ${theme.cardBg} ${theme.cardBorder} shadow-md hover:border-[#B88E3E] transition-all cursor-pointer w-56 text-center space-y-1 relative group`}
                   >
                     <div className="absolute top-2 right-2 flex items-center gap-1">
+                      <a
+                        href={getPersonUrl(child.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-5 h-5 rounded-md bg-blue-600/90 hover:bg-blue-500 text-white flex items-center justify-center shadow-sm opacity-90 hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
+                        title="Відкрити особу у новій вкладці браузера"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

@@ -16,9 +16,11 @@ import {
   Globe,
   Briefcase,
   Layers,
-  ChevronRight
+  ChevronRight,
+  ExternalLink
 } from 'lucide-react';
 import { useGenealogy, useUIStore } from '../context/GenealogyContext';
+import { getPersonUrl, openPersonInNewWindow } from '../stores/useUIStore';
 import { Person } from '../types';
 import { getThemeConfig } from '../utils/theme';
 import { 
@@ -364,7 +366,19 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 return (
                   <div
                     key={`search_res_${p.id}_${idx}`}
-                    onClick={() => handleSelectInTree(p.id)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(p.id);
+                        return;
+                      }
+                      handleSelectInTree(p.id);
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1) {
+                        e.preventDefault();
+                        openPersonInNewWindow(p.id);
+                      }
+                    }}
                     className={`pt-2.5 first:pt-0 rounded-2xl p-3 transition-all cursor-pointer border ${
                       isSelected
                         ? 'bg-[#B88E3E]/15 border-[#B88E3E]/40 shadow-sm'
@@ -520,6 +534,17 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                             <FileText className="w-4 h-4 text-indigo-500" />
                           </button>
                         )}
+
+                        <a
+                          href={getPersonUrl(p.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1.5 rounded-xl border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-semibold transition-colors cursor-pointer text-blue-500 hover:text-blue-400"
+                          title="Відкрити особу у новій вкладці браузера"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
                       </div>
                     </div>
                   </div>

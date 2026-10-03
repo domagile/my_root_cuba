@@ -686,9 +686,10 @@ function patronymicNormalize(p: string): string {
  * Finds all potential duplicate pairs in the tree using multi-dimensional phonetic,
  * chronological, and genealogical similarity evaluation.
  */
-export function detectDuplicatePersons(persons: Person[]): DuplicatePair[] {
+export function detectDuplicatePersons(persons: Person[], filterIgnored = false): DuplicatePair[] {
   const duplicatePairs: DuplicatePair[] = [];
   const n = persons.length;
+  const ignoredSet = filterIgnored ? getIgnoredDuplicatePairKeys() : undefined;
 
   const personsMap = new Map<string, Person>();
   for (const p of persons) {
@@ -699,6 +700,10 @@ export function detectDuplicatePersons(persons: Person[]): DuplicatePair[] {
     for (let j = i + 1; j < n; j++) {
       const pA = persons[i];
       const pB = persons[j];
+
+      if (filterIgnored && ignoredSet && isDuplicatePairIgnored(pA.id, pB.id, ignoredSet)) {
+        continue;
+      }
 
       const comp = comparePersonPair(pA, pB, personsMap);
       if (comp && comp.confidence >= 48) {
@@ -718,6 +723,93 @@ export function detectDuplicatePersons(persons: Person[]): DuplicatePair[] {
 
   // Sort descending by confidence
   return duplicatePairs.sort((a, b) => b.confidence - a.confidence);
+}
+
+export const RODOVID_IGNORED_DUPLICATE_PAIRS_KEY = 'rodovid_ignored_duplicate_pairs';
+
+/**
+ * Standardizes a pair key regardless of order
+ */
+export function getDuplicatePairKey(idA: string, idB: string): string {
+  return [idA, idB].sort().join('___');
+}
+
+/**
+ * Loads all ignored pair keys from localStorage
+ */
+export function getIgnoredDuplicatePairKeys(): Set<string> {
+  const set = new Set<string>();
+  try {
+    const raw = localStorage.getItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY);
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        list.forEach((item) => {
+          if (typeof item === 'string') {
+            set.add(item);
+            // If item has format dup_A_B, also normalize to A___B
+            if (item.startsWith('dup_')) {
+              const parts = item.slice(4).split('_');
+              if (parts.length >= 2) {
+                set.add([parts[0], parts.slice(1).join('_')].sort().join('___'));
+              }
+            }
+          }
+        });
+      }
+    }
+  } catch {}
+  return set;
+}
+
+/**
+ * Checks whether a pair of person IDs is marked as "not a duplicate" (ignored)
+ */
+export function isDuplicatePairIgnored(idA: string, idB: string, ignoredSet?: Set<string>): boolean {
+  if (!idA || !idB || idA === idB) return true;
+  const set = ignoredSet || getIgnoredDuplicatePairKeys();
+  const normalizedKey = getDuplicatePairKey(idA, idB);
+  if (set.has(normalizedKey)) return true;
+  if (set.has(`dup_${idA}_${idB}`) || set.has(`dup_${idB}_${idA}`)) return true;
+  return false;
+}
+
+/**
+ * Marks a pair of persons as "not duplicate"
+ */
+export function ignoreDuplicatePair(idA: string, idB: string): void {
+  try {
+    const set = getIgnoredDuplicatePairKeys();
+    const key = getDuplicatePairKey(idA, idB);
+    set.add(key);
+    set.add(`dup_${idA}_${idB}`);
+    set.add(`dup_${idB}_${idA}`);
+    localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(Array.from(set)));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed', { detail: { idA, idB, ignored: true } }));
+    }
+  } catch (err) {
+    console.error('Failed to ignore duplicate pair:', err);
+  }
+}
+
+/**
+ * Restores a pair back to the duplicates list
+ */
+export function unignoreDuplicatePair(idA: string, idB: string): void {
+  try {
+    const set = getIgnoredDuplicatePairKeys();
+    const key = getDuplicatePairKey(idA, idB);
+    set.delete(key);
+    set.delete(`dup_${idA}_${idB}`);
+    set.delete(`dup_${idB}_${idA}`);
+    localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(Array.from(set)));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed', { detail: { idA, idB, ignored: false } }));
+    }
+  } catch (err) {
+    console.error('Failed to unignore duplicate pair:', err);
+  }
 }
 
 /**
@@ -744,10 +836,15 @@ export function findDuplicatesForPerson(
   }
   personsMap.set(target.id, target);
 
+  const ignoredSet = getIgnoredDuplicatePairKeys();
   const matches: PersonDuplicateMatch[] = [];
 
   for (const existing of existingPersons) {
     if (existing.id === target.id || (excludeId && existing.id === excludeId)) {
+      continue;
+    }
+
+    if (isDuplicatePairIgnored(target.id, existing.id, ignoredSet)) {
       continue;
     }
 
@@ -766,3 +863,4 @@ export function findDuplicatesForPerson(
 
   return matches.sort((a, b) => b.confidence - a.confidence);
 }
+

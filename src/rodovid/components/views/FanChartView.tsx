@@ -38,7 +38,7 @@ import {
   getMaxAncestorGenerations
 } from '../../utils/treeLayout';
 import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId } from '../../utils/relationship';
-import { useUIStore } from '../../../stores/useUIStore';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted } from '../../utils/privacy';
 import { areSurnamesEquivalent, normalizeUkrainianSurnameGender } from '../../../utils/ukrainianPhonetics';
@@ -1312,9 +1312,19 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                   }`}
                   onMouseEnter={() => setHoveredSector(sec)}
                   onMouseLeave={() => setHoveredSector(null)}
-                  onClick={() => {
+                  onClick={(e) => {
                     if (sec.person) {
+                      if (e.metaKey || e.ctrlKey || e.button === 1) {
+                        openPersonInNewWindow(sec.person.id);
+                        return;
+                      }
                       onSelectPerson(sec.person.id);
+                    }
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1 && sec.person) {
+                      e.preventDefault();
+                      openPersonInNewWindow(sec.person.id);
                     }
                   }}
                 >
@@ -1742,6 +1752,19 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                 >
                   Відкрити картку
                 </button>
+                <a
+                  href={getPersonUrl(hoveredSector.person!.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`p-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center justify-center ${
+                    canvasTheme === 'parchment'
+                      ? 'bg-neutral-100 hover:bg-neutral-200 text-blue-600 border border-neutral-300'
+                      : 'bg-slate-800 hover:bg-slate-700 text-blue-400'
+                  }`}
+                  title="Відкрити картку цієї особи у новій вкладці браузера"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
                 <button
                   onClick={() => onChangeRoot(hoveredSector.person!.id)}
                   className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
@@ -1949,7 +1972,19 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                               return (
                                 <div
                                   key={`${p.id}_${pIdx}`}
-                                  onClick={() => onSelectPerson(p.id)}
+                                  onClick={(e) => {
+                                    if (e.metaKey || e.ctrlKey || e.button === 1) {
+                                      openPersonInNewWindow(p.id);
+                                      return;
+                                    }
+                                    onSelectPerson(p.id);
+                                  }}
+                                  onAuxClick={(e) => {
+                                    if (e.button === 1) {
+                                      e.preventDefault();
+                                      openPersonInNewWindow(p.id);
+                                    }
+                                  }}
                                   onMouseEnter={() => {
                                     const matchingSec = sectors.find((s) => s.person?.id === p.id);
                                     if (matchingSec) setHoveredSector(matchingSec);
@@ -2011,6 +2046,19 @@ export const FanChartView: React.FC<FanChartViewProps> = ({
                                     >
                                       <User className="w-3 h-3" />
                                     </button>
+                                    <a
+                                      href={getPersonUrl(p.id)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className={`p-1 rounded transition-colors cursor-pointer ${
+                                        canvasTheme === 'parchment'
+                                          ? 'text-neutral-400 hover:text-blue-600 hover:bg-neutral-100'
+                                          : 'text-slate-400 hover:text-blue-400 hover:bg-slate-800'
+                                      }`}
+                                      title="Відкрити особу у новій вкладці браузера"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
                                   </div>
                                 </div>
                               );

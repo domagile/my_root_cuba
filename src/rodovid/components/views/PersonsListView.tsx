@@ -25,11 +25,12 @@ import {
   FileText,
   GitMerge,
   ChevronDown,
-  Check
+  Check,
+  ExternalLink
 } from 'lucide-react';
 import { GenealogyDatabase, Person, Gender } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
-import { useUIStore } from '../../../stores/useUIStore';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { useGenealogyStore } from '../../../stores/useGenealogyStore';
 import { isPersonLiving, getPrivacySafePerson, isUserWhitelisted, isUserAdmin } from '../../utils/privacy';
@@ -227,12 +228,21 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     handleSetResearchStatus(p, nextStatus, e);
   };
 
-  // Detect duplicates across all persons
+  const [ignoredRevision, setIgnoredRevision] = useState(0);
+  useEffect(() => {
+    const handleStorageChange = () => setIgnoredRevision((v) => v + 1);
+    window.addEventListener('rodovid_ignored_duplicates_changed', handleStorageChange);
+    return () => {
+      window.removeEventListener('rodovid_ignored_duplicates_changed', handleStorageChange);
+    };
+  }, []);
+
+  // Detect duplicates across all persons (excluding pairs marked as "not duplicate")
   const duplicatePairs: DuplicatePair[] = useMemo(() => {
     const pList = Object.values(database.persons || {}) as Person[];
     if (pList.length < 2) return [];
-    return detectDuplicatePersons(pList);
-  }, [database.persons]);
+    return detectDuplicatePersons(pList, true);
+  }, [database.persons, ignoredRevision]);
 
   const duplicatePersonIds = useMemo(() => {
     const ids = new Set<string>();
@@ -852,7 +862,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   return (
                     <tr
                       key={`${p.id}_${pIdx}`}
-                      onClick={() => onSelectPerson(p.id)}
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.button === 1) {
+                          openPersonInNewWindow(p.id);
+                          return;
+                        }
+                        onSelectPerson(p.id);
+                      }}
+                      onAuxClick={(e) => {
+                        if (e.button === 1) {
+                          e.preventDefault();
+                          openPersonInNewWindow(p.id);
+                        }
+                      }}
                       className={`hover:bg-neutral-500/5 cursor-pointer transition-colors`}
                     >
                       <td className="py-3 px-4">
@@ -897,7 +919,22 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                           )}
                           <div>
                             <div className={`font-semibold ${theme.textPrimary} flex items-center gap-1.5`}>
-                              <span>{isMasked ? 'Скрито Скрито' : getFullName(p)}</span>
+                              {isMasked ? (
+                                <span>Скрито Скрито</span>
+                              ) : (
+                                <a
+                                  href={getPersonUrl(p.id)}
+                                  onClick={(e) => {
+                                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                                    e.preventDefault();
+                                    onSelectPerson(p.id);
+                                  }}
+                                  className="hover:underline hover:text-emerald-500 transition-colors"
+                                  title="Відкрити картку (Ctrl+клік або коліщатко для нової вкладки)"
+                                >
+                                  {getFullName(p)}
+                                </a>
+                              )}
                               {isMasked && (
                                 <span className="text-[10px] px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded font-normal flex items-center gap-1">
                                   <Shield className="w-2.5 h-2.5" /> Скрито
@@ -1277,7 +1314,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             return (
               <div
                 key={`${p.id}_${pIdx}`}
-                onClick={() => onSelectPerson(p.id)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.button === 1) {
+                    openPersonInNewWindow(p.id);
+                    return;
+                  }
+                  onSelectPerson(p.id);
+                }}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    openPersonInNewWindow(p.id);
+                  }
+                }}
                 className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 hover:border-emerald-500/60 cursor-pointer shadow-xs transition-all flex flex-col justify-between`}
               >
                 <div>
@@ -1322,7 +1371,22 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     )}
                     <div className="min-w-0 flex-1">
                       <h3 className={`font-semibold text-sm ${theme.textPrimary} truncate flex items-center gap-1.5`}>
-                        <span>{isMasked ? 'Скрито Скрито' : getFullName(p)}</span>
+                        {isMasked ? (
+                          <span>Скрито Скрито</span>
+                        ) : (
+                          <a
+                            href={getPersonUrl(p.id)}
+                            onClick={(e) => {
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                              e.preventDefault();
+                              onSelectPerson(p.id);
+                            }}
+                            className="hover:underline hover:text-emerald-500 transition-colors truncate"
+                            title="Відкрити картку (Ctrl+клік або коліщатко для нової вкладки)"
+                          >
+                            {getFullName(p)}
+                          </a>
+                        )}
                         {isMasked && (
                           <span className="text-[10px] px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded font-normal flex items-center gap-1">
                             <Shield className="w-2.5 h-2.5" /> Скрито

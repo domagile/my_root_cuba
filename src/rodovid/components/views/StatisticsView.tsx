@@ -1346,9 +1346,9 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ database, onSele
                     </div>
 
                     <div className="flex flex-wrap gap-1 pt-1">
-                      {fam.children.slice(0, 4).map((c) => (
+                      {fam.children.slice(0, 4).map((c, cIdx) => (
                         <button
-                          key={c.id}
+                          key={`fam_child_${c.id}_${cIdx}`}
                           type="button"
                           onClick={() => onSelectPerson(c.id)}
                           className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors truncate max-w-[120px] cursor-pointer ${

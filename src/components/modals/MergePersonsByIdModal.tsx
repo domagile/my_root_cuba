@@ -26,7 +26,7 @@ import {
 import { Person, Family, DuplicatePair, MergeFieldSelection } from '../../types';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
-import { comparePersonPair } from '../../utils/duplicateDetector';
+import { comparePersonPair, ignoreDuplicatePair } from '../../utils/duplicateDetector';
 import { executeSmartPersonMerge } from '../../utils/personMerge';
 import { SmartMergeModal } from '../../rodovid/components/modals/SmartMergeModal';
 
@@ -79,11 +79,16 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
   const candidatesA = useMemo(() => {
     if (!searchA.trim() || searchA.length < 2) return [];
     const q = searchA.toLowerCase().trim();
+    const seen = new Set<string>();
     return persons
       .filter((p) => {
-        if (p.id === idB) return false;
+        if (!p || !p.id || p.id === idB || seen.has(p.id)) return false;
         const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''} ${p.id}`.toLowerCase();
-        return name.includes(q);
+        if (name.includes(q)) {
+          seen.add(p.id);
+          return true;
+        }
+        return false;
       })
       .slice(0, 8);
   }, [searchA, persons, idB]);
@@ -92,11 +97,16 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
   const candidatesB = useMemo(() => {
     if (!searchB.trim() || searchB.length < 2) return [];
     const q = searchB.toLowerCase().trim();
+    const seen = new Set<string>();
     return persons
       .filter((p) => {
-        if (p.id === idA) return false;
+        if (!p || !p.id || p.id === idA || seen.has(p.id)) return false;
         const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''} ${p.id}`.toLowerCase();
-        return name.includes(q);
+        if (name.includes(q)) {
+          seen.add(p.id);
+          return true;
+        }
+        return false;
       })
       .slice(0, 8);
   }, [searchB, persons, idA]);
@@ -183,6 +193,8 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
         deletedPersonIds: [result.deletedPersonId]
       });
 
+      ignoreDuplicatePair(personA.id, personB.id);
+
       setSelectedPersonId(result.masterPerson.id);
       if (onMergeSuccess) {
         onMergeSuccess(result.masterPerson);
@@ -201,6 +213,9 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
     extra?: { masterPerson?: Person; deletedPersonId?: string }
   ) => {
     const deletedId = extra?.deletedPersonId || (masterTarget === 'A' ? personB?.id : personA?.id);
+    if (personA && personB) {
+      ignoreDuplicatePair(personA.id, personB.id);
+    }
     mergePersons({
       updatedPersons,
       updatedFamilies,
@@ -382,9 +397,9 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
                   {/* Autocomplete Dropdown A */}
                   {showSearchDropA && candidatesA.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-1 z-30 p-1 rounded-xl bg-white dark:bg-slate-850 border border-neutral-200 dark:border-neutral-700 shadow-xl max-h-48 overflow-y-auto">
-                      {candidatesA.map((cand) => (
+                      {candidatesA.map((cand, candIdx) => (
                         <button
-                          key={cand.id}
+                          key={`cand_a_${cand.id}_${candIdx}`}
                           onClick={() => {
                             setIdA(cand.id);
                             setShowSearchDropA(false);
@@ -462,9 +477,9 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
                   {/* Autocomplete Dropdown B */}
                   {showSearchDropB && candidatesB.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-1 z-30 p-1 rounded-xl bg-white dark:bg-slate-850 border border-neutral-200 dark:border-neutral-700 shadow-xl max-h-48 overflow-y-auto">
-                      {candidatesB.map((cand) => (
+                      {candidatesB.map((cand, candIdx) => (
                         <button
-                          key={cand.id}
+                          key={`cand_b_${cand.id}_${candIdx}`}
                           onClick={() => {
                             setIdB(cand.id);
                             setShowSearchDropB(false);
@@ -626,6 +641,11 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
           isOpen={isDetailedMergeOpen}
           onClose={() => setIsDetailedMergeOpen(false)}
           onMergeComplete={handleDetailedMergeComplete}
+          onMarkNotDuplicate={(pair) => {
+            ignoreDuplicatePair(pair.personA.id, pair.personB.id);
+            setIsDetailedMergeOpen(false);
+            onClose();
+          }}
         />
       )}
     </>

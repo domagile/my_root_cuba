@@ -87,6 +87,11 @@ export const Sidebar: React.FC = () => {
   ];
 
   const researchItems: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [
+    ...(isAdmin ? [{
+      id: 'requests' as NavigationTab,
+      label: `Запити на доступ${pendingRequestsCount > 0 ? ` (${pendingRequestsCount})` : ''}`,
+      icon: ShieldCheck
+    }] : []),
     { id: 'ai-analysis', label: 'Слідчий AI аналіз', icon: Sparkles },
     { id: 'documents', label: 'Речові докази', icon: FileText },
     { id: 'research', label: 'Детективні розкопки', icon: Compass },

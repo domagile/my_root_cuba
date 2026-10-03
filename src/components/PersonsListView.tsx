@@ -28,7 +28,8 @@ import {
   ChevronDown,
   Filter,
   Heart,
-  SlidersHorizontal
+  SlidersHorizontal,
+  ExternalLink
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { Person } from '../types';
@@ -39,7 +40,7 @@ import { isPersonMale, isPersonFemale } from '../utils/genderUtils';
 import { isPersonHypothesis, isPersonConfirmed } from '../utils/researchStatusUtils';
 import { BulkEditPersonsModal, BulkEditParams } from './modals/BulkEditPersonsModal';
 import { useAuthStore } from '../stores/useAuthStore';
-import { useUIStore } from '../stores/useUIStore';
+import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../stores/useUIStore';
 import { isUserAdmin } from '../rodovid/utils/privacy';
 import { getPersonRodName } from '../rodovid/utils/treeLayout';
 import { formatClanName, normalizeUkrainianSurnameGender, areSurnamesEquivalent } from '../utils/ukrainianPhonetics';
@@ -893,8 +894,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               } rounded-md text-xs focus:outline-none focus:border-[#B88E3E] cursor-pointer`}
             >
               <option value="all">Усі роди ({availableClans.length})</option>
-              {availableClans.map((c) => (
-                <option key={c.id} value={c.id}>
+              {availableClans.map((c, cIdx) => (
+                <option key={`clan_opt_${c.id}_${cIdx}`} value={c.id}>
                   {c.name} ({c.count})
                 </option>
               ))}
@@ -1343,9 +1344,18 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-[#E5E5E5] text-xs">
+                              <a
+                                href={getPersonUrl(p.id)}
+                                onClick={(e) => {
+                                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                                  e.preventDefault();
+                                  onInspectPerson?.(p.id);
+                                }}
+                                className="font-bold text-[#E5E5E5] hover:text-[#B88E3E] text-xs transition-colors cursor-pointer"
+                                title="Переглянути профіль (Ctrl+клік або коліщатко для нової вкладки)"
+                              >
                                 {p.lastName} {p.firstName} {p.patronymic || ''}
-                              </span>
+                              </a>
                               {isCentral && (
                                 <span title="Центральна особа">
                                   <Crown className="w-3.5 h-3.5 text-[#B88E3E] shrink-0" />
@@ -1522,7 +1532,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                                 В дерево
                               </button>
 
-                              <button
+                               <button
                                 onClick={() => onInspectPerson?.(p.id)}
                                 className="p-1 rounded-md text-[#A3A3A3] hover:text-[#E5E5E5] hover:bg-[#333333] transition-colors cursor-pointer"
                                 title="Профіль"
@@ -1607,7 +1617,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             return (
               <div
                 key={`${p.id}_${pIdx}`}
-                onClick={() => onInspectPerson?.(p.id)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.button === 1) {
+                    openPersonInNewWindow(p.id);
+                    return;
+                  }
+                  onInspectPerson?.(p.id);
+                }}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    openPersonInNewWindow(p.id);
+                  }
+                }}
                 className={`p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2.5 relative ${
                   isCentral
                     ? 'bg-[#222222] border-[#B88E3E] shadow-md ring-1 ring-[#B88E3E]/30'
@@ -1694,8 +1716,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   </span>
 
                   <div className="min-w-0 flex-1">
-                    <h4 className="font-bold text-xs text-[#E5E5E5] truncate leading-snug">
-                      {p.lastName} {p.firstName}
+                    <h4 className="font-bold text-xs truncate leading-snug">
+                      <a
+                        href={getPersonUrl(p.id)}
+                        onClick={(e) => {
+                          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                          e.preventDefault();
+                          onInspectPerson?.(p.id);
+                        }}
+                        className="text-[#E5E5E5] hover:text-[#B88E3E] transition-colors"
+                        title="Відкрити профіль (Ctrl+клік для нової вкладки)"
+                      >
+                        {p.lastName} {p.firstName}
+                      </a>
                     </h4>
                     {p.patronymic && (
                       <p className="text-[11px] text-[#A3A3A3] truncate">{p.patronymic}</p>

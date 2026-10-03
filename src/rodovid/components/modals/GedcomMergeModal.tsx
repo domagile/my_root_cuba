@@ -434,11 +434,11 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
 
                 {detectedBranchPresets.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                    {detectedBranchPresets.map((preset) => {
+                    {detectedBranchPresets.map((preset, idx) => {
                       const isExcluded = excludeAncestorsOf.includes(preset.person.id);
                       return (
                         <button
-                          key={preset.person.id}
+                          key={`preset_top_${preset.person.id}_${idx}`}
                           type="button"
                           onClick={() => {
                             setExcludeAncestorsOf((prev) =>
@@ -941,11 +941,11 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
 
                 {detectedBranchPresets.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {detectedBranchPresets.map((preset) => {
+                    {detectedBranchPresets.map((preset, idx) => {
                       const isAncestorsExcluded = excludeAncestorsOf.includes(preset.person.id);
                       return (
                         <div
-                          key={preset.person.id}
+                          key={`preset_btm_${preset.person.id}_${idx}`}
                           className={`p-3.5 rounded-xl border transition-all space-y-3 ${
                             isAncestorsExcluded
                               ? 'bg-rose-950/30 border-rose-500/70 shadow-md ring-1 ring-rose-500/30'
@@ -1068,7 +1068,7 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
                         return nameStr.includes(branchSearch.toLowerCase().trim());
                       })
                       .slice(0, 15)
-                      .map((p) => {
+                      .map((p, idx) => {
                         const isAncestorsExcluded = excludeAncestorsOf.includes(p.id);
                         const isPersonExcluded = excludeIndividuals.includes(p.id);
                         const ancIds = getPersonAncestorsIds(p.id, incomingDatabase.persons || {});
@@ -1076,7 +1076,7 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
 
                         return (
                           <div
-                            key={p.id}
+                            key={`inc_p_${p.id}_${idx}`}
                             className="p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
                           >
                             <div>

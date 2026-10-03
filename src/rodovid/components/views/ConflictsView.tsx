@@ -34,16 +34,24 @@ import {
   EyeOff,
   Check,
   X,
-  Layers
+  Layers,
+  RotateCcw
 } from 'lucide-react';
 import { Person, Family, TreeConflict, DuplicatePair } from '../../../types';
 import { runTreeDataHealthAudit, autoFixTreeConflict } from '../../../utils/treeAudit';
-import { detectDuplicatePersons } from '../../../utils/duplicateDetector';
+import {
+  detectDuplicatePersons,
+  isDuplicatePairIgnored,
+  ignoreDuplicatePair,
+  unignoreDuplicatePair,
+  getIgnoredDuplicatePairKeys
+} from '../../../utils/duplicateDetector';
 import { quickMergePersons, batchMergeSafeDuplicates } from '../../../utils/personMerge';
 import { SmartMergeModal } from '../modals/SmartMergeModal';
 import { PersonDetailModal } from '../../../components/Tree/PersonDetailModal';
 import { MergePersonsByIdModal } from '../../../components/modals/MergePersonsByIdModal';
 import { useGenealogyStore } from '../../../stores/useGenealogyStore';
+import { getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 
 interface ConflictsViewProps {
   persons: Person[];
@@ -88,13 +96,18 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
 
   // Ignored pairs persistence
   const [ignoredPairIds, setIgnoredPairIds] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem('rodovid_ignored_duplicate_pairs');
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
+    return Array.from(getIgnoredDuplicatePairKeys());
   });
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setIgnoredPairIds(Array.from(getIgnoredDuplicatePairKeys()));
+    };
+    window.addEventListener('rodovid_ignored_duplicates_changed', handleStorageChange);
+    return () => {
+      window.removeEventListener('rodovid_ignored_duplicates_changed', handleStorageChange);
+    };
+  }, []);
 
   // Active Modals state
   const [activeMergePair, setActiveMergePair] = useState<DuplicatePair | null>(null);
@@ -109,22 +122,20 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Toggle ignore pair
-  const handleToggleIgnorePair = (pairId: string) => {
-    let next: string[];
-    if (ignoredPairIds.includes(pairId)) {
-      next = ignoredPairIds.filter(id => id !== pairId);
-      showNotification('Пару відновлено для перевірки.');
-    } else {
-      next = [...ignoredPairIds, pairId];
-      showNotification('Пару позначено як різних осіб та приховано.');
-    }
-    setIgnoredPairIds(next);
-    try {
-      localStorage.setItem('rodovid_ignored_duplicate_pairs', JSON.stringify(next));
-    } catch (e) {
-      console.error(e);
-    }
+  // Mark pair as not duplicate
+  const handleMarkNotDuplicate = (pair: DuplicatePair) => {
+    ignoreDuplicatePair(pair.personA.id, pair.personB.id);
+    const updated = Array.from(getIgnoredDuplicatePairKeys());
+    setIgnoredPairIds(updated);
+    showNotification('Особи позначено як «Не дублікат» і приховано зі списку активних дублікатів.');
+  };
+
+  // Restore pair back to active duplicates
+  const handleRestorePair = (pair: DuplicatePair) => {
+    unignoreDuplicatePair(pair.personA.id, pair.personB.id);
+    const updated = Array.from(getIgnoredDuplicatePairKeys());
+    setIgnoredPairIds(updated);
+    showNotification('Пару відновлено для подальшої перевірки.');
   };
 
   // Run Realtime Audits
@@ -136,23 +147,26 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     return detectDuplicatePersons(persons);
   }, [persons]);
 
+  const ignoredSet = useMemo(() => new Set(ignoredPairIds), [ignoredPairIds]);
+
   // Duplicate pairs statistics
   const duplicateStats = useMemo(() => {
     const total = duplicatePairs.length;
     const exact = duplicatePairs.filter(p => p.confidence >= 85).length;
     const probable = duplicatePairs.filter(p => p.confidence >= 70 && p.confidence < 85).length;
     const withParents = duplicatePairs.filter(p => p.criteria?.parentsMatch && p.criteria.parentsMatch !== 'none').length;
-    const ignored = duplicatePairs.filter(p => ignoredPairIds.includes(p.id)).length;
+    const ignored = duplicatePairs.filter(p => isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet)).length;
     return { total, exact, probable, withParents, ignored };
-  }, [duplicatePairs, ignoredPairIds]);
+  }, [duplicatePairs, ignoredSet]);
 
   // Safe pairs for batch merge (confidence >= 85% and not ignored)
   const safeBatchPairs = useMemo(() => {
-    return duplicatePairs.filter(p => p.confidence >= 85 && !ignoredPairIds.includes(p.id));
-  }, [duplicatePairs, ignoredPairIds]);
+    return duplicatePairs.filter(p => p.confidence >= 85 && !isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet));
+  }, [duplicatePairs, ignoredSet]);
 
   // Quick 1-click merge
   const handleQuickMerge = (pair: DuplicatePair) => {
+    ignoreDuplicatePair(pair.personA.id, pair.personB.id);
     const res = quickMergePersons(pair.personA, pair.personB, persons, families);
     mergePersons({
       updatedPersons: res.updatedPersons,
@@ -164,6 +178,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     if (onUpdateFamilies) {
       onUpdateFamilies(res.updatedFamilies);
     }
+    setIgnoredPairIds(Array.from(getIgnoredDuplicatePairKeys()));
     const nameStr = res.masterPerson.name?.given
       ? `${res.masterPerson.name.surname || ''} ${res.masterPerson.name.given}`.trim()
       : res.masterPerson.id;
@@ -176,6 +191,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
       showNotification('Немає безпечних дублікатів (>85%) для пакетного злиття.');
       return;
     }
+    safeBatchPairs.forEach(p => ignoreDuplicatePair(p.personA.id, p.personB.id));
     const res = batchMergeSafeDuplicates(safeBatchPairs, persons, families, 85);
     mergePersons({
       updatedPersons: res.updatedPersons,
@@ -186,6 +202,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     if (onUpdateFamilies) {
       onUpdateFamilies(res.updatedFamilies);
     }
+    setIgnoredPairIds(Array.from(getIgnoredDuplicatePairKeys()));
     setIsBatchConfirmOpen(false);
     showNotification(`Автоматично об'єднано ${res.mergedCount} дублікатів у базі даних!`);
   };
@@ -226,7 +243,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
   // Filtered duplicates
   const filteredDuplicates = useMemo(() => {
     return duplicatePairs.filter(pair => {
-      const isIgnored = ignoredPairIds.includes(pair.id);
+      const isIgnored = isDuplicatePairIgnored(pair.personA.id, pair.personB.id, ignoredSet);
       if (showIgnoredPairs) {
         if (!isIgnored) return false;
       } else {
@@ -251,7 +268,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
       }
       return true;
     });
-  }, [duplicatePairs, minConfidenceFilter, duplicateSearchQuery, ignoredPairIds, showIgnoredPairs, duplicateCriteriaFilter]);
+  }, [duplicatePairs, minConfidenceFilter, duplicateSearchQuery, ignoredSet, showIgnoredPairs, duplicateCriteriaFilter]);
 
   // Auto fix single conflict
   const handleAutoFix = (conflict: TreeConflict) => {
@@ -288,6 +305,12 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     masterName: string,
     extra?: { masterPerson?: Person; deletedPersonId?: string }
   ) => {
+    if (activeMergePair) {
+      ignoreDuplicatePair(activeMergePair.personA.id, activeMergePair.personB.id);
+    }
+    if (extra?.deletedPersonId && extra?.masterPerson?.id) {
+      ignoreDuplicatePair(extra.deletedPersonId, extra.masterPerson.id);
+    }
     mergePersons({
       updatedPersons,
       updatedFamilies,
@@ -298,6 +321,8 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     if (onUpdateFamilies) {
       onUpdateFamilies(updatedFamilies);
     }
+    setIgnoredPairIds(Array.from(getIgnoredDuplicatePairKeys()));
+    setActiveMergePair(null);
     showNotification(`Персони успішно злито! Запис «${masterName}» оновлено.`);
   };
 
@@ -544,13 +569,13 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredConflicts.map(conflict => {
+                {filteredConflicts.map((conflict, cIdx) => {
                   const isCritical = conflict.severity === 'critical';
                   const isWarning = conflict.severity === 'warning';
 
                   return (
                     <div
-                      key={conflict.id}
+                      key={`conflict_${conflict.id}_${cIdx}`}
                       className={`p-4 md:p-5 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                         isCritical
                           ? 'bg-rose-950/10 border-rose-900/40 hover:border-rose-700/60'
@@ -589,6 +614,58 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                           {conflict.description}
                         </p>
 
+                        {/* Person Reference Links with new tab support */}
+                        <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-neutral-300">
+                          <span className="text-neutral-500">Особа:</span>
+                          <a
+                            href={getPersonUrl(conflict.personId)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => {
+                              if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                              e.preventDefault();
+                              setInspectingPersonId(conflict.personId);
+                            }}
+                            onAuxClick={(e) => {
+                              if (e.button === 1) {
+                                e.preventDefault();
+                                openPersonInNewWindow(conflict.personId);
+                              }
+                            }}
+                            className="font-semibold text-emerald-400 hover:text-emerald-300 hover:underline transition-colors"
+                            title="Відкрити картку особи (Ctrl+клік або коліщатко миші для нової вкладки)"
+                          >
+                            {conflict.personName}
+                          </a>
+
+                          {conflict.relatedPersonId && conflict.relatedPersonName && (
+                            <>
+                              <span className="text-neutral-600">•</span>
+                              <span className="text-neutral-500">Пов'язана особа:</span>
+                              <a
+                                href={getPersonUrl(conflict.relatedPersonId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => {
+                                  if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                  e.preventDefault();
+                                  setInspectingPersonId(conflict.relatedPersonId!);
+                                }}
+                                onAuxClick={(e) => {
+                                  if (e.button === 1) {
+                                    e.preventDefault();
+                                    openPersonInNewWindow(conflict.relatedPersonId!);
+                                  }
+                                }}
+                                className="font-semibold text-amber-400 hover:text-amber-300 hover:underline transition-colors"
+                                title="Відкрити картку пов'язаної особи (Ctrl+клік або коліщатко миші для нової вкладки)"
+                              >
+                                {conflict.relatedPersonName}
+                              </a>
+                            </>
+                          )}
+                        </div>
+
                         <div className="flex items-start gap-1.5 text-xs text-[#d1b06c] pt-1">
                           <Sparkles className="w-3.5 h-3.5 shrink-0 text-[#B88E3E] mt-0.5" />
                           <span>
@@ -609,13 +686,27 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                           </button>
                         )}
 
-                        <button
-                          onClick={() => setInspectingPersonId(conflict.personId)}
+                        <a
+                          href={getPersonUrl(conflict.personId)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => {
+                            if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                            e.preventDefault();
+                            setInspectingPersonId(conflict.personId);
+                          }}
+                          onAuxClick={(e) => {
+                            if (e.button === 1) {
+                              e.preventDefault();
+                              openPersonInNewWindow(conflict.personId);
+                            }
+                          }}
                           className="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                          title="Переглянути картку (Ctrl+клік або коліщатко миші для нової вкладки)"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>Картка</span>
-                        </button>
+                        </a>
                       </div>
                     </div>
                   );
@@ -843,9 +934,9 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
               </div>
             ) : (
               <div className="space-y-4">
-                {filteredDuplicates.map(pair => {
+                {filteredDuplicates.map((pair, pIdx) => {
                   const { personA, personB, confidence, reasons, criteria } = pair;
-                  const isPairIgnored = ignoredPairIds.includes(pair.id);
+                  const isPairIgnored = isDuplicatePairIgnored(pair.personA.id, pair.personB.id, ignoredSet);
 
                   const nameA = `${personA.name?.surname || personA.lastName || ''} ${personA.name?.given || personA.firstName || ''} ${personA.name?.patronymic || personA.patronymic || ''}`.trim() || personA.id;
                   const nameB = `${personB.name?.surname || personB.lastName || ''} ${personB.name?.given || personB.firstName || ''} ${personB.name?.patronymic || personB.patronymic || ''}`.trim() || personB.id;
@@ -863,7 +954,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
 
                   return (
                     <div
-                      key={pair.id}
+                      key={`dup_pair_${pair.id}_${pIdx}`}
                       className={`p-5 rounded-2xl bg-neutral-900/70 border transition-all space-y-4 shadow-sm ${
                         confidence >= 85
                           ? 'border-emerald-900/50 hover:border-emerald-700/70'
@@ -888,8 +979,8 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                             {confidence >= 85 ? 'Майже точний дублікат' : confidence >= 70 ? 'Висока ймовірність' : 'Можливий дублікат'}
                           </span>
                           {isPairIgnored && (
-                            <span className="px-2 py-0.5 rounded-md bg-neutral-800 text-neutral-400 text-[10px] font-mono">
-                              Приховано
+                            <span className="px-2 py-0.5 rounded-md bg-neutral-800 text-emerald-400 text-[10px] font-mono border border-neutral-700">
+                              Позначено як «Не дублікат»
                             </span>
                           )}
                         </div>
@@ -897,50 +988,69 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                         {/* Action buttons */}
                         <div className="flex flex-wrap items-center gap-2">
                           {/* 1-Click Quick Merge */}
-                          <button
-                            type="button"
-                            onClick={() => handleQuickMerge(pair)}
-                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-                            title="Автоматично об'єднати записи за одне натискання (більш повний профіль стане головним)"
-                          >
-                            <Zap className="w-3.5 h-3.5" />
-                            <span>Швидке злиття</span>
-                          </button>
+                          {!isPairIgnored && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMerge(pair)}
+                              className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                              title="Автоматично об'єднати записи за одне натискання (більш повний профіль стане головним)"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              <span>Швидке злиття</span>
+                            </button>
+                          )}
 
                           {/* Full Interactive Smart Merge Wizard */}
-                          <button
-                            type="button"
-                            onClick={() => setActiveMergePair(pair)}
-                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#B88E3E] hover:bg-[#a37c33] text-neutral-950 transition-all flex items-center gap-1.5 shadow-md shadow-[#B88E3E]/20 cursor-pointer"
-                            title="Відкрити майстер з можливістю покрокового вибору кожного поля та батьків"
-                          >
-                            <GitMerge className="w-3.5 h-3.5" />
-                            <span>Майстер злиття</span>
-                          </button>
+                          {!isPairIgnored && (
+                            <button
+                              type="button"
+                              onClick={() => setActiveMergePair(pair)}
+                              className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#B88E3E] hover:bg-[#a37c33] text-neutral-950 transition-all flex items-center gap-1.5 shadow-md shadow-[#B88E3E]/20 cursor-pointer"
+                              title="Відкрити майстер з можливістю покрокового вибору кожного поля та батьків"
+                            >
+                              <GitMerge className="w-3.5 h-3.5" />
+                              <span>Майстер злиття</span>
+                            </button>
+                          )}
 
                           {/* Manual Merge By ID */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setInitialMergeIdA(pair.personA.id);
-                              setInitialMergeIdB(pair.personB.id);
-                              setIsMergeByIdOpen(true);
-                            }}
-                            className="px-3 py-1.5 rounded-xl text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-all flex items-center gap-1 cursor-pointer"
-                            title="Злити через діалог по ID"
-                          >
-                            <span>По ID</span>
-                          </button>
+                          {!isPairIgnored && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInitialMergeIdA(pair.personA.id);
+                                setInitialMergeIdB(pair.personB.id);
+                                setIsMergeByIdOpen(true);
+                              }}
+                              className="px-3 py-1.5 rounded-xl text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-all flex items-center gap-1 cursor-pointer"
+                              title="Злити через діалог по ID"
+                            >
+                              <span>По ID</span>
+                            </button>
+                          )}
 
-                          {/* Toggle Ignore */}
-                          <button
-                            type="button"
-                            onClick={() => handleToggleIgnorePair(pair.id)}
-                            className="p-1.5 rounded-xl text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 border border-neutral-800 transition-colors cursor-pointer"
-                            title={isPairIgnored ? 'Відновити в список дублікатів' : 'Позначити як різні особи (ігнорувати)'}
-                          >
-                            <EyeOff className="w-3.5 h-3.5" />
-                          </button>
+                          {/* Not Duplicate / Restore button */}
+                          {isPairIgnored ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRestorePair(pair)}
+                              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-neutral-800 hover:bg-neutral-700 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                              title="Повернути до списку активних дублікатів"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Відновити в дублікати</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkNotDuplicate(pair)}
+                              className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-800 hover:bg-neutral-700 text-emerald-400 hover:text-emerald-300 border border-neutral-700 hover:border-emerald-500/50 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                              title="Це різні люди: позначити як «Не дублікат» і прибрати зі списку"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Не дублікат</span>
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1025,23 +1135,71 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                         {/* Person A card */}
                         <div className="p-3.5 rounded-xl bg-neutral-950/60 border border-neutral-800 space-y-2">
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-bold text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <a
+                                href={getPersonUrl(personA.id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => {
+                                  if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                  e.preventDefault();
+                                  setInspectingPersonId(personA.id);
+                                }}
+                                onAuxClick={(e) => {
+                                  if (e.button === 1) {
+                                    e.preventDefault();
+                                    openPersonInNewWindow(personA.id);
+                                  }
+                                }}
+                                className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-bold text-xs shrink-0 hover:scale-105 transition-transform"
+                                title="Відкрити картку особи A (Ctrl+клік або коліщатко для нової вкладки)"
+                              >
                                 A
-                              </div>
-                              <div>
-                                <h4 className="text-sm font-bold text-white">{nameA}</h4>
+                              </a>
+                              <div className="min-w-0">
+                                <a
+                                  href={getPersonUrl(personA.id)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => {
+                                    if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                    e.preventDefault();
+                                    setInspectingPersonId(personA.id);
+                                  }}
+                                  onAuxClick={(e) => {
+                                    if (e.button === 1) {
+                                      e.preventDefault();
+                                      openPersonInNewWindow(personA.id);
+                                    }
+                                  }}
+                                  className="text-sm font-bold text-white hover:text-emerald-400 hover:underline transition-colors block truncate"
+                                  title="Відкрити картку особи A (Ctrl+клік або коліщатко для нової вкладки)"
+                                >
+                                  {nameA}
+                                </a>
                                 <span className="text-[10px] text-neutral-500 font-mono">ID: {personA.id}</span>
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setInspectingPersonId(personA.id)}
+                            <a
+                              href={getPersonUrl(personA.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => {
+                                if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                e.preventDefault();
+                                setInspectingPersonId(personA.id);
+                              }}
+                              onAuxClick={(e) => {
+                                if (e.button === 1) {
+                                  e.preventDefault();
+                                  openPersonInNewWindow(personA.id);
+                                }
+                              }}
                               className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
-                              title="Переглянути картку особи A"
+                              title="Переглянути картку особи A (Ctrl+клік або коліщатко для нової вкладки)"
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
-                            </button>
+                            </a>
                           </div>
 
                           <div className="text-xs text-neutral-400 space-y-1.5 pt-1">
@@ -1062,15 +1220,61 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                             <div className="pt-1 border-t border-neutral-800/80 space-y-0.5 text-[11px]">
                               <div className="flex items-center justify-between">
                                 <span className="text-neutral-500">Батько:</span>
-                                <span className="text-neutral-300 font-medium truncate max-w-[170px]" title={fatherAName}>
-                                  {fatherAName}
-                                </span>
+                                {fatherA ? (
+                                  <a
+                                    href={getPersonUrl(fatherA.id)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => {
+                                      if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                      e.preventDefault();
+                                      setInspectingPersonId(fatherA.id);
+                                    }}
+                                    onAuxClick={(e) => {
+                                      if (e.button === 1) {
+                                        e.preventDefault();
+                                        openPersonInNewWindow(fatherA.id);
+                                      }
+                                    }}
+                                    className="text-neutral-300 font-medium hover:text-emerald-400 hover:underline truncate max-w-[170px] transition-colors"
+                                    title={`Батько: ${fatherAName} (Ctrl+клік для нової вкладки)`}
+                                  >
+                                    {fatherAName}
+                                  </a>
+                                ) : (
+                                  <span className="text-neutral-400 truncate max-w-[170px]" title={fatherAName}>
+                                    {fatherAName}
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center justify-between">
                                 <span className="text-neutral-500">Мати:</span>
-                                <span className="text-neutral-300 font-medium truncate max-w-[170px]" title={motherAName}>
-                                  {motherAName}
-                                </span>
+                                {motherA ? (
+                                  <a
+                                    href={getPersonUrl(motherA.id)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => {
+                                      if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                      e.preventDefault();
+                                      setInspectingPersonId(motherA.id);
+                                    }}
+                                    onAuxClick={(e) => {
+                                      if (e.button === 1) {
+                                        e.preventDefault();
+                                        openPersonInNewWindow(motherA.id);
+                                      }
+                                    }}
+                                    className="text-neutral-300 font-medium hover:text-emerald-400 hover:underline truncate max-w-[170px] transition-colors"
+                                    title={`Мати: ${motherAName} (Ctrl+клік для нової вкладки)`}
+                                  >
+                                    {motherAName}
+                                  </a>
+                                ) : (
+                                  <span className="text-neutral-400 truncate max-w-[170px]" title={motherAName}>
+                                    {motherAName}
+                                  </span>
+                                )}
                               </div>
                             </div>
 
@@ -1086,23 +1290,71 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                         {/* Person B card */}
                         <div className="p-3.5 rounded-xl bg-neutral-950/60 border border-neutral-800 space-y-2">
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-bold text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <a
+                                href={getPersonUrl(personB.id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => {
+                                  if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                  e.preventDefault();
+                                  setInspectingPersonId(personB.id);
+                                }}
+                                onAuxClick={(e) => {
+                                  if (e.button === 1) {
+                                    e.preventDefault();
+                                    openPersonInNewWindow(personB.id);
+                                  }
+                                }}
+                                className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-bold text-xs shrink-0 hover:scale-105 transition-transform"
+                                title="Відкрити картку особи B (Ctrl+клік або коліщатко для нової вкладки)"
+                              >
                                 B
-                              </div>
-                              <div>
-                                <h4 className="text-sm font-bold text-white">{nameB}</h4>
+                              </a>
+                              <div className="min-w-0">
+                                <a
+                                  href={getPersonUrl(personB.id)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => {
+                                    if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                    e.preventDefault();
+                                    setInspectingPersonId(personB.id);
+                                  }}
+                                  onAuxClick={(e) => {
+                                    if (e.button === 1) {
+                                      e.preventDefault();
+                                      openPersonInNewWindow(personB.id);
+                                    }
+                                  }}
+                                  className="text-sm font-bold text-white hover:text-amber-400 hover:underline transition-colors block truncate"
+                                  title="Відкрити картку особи B (Ctrl+клік або коліщатко для нової вкладки)"
+                                >
+                                  {nameB}
+                                </a>
                                 <span className="text-[10px] text-neutral-500 font-mono">ID: {personB.id}</span>
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setInspectingPersonId(personB.id)}
+                            <a
+                              href={getPersonUrl(personB.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => {
+                                if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                e.preventDefault();
+                                setInspectingPersonId(personB.id);
+                              }}
+                              onAuxClick={(e) => {
+                                if (e.button === 1) {
+                                  e.preventDefault();
+                                  openPersonInNewWindow(personB.id);
+                                }
+                              }}
                               className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
-                              title="Переглянути картку особи B"
+                              title="Переглянути картку особи B (Ctrl+клік або коліщатко для нової вкладки)"
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
-                            </button>
+                            </a>
                           </div>
 
                           <div className="text-xs text-neutral-400 space-y-1.5 pt-1">
@@ -1123,15 +1375,61 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                             <div className="pt-1 border-t border-neutral-800/80 space-y-0.5 text-[11px]">
                               <div className="flex items-center justify-between">
                                 <span className="text-neutral-500">Батько:</span>
-                                <span className="text-neutral-300 font-medium truncate max-w-[170px]" title={fatherBName}>
-                                  {fatherBName}
-                                </span>
+                                {fatherB ? (
+                                  <a
+                                    href={getPersonUrl(fatherB.id)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => {
+                                      if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                      e.preventDefault();
+                                      setInspectingPersonId(fatherB.id);
+                                    }}
+                                    onAuxClick={(e) => {
+                                      if (e.button === 1) {
+                                        e.preventDefault();
+                                        openPersonInNewWindow(fatherB.id);
+                                      }
+                                    }}
+                                    className="text-neutral-300 font-medium hover:text-amber-400 hover:underline truncate max-w-[170px] transition-colors"
+                                    title={`Батько: ${fatherBName} (Ctrl+клік для нової вкладки)`}
+                                  >
+                                    {fatherBName}
+                                  </a>
+                                ) : (
+                                  <span className="text-neutral-400 truncate max-w-[170px]" title={fatherBName}>
+                                    {fatherBName}
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center justify-between">
                                 <span className="text-neutral-500">Мати:</span>
-                                <span className="text-neutral-300 font-medium truncate max-w-[170px]" title={motherBName}>
-                                  {motherBName}
-                                </span>
+                                {motherB ? (
+                                  <a
+                                    href={getPersonUrl(motherB.id)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => {
+                                      if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                                      e.preventDefault();
+                                      setInspectingPersonId(motherB.id);
+                                    }}
+                                    onAuxClick={(e) => {
+                                      if (e.button === 1) {
+                                        e.preventDefault();
+                                        openPersonInNewWindow(motherB.id);
+                                      }
+                                    }}
+                                    className="text-neutral-300 font-medium hover:text-amber-400 hover:underline truncate max-w-[170px] transition-colors"
+                                    title={`Мати: ${motherBName} (Ctrl+клік для нової вкладки)`}
+                                  >
+                                    {motherBName}
+                                  </a>
+                                ) : (
+                                  <span className="text-neutral-400 truncate max-w-[170px]" title={motherBName}>
+                                    {motherBName}
+                                  </span>
+                                )}
                               </div>
                             </div>
 
@@ -1242,6 +1540,10 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
           isOpen={!!activeMergePair}
           onClose={() => setActiveMergePair(null)}
           onMergeComplete={handleMergeComplete}
+          onMarkNotDuplicate={(pair) => {
+            handleMarkNotDuplicate(pair);
+            setActiveMergePair(null);
+          }}
         />
       )}
 

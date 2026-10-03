@@ -21,10 +21,13 @@ import {
   Heart,
   Users,
   Sparkles,
-  Info
+  Info,
+  ExternalLink
 } from 'lucide-react';
 import { Person, DuplicatePair, MergeFieldSelection, Family } from '../../../types';
 import { executeSmartPersonMerge } from '../../../utils/personMerge';
+import { ignoreDuplicatePair } from '../../../utils/duplicateDetector';
+import { getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 
 interface SmartMergeModalProps {
   pair: DuplicatePair;
@@ -38,6 +41,7 @@ interface SmartMergeModalProps {
     masterName: string,
     extra?: { masterPerson?: Person; deletedPersonId?: string }
   ) => void;
+  onMarkNotDuplicate?: (pair: DuplicatePair) => void;
 }
 
 export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
@@ -46,7 +50,8 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
   allFamilies,
   isOpen,
   onClose,
-  onMergeComplete
+  onMergeComplete,
+  onMarkNotDuplicate
 }) => {
   const { personA, personB, confidence, confidenceLevel, reasons } = pair;
 
@@ -119,6 +124,14 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleNotDuplicate = () => {
+    ignoreDuplicatePair(personA.id, personB.id);
+    if (onMarkNotDuplicate) {
+      onMarkNotDuplicate(pair);
+    }
+    onClose();
   };
 
   const setFieldChoice = (field: keyof MergeFieldSelection, val: any) => {
@@ -313,14 +326,54 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
           <div className="bg-neutral-900/80 rounded-xl border border-neutral-800 p-2">
             <div className="grid grid-cols-12 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-neutral-400 border-b border-neutral-800 mb-1">
               <div className="col-span-3">Поле</div>
-              <div className="col-span-4 text-emerald-400 flex items-center gap-1.5">
-                <User className="w-3 h-3" />
-                <span>Запис 1 ({personA.id})</span>
+              <div className="col-span-4 text-emerald-400 flex items-center gap-1.5 min-w-0">
+                <User className="w-3 h-3 shrink-0" />
+                <a
+                  href={getPersonUrl(personA.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                    e.preventDefault();
+                    openPersonInNewWindow(personA.id);
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      openPersonInNewWindow(personA.id);
+                    }
+                  }}
+                  className="hover:underline flex items-center gap-1 text-emerald-400 font-bold truncate transition-colors"
+                  title="Відкрити особу A в новій вкладці (Ctrl+клік або коліщатко миші)"
+                >
+                  <span className="truncate">Запис 1 ({personA.id})</span>
+                  <ExternalLink className="w-3 h-3 shrink-0 opacity-70 hover:opacity-100" />
+                </a>
               </div>
               <div className="col-span-1 text-center">Вибір</div>
-              <div className="col-span-4 text-amber-400 flex items-center gap-1.5">
-                <User className="w-3 h-3" />
-                <span>Запис 2 ({personB.id})</span>
+              <div className="col-span-4 text-amber-400 flex items-center gap-1.5 min-w-0">
+                <User className="w-3 h-3 shrink-0" />
+                <a
+                  href={getPersonUrl(personB.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.button === 1) return;
+                    e.preventDefault();
+                    openPersonInNewWindow(personB.id);
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      openPersonInNewWindow(personB.id);
+                    }
+                  }}
+                  className="hover:underline flex items-center gap-1 text-amber-400 font-bold truncate transition-colors"
+                  title="Відкрити особу B в новій вкладці (Ctrl+клік або коліщатко миші)"
+                >
+                  <span className="truncate">Запис 2 ({personB.id})</span>
+                  <ExternalLink className="w-3 h-3 shrink-0 opacity-70 hover:opacity-100" />
+                </a>
               </div>
             </div>
 
@@ -513,13 +566,25 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 md:p-5 border-t border-neutral-800 bg-neutral-900/90 flex items-center justify-between gap-3 shrink-0">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
-          >
-            Скасувати
-          </button>
+        <div className="p-4 md:p-5 border-t border-neutral-800 bg-neutral-900/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+            >
+              Скасувати
+            </button>
+            <button
+              type="button"
+              onClick={handleNotDuplicate}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-800 hover:bg-neutral-700 text-emerald-400 hover:text-emerald-300 border border-neutral-700 hover:border-emerald-500/50 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Це різні люди: прибрати цю пару зі списку дублікатів"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Не дублікат</span>
+            </button>
+          </div>
 
           <button
             onClick={handleExecuteMerge}

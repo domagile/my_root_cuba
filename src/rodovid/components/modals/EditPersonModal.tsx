@@ -502,8 +502,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-blue-500"
                 >
                   <option value="">-- Не вказаний / Невідомий --</option>
-                  {availableFathers.map((f) => (
-                    <option key={f.id} value={f.id}>
+                  {availableFathers.map((f, idx) => (
+                    <option key={`f_${f.id}_${idx}`} value={f.id}>
                       {getFullName(f)} ({f.birthYear || '?'}) [{f.id}]
                     </option>
                   ))}
@@ -520,8 +520,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-rose-500"
                 >
                   <option value="">-- Не вказана / Невідома --</option>
-                  {availableMothers.map((m) => (
-                    <option key={m.id} value={m.id}>
+                  {availableMothers.map((m, idx) => (
+                    <option key={`m_${m.id}_${idx}`} value={m.id}>
                       {getFullName(m)} ({m.birthYear || '?'}) [{m.id}]
                     </option>
                   ))}

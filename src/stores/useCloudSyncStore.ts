@@ -1,10 +1,28 @@
 import { create } from 'zustand';
+import { Person } from '../types';
 
 export type CloudSyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
 export type CloudSyncMode = 'manual' | 'auto';
 
 const SYNC_MODE_STORAGE_KEY = 'rodovid_cloud_sync_mode';
 const QUOTA_STORAGE_KEY = 'rodovid_firestore_quota_exceeded_day';
+const DELTAS_STORAGE_KEY = 'rodovid_dirty_person_deltas_v2';
+
+export type DirtyPersonsDeltaMap = Record<string, Partial<Person>>;
+
+export function loadDirtyPersonsDeltas(): DirtyPersonsDeltaMap {
+  try {
+    const raw = localStorage.getItem(DELTAS_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+export function saveDirtyPersonsDeltas(deltas: DirtyPersonsDeltaMap) {
+  try {
+    localStorage.setItem(DELTAS_STORAGE_KEY, JSON.stringify(deltas));
+  } catch {}
+}
 
 export function isQuotaExceededToday(): boolean {
   try {
@@ -100,6 +118,7 @@ export interface CloudSyncState {
   unsavedChangesCount: number;
   isQuotaExceeded: boolean;
   dirtyTracker: DirtyEntitiesTracker;
+  dirtyPersonsDelta: DirtyPersonsDeltaMap;
   
   setStatus: (status: CloudSyncStatus, error?: string | null) => void;
   setSyncMode: (mode: CloudSyncMode) => void;
@@ -110,6 +129,8 @@ export interface CloudSyncState {
   setIsManualPushing: (isPushing: boolean) => void;
   setIsManualPulling: (isPulling: boolean) => void;
   markDirty: (type: EntitySyncType, id: string) => void;
+  markPersonDirtyWithDelta: (personId: string, delta: Partial<Person>) => void;
+  clearPersonDirtyDelta: (personId: string) => void;
   markDeleted: (type: EntitySyncType, id: string) => void;
   clearDirty: () => void;
   markUnsavedChange: () => void;
@@ -117,6 +138,7 @@ export interface CloudSyncState {
 }
 
 const initialDirtyTracker = loadDirtyEntities();
+const initialDirtyPersonsDelta = loadDirtyPersonsDeltas();
 const initialDirtyCount = countDirtyItems(initialDirtyTracker);
 
 export const useCloudSyncStore = create<CloudSyncState>((set) => ({
@@ -139,6 +161,7 @@ export const useCloudSyncStore = create<CloudSyncState>((set) => ({
   unsavedChangesCount: initialDirtyCount,
   isQuotaExceeded: isQuotaExceededToday(),
   dirtyTracker: initialDirtyTracker,
+  dirtyPersonsDelta: initialDirtyPersonsDelta,
 
   setQuotaExceeded: (isQuotaExceeded) => {
     markQuotaExceededToday(isQuotaExceeded);
@@ -203,6 +226,54 @@ export const useCloudSyncStore = create<CloudSyncState>((set) => ({
       };
     }),
 
+  markPersonDirtyWithDelta: (personId, delta) =>
+    set((state) => {
+      // 1. Mark in dirtyTracker
+      const tracker = { ...state.dirtyTracker };
+      const setList = new Set(tracker.persons);
+      setList.add(personId);
+      tracker.persons = Array.from(setList);
+
+      // Remove from deletedPersons if was there
+      tracker.deletedPersons = tracker.deletedPersons.filter((x) => x !== personId);
+      saveDirtyEntities(tracker);
+
+      // 2. Accumulate delta for this specific person
+      const currentDelta = state.dirtyPersonsDelta[personId] || {};
+      const nextDeltas: DirtyPersonsDeltaMap = {
+        ...state.dirtyPersonsDelta,
+        [personId]: { ...currentDelta, ...delta }
+      };
+      saveDirtyPersonsDeltas(nextDeltas);
+
+      const total = countDirtyItems(tracker);
+      return {
+        dirtyTracker: tracker,
+        dirtyPersonsDelta: nextDeltas,
+        hasUnsavedChanges: total > 0,
+        unsavedChangesCount: total
+      };
+    }),
+
+  clearPersonDirtyDelta: (personId) =>
+    set((state) => {
+      const tracker = { ...state.dirtyTracker };
+      tracker.persons = tracker.persons.filter((id) => id !== personId);
+      saveDirtyEntities(tracker);
+
+      const nextDeltas = { ...state.dirtyPersonsDelta };
+      delete nextDeltas[personId];
+      saveDirtyPersonsDeltas(nextDeltas);
+
+      const total = countDirtyItems(tracker);
+      return {
+        dirtyTracker: tracker,
+        dirtyPersonsDelta: nextDeltas,
+        hasUnsavedChanges: total > 0,
+        unsavedChangesCount: total
+      };
+    }),
+
   markDeleted: (type, id) =>
     set((state) => {
       const tracker = { ...state.dirtyTracker };
@@ -216,9 +287,18 @@ export const useCloudSyncStore = create<CloudSyncState>((set) => ({
       }
 
       saveDirtyEntities(tracker);
+
+      let nextDeltas = state.dirtyPersonsDelta;
+      if (type === 'persons' && nextDeltas[id]) {
+        nextDeltas = { ...nextDeltas };
+        delete nextDeltas[id];
+        saveDirtyPersonsDeltas(nextDeltas);
+      }
+
       const total = countDirtyItems(tracker);
       return {
         dirtyTracker: tracker,
+        dirtyPersonsDelta: nextDeltas,
         hasUnsavedChanges: total > 0,
         unsavedChangesCount: total
       };
@@ -240,8 +320,10 @@ export const useCloudSyncStore = create<CloudSyncState>((set) => ({
         deletedPlaces: []
       };
       saveDirtyEntities(empty);
+      saveDirtyPersonsDeltas({});
       return {
         dirtyTracker: empty,
+        dirtyPersonsDelta: {},
         hasUnsavedChanges: false,
         unsavedChangesCount: 0
       };
@@ -269,8 +351,10 @@ export const useCloudSyncStore = create<CloudSyncState>((set) => ({
         deletedPlaces: []
       };
       saveDirtyEntities(empty);
+      saveDirtyPersonsDeltas({});
       return {
         dirtyTracker: empty,
+        dirtyPersonsDelta: {},
         hasUnsavedChanges: false,
         unsavedChangesCount: 0
       };

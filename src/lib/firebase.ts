@@ -349,6 +349,44 @@ export async function deleteEntityDoc(
 export const savePersonDoc = (person: any, projectId?: string) =>
   saveEntityDoc('persons', person.id, person, projectId);
 
+/**
+ * Saves ONLY the changed fields (delta) for a single person document using merge: true
+ * Path: projects/{projectId}/persons/{personId}
+ */
+export async function savePersonDeltaDoc(
+  personId: string,
+  delta: any,
+  projectId: string = DEFAULT_PROJECT_ID
+): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
+  }
+  return trackAtomicSync(async () => {
+    try {
+      const db = getDbInstance();
+      if (!db || !personId || !delta) return false;
+      const cleanDelta = JSON.parse(JSON.stringify(delta));
+      delete cleanDelta.id;
+
+      if ('deathYear' in delta && (delta.deathYear === undefined || delta.deathYear === null)) cleanDelta.deathYear = null;
+      if ('deathDate' in delta && (delta.deathDate === undefined || delta.deathDate === null)) cleanDelta.deathDate = null;
+      if ('deathPlace' in delta && (delta.deathPlace === undefined || delta.deathPlace === null)) cleanDelta.deathPlace = null;
+      if ('deathReason' in delta && (delta.deathReason === undefined || delta.deathReason === null)) cleanDelta.deathReason = null;
+      if ('birthYear' in delta && (delta.birthYear === undefined || delta.birthYear === null)) cleanDelta.birthYear = null;
+      if ('birthDate' in delta && (delta.birthDate === undefined || delta.birthDate === null)) cleanDelta.birthDate = null;
+      if ('birthPlace' in delta && (delta.birthPlace === undefined || delta.birthPlace === null)) cleanDelta.birthPlace = null;
+
+      cleanDelta.updatedAt = cleanDelta.updatedAt || new Date().toISOString();
+      const docRef = doc(db, 'projects', projectId, 'persons', String(personId));
+      await setDoc(docRef, cleanDelta, { merge: true });
+      return true;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/persons/${personId}`);
+      throw err;
+    }
+  }).catch(() => false);
+}
+
 export const deletePersonDoc = (personId: string, projectId?: string) =>
   deleteEntityDoc('persons', personId, projectId);
 

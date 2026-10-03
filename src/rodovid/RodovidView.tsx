@@ -168,7 +168,8 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
   }, [selectedPersonId, database.persons, database.rootPersonId]);
 
   // Modals state
-  const [inspectPersonId, setInspectPersonId] = useState<string | null>(null);
+  const inspectPersonId = useUIStore((s) => s.activeInspectPersonId);
+  const setInspectPersonId = useUIStore((s) => s.setInspectPersonId);
   const [relationManagerPersonId, setRelationManagerPersonId] = useState<string | null>(null);
   const [addRelation, setAddRelation] = useState<{
     type: 'father' | 'mother' | 'parent' | 'child' | 'spouse' | 'sibling' | 'godparent' | 'witness';
