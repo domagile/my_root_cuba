@@ -129,6 +129,179 @@ export const COMPACT_VERTICAL_GENERATION_GAP = 68;
 export const COMPACT_HORIZONTAL_GENERATION_GAP = 72;
 
 /**
+ * Robustly resolves direct parents (father and mother) of a person across all database formats:
+ * - Direct fatherId / motherId properties
+ * - parentFamilyId references
+ * - database.families where the person is listed in children or childrenIds
+ * - Candidate persons where the person is in childrenIds
+ * Validates that candidate parents actually exist in database.persons to avoid ghost collapse states.
+ */
+export function resolvePersonParents(
+  p: Person | null | undefined,
+  database: { persons?: Record<string, Person>; families?: Record<string, any> }
+): {
+  fatherId?: string;
+  motherId?: string;
+  father: Person | null;
+  mother: Person | null;
+} {
+  if (!p || !database?.persons) return { father: null, mother: null };
+
+  let fId = p.fatherId;
+  let mId = p.motherId;
+
+  // 1. Check parentFamilyId if defined
+  if (p.parentFamilyId && database.families?.[p.parentFamilyId]) {
+    const fam = database.families[p.parentFamilyId];
+    if (!fId && fam.husbandId) fId = fam.husbandId;
+    if (!mId && fam.wifeId) mId = fam.wifeId;
+  }
+
+  // 2. If still missing father or mother, check any family in database.families where p is in children or childrenIds
+  if ((!fId || !mId) && database.families) {
+    const familiesList = Object.values(database.families);
+    for (const fam of familiesList) {
+      if (!fam) continue;
+      const isChild =
+        (Array.isArray(fam.children) && fam.children.some((c: any) => (c?.personId || c?.id) === p.id)) ||
+        (Array.isArray(fam.childrenIds) && fam.childrenIds.includes(p.id));
+      if (isChild) {
+        if (!fId && fam.husbandId) fId = fam.husbandId;
+        if (!mId && fam.wifeId) mId = fam.wifeId;
+        if (fId && mId) break;
+      }
+    }
+  }
+
+  // 3. Fallback: check if any person has p in childrenIds
+  if ((!fId || !mId) && database.persons) {
+    for (const cand of Object.values(database.persons)) {
+      if (!cand || cand.id === p.id) continue;
+      if (cand.childrenIds && cand.childrenIds.includes(p.id)) {
+        if (!fId && (cand.gender === 'male' || cand.gender === 'M')) {
+          fId = cand.id;
+        } else if (!mId && (cand.gender === 'female' || cand.gender === 'F')) {
+          mId = cand.id;
+        }
+      }
+      if (fId && mId) break;
+    }
+  }
+
+  // 4. Validate existence in database.persons
+  const father = fId && database.persons[fId] && !database.persons[fId].isDeleted ? database.persons[fId] : null;
+  const mother = mId && database.persons[mId] && !database.persons[mId].isDeleted ? database.persons[mId] : null;
+
+  return {
+    fatherId: father ? father.id : undefined,
+    motherId: mother ? mother.id : undefined,
+    father,
+    mother
+  };
+}
+
+/**
+ * Robustly resolves direct children IDs of a person across all database formats:
+ * - Direct childrenIds property on person
+ * - Families where the person is husband or wife (children or childrenIds arrays)
+ * - Persons whose fatherId or motherId matches pId
+ * - Persons whose parents are resolved via resolvePersonParents
+ */
+export function resolvePersonChildrenIds(
+  pId: string,
+  database: { persons?: Record<string, Person>; families?: Record<string, any> }
+): string[] {
+  if (!pId || !database?.persons?.[pId]) return [];
+  const p = database.persons[pId];
+  const childIds = new Set<string>();
+
+  if (p.childrenIds) {
+    p.childrenIds.forEach(c => childIds.add(c));
+  }
+
+  if (database.families) {
+    Object.values(database.families).forEach(fam => {
+      if (!fam) return;
+      if (fam.husbandId === pId || fam.wifeId === pId) {
+        if (Array.isArray(fam.children)) {
+          fam.children.forEach((c: any) => {
+            const cId = typeof c === 'string' ? c : (c?.personId || c?.id);
+            if (cId) childIds.add(cId);
+          });
+        }
+        if (Array.isArray(fam.childrenIds)) {
+          fam.childrenIds.forEach((cId: string) => childIds.add(cId));
+        }
+      }
+    });
+  }
+
+  Object.values(database.persons).forEach(cand => {
+    if (!cand || cand.id === pId || cand.isDeleted) return;
+    if (cand.fatherId === pId || cand.motherId === pId) {
+      childIds.add(cand.id);
+      return;
+    }
+    const { fatherId, motherId } = resolvePersonParents(cand, database);
+    if (fatherId === pId || motherId === pId) {
+      childIds.add(cand.id);
+    }
+  });
+
+  return Array.from(childIds).filter(cId => Boolean(database.persons[cId] && !database.persons[cId].isDeleted));
+}
+
+/**
+ * Robustly resolves all spouse and co-parent IDs for a person:
+ * - Direct spouseIds property on person
+ * - Families in database where person is husband or wife (partnerId)
+ * - Any person with whom this person shares a child in the database
+ */
+export function resolvePersonSpouseIds(
+  pId: string,
+  database: { persons?: Record<string, Person>; families?: Record<string, any> }
+): string[] {
+  if (!pId || !database?.persons?.[pId]) return [];
+  const p = database.persons[pId];
+  const spouseIds = new Set<string>();
+
+  if (p.spouseIds) {
+    p.spouseIds.forEach(s => spouseIds.add(s));
+  }
+
+  if (p.spouseFamilyIds && database.families) {
+    p.spouseFamilyIds.forEach(fId => {
+      const fam = database.families[fId];
+      if (fam) {
+        const partnerId = fam.husbandId === p.id ? fam.wifeId : fam.husbandId;
+        if (partnerId) spouseIds.add(partnerId);
+      }
+    });
+  }
+
+  if (database.families) {
+    Object.values(database.families).forEach(fam => {
+      if (!fam) return;
+      if (fam.husbandId === pId && fam.wifeId) spouseIds.add(fam.wifeId);
+      if (fam.wifeId === pId && fam.husbandId) spouseIds.add(fam.husbandId);
+    });
+  }
+
+  // Co-parents: persons sharing a child with pId in the database
+  Object.values(database.persons).forEach(cand => {
+    if (!cand || cand.isDeleted) return;
+    const { fatherId, motherId } = resolvePersonParents(cand, database);
+    if (fatherId === pId && motherId && motherId !== pId) {
+      spouseIds.add(motherId);
+    } else if (motherId === pId && fatherId && fatherId !== pId) {
+      spouseIds.add(fatherId);
+    }
+  });
+
+  return Array.from(spouseIds).filter(sId => Boolean(database.persons[sId] && !database.persons[sId].isDeleted));
+}
+
+/**
  * Calculates total direct descendants count under a person (children, grandchildren, etc.)
  */
 export function getTotalDescendantsCount(personId: string, database: GenealogyDatabase): number {
@@ -139,22 +312,7 @@ export function getTotalDescendantsCount(personId: string, database: GenealogyDa
 
   while (queue.length > 0) {
     const curId = queue.shift()!;
-    const p = database.persons[curId];
-    if (!p) continue;
-
-    const childIds = new Set<string>();
-    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-    if (p.spouseFamilyIds && database.families) {
-      p.spouseFamilyIds.forEach(fId => {
-        const fam = database.families[fId];
-        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
-      });
-    }
-    Object.values(database.persons).forEach(cand => {
-      if (cand.fatherId === curId || cand.motherId === curId) {
-        childIds.add(cand.id);
-      }
-    });
+    const childIds = resolvePersonChildrenIds(curId, database);
 
     childIds.forEach(cId => {
       if (!visited.has(cId) && database.persons[cId]) {
@@ -350,19 +508,9 @@ export function calculateClassicFamilyTreeLayout(
     directAncestors.add(pId);
     const p = database.persons[pId];
     if (!p) return;
-    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-    if (!fId && !mId && database.families) {
-      const matchingFam = Object.values(database.families).find(fam => 
-        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
-      );
-      if (matchingFam) {
-        fId = matchingFam.husbandId;
-        mId = matchingFam.wifeId;
-      }
-    }
-    if (fId && database.persons[fId]) collectAncestors(fId);
-    if (mId && database.persons[mId]) collectAncestors(mId);
+    const { father, mother } = resolvePersonParents(p, database);
+    if (father) collectAncestors(father.id);
+    if (mother) collectAncestors(mother.id);
   };
   collectAncestors(root.id);
 
@@ -370,21 +518,9 @@ export function calculateClassicFamilyTreeLayout(
   const collectDescendants = (pId: string) => {
     if (!pId || directDescendants.has(pId)) return;
     directDescendants.add(pId);
-    const p = database.persons[pId];
-    if (!p) return;
-    const childIds = new Set<string>();
-    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-    if (p.spouseFamilyIds) {
-      p.spouseFamilyIds.forEach(fId => {
-        const fam = database.families[fId];
-        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
-      });
-    }
-    Object.values(database.persons).forEach(cand => {
-      if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
-    });
+    const childIds = resolvePersonChildrenIds(pId, database);
     childIds.forEach(cId => {
-      if (database.persons[cId]) collectDescendants(cId);
+      collectDescendants(cId);
     });
   };
   collectDescendants(root.id);
@@ -440,44 +576,18 @@ export function calculateClassicFamilyTreeLayout(
 
   // Helper to collect all direct children of a person across all database relationship formats
   const getDirectChildrenIds = (pId: string): string[] => {
-    const p = database.persons[pId];
-    if (!p) return [];
-    const childIds = new Set<string>();
-    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-    if (p.spouseFamilyIds && database.families) {
-      p.spouseFamilyIds.forEach(fId => {
-        const fam = database.families[fId];
-        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
-      });
-    }
-    Object.values(database.persons).forEach(cand => {
-      if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
-    });
-    return Array.from(childIds).filter(cId => Boolean(database.persons[cId]));
+    return resolvePersonChildrenIds(pId, database);
   };
 
   // Helper to collect all direct parents of a person across all database relationship formats
   const getDirectParentIds = (pId: string): string[] => {
     const p = database.persons[pId];
     if (!p) return [];
-    const parents = new Set<string>();
-    if (p.fatherId && database.persons[p.fatherId]) parents.add(p.fatherId);
-    if (p.motherId && database.persons[p.motherId]) parents.add(p.motherId);
-    if (p.parentFamilyId && database.families) {
-      const fam = database.families[p.parentFamilyId];
-      if (fam?.husbandId && database.persons[fam.husbandId]) parents.add(fam.husbandId);
-      if (fam?.wifeId && database.persons[fam.wifeId]) parents.add(fam.wifeId);
-    }
-    if (parents.size === 0 && database.families) {
-      const matchingFam = Object.values(database.families).find(fam =>
-        fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
-      );
-      if (matchingFam) {
-        if (matchingFam.husbandId && database.persons[matchingFam.husbandId]) parents.add(matchingFam.husbandId);
-        if (matchingFam.wifeId && database.persons[matchingFam.wifeId]) parents.add(matchingFam.wifeId);
-      }
-    }
-    return Array.from(parents);
+    const { father, mother } = resolvePersonParents(p, database);
+    const parents: string[] = [];
+    if (father) parents.push(father.id);
+    if (mother) parents.push(mother.id);
+    return parents;
   };
 
   // Collect all persons that must be hidden because their parent or ancestor has collapsed children
@@ -526,18 +636,18 @@ export function calculateClassicFamilyTreeLayout(
       if (entry.startsWith('pat_')) {
         const childId = entry.replace('pat_', '');
         const p = database.persons[childId];
-        const fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-        if (fId && !collapsedAncestorIds.has(fId)) {
-          collapsedAncestorIds.add(fId);
-          q.push(fId);
+        const { father } = resolvePersonParents(p, database);
+        if (father && !collapsedAncestorIds.has(father.id)) {
+          collapsedAncestorIds.add(father.id);
+          q.push(father.id);
         }
       } else if (entry.startsWith('mat_')) {
         const childId = entry.replace('mat_', '');
         const p = database.persons[childId];
-        const mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-        if (mId && !collapsedAncestorIds.has(mId)) {
-          collapsedAncestorIds.add(mId);
-          q.push(mId);
+        const { mother } = resolvePersonParents(p, database);
+        if (mother && !collapsedAncestorIds.has(mother.id)) {
+          collapsedAncestorIds.add(mother.id);
+          q.push(mother.id);
         }
       } else {
         getDirectParentIds(entry).forEach(parId => {
@@ -674,10 +784,6 @@ export function calculateClassicFamilyTreeLayout(
     if (collapsedAncestorIds.has(pId)) {
       return;
     }
-    // If showSiblings is false: only allow direct backbone or spouses of backbone
-    if (!showSiblings && !isDirectBackbone(pId) && !isSpouseOfBackbone(pId)) {
-      return;
-    }
     // If individual sibling branch is collapsed: do not enqueue collateral siblings
     if (isPersonACollapsedSibling(pId)) {
       return;
@@ -720,31 +826,23 @@ export function calculateClassicFamilyTreeLayout(
     }
 
     // 2. Ancestors (Gen - 1, Gen - 2...) - expandable for ANY person in the tree
-    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${id}`) || collapsedParents.has(id);
-    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${id}`) || collapsedParents.has(id);
-    const isBothCollapsed = isPaternalDirectlyCollapsed && isMaternalDirectlyCollapsed;
+    const { father, mother } = resolvePersonParents(p, database);
+    const fId = father?.id;
+    const mId = mother?.id;
+    const isPaternalDirectlyCollapsed = Boolean(fId && (collapsedParents.has(`pat_${id}`) || collapsedParents.has(id)));
+    const isMaternalDirectlyCollapsed = Boolean(mId && (collapsedParents.has(`mat_${id}`) || collapsedParents.has(id)));
+    const isBothCollapsed = (fId && mId)
+      ? (isPaternalDirectlyCollapsed && isMaternalDirectlyCollapsed)
+      : (fId ? isPaternalDirectlyCollapsed : isMaternalDirectlyCollapsed);
 
-    if (showParents && !isBothCollapsed && !collapsedAncestorIds.has(id) && !isPersonACollapsedSibling(id)) {
-      if (maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations) {
-        let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-        let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-
-        // Fallback: check if person is child in any family
-        if (!fId && !mId) {
-          const matchingFam = Object.values(database.families || {}).find(fam => 
-            fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
-          );
-          if (matchingFam) {
-            fId = matchingFam.husbandId;
-            mId = matchingFam.wifeId;
-          }
+    if (showParents && !isBothCollapsed && !isPersonACollapsedSibling(id)) {
+      const canExpandAncestors = maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations || !isBothCollapsed;
+      if (canExpandAncestors) {
+        if (father && !isPaternalDirectlyCollapsed && !collapsedAncestorIds.has(father.id)) {
+          enqueuePerson(father.id, gen - 1);
         }
-
-        if (fId && database.persons[fId] && !isPaternalDirectlyCollapsed && !collapsedAncestorIds.has(fId)) {
-          enqueuePerson(fId, gen - 1);
-        }
-        if (mId && database.persons[mId] && !isMaternalDirectlyCollapsed && !collapsedAncestorIds.has(mId)) {
-          enqueuePerson(mId, gen - 1);
+        if (mother && !isMaternalDirectlyCollapsed && !collapsedAncestorIds.has(mother.id)) {
+          enqueuePerson(mother.id, gen - 1);
         }
       }
     }
@@ -876,18 +974,8 @@ export function calculateClassicFamilyTreeLayout(
     personsInGen.forEach(p => {
       if (processed.has(p.id)) return;
 
-      // Find all spouses for this person in this generation
-      const spouseIdsSet = new Set<string>();
-      if (p.spouseIds) p.spouseIds.forEach(s => spouseIdsSet.add(s));
-      if (p.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach(fId => {
-          const fam = database.families[fId];
-          if (fam) {
-            const partnerId = fam.husbandId === p.id ? fam.wifeId : fam.husbandId;
-            if (partnerId) spouseIdsSet.add(partnerId);
-          }
-        });
-      }
+      // Find all spouses and co-parents for this person in this generation
+      const spouseIdsSet = new Set<string>(resolvePersonSpouseIds(p.id, database));
 
       const rawSpouses: Person[] = [];
       spouseIdsSet.forEach(sId => {
@@ -929,22 +1017,30 @@ export function calculateClassicFamilyTreeLayout(
         }
         // Also check if any children have both p and sp as parents, or belong to this family
         Object.values(database.persons).forEach(candChild => {
-          // If candidate child explicitly has another father or mother assigned, do NOT link to this union
-          const hasDifferentFather = candChild.fatherId && candChild.fatherId !== p.id && candChild.fatherId !== sp.id;
-          const hasDifferentMother = candChild.motherId && candChild.motherId !== p.id && candChild.motherId !== sp.id;
-          if (hasDifferentFather || hasDifferentMother) return;
+          if (!candChild || candChild.id === p.id || candChild.id === sp.id || candChild.isDeleted) return;
+          const { fatherId, motherId } = resolvePersonParents(candChild, database);
 
           if (
-            (candChild.fatherId === p.id && candChild.motherId === sp.id) ||
-            (candChild.fatherId === sp.id && candChild.motherId === p.id) ||
+            (fatherId === p.id && motherId === sp.id) ||
+            (fatherId === sp.id && motherId === p.id) ||
             (matchedFam?.id && candChild.parentFamilyId === matchedFam.id)
           ) {
             unionChildren.add(candChild.id);
+            return;
+          }
+
+          // If this is the only spouse in the unit, link children where single known parent is p or sp
+          if (rawSpouses.length === 1) {
+            if ((fatherId === p.id && !motherId) || (motherId === p.id && !fatherId)) {
+              unionChildren.add(candChild.id);
+            } else if ((fatherId === sp.id && !motherId) || (motherId === sp.id && !fatherId)) {
+              unionChildren.add(candChild.id);
+            }
           }
         });
 
         const validUnionChildren = Array.from(unionChildren).filter(
-          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
+          cId => database.persons[cId] && personGen.has(cId) && (normalizedGen.get(cId) ?? 0) > gen
         );
         // Sort children by age: oldest to the left, younger to the right
         validUnionChildren.sort((idA, idB) => 
@@ -979,27 +1075,14 @@ export function calculateClassicFamilyTreeLayout(
 
       // All children of primary person & spouses
       const allChildren = new Set<string>();
-      if (p.childrenIds) p.childrenIds.forEach(c => allChildren.add(c));
-      spousesInfo.forEach(s => s.childrenIds.forEach(c => allChildren.add(c)));
-      if (p.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach(fId => {
-          const fam = database.families[fId];
-          if (fam?.childrenIds) fam.childrenIds.forEach((cId: string) => allChildren.add(cId));
-          if (fam?.children) {
-            fam.children.forEach((c: any) => {
-              const cId = typeof c === 'string' ? c : (c?.personId || c?.id);
-              if (cId) allChildren.add(cId);
-            });
-          }
-        });
-      }
-      Object.values(database.persons).forEach(candChild => {
-        if (candChild.fatherId === p.id || candChild.motherId === p.id) {
-          allChildren.add(candChild.id);
-        }
+      resolvePersonChildrenIds(p.id, database).forEach(cId => allChildren.add(cId));
+      rawSpouses.forEach(sp => {
+        resolvePersonChildrenIds(sp.id, database).forEach(cId => allChildren.add(cId));
       });
+      spousesInfo.forEach(s => s.childrenIds.forEach(c => allChildren.add(c)));
+
       const validAllChildren = Array.from(allChildren).filter(
-        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
+        cId => database.persons[cId] && personGen.has(cId) && (normalizedGen.get(cId) ?? 0) > gen
       );
       // Sort all children by age: oldest to the left, younger to the right
       validAllChildren.sort((idA, idB) => 
@@ -1549,30 +1632,21 @@ export function calculateClassicFamilyTreeLayout(
 
   // Helper to compute relationship collapse/expand flags
   const getNodeFlags = (p: Person) => {
-    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    const { father, mother } = resolvePersonParents(p, database);
+    const fId = father?.id;
+    const mId = mother?.id;
 
-    if (!fId && !mId) {
-      const matchingFam = Object.values(database.families || {}).find(fam => 
-        fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
-      );
-      if (matchingFam) {
-        fId = matchingFam.husbandId;
-        mId = matchingFam.wifeId;
-      }
-    }
-
-    const parentsCount = (fId && database.persons[fId] ? 1 : 0) + (mId && database.persons[mId] ? 1 : 0);
+    const parentsCount = (father ? 1 : 0) + (mother ? 1 : 0);
     const hasParents = parentsCount > 0;
-    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${p.id}`) || collapsedParents.has(p.id);
-    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${p.id}`) || collapsedParents.has(p.id);
+    const isPaternalDirectlyCollapsed = Boolean(fId && (collapsedParents.has(`pat_${p.id}`) || collapsedParents.has(p.id)));
+    const isMaternalDirectlyCollapsed = Boolean(mId && (collapsedParents.has(`mat_${p.id}`) || collapsedParents.has(p.id)));
     const isPaternalVisible = Boolean(fId && personGen.has(fId));
     const isMaternalVisible = Boolean(mId && personGen.has(mId));
 
     const isPaternalCollapsed = Boolean(fId && (isPaternalDirectlyCollapsed || !showParents || !isPaternalVisible));
     const isMaternalCollapsed = Boolean(mId && (isMaternalDirectlyCollapsed || !showParents || !isMaternalVisible));
 
-    const areParentsVisible = (fId && isPaternalVisible) || (mId && isMaternalVisible);
+    const areParentsVisible = Boolean((fId && isPaternalVisible) || (mId && isMaternalVisible));
     const isParentsCollapsed = collapsedParents.has(p.id) ||
       (hasParents && (
         (fId && mId ? isPaternalCollapsed && isMaternalCollapsed : (fId ? isPaternalCollapsed : isMaternalCollapsed))
@@ -2002,6 +2076,107 @@ export function calculateClassicFamilyTreeLayout(
     });
   });
 
+  // 3. Third Pass (Safety Net): Guarantee that every child on canvas with visible parents has a connecting link and marriage link
+  nodes.forEach(cNode => {
+    const p = cNode.person;
+    const { father, mother } = resolvePersonParents(p, database);
+    const fNode = father ? nodeMap.get(father.id) : null;
+    const mNode = mother ? nodeMap.get(mother.id) : null;
+    const childCenterX = cNode.x + cNode.width / 2;
+
+    // 3a. If both father and mother are on canvas, make sure a marriage link connects them!
+    if (father && mother && fNode && mNode) {
+      const hasMarriage = links.some(l =>
+        l.type === 'marriage' &&
+        ((l.sourcePersonId === father.id && l.targetPersonId === mother.id) ||
+         (l.sourcePersonId === mother.id && l.targetPersonId === father.id))
+      );
+      if (!hasMarriage) {
+        const leftCardRightEdge = Math.min(fNode.x, mNode.x) + cardWidth;
+        const rightCardLeftEdge = Math.max(fNode.x, mNode.x);
+        const marriageMidX = (leftCardRightEdge + rightCardLeftEdge) / 2;
+        const marriageMidY = fNode.y + cardHeight / 2;
+        links.push({
+          id: `m_${father.id}_${mother.id}`,
+          sourceX: leftCardRightEdge,
+          sourceY: marriageMidY,
+          targetX: rightCardLeftEdge,
+          targetY: marriageMidY,
+          type: 'marriage',
+          color: '#a1a1aa',
+          sourcePersonId: father.id,
+          targetPersonId: mother.id,
+          path: `M ${leftCardRightEdge} ${marriageMidY} L ${rightCardLeftEdge} ${marriageMidY}`
+        });
+      }
+    }
+
+    // 3b. Check if this child already has a connecting drop link
+    const hasDropLink = links.some(l =>
+      l.childPersonId === cNode.id ||
+      ((l.type === 'drop' || l.type === 'child') && l.targetPersonId === cNode.id)
+    );
+
+    if (!hasDropLink && (fNode || mNode)) {
+      if (father && mother && fNode && mNode) {
+        const leftCardRightEdge = Math.min(fNode.x, mNode.x) + cardWidth;
+        const rightCardLeftEdge = Math.max(fNode.x, mNode.x);
+        const marriageMidX = (leftCardRightEdge + rightCardLeftEdge) / 2;
+        const marriageMidY = fNode.y + cardHeight / 2;
+        const dropY = cNode.y;
+        const junctionY = (marriageMidY + dropY) / 2;
+
+        const pathStr = Math.abs(marriageMidX - childCenterX) < 3
+          ? `M ${marriageMidX} ${marriageMidY} L ${childCenterX} ${dropY}`
+          : `M ${marriageMidX} ${marriageMidY} L ${marriageMidX} ${junctionY} L ${childCenterX} ${junctionY} L ${childCenterX} ${dropY}`;
+
+        links.push({
+          id: `safety_drop_${father.id}_${mother.id}_${cNode.id}`,
+          sourceX: marriageMidX,
+          sourceY: marriageMidY,
+          targetX: childCenterX,
+          targetY: dropY,
+          type: 'drop',
+          color: '#38bdf8',
+          sourcePersonId: father.id,
+          targetPersonId: mother.id,
+          childPersonId: cNode.id,
+          arrow: 'down',
+          arrowX: childCenterX,
+          arrowY: dropY,
+          path: pathStr
+        });
+      } else {
+        const parId = father ? father.id : mother!.id;
+        const parNode = (fNode || mNode)!;
+        const stemX = parNode.centerX;
+        const stemY = parNode.y + cardHeight;
+        const dropY = cNode.y;
+        const junctionY = (stemY + dropY) / 2;
+
+        const pathStr = Math.abs(stemX - childCenterX) < 3
+          ? `M ${stemX} ${stemY} L ${childCenterX} ${dropY}`
+          : `M ${stemX} ${stemY} L ${stemX} ${junctionY} L ${childCenterX} ${junctionY} L ${childCenterX} ${dropY}`;
+
+        links.push({
+          id: `safety_drop_${parId}_${cNode.id}`,
+          sourceX: stemX,
+          sourceY: stemY,
+          targetX: childCenterX,
+          targetY: dropY,
+          type: 'drop',
+          color: '#38bdf8',
+          sourcePersonId: parId,
+          childPersonId: cNode.id,
+          arrow: 'down',
+          arrowX: childCenterX,
+          arrowY: dropY,
+          path: pathStr
+        });
+      }
+    }
+  });
+
   // Recalculate full dimensions
   let finalMaxX = 1400;
   let finalMaxY = 900;
@@ -2083,40 +2258,25 @@ export function calculateHorizontalFamilyTreeLayout(
   const collectAncestors = (pId: string) => {
     const p = database.persons[pId];
     if (!p) return;
-    const parents: string[] = [];
-    if (p.fatherId) parents.push(p.fatherId);
-    if (p.motherId) parents.push(p.motherId);
-    if (p.parentFamilyId && database.families) {
-      const fam = database.families[p.parentFamilyId];
-      if (fam?.husbandId) parents.push(fam.husbandId);
-      if (fam?.wifeId) parents.push(fam.wifeId);
+    const { father, mother } = resolvePersonParents(p, database);
+    if (father && !directAncestors.has(father.id)) {
+      directAncestors.add(father.id);
+      collectAncestors(father.id);
     }
-    parents.forEach(parId => {
-      if (!directAncestors.has(parId) && database.persons[parId]) {
-        directAncestors.add(parId);
-        collectAncestors(parId);
-      }
-    });
+    if (mother && !directAncestors.has(mother.id)) {
+      directAncestors.add(mother.id);
+      collectAncestors(mother.id);
+    }
   };
   collectAncestors(root.id);
 
   const directDescendants = new Set<string>();
   const collectDescendants = (pId: string) => {
-    const p = database.persons[pId];
-    if (!p) return;
-    const childIds = new Set<string>();
-    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-    if (p.spouseFamilyIds && database.families) {
-      p.spouseFamilyIds.forEach(fId => {
-        const fam = database.families[fId];
-        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
-      });
-    }
-    Object.values(database.persons).forEach(cand => {
-      if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
-    });
+    if (!pId || directDescendants.has(pId)) return;
+    directDescendants.add(pId);
+    const childIds = resolvePersonChildrenIds(pId, database);
     childIds.forEach(cId => {
-      if (database.persons[cId]) collectDescendants(cId);
+      collectDescendants(cId);
     });
   };
   collectDescendants(root.id);
@@ -2168,44 +2328,18 @@ export function calculateHorizontalFamilyTreeLayout(
   };
 
   const getDirectChildrenIds = (pId: string): string[] => {
-    const p = database.persons[pId];
-    if (!p) return [];
-    const childIds = new Set<string>();
-    if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-    if (p.spouseFamilyIds && database.families) {
-      p.spouseFamilyIds.forEach(fId => {
-        const fam = database.families[fId];
-        if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
-      });
-    }
-    Object.values(database.persons).forEach(cand => {
-      if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
-    });
-    return Array.from(childIds).filter(cId => Boolean(database.persons[cId]));
+    return resolvePersonChildrenIds(pId, database);
   };
 
   // Helper to collect all direct parents of a person across all database relationship formats
   const getDirectParentIds = (pId: string): string[] => {
     const p = database.persons[pId];
     if (!p) return [];
-    const parents = new Set<string>();
-    if (p.fatherId && database.persons[p.fatherId]) parents.add(p.fatherId);
-    if (p.motherId && database.persons[p.motherId]) parents.add(p.motherId);
-    if (p.parentFamilyId && database.families) {
-      const fam = database.families[p.parentFamilyId];
-      if (fam?.husbandId && database.persons[fam.husbandId]) parents.add(fam.husbandId);
-      if (fam?.wifeId && database.persons[fam.wifeId]) parents.add(fam.wifeId);
-    }
-    if (parents.size === 0 && database.families) {
-      const matchingFam = Object.values(database.families).find(fam =>
-        fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
-      );
-      if (matchingFam) {
-        if (matchingFam.husbandId && database.persons[matchingFam.husbandId]) parents.add(matchingFam.husbandId);
-        if (matchingFam.wifeId && database.persons[matchingFam.wifeId]) parents.add(matchingFam.wifeId);
-      }
-    }
-    return Array.from(parents);
+    const { father, mother } = resolvePersonParents(p, database);
+    const parents: string[] = [];
+    if (father) parents.push(father.id);
+    if (mother) parents.push(mother.id);
+    return parents;
   };
 
   // Collect collapsed descendants
@@ -2418,35 +2552,23 @@ export function calculateHorizontalFamilyTreeLayout(
     });
 
     // Ancestors (Gen - 1)
-    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${id}`) || collapsedParents.has(id);
-    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${id}`) || collapsedParents.has(id);
-    const isBothCollapsed = isPaternalDirectlyCollapsed && isMaternalDirectlyCollapsed;
+    const { father, mother } = resolvePersonParents(p, database);
+    const fId = father?.id;
+    const mId = mother?.id;
+    const isPaternalDirectlyCollapsed = Boolean(fId && (collapsedParents.has(`pat_${id}`) || collapsedParents.has(id)));
+    const isMaternalDirectlyCollapsed = Boolean(mId && (collapsedParents.has(`mat_${id}`) || collapsedParents.has(id)));
+    const isBothCollapsed = (fId && mId)
+      ? (isPaternalDirectlyCollapsed && isMaternalDirectlyCollapsed)
+      : (fId ? isPaternalDirectlyCollapsed : isMaternalDirectlyCollapsed);
 
-    if (showParents && !isBothCollapsed && !collapsedAncestorIds.has(id)) {
-      if (maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations) {
-        let fId = p.fatherId;
-        let mId = p.motherId;
-        if (p.parentFamilyId && database.families) {
-          const fam = database.families[p.parentFamilyId];
-          if (fam) {
-            if (fam.husbandId) fId = fam.husbandId;
-            if (fam.wifeId) mId = fam.wifeId;
-          }
+    if (showParents && !isBothCollapsed) {
+      const canExpandAncestors = maxGenerations === 0 || Math.abs(gen - 1) <= maxGenerations || !isBothCollapsed;
+      if (canExpandAncestors) {
+        if (father && !isPaternalDirectlyCollapsed && !collapsedAncestorIds.has(father.id)) {
+          enqueuePerson(father.id, gen - 1);
         }
-        if (!fId && !mId && database.families) {
-          const matchingFam = Object.values(database.families).find(fam =>
-            fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
-          );
-          if (matchingFam) {
-            fId = matchingFam.husbandId;
-            mId = matchingFam.wifeId;
-          }
-        }
-        if (fId && database.persons[fId] && !isPaternalDirectlyCollapsed && !collapsedAncestorIds.has(fId)) {
-          enqueuePerson(fId, gen - 1);
-        }
-        if (mId && database.persons[mId] && !isMaternalDirectlyCollapsed && !collapsedAncestorIds.has(mId)) {
-          enqueuePerson(mId, gen - 1);
+        if (mother && !isMaternalDirectlyCollapsed && !collapsedAncestorIds.has(mother.id)) {
+          enqueuePerson(mother.id, gen - 1);
         }
       }
     }
@@ -2567,17 +2689,8 @@ export function calculateHorizontalFamilyTreeLayout(
     personsInGen.forEach(p => {
       if (processed.has(p.id)) return;
 
-      const spouseIdsSet = new Set<string>();
-      if (p.spouseIds) p.spouseIds.forEach(s => spouseIdsSet.add(s));
-      if (p.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach(fId => {
-          const fam = database.families[fId];
-          if (fam) {
-            const partnerId = fam.husbandId === p.id ? fam.wifeId : fam.husbandId;
-            if (partnerId) spouseIdsSet.add(partnerId);
-          }
-        });
-      }
+      // Find all spouses and co-parents for this person in this generation
+      const spouseIdsSet = new Set<string>(resolvePersonSpouseIds(p.id, database));
 
       const rawSpouses: Person[] = [];
       spouseIdsSet.forEach(sId => {
@@ -2615,22 +2728,30 @@ export function calculateHorizontalFamilyTreeLayout(
           });
         }
         Object.values(database.persons).forEach(candChild => {
-          // If candidate child explicitly has another father or mother assigned, do NOT link to this union
-          const hasDifferentFather = candChild.fatherId && candChild.fatherId !== p.id && candChild.fatherId !== sp.id;
-          const hasDifferentMother = candChild.motherId && candChild.motherId !== p.id && candChild.motherId !== sp.id;
-          if (hasDifferentFather || hasDifferentMother) return;
+          if (!candChild || candChild.id === p.id || candChild.id === sp.id || candChild.isDeleted) return;
+          const { fatherId, motherId } = resolvePersonParents(candChild, database);
 
           if (
-            (candChild.fatherId === p.id && candChild.motherId === sp.id) ||
-            (candChild.fatherId === sp.id && candChild.motherId === p.id) ||
+            (fatherId === p.id && motherId === sp.id) ||
+            (fatherId === sp.id && motherId === p.id) ||
             (matchedFam?.id && candChild.parentFamilyId === matchedFam.id)
           ) {
             unionChildren.add(candChild.id);
+            return;
+          }
+
+          // If this is the only spouse in the unit, link children where single known parent is p or sp
+          if (rawSpouses.length === 1) {
+            if ((fatherId === p.id && !motherId) || (motherId === p.id && !fatherId)) {
+              unionChildren.add(candChild.id);
+            } else if ((fatherId === sp.id && !motherId) || (motherId === sp.id && !fatherId)) {
+              unionChildren.add(candChild.id);
+            }
           }
         });
 
         const validUnionChildren = Array.from(unionChildren).filter(
-          cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
+          cId => database.persons[cId] && personGen.has(cId) && (normalizedGen.get(cId) ?? 0) > gen
         );
         validUnionChildren.sort((idA, idB) =>
           comparePersonsByAge(database.persons[idA], database.persons[idB])
@@ -2660,27 +2781,14 @@ export function calculateHorizontalFamilyTreeLayout(
       });
 
       const allChildren = new Set<string>();
-      if (p.childrenIds) p.childrenIds.forEach(c => allChildren.add(c));
-      spousesInfo.forEach(s => s.childrenIds.forEach(c => allChildren.add(c)));
-      if (p.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach(fId => {
-          const fam = database.families[fId];
-          if (fam?.childrenIds) fam.childrenIds.forEach((cId: string) => allChildren.add(cId));
-          if (fam?.children) {
-            fam.children.forEach((c: any) => {
-              const cId = typeof c === 'string' ? c : (c?.personId || c?.id);
-              if (cId) allChildren.add(cId);
-            });
-          }
-        });
-      }
-      Object.values(database.persons).forEach(candChild => {
-        if (candChild.fatherId === p.id || candChild.motherId === p.id) {
-          allChildren.add(candChild.id);
-        }
+      resolvePersonChildrenIds(p.id, database).forEach(cId => allChildren.add(cId));
+      rawSpouses.forEach(sp => {
+        resolvePersonChildrenIds(sp.id, database).forEach(cId => allChildren.add(cId));
       });
+      spousesInfo.forEach(s => s.childrenIds.forEach(c => allChildren.add(c)));
+
       const validAllChildren = Array.from(allChildren).filter(
-        cId => database.persons[cId] && normalizedGen.get(cId) === gen + 1 && personGen.has(cId)
+        cId => database.persons[cId] && personGen.has(cId) && (normalizedGen.get(cId) ?? 0) > gen
       );
       validAllChildren.sort((idA, idB) =>
         comparePersonsByAge(database.persons[idA], database.persons[idB])
@@ -3154,30 +3262,21 @@ export function calculateHorizontalFamilyTreeLayout(
   const nodeMap = new Map<string, { x: number; y: number; width: number; height: number; centerX: number; centerY: number }>();
 
   const getNodeFlags = (p: Person) => {
-    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
+    const { father, mother } = resolvePersonParents(p, database);
+    const fId = father?.id;
+    const mId = mother?.id;
 
-    if (!fId && !mId && database.families) {
-      const matchingFam = Object.values(database.families).find(fam =>
-        fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
-      );
-      if (matchingFam) {
-        fId = matchingFam.husbandId;
-        mId = matchingFam.wifeId;
-      }
-    }
-
-    const parentsCount = (fId && database.persons[fId] ? 1 : 0) + (mId && database.persons[mId] ? 1 : 0);
+    const parentsCount = (father ? 1 : 0) + (mother ? 1 : 0);
     const hasParents = parentsCount > 0;
-    const isPaternalDirectlyCollapsed = collapsedParents.has(`pat_${p.id}`) || collapsedParents.has(p.id);
-    const isMaternalDirectlyCollapsed = collapsedParents.has(`mat_${p.id}`) || collapsedParents.has(p.id);
+    const isPaternalDirectlyCollapsed = Boolean(fId && (collapsedParents.has(`pat_${p.id}`) || collapsedParents.has(p.id)));
+    const isMaternalDirectlyCollapsed = Boolean(mId && (collapsedParents.has(`mat_${p.id}`) || collapsedParents.has(p.id)));
     const isPaternalVisible = Boolean(fId && personGen.has(fId));
     const isMaternalVisible = Boolean(mId && personGen.has(mId));
 
     const isPaternalCollapsed = Boolean(fId && (isPaternalDirectlyCollapsed || !showParents || !isPaternalVisible));
     const isMaternalCollapsed = Boolean(mId && (isMaternalDirectlyCollapsed || !showParents || !isMaternalVisible));
 
-    const areParentsVisible = (fId && isPaternalVisible) || (mId && isMaternalVisible);
+    const areParentsVisible = Boolean((fId && isPaternalVisible) || (mId && isMaternalVisible));
     const isParentsCollapsed = collapsedParents.has(p.id) ||
       (hasParents && (
         (fId && mId ? isPaternalCollapsed && isMaternalCollapsed : (fId ? isPaternalCollapsed : isMaternalCollapsed))
@@ -3540,6 +3639,99 @@ export function calculateHorizontalFamilyTreeLayout(
         }
       }
     });
+  });
+
+  // 3. Third Pass (Safety Net): Guarantee that every child on canvas with visible parents has a connecting link and marriage link
+  nodes.forEach(cNode => {
+    const p = cNode.person;
+    const { father, mother } = resolvePersonParents(p, database);
+    const fNode = father ? nodeMap.get(father.id) : null;
+    const mNode = mother ? nodeMap.get(mother.id) : null;
+    const childCenterY = cNode.y + cNode.height / 2;
+
+    if (father && mother && fNode && mNode) {
+      const hasMarriage = links.some(l =>
+        l.type === 'marriage' &&
+        ((l.sourcePersonId === father.id && l.targetPersonId === mother.id) ||
+         (l.sourcePersonId === mother.id && l.targetPersonId === father.id))
+      );
+      if (!hasMarriage) {
+        const topCard = fNode.y < mNode.y ? fNode : mNode;
+        const bottomCard = fNode.y < mNode.y ? mNode : fNode;
+        links.push({
+          id: `marriage_${father.id}_${mother.id}`,
+          sourceX: topCard.centerX,
+          sourceY: topCard.y + topCard.height,
+          targetX: bottomCard.centerX,
+          targetY: bottomCard.y,
+          type: 'marriage',
+          color: '#a1a1aa',
+          sourcePersonId: father.id,
+          targetPersonId: mother.id,
+          path: `M ${topCard.centerX} ${topCard.y + topCard.height} L ${bottomCard.centerX} ${bottomCard.y}`
+        });
+      }
+    }
+
+    const hasDropLink = links.some(l =>
+      l.childPersonId === cNode.id ||
+      ((l.type === 'drop' || l.type === 'child') && l.targetPersonId === cNode.id)
+    );
+
+    if (!hasDropLink && (fNode || mNode)) {
+      if (father && mother && fNode && mNode) {
+        const stemStartX = Math.max(fNode.x, mNode.x) + cardWidth;
+        const stemStartY = (fNode.centerY + mNode.centerY) / 2;
+        const junctionX = (stemStartX + cNode.x) / 2;
+
+        const pathStr = Math.abs(stemStartY - childCenterY) < 3
+          ? `M ${stemStartX} ${stemStartY} L ${cNode.x} ${childCenterY}`
+          : `M ${stemStartX} ${stemStartY} L ${junctionX} ${stemStartY} L ${junctionX} ${childCenterY} L ${cNode.x} ${childCenterY}`;
+
+        links.push({
+          id: `safety_drop_h_${father.id}_${mother.id}_${cNode.id}`,
+          sourceX: stemStartX,
+          sourceY: stemStartY,
+          targetX: cNode.x,
+          targetY: childCenterY,
+          type: 'drop',
+          color: '#38bdf8',
+          sourcePersonId: father.id,
+          targetPersonId: mother.id,
+          childPersonId: cNode.id,
+          arrow: 'right',
+          arrowX: cNode.x,
+          arrowY: childCenterY,
+          path: pathStr
+        });
+      } else {
+        const parId = father ? father.id : mother!.id;
+        const parNode = (fNode || mNode)!;
+        const stemStartX = parNode.x + cardWidth;
+        const stemStartY = parNode.centerY;
+        const junctionX = (stemStartX + cNode.x) / 2;
+
+        const pathStr = Math.abs(stemStartY - childCenterY) < 3
+          ? `M ${stemStartX} ${stemStartY} L ${cNode.x} ${childCenterY}`
+          : `M ${stemStartX} ${stemStartY} L ${junctionX} ${stemStartY} L ${junctionX} ${childCenterY} L ${cNode.x} ${childCenterY}`;
+
+        links.push({
+          id: `safety_drop_h_${parId}_${cNode.id}`,
+          sourceX: stemStartX,
+          sourceY: stemStartY,
+          targetX: cNode.x,
+          targetY: childCenterY,
+          type: 'drop',
+          color: '#38bdf8',
+          sourcePersonId: parId,
+          childPersonId: cNode.id,
+          arrow: 'right',
+          arrowX: cNode.x,
+          arrowY: childCenterY,
+          path: pathStr
+        });
+      }
+    }
   });
 
   // Calculate full dimensions

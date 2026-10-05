@@ -76,7 +76,8 @@ import {
   CLASSIC_CARD_HEIGHT,
   getLineageColorMap,
   getPersonClanColor,
-  getPersonRodName
+  getPersonRodName,
+  resolvePersonParents
 } from '../../utils/treeLayout';
 import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId, calculateKinship } from '../../utils/relationship';
 import { getSavedUserTreeState, saveUserTreeState } from '../../../utils/userTreeState';
@@ -712,9 +713,16 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return { focusedPersonIds: pIds, focusedLinkIds: lIds, focusColor: color, focusTitle: title };
   }, [focusType, focusPersonId, selectedClanId, activePersonId, database, availableClans, layout.links, lineageColorMap]);
 
+  const getParentsOfPerson = useCallback((personId: string) => {
+    return resolvePersonParents(database.persons[personId], database);
+  }, [database]);
+
   const toggleCollapseParents = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
     setAnchorForPerson(personId);
     setShowParents(true);
+    if (directAncestorsOnly) {
+      setDirectAncestorsOnly(false);
+    }
     setCollapsedParents((prev) => {
       const next = new Set(prev);
       const shouldCollapse = isCurrentlyCollapsed !== undefined
@@ -725,45 +733,63 @@ export const TreeView: React.FC<TreeViewProps> = ({
         next.delete(`pat_${personId}`);
         next.delete(`mat_${personId}`);
       } else {
+        if (generations > 0) {
+          setGenerations(0);
+        }
         next.delete(personId);
         next.delete(`pat_${personId}`);
         next.delete(`mat_${personId}`);
-        const p = database.persons[personId];
-        if (p) {
-          if (p.fatherId) {
-            next.delete(p.fatherId);
-            next.delete(`pat_${p.fatherId}`);
-            next.delete(`mat_${p.fatherId}`);
-          }
-          if (p.motherId) {
-            next.delete(p.motherId);
-            next.delete(`pat_${p.motherId}`);
-            next.delete(`mat_${p.motherId}`);
-          }
+        const { father, mother } = getParentsOfPerson(personId);
+        if (father) {
+          next.delete(father.id);
+          next.delete(`pat_${father.id}`);
+          next.delete(`mat_${father.id}`);
+        }
+        if (mother) {
+          next.delete(mother.id);
+          next.delete(`pat_${mother.id}`);
+          next.delete(`mat_${mother.id}`);
         }
       }
       return next;
     });
-  }, [setAnchorForPerson, database.persons]);
+  }, [setAnchorForPerson, getParentsOfPerson, directAncestorsOnly, generations]);
 
-  const toggleCollapseParentBranch = useCallback((personId: string, branch: 'paternal' | 'maternal') => {
+  const toggleCollapseParentBranch = useCallback((personId: string, branch: 'paternal' | 'maternal', isBranchCurrentlyCollapsed?: boolean) => {
     setAnchorForPerson(personId);
     setShowParents(true);
+    if (directAncestorsOnly) {
+      setDirectAncestorsOnly(false);
+    }
     setCollapsedParents((prev) => {
       const next = new Set(prev);
       const key = branch === 'paternal' ? `pat_${personId}` : `mat_${personId}`;
       const otherKey = branch === 'paternal' ? `mat_${personId}` : `pat_${personId}`;
 
-      if (next.has(personId)) {
-        // Both are currently collapsed: expand this branch, keep other branch collapsed
-        next.delete(personId);
-        next.add(otherKey);
+      const isCollapsed = isBranchCurrentlyCollapsed !== undefined
+        ? isBranchCurrentlyCollapsed
+        : (next.has(personId) || next.has(key));
+
+      if (isCollapsed) {
+        // Expand this branch!
+        if (generations > 0) {
+          setGenerations(0);
+        }
         next.delete(key);
-      } else if (next.has(key)) {
-        // This specific branch is collapsed: expand it
-        next.delete(key);
+        if (next.has(personId)) {
+          next.delete(personId);
+          // Keep other branch collapsed if whole was collapsed
+          next.add(otherKey);
+        }
+        const { father, mother } = getParentsOfPerson(personId);
+        const targetParent = branch === 'paternal' ? father : mother;
+        if (targetParent) {
+          next.delete(targetParent.id);
+          next.delete(`pat_${targetParent.id}`);
+          next.delete(`mat_${targetParent.id}`);
+        }
       } else {
-        // This branch is visible: collapse it
+        // Collapse this branch!
         next.add(key);
         // If otherKey is also collapsed, combine to personId
         if (next.has(otherKey)) {
@@ -774,44 +800,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
       }
       return next;
     });
-  }, [setAnchorForPerson]);
-
-  const getParentsOfPerson = useCallback((personId: string) => {
-    const p = database.persons[personId];
-    if (!p) return { father: null, mother: null };
-    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-    if (!fId && !mId && database.families) {
-      const matchingFam = Object.values(database.families).find(fam =>
-        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
-      );
-      if (matchingFam) {
-        fId = matchingFam.husbandId;
-        mId = matchingFam.wifeId;
-      }
-    }
-    return {
-      father: fId ? database.persons[fId] || null : null,
-      mother: mId ? database.persons[mId] || null : null
-    };
-  }, [database]);
+  }, [setAnchorForPerson, getParentsOfPerson, directAncestorsOnly, generations]);
 
   // Helper to fetch all siblings for a person
   const getSiblingsOfPerson = useCallback((personId: string): Person[] => {
     const p = database.persons[personId];
     if (!p) return [];
-    let fId = p?.fatherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    let mId = p?.motherId || (p?.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-
-    if (!fId && !mId && database.families) {
-      const matchingFam = Object.values(database.families).find(fam => 
-        fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
-      );
-      if (matchingFam) {
-        fId = matchingFam.husbandId;
-        mId = matchingFam.wifeId;
-      }
-    }
+    const { father, mother } = resolvePersonParents(p, database);
+    const fId = father?.id;
+    const mId = mother?.id;
 
     const siblingIds = new Set<string>();
     if (p.siblingIds) {
@@ -1080,7 +1077,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
       return next;
     });
     if (!showSiblings) setShowSiblings(true);
-  }, [setAnchorForPerson, getSiblingsOfPerson, showSiblings]);
+    if (directAncestorsOnly) setDirectAncestorsOnly(false);
+  }, [setAnchorForPerson, getSiblingsOfPerson, showSiblings, directAncestorsOnly]);
 
   const toggleCollapseChildren = useCallback((personId: string, isCurrentlyCollapsed?: boolean) => {
     setAnchorForPerson(personId);
@@ -3851,7 +3849,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => toggleCollapseParentBranch(p.id, 'paternal')}
+                                  onClick={() => toggleCollapseParentBranch(p.id, 'paternal', node.isPaternalCollapsed)}
                                   className={`px-2 py-1 rounded text-[10px] font-semibold transition-colors shrink-0 cursor-pointer flex items-center gap-1 ${
                                     node.isPaternalCollapsed
                                       ? 'bg-amber-600 hover:bg-amber-500 text-white'
@@ -3895,7 +3893,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => toggleCollapseParentBranch(p.id, 'maternal')}
+                                  onClick={() => toggleCollapseParentBranch(p.id, 'maternal', node.isMaternalCollapsed)}
                                   className={`px-2 py-1 rounded text-[10px] font-semibold transition-colors shrink-0 cursor-pointer flex items-center gap-1 ${
                                     node.isMaternalCollapsed
                                       ? 'bg-amber-600 hover:bg-amber-500 text-white'
@@ -4531,7 +4529,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (isAllCollapsed) {
+                          if (isAllCollapsed || isPartiallyCollapsed) {
                             expandAllSiblingsOfPerson(p.id);
                           } else {
                             collapseAllSiblingsOfPerson(p.id);
