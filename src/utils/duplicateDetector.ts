@@ -689,6 +689,8 @@ function patronymicNormalize(p: string): string {
 export function detectDuplicatePersons(persons: Person[], filterIgnored = false): DuplicatePair[] {
   const duplicatePairs: DuplicatePair[] = [];
   const n = persons.length;
+  if (n < 2) return [];
+
   const ignoredSet = filterIgnored ? getIgnoredDuplicatePairKeys() : undefined;
 
   const personsMap = new Map<string, Person>();
@@ -696,13 +698,81 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
     personsMap.set(p.id, p);
   }
 
+  // Pre-extract search metadata once per person to avoid repeated regex & year parsing inside the O(N^2) loop
+  interface FastPersonMeta {
+    person: Person;
+    gender: string | null;
+    birthYear: number | null;
+    deathYear: number | null;
+    surnameClean: string;
+    givenClean: string;
+    hasMaiden: boolean;
+  }
+
+  const metaList: FastPersonMeta[] = new Array(n);
   for (let i = 0; i < n; i++) {
+    const p = persons[i];
+    const sur = (p.name?.surname || p.lastName || '').trim().toLowerCase();
+    const maiden = (p.name?.maidenName || p.maidenName || '').trim().toLowerCase();
+    const given = (p.name?.given || p.firstName || '').trim().toLowerCase();
+    const bY = extractYear(p.birthDate) || extractYear(p.birthYear) || null;
+    const dY = extractYear(p.deathDate) || extractYear(p.deathYear) || null;
+    metaList[i] = {
+      person: p,
+      gender: p.gender || null,
+      birthYear: bY,
+      deathYear: dY,
+      surnameClean: sur,
+      givenClean: given,
+      hasMaiden: Boolean(maiden && maiden !== sur)
+    };
+  }
+
+  for (let i = 0; i < n; i++) {
+    const mA = metaList[i];
+    const pA = mA.person;
+
     for (let j = i + 1; j < n; j++) {
-      const pA = persons[i];
-      const pB = persons[j];
+      const mB = metaList[j];
+      const pB = mB.person;
 
       if (filterIgnored && ignoredSet && isDuplicatePairIgnored(pA.id, pB.id, ignoredSet)) {
         continue;
+      }
+
+      // 1. Fast gender check (if both genders specified and distinct, cannot be duplicates)
+      if (mA.gender && mB.gender && mA.gender !== mB.gender) {
+        continue;
+      }
+
+      // 2. Fast birth year generation guard (if both known and > 12 years apart, cannot be duplicates)
+      if (mA.birthYear !== null && mB.birthYear !== null && Math.abs(mA.birthYear - mB.birthYear) > 12) {
+        continue;
+      }
+
+      // 3. Fast death year guard (if both known and > 15 years apart, cannot be duplicates)
+      if (mA.deathYear !== null && mB.deathYear !== null && Math.abs(mA.deathYear - mB.deathYear) > 15) {
+        continue;
+      }
+
+      // 4. Fast given name quick rejection: if both given names exist, have >= 3 chars, and first letter differs
+      // and neither is an obvious cross-alphabet or known variant
+      if (
+        mA.givenClean &&
+        mB.givenClean &&
+        mA.givenClean.length >= 3 &&
+        mB.givenClean.length >= 3 &&
+        mA.givenClean[0] !== mB.givenClean[0] &&
+        !((mA.givenClean[0] === 'і' && mB.givenClean[0] === 'и') ||
+          (mA.givenClean[0] === 'и' && mB.givenClean[0] === 'і') ||
+          (mA.givenClean[0] === 'о' && mB.givenClean[0] === 'а') ||
+          (mA.givenClean[0] === 'а' && mB.givenClean[0] === 'о') ||
+          (mA.givenClean[0] === 'г' && mB.givenClean[0] === 'ґ'))
+      ) {
+        // Distinct first letter of given name: check if neither is parent/cross-referenced before deep check
+        if (!pA.fatherId && !pB.fatherId && !pA.motherId && !pB.motherId) {
+          continue;
+        }
       }
 
       const comp = comparePersonPair(pA, pB, personsMap);

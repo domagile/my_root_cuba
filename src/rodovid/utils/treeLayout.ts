@@ -128,6 +128,197 @@ export const COMPACT_CARD_HEIGHT = 68;
 export const COMPACT_VERTICAL_GENERATION_GAP = 68;
 export const COMPACT_HORIZONTAL_GENERATION_GAP = 72;
 
+export interface DatabaseRelationshipIndex {
+  parentToChildren: Map<string, string[]>;
+  childToParents: Map<string, { fatherId?: string; motherId?: string; father: Person | null; mother: Person | null }>;
+  personSpouses: Map<string, string[]>;
+  personSiblings: Map<string, string[]>;
+  totalDescendants: Map<string, number>;
+}
+
+const databaseIndexWeakMap = new WeakMap<object, DatabaseRelationshipIndex>();
+
+export function getRelationshipIndex(database: { persons?: Record<string, Person>; families?: Record<string, any> }): DatabaseRelationshipIndex {
+  if (database && typeof database === 'object' && databaseIndexWeakMap.has(database)) {
+    return databaseIndexWeakMap.get(database)!;
+  }
+
+  const parentToChildren = new Map<string, Set<string>>();
+  const childToParents = new Map<string, { fatherId?: string; motherId?: string; father: Person | null; mother: Person | null }>();
+  const personSpouses = new Map<string, Set<string>>();
+  const personSiblings = new Map<string, Set<string>>();
+  const totalDescendants = new Map<string, number>();
+
+  const persons = database.persons || {};
+  const families = database.families || {};
+  const pValues = Object.values(persons);
+
+  // 1. Index families
+  for (const fam of Object.values(families)) {
+    if (!fam) continue;
+    const hId = fam.husbandId;
+    const wId = fam.wifeId;
+    if (hId && wId) {
+      if (!personSpouses.has(hId)) personSpouses.set(hId, new Set());
+      personSpouses.get(hId)!.add(wId);
+      if (!personSpouses.has(wId)) personSpouses.set(wId, new Set());
+      personSpouses.get(wId)!.add(hId);
+    }
+    const cIds = [
+      ...(Array.isArray(fam.children) ? fam.children : []),
+      ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
+    ].map(c => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean) as string[];
+
+    for (const cId of cIds) {
+      if (hId) {
+        if (!parentToChildren.has(hId)) parentToChildren.set(hId, new Set());
+        parentToChildren.get(hId)!.add(cId);
+      }
+      if (wId) {
+        if (!parentToChildren.has(wId)) parentToChildren.set(wId, new Set());
+        parentToChildren.get(wId)!.add(cId);
+      }
+      if (!childToParents.has(cId)) {
+        childToParents.set(cId, {
+          fatherId: hId || undefined,
+          motherId: wId || undefined,
+          father: hId && persons[hId] && !persons[hId].isDeleted ? persons[hId] : null,
+          mother: wId && persons[wId] && !persons[wId].isDeleted ? persons[wId] : null
+        });
+      }
+    }
+  }
+
+  // 2. Index persons
+  for (const p of pValues) {
+    if (!p || p.isDeleted) continue;
+    let par = childToParents.get(p.id);
+    if (!par) {
+      const f = p.fatherId && persons[p.fatherId] && !persons[p.fatherId].isDeleted ? persons[p.fatherId] : null;
+      const m = p.motherId && persons[p.motherId] && !persons[p.motherId].isDeleted ? persons[p.motherId] : null;
+      par = {
+        fatherId: f ? f.id : p.fatherId,
+        motherId: m ? m.id : p.motherId,
+        father: f,
+        mother: m
+      };
+      childToParents.set(p.id, par);
+    } else {
+      if (!par.fatherId && p.fatherId) {
+        par.fatherId = p.fatherId;
+        par.father = persons[p.fatherId] && !persons[p.fatherId].isDeleted ? persons[p.fatherId] : null;
+      }
+      if (!par.motherId && p.motherId) {
+        par.motherId = p.motherId;
+        par.mother = persons[p.motherId] && !persons[p.motherId].isDeleted ? persons[p.motherId] : null;
+      }
+    }
+
+    if (par.fatherId) {
+      if (!parentToChildren.has(par.fatherId)) parentToChildren.set(par.fatherId, new Set());
+      parentToChildren.get(par.fatherId)!.add(p.id);
+    }
+    if (par.motherId) {
+      if (!parentToChildren.has(par.motherId)) parentToChildren.set(par.motherId, new Set());
+      parentToChildren.get(par.motherId)!.add(p.id);
+    }
+    if (p.childrenIds) {
+      for (const c of p.childrenIds) {
+        if (!parentToChildren.has(p.id)) parentToChildren.set(p.id, new Set());
+        parentToChildren.get(p.id)!.add(c);
+      }
+    }
+    if (p.spouseIds) {
+      for (const s of p.spouseIds) {
+        if (!personSpouses.has(p.id)) personSpouses.set(p.id, new Set());
+        personSpouses.get(p.id)!.add(s);
+      }
+    }
+    if (p.spouseFamilyIds) {
+      for (const fId of p.spouseFamilyIds) {
+        const fam = families[fId];
+        if (fam) {
+          const partnerId = fam.husbandId === p.id ? fam.wifeId : fam.husbandId;
+          if (partnerId) {
+            if (!personSpouses.has(p.id)) personSpouses.set(p.id, new Set());
+            personSpouses.get(p.id)!.add(partnerId);
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Build siblings index (children sharing father, mother or explicit siblingIds)
+  for (const p of pValues) {
+    if (!p || p.isDeleted) continue;
+    const par = childToParents.get(p.id);
+    const sibSet = new Set<string>(p.siblingIds || []);
+    if (par?.fatherId && parentToChildren.has(par.fatherId)) {
+      for (const c of parentToChildren.get(par.fatherId)!) {
+        if (c !== p.id) sibSet.add(c);
+      }
+    }
+    if (par?.motherId && parentToChildren.has(par.motherId)) {
+      for (const c of parentToChildren.get(par.motherId)!) {
+        if (c !== p.id) sibSet.add(c);
+      }
+    }
+    personSiblings.set(p.id, sibSet);
+  }
+
+  // Convert Set maps to fast Array maps
+  const parentToChildrenArr = new Map<string, string[]>();
+  for (const [k, v] of parentToChildren.entries()) {
+    parentToChildrenArr.set(k, Array.from(v).filter(cId => Boolean(persons[cId] && !persons[cId].isDeleted)));
+  }
+  const personSpousesArr = new Map<string, string[]>();
+  for (const [k, v] of personSpouses.entries()) {
+    personSpousesArr.set(k, Array.from(v).filter(sId => Boolean(persons[sId] && !persons[sId].isDeleted)));
+  }
+  const personSiblingsArr = new Map<string, string[]>();
+  for (const [k, v] of personSiblings.entries()) {
+    personSiblingsArr.set(k, Array.from(v).filter(sId => Boolean(persons[sId] && !persons[sId].isDeleted)));
+  }
+
+  // 4. Memoized total descendants count
+  function countDescendants(pId: string, visited: Set<string>): number {
+    if (visited.has(pId)) return 0;
+    visited.add(pId);
+    if (totalDescendants.has(pId)) return totalDescendants.get(pId)!;
+    let count = 0;
+    const cIds = parentToChildrenArr.get(pId) || [];
+    for (const cId of cIds) {
+      if (!visited.has(cId) && persons[cId] && !persons[cId].isDeleted) {
+        count += 1 + countDescendants(cId, visited);
+      }
+    }
+    totalDescendants.set(pId, count);
+    return count;
+  }
+
+  for (const p of pValues) {
+    if (p && !p.isDeleted) {
+      countDescendants(p.id, new Set<string>());
+    }
+  }
+
+  const result: DatabaseRelationshipIndex = {
+    parentToChildren: parentToChildrenArr,
+    childToParents,
+    personSpouses: personSpousesArr,
+    personSiblings: personSiblingsArr,
+    totalDescendants
+  };
+
+  if (database && typeof database === 'object') {
+    try {
+      databaseIndexWeakMap.set(database, result);
+    } catch {}
+  }
+
+  return result;
+}
+
 /**
  * Robustly resolves direct parents (father and mother) of a person across all database formats:
  * - Direct fatherId / motherId properties
@@ -146,55 +337,16 @@ export function resolvePersonParents(
   mother: Person | null;
 } {
   if (!p || !database?.persons) return { father: null, mother: null };
+  const idx = getRelationshipIndex(database);
+  const found = idx.childToParents.get(p.id);
+  if (found) return found;
 
-  let fId = p.fatherId;
-  let mId = p.motherId;
-
-  // 1. Check parentFamilyId if defined
-  if (p.parentFamilyId && database.families?.[p.parentFamilyId]) {
-    const fam = database.families[p.parentFamilyId];
-    if (!fId && fam.husbandId) fId = fam.husbandId;
-    if (!mId && fam.wifeId) mId = fam.wifeId;
-  }
-
-  // 2. If still missing father or mother, check any family in database.families where p is in children or childrenIds
-  if ((!fId || !mId) && database.families) {
-    const familiesList = Object.values(database.families);
-    for (const fam of familiesList) {
-      if (!fam) continue;
-      const isChild =
-        (Array.isArray(fam.children) && fam.children.some((c: any) => (c?.personId || c?.id) === p.id)) ||
-        (Array.isArray(fam.childrenIds) && fam.childrenIds.includes(p.id));
-      if (isChild) {
-        if (!fId && fam.husbandId) fId = fam.husbandId;
-        if (!mId && fam.wifeId) mId = fam.wifeId;
-        if (fId && mId) break;
-      }
-    }
-  }
-
-  // 3. Fallback: check if any person has p in childrenIds
-  if ((!fId || !mId) && database.persons) {
-    for (const cand of Object.values(database.persons)) {
-      if (!cand || cand.id === p.id) continue;
-      if (cand.childrenIds && cand.childrenIds.includes(p.id)) {
-        if (!fId && (cand.gender === 'male' || cand.gender === 'M')) {
-          fId = cand.id;
-        } else if (!mId && (cand.gender === 'female' || cand.gender === 'F')) {
-          mId = cand.id;
-        }
-      }
-      if (fId && mId) break;
-    }
-  }
-
-  // 4. Validate existence in database.persons
-  const father = fId && database.persons[fId] && !database.persons[fId].isDeleted ? database.persons[fId] : null;
-  const mother = mId && database.persons[mId] && !database.persons[mId].isDeleted ? database.persons[mId] : null;
+  const father = p.fatherId && database.persons[p.fatherId] && !database.persons[p.fatherId].isDeleted ? database.persons[p.fatherId] : null;
+  const mother = p.motherId && database.persons[p.motherId] && !database.persons[p.motherId].isDeleted ? database.persons[p.motherId] : null;
 
   return {
-    fatherId: father ? father.id : undefined,
-    motherId: mother ? mother.id : undefined,
+    fatherId: father ? father.id : p.fatherId,
+    motherId: mother ? mother.id : p.motherId,
     father,
     mother
   };
@@ -212,43 +364,8 @@ export function resolvePersonChildrenIds(
   database: { persons?: Record<string, Person>; families?: Record<string, any> }
 ): string[] {
   if (!pId || !database?.persons?.[pId]) return [];
-  const p = database.persons[pId];
-  const childIds = new Set<string>();
-
-  if (p.childrenIds) {
-    p.childrenIds.forEach(c => childIds.add(c));
-  }
-
-  if (database.families) {
-    Object.values(database.families).forEach(fam => {
-      if (!fam) return;
-      if (fam.husbandId === pId || fam.wifeId === pId) {
-        if (Array.isArray(fam.children)) {
-          fam.children.forEach((c: any) => {
-            const cId = typeof c === 'string' ? c : (c?.personId || c?.id);
-            if (cId) childIds.add(cId);
-          });
-        }
-        if (Array.isArray(fam.childrenIds)) {
-          fam.childrenIds.forEach((cId: string) => childIds.add(cId));
-        }
-      }
-    });
-  }
-
-  Object.values(database.persons).forEach(cand => {
-    if (!cand || cand.id === pId || cand.isDeleted) return;
-    if (cand.fatherId === pId || cand.motherId === pId) {
-      childIds.add(cand.id);
-      return;
-    }
-    const { fatherId, motherId } = resolvePersonParents(cand, database);
-    if (fatherId === pId || motherId === pId) {
-      childIds.add(cand.id);
-    }
-  });
-
-  return Array.from(childIds).filter(cId => Boolean(database.persons[cId] && !database.persons[cId].isDeleted));
+  const idx = getRelationshipIndex(database);
+  return idx.parentToChildren.get(pId) || [];
 }
 
 /**
@@ -262,43 +379,8 @@ export function resolvePersonSpouseIds(
   database: { persons?: Record<string, Person>; families?: Record<string, any> }
 ): string[] {
   if (!pId || !database?.persons?.[pId]) return [];
-  const p = database.persons[pId];
-  const spouseIds = new Set<string>();
-
-  if (p.spouseIds) {
-    p.spouseIds.forEach(s => spouseIds.add(s));
-  }
-
-  if (p.spouseFamilyIds && database.families) {
-    p.spouseFamilyIds.forEach(fId => {
-      const fam = database.families[fId];
-      if (fam) {
-        const partnerId = fam.husbandId === p.id ? fam.wifeId : fam.husbandId;
-        if (partnerId) spouseIds.add(partnerId);
-      }
-    });
-  }
-
-  if (database.families) {
-    Object.values(database.families).forEach(fam => {
-      if (!fam) return;
-      if (fam.husbandId === pId && fam.wifeId) spouseIds.add(fam.wifeId);
-      if (fam.wifeId === pId && fam.husbandId) spouseIds.add(fam.husbandId);
-    });
-  }
-
-  // Co-parents: persons sharing a child with pId in the database
-  Object.values(database.persons).forEach(cand => {
-    if (!cand || cand.isDeleted) return;
-    const { fatherId, motherId } = resolvePersonParents(cand, database);
-    if (fatherId === pId && motherId && motherId !== pId) {
-      spouseIds.add(motherId);
-    } else if (motherId === pId && fatherId && fatherId !== pId) {
-      spouseIds.add(fatherId);
-    }
-  });
-
-  return Array.from(spouseIds).filter(sId => Boolean(database.persons[sId] && !database.persons[sId].isDeleted));
+  const idx = getRelationshipIndex(database);
+  return idx.personSpouses.get(pId) || [];
 }
 
 /**
@@ -306,24 +388,8 @@ export function resolvePersonSpouseIds(
  */
 export function getTotalDescendantsCount(personId: string, database: GenealogyDatabase): number {
   if (!personId || !database?.persons?.[personId]) return 0;
-  const visited = new Set<string>([personId]);
-  const queue: string[] = [personId];
-  let count = 0;
-
-  while (queue.length > 0) {
-    const curId = queue.shift()!;
-    const childIds = resolvePersonChildrenIds(curId, database);
-
-    childIds.forEach(cId => {
-      if (!visited.has(cId) && database.persons[cId]) {
-        visited.add(cId);
-        count++;
-        queue.push(cId);
-      }
-    });
-  }
-
-  return count;
+  const idx = getRelationshipIndex(database);
+  return idx.totalDescendants.get(personId) || 0;
 }
 
 /**
@@ -501,6 +567,8 @@ export function calculateClassicFamilyTreeLayout(
     return { nodes: [], links: [], width: 1000, height: 800 };
   }
 
+  const relIndex = getRelationshipIndex(database);
+
   // 0. Build complete direct backbone: ancestors and direct descendants of root person
   const directAncestors = new Set<string>();
   const collectAncestors = (pId: string) => {
@@ -592,7 +660,10 @@ export function calculateClassicFamilyTreeLayout(
 
   // Collect all persons that must be hidden because their parent or ancestor has collapsed children
   const collapsedDescendantIds = new Set<string>();
-  const collapsedChildrenParentsList = Object.keys(database.persons).filter(pId => isPersonChildrenCollapsed(pId));
+  const shouldCheckCollapsedChildren = collapsedChildren.size > 0 || !showDescendants;
+  const collapsedChildrenParentsList = shouldCheckCollapsedChildren
+    ? Object.keys(database.persons).filter(pId => isPersonChildrenCollapsed(pId))
+    : [];
   
   if (collapsedChildrenParentsList.length > 0) {
     const q: string[] = [];
@@ -671,14 +742,8 @@ export function calculateClassicFamilyTreeLayout(
 
     // Also include spouses of collapsed ancestors if they are only in the tree through the collapsed branch
     const isUncollapsedParentOfSomeone = (sId: string): boolean => {
-      return Object.values(database.persons).some(cand => {
-        if (collapsedAncestorIds.has(cand.id)) return false;
-        const fId = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
-        const mId = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-        if (fId === sId) return !collapsedParents.has(cand.id) && !collapsedParents.has(`pat_${cand.id}`);
-        if (mId === sId) return !collapsedParents.has(cand.id) && !collapsedParents.has(`mat_${cand.id}`);
-        return false;
-      });
+      const cIds = relIndex.parentToChildren.get(sId) || [];
+      return cIds.some(candId => !collapsedParents.has(candId) && !collapsedParents.has(`pat_${candId}`) && !collapsedParents.has(`mat_${candId}`));
     };
 
     collapsedAncestorIds.forEach(aId => {
@@ -867,56 +932,12 @@ export function calculateClassicFamilyTreeLayout(
 
     // 4. Siblings (at same generation) - expandable when showSiblings is active
     if (showSiblings && !directAncestorsOnly && !collapsedSiblings.has(id) && !isPersonACollapsedSibling(id)) {
-      let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-      let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-
-      if (!fId && !mId && database.families) {
-        const matchingFam = Object.values(database.families).find(fam => 
-          fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
-        );
-        if (matchingFam) {
-          fId = matchingFam.husbandId;
-          mId = matchingFam.wifeId;
+      const sibIds = relIndex.personSiblings.get(id) || [];
+      for (const sibId of sibIds) {
+        if (!isPersonACollapsedSibling(sibId)) {
+          enqueuePerson(sibId, gen);
         }
       }
-
-      if (p.siblingIds) {
-        p.siblingIds.forEach(sId => {
-          if (!isPersonACollapsedSibling(sId)) {
-            enqueuePerson(sId, gen);
-          }
-        });
-      }
-
-      if (database.families) {
-        Object.values(database.families).forEach((fam) => {
-          const isChild = (fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)) ||
-                          (Array.isArray(fam.childrenIds) && fam.childrenIds.includes(p.id));
-          if (isChild) {
-            const rawChildren = [
-              ...(Array.isArray(fam.children) ? fam.children : []),
-              ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
-            ].map((c: any) => typeof c === 'string' ? c : c?.personId || c?.id).filter(Boolean);
-
-            rawChildren.forEach((sibId) => {
-              if (sibId !== p.id && !isPersonACollapsedSibling(sibId)) {
-                enqueuePerson(sibId, gen);
-              }
-            });
-          }
-        });
-      }
-
-      Object.values(database.persons).forEach(cand => {
-        if (cand.id !== p.id && !personGen.has(cand.id)) {
-          const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
-          const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-          const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id)) || (p.siblingIds && p.siblingIds.includes(cand.id)) || (p.parentFamilyId && cand.parentFamilyId && p.parentFamilyId === cand.parentFamilyId);
-          if (isSibling && !isPersonACollapsedSibling(cand.id)) {
-            enqueuePerson(cand.id, gen);
-          }
-        }
-      });
     }
   }
 
@@ -1016,7 +1037,15 @@ export function calculateClassicFamilyTreeLayout(
           });
         }
         // Also check if any children have both p and sp as parents, or belong to this family
-        Object.values(database.persons).forEach(candChild => {
+        const pChildren = relIndex.parentToChildren.get(p.id) || [];
+        const spChildren = relIndex.parentToChildren.get(sp.id) || [];
+        const candidateChildIds = new Set<string>([...pChildren, ...spChildren]);
+        if (matchedFam?.childrenIds) {
+          matchedFam.childrenIds.forEach((cId: string) => candidateChildIds.add(cId));
+        }
+
+        candidateChildIds.forEach(candChildId => {
+          const candChild = database.persons[candChildId];
           if (!candChild || candChild.id === p.id || candChild.id === sp.id || candChild.isDeleted) return;
           const { fatherId, motherId } = resolvePersonParents(candChild, database);
 
@@ -1154,60 +1183,14 @@ export function calculateClassicFamilyTreeLayout(
 
   // Helpers for sibling detection and accurate person coordinate calculations
   const getParentsOfPerson = (pId: string) => {
-    const p = database.persons[pId];
-    if (!p) return { fatherId: undefined, motherId: undefined };
-    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-    if ((!fId || !mId) && database.families) {
-      for (const fam of Object.values(database.families)) {
-        const rawChildren = [
-          ...(Array.isArray(fam.children) ? fam.children : []),
-          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
-        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
-        if (rawChildren.includes(p.id) || (p.parentFamilyId && fam.id === p.parentFamilyId)) {
-          if (!fId && fam.husbandId) fId = fam.husbandId;
-          if (!mId && fam.wifeId) mId = fam.wifeId;
-        }
-      }
-    }
-    if ((!fId || !mId) && database.persons) {
-      for (const parentCandidate of Object.values(database.persons)) {
-        const cIds = parentCandidate.childrenIds || [];
-        if (cIds.includes(p.id)) {
-          if (parentCandidate.gender === 'female' || parentCandidate.gender === 'F') {
-            if (!mId) mId = parentCandidate.id;
-          } else {
-            if (!fId) fId = parentCandidate.id;
-          }
-        }
-      }
-    }
-    return { fatherId: fId, motherId: mId };
+    const par = relIndex.childToParents.get(pId);
+    return { fatherId: par?.fatherId, motherId: par?.motherId };
   };
 
   const areSiblings = (pId1: string, pId2: string): boolean => {
     if (!pId1 || !pId2 || pId1 === pId2) return false;
-    const p1 = database.persons[pId1];
-    const p2 = database.persons[pId2];
-    if (!p1 || !p2) return false;
-    if (p1.siblingIds?.includes(pId2) || p2.siblingIds?.includes(pId1)) return true;
-    if (p1.parentFamilyId && p2.parentFamilyId && p1.parentFamilyId === p2.parentFamilyId) return true;
-    const par1 = getParentsOfPerson(pId1);
-    const par2 = getParentsOfPerson(pId2);
-    if ((par1.fatherId && par1.fatherId === par2.fatherId) ||
-        (par1.motherId && par1.motherId === par2.motherId)) {
-      return true;
-    }
-    if (database.families) {
-      for (const fam of Object.values(database.families)) {
-        const rawChildren = [
-          ...(Array.isArray(fam.children) ? fam.children : []),
-          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
-        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
-        if (rawChildren.includes(pId1) && rawChildren.includes(pId2)) return true;
-      }
-    }
-    return false;
+    const sibs = relIndex.personSiblings.get(pId1);
+    return Boolean(sibs && sibs.includes(pId2));
   };
 
   const unitsAreSiblings = (u1: Unit, u2: Unit): boolean => {
@@ -1654,26 +1637,9 @@ export function calculateClassicFamilyTreeLayout(
       !showParents ||
       (hasParents && !areParentsVisible);
 
-    let siblingCount = 0;
-    let areSiblingsVisible = false;
-    const sibs = Object.values(database.persons).filter(cand => 
-      cand.id !== p.id && (
-        (fId && (cand.fatherId === fId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.husbandId === fId))) ||
-        (mId && (cand.motherId === mId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.wifeId === mId))) ||
-        (p.siblingIds && p.siblingIds.includes(cand.id)) ||
-        (cand.siblingIds && cand.siblingIds.includes(p.id)) ||
-        (p.parentFamilyId && cand.parentFamilyId && p.parentFamilyId === cand.parentFamilyId) ||
-        (database.families && Object.values(database.families).some(fam => {
-          const rawChildren = [
-            ...(Array.isArray(fam.children) ? fam.children : []),
-            ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
-          ].map((c: any) => typeof c === 'string' ? c : c?.personId || c?.id).filter(Boolean);
-          return rawChildren.includes(p.id) && rawChildren.includes(cand.id);
-        }))
-      )
-    );
-    siblingCount = sibs.length;
-    areSiblingsVisible = sibs.some(s => personGen.has(s.id));
+    const sibIds = relIndex.personSiblings.get(p.id) || [];
+    const siblingCount = sibIds.length;
+    const areSiblingsVisible = sibIds.some(sId => personGen.has(sId));
     const hasSiblings = siblingCount > 0;
     const isSiblingsCollapsed = collapsedSiblings.has(p.id) || !showSiblings || (hasSiblings && !areSiblingsVisible) || isPersonACollapsedSibling(p.id);
 
@@ -1683,7 +1649,7 @@ export function calculateClassicFamilyTreeLayout(
     const areChildrenVisible = validChildren.some(cId => personGen.has(cId));
     const isChildrenCollapsed = isPersonChildrenCollapsed(p.id) || !showDescendants || (hasChildren && !areChildrenVisible);
 
-    const descendantsCount = getTotalDescendantsCount(p.id, database);
+    const descendantsCount = relIndex.totalDescendants.get(p.id) || 0;
     const isDirectAncestor = directAncestors.has(p.id) || p.id === root.id;
 
     return {
@@ -2253,6 +2219,8 @@ export function calculateHorizontalFamilyTreeLayout(
     root = allPersons[0];
   }
 
+  const relIndex = getRelationshipIndex(database);
+
   // 1. Collect direct backbone (ancestors & descendants of root)
   const directAncestors = new Set<string>();
   const collectAncestors = (pId: string) => {
@@ -2419,14 +2387,8 @@ export function calculateHorizontalFamilyTreeLayout(
 
     // Also include spouses of collapsed ancestors if they are only in the tree through the collapsed branch
     const isUncollapsedParentOfSomeone = (sId: string): boolean => {
-      return Object.values(database.persons).some(cand => {
-        if (collapsedAncestorIds.has(cand.id)) return false;
-        const fId = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
-        const mId = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-        if (fId === sId) return !collapsedParents.has(cand.id) && !collapsedParents.has(`pat_${cand.id}`);
-        if (mId === sId) return !collapsedParents.has(cand.id) && !collapsedParents.has(`mat_${cand.id}`);
-        return false;
-      });
+      const cIds = relIndex.parentToChildren.get(sId) || [];
+      return cIds.some(candId => !collapsedParents.has(candId) && !collapsedParents.has(`pat_${candId}`) && !collapsedParents.has(`mat_${candId}`));
     };
 
     collapsedAncestorIds.forEach(aId => {
@@ -2590,50 +2552,10 @@ export function calculateHorizontalFamilyTreeLayout(
 
     // Siblings (Gen)
     if (showSiblings && !directAncestorsOnly && !collapsedSiblings.has(id) && !isPersonACollapsedSibling(id)) {
-      let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-      let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-      if (!fId && !mId && database.families) {
-        const matchingFam = Object.values(database.families).find(fam =>
-          fam.children && fam.children.some(c => (c.personId || (c as any).id) === p.id)
-        );
-        if (matchingFam) {
-          fId = matchingFam.husbandId;
-          mId = matchingFam.wifeId;
-        }
+      const sibIds = relIndex.personSiblings.get(id) || [];
+      for (const sibId of sibIds) {
+        if (!isPersonACollapsedSibling(sibId)) enqueuePerson(sibId, gen);
       }
-      if (p.siblingIds) {
-        p.siblingIds.forEach(sId => {
-          if (!isPersonACollapsedSibling(sId)) enqueuePerson(sId, gen);
-        });
-      }
-      if (database.families) {
-        Object.values(database.families).forEach((fam) => {
-          const isChild = (fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)) ||
-                          (Array.isArray(fam.childrenIds) && fam.childrenIds.includes(p.id));
-          if (isChild) {
-            const rawChildren = [
-              ...(Array.isArray(fam.children) ? fam.children : []),
-              ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
-            ].map((c: any) => typeof c === 'string' ? c : c?.personId || c?.id).filter(Boolean);
-
-            rawChildren.forEach((sibId) => {
-              if (sibId !== p.id && !isPersonACollapsedSibling(sibId)) {
-                enqueuePerson(sibId, gen);
-              }
-            });
-          }
-        });
-      }
-      Object.values(database.persons).forEach(cand => {
-        if (cand.id !== p.id && !personGen.has(cand.id)) {
-          const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
-          const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-          const isSibling = (fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(p.id)) || (p.siblingIds && p.siblingIds.includes(cand.id)) || (p.parentFamilyId && cand.parentFamilyId && p.parentFamilyId === cand.parentFamilyId);
-          if (isSibling && !isPersonACollapsedSibling(cand.id)) {
-            enqueuePerson(cand.id, gen);
-          }
-        }
-      });
     }
   }
 
@@ -2727,7 +2649,15 @@ export function calculateHorizontalFamilyTreeLayout(
             if (cId) unionChildren.add(cId);
           });
         }
-        Object.values(database.persons).forEach(candChild => {
+        const pChildren = relIndex.parentToChildren.get(p.id) || [];
+        const spChildren = relIndex.parentToChildren.get(sp.id) || [];
+        const candidateChildIds = new Set<string>([...pChildren, ...spChildren]);
+        if (matchedFam?.childrenIds) {
+          matchedFam.childrenIds.forEach((cId: string) => candidateChildIds.add(cId));
+        }
+
+        candidateChildIds.forEach(candChildId => {
+          const candChild = database.persons[candChildId];
           if (!candChild || candChild.id === p.id || candChild.id === sp.id || candChild.isDeleted) return;
           const { fatherId, motherId } = resolvePersonParents(candChild, database);
 
@@ -2853,60 +2783,14 @@ export function calculateHorizontalFamilyTreeLayout(
 
   // Helpers for sibling detection
   const getParentsOfPerson = (pId: string) => {
-    const p = database.persons[pId];
-    if (!p) return { fatherId: undefined, motherId: undefined };
-    let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-    let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-    if ((!fId || !mId) && database.families) {
-      for (const fam of Object.values(database.families)) {
-        const rawChildren = [
-          ...(Array.isArray(fam.children) ? fam.children : []),
-          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
-        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
-        if (rawChildren.includes(p.id) || (p.parentFamilyId && fam.id === p.parentFamilyId)) {
-          if (!fId && fam.husbandId) fId = fam.husbandId;
-          if (!mId && fam.wifeId) mId = fam.wifeId;
-        }
-      }
-    }
-    if ((!fId || !mId) && database.persons) {
-      for (const parentCandidate of Object.values(database.persons)) {
-        const cIds = parentCandidate.childrenIds || [];
-        if (cIds.includes(p.id)) {
-          if (parentCandidate.gender === 'female' || parentCandidate.gender === 'F') {
-            if (!mId) mId = parentCandidate.id;
-          } else {
-            if (!fId) fId = parentCandidate.id;
-          }
-        }
-      }
-    }
-    return { fatherId: fId, motherId: mId };
+    const par = relIndex.childToParents.get(pId);
+    return { fatherId: par?.fatherId, motherId: par?.motherId };
   };
 
   const areSiblings = (pId1: string, pId2: string): boolean => {
     if (!pId1 || !pId2 || pId1 === pId2) return false;
-    const p1 = database.persons[pId1];
-    const p2 = database.persons[pId2];
-    if (!p1 || !p2) return false;
-    if (p1.siblingIds?.includes(pId2) || p2.siblingIds?.includes(pId1)) return true;
-    if (p1.parentFamilyId && p2.parentFamilyId && p1.parentFamilyId === p2.parentFamilyId) return true;
-    const par1 = getParentsOfPerson(pId1);
-    const par2 = getParentsOfPerson(pId2);
-    if ((par1.fatherId && par1.fatherId === par2.fatherId) ||
-        (par1.motherId && par1.motherId === par2.motherId)) {
-      return true;
-    }
-    if (database.families) {
-      for (const fam of Object.values(database.families)) {
-        const rawChildren = [
-          ...(Array.isArray(fam.children) ? fam.children : []),
-          ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
-        ].map((c: any) => typeof c === 'string' ? c : (c?.personId || c?.id)).filter(Boolean);
-        if (rawChildren.includes(pId1) && rawChildren.includes(pId2)) return true;
-      }
-    }
-    return false;
+    const sibs = relIndex.personSiblings.get(pId1);
+    return Boolean(sibs && sibs.includes(pId2));
   };
 
   const unitsAreSiblings = (u1: Unit, u2: Unit): boolean => {
@@ -3284,26 +3168,9 @@ export function calculateHorizontalFamilyTreeLayout(
       !showParents ||
       (hasParents && !areParentsVisible);
 
-    let siblingCount = 0;
-    let areSiblingsVisible = false;
-    const sibs = Object.values(database.persons).filter(cand =>
-      cand.id !== p.id && (
-        (fId && (cand.fatherId === fId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.husbandId === fId))) ||
-        (mId && (cand.motherId === mId || (cand.parentFamilyId && database.families[cand.parentFamilyId]?.wifeId === mId))) ||
-        (p.siblingIds && p.siblingIds.includes(cand.id)) ||
-        (cand.siblingIds && cand.siblingIds.includes(p.id)) ||
-        (p.parentFamilyId && cand.parentFamilyId && p.parentFamilyId === cand.parentFamilyId) ||
-        (database.families && Object.values(database.families).some(fam => {
-          const rawChildren = [
-            ...(Array.isArray(fam.children) ? fam.children : []),
-            ...(Array.isArray(fam.childrenIds) ? fam.childrenIds : [])
-          ].map((c: any) => typeof c === 'string' ? c : c?.personId || c?.id).filter(Boolean);
-          return rawChildren.includes(p.id) && rawChildren.includes(cand.id);
-        }))
-      )
-    );
-    siblingCount = sibs.length;
-    areSiblingsVisible = sibs.some(s => personGen.has(s.id));
+    const sibIds = relIndex.personSiblings.get(p.id) || [];
+    const siblingCount = sibIds.length;
+    const areSiblingsVisible = sibIds.some(sId => personGen.has(sId));
     const hasSiblings = siblingCount > 0;
     const isSiblingsCollapsed = collapsedSiblings.has(p.id) || !showSiblings || (hasSiblings && !areSiblingsVisible) || isPersonACollapsedSibling(p.id);
 
@@ -3313,7 +3180,7 @@ export function calculateHorizontalFamilyTreeLayout(
     const areChildrenVisible = validChildren.some(cId => personGen.has(cId));
     const isChildrenCollapsed = isPersonChildrenCollapsed(p.id) || !showDescendants || (hasChildren && !areChildrenVisible);
 
-    const descendantsCount = getTotalDescendantsCount(p.id, database);
+    const descendantsCount = relIndex.totalDescendants.get(p.id) || 0;
     const isDirectAncestor = directAncestors.has(p.id) || p.id === root.id;
 
     return {

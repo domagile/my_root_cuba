@@ -77,7 +77,8 @@ import {
   getLineageColorMap,
   getPersonClanColor,
   getPersonRodName,
-  resolvePersonParents
+  resolvePersonParents,
+  getRelationshipIndex
 } from '../../utils/treeLayout';
 import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId, calculateKinship } from '../../utils/relationship';
 import { getSavedUserTreeState, saveUserTreeState } from '../../../utils/userTreeState';
@@ -214,10 +215,23 @@ export const TreeView: React.FC<TreeViewProps> = ({
     };
   }, []);
 
-  const duplicatePairs = useMemo(() => {
+  const [duplicatePairs, setDuplicatePairs] = useState<DuplicatePair[]>([]);
+
+  useEffect(() => {
     const pList = Object.values(database.persons || {}) as Person[];
-    if (pList.length < 2) return [];
-    return detectDuplicatePersons(pList, true);
+    if (pList.length < 2) {
+      setDuplicatePairs([]);
+      return;
+    }
+    // Defer duplicate scanning off the critical render path
+    const timer = setTimeout(() => {
+      try {
+        const dups = detectDuplicatePersons(pList, true);
+        setDuplicatePairs(dups);
+      } catch {}
+    }, 120);
+
+    return () => clearTimeout(timer);
   }, [database.persons, ignoredRevision]);
 
   const duplicatesByPersonId = useMemo(() => {
@@ -256,6 +270,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return { x: 0, y: 0 };
   });
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [isWheeling, setIsWheeling] = useState<boolean>(false);
+  const scaleRef = useRef<number>(scale);
+  scaleRef.current = scale;
+  const panRef = useRef<{ x: number; y: number }>(pan);
+  panRef.current = pan;
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [showMinimap, setShowMinimap] = useState<boolean>(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 640) {
@@ -348,6 +367,26 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [collapsedSiblings, setCollapsedSiblings] = useState<Set<string>>(new Set());
   const [collapsedChildren, setCollapsedChildren] = useState<Set<string>>(new Set());
   const [hoveredPersonId, setHoveredPersonId] = useState<string | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
+
+  const handleCardMouseEnter = useCallback((pId: string) => {
+    if (hoverTimerRef.current !== null) {
+      clearTimeout(hoverTimerRef.current);
+    }
+    hoverTimerRef.current = window.setTimeout(() => {
+      setHoveredPersonId(pId);
+      hoverTimerRef.current = null;
+    }, 50);
+  }, []);
+
+  const handleCardMouseLeave = useCallback(() => {
+    if (hoverTimerRef.current !== null) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHoveredPersonId(null);
+  }, []);
+
   const [reportPersonId, setReportPersonId] = useState<string | null>(null);
   const [selectiveMenuPersonId, setSelectiveMenuPersonId] = useState<string | null>(null);
   const selectiveMenuRef = useRef<HTMLDivElement | null>(null);
@@ -451,8 +490,16 @@ export const TreeView: React.FC<TreeViewProps> = ({
     enableLineBridges
   ]);
 
+  const nodeByPersonId = useMemo(() => {
+    const map = new Map<string, typeof layout.nodes[0]>();
+    for (const n of layout.nodes) {
+      map.set(n.person.id, n);
+    }
+    return map;
+  }, [layout.nodes]);
+
   const setAnchorForPerson = useCallback((personId: string) => {
-    const node = layout.nodes.find((n) => n.person.id === personId);
+    const node = nodeByPersonId.get(personId);
     if (node) {
       anchorRef.current = {
         personId,
@@ -460,7 +507,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
         screenY: node.y * scale + pan.y
       };
     }
-  }, [layout.nodes, scale, pan.x, pan.y]);
+  }, [nodeByPersonId, scale, pan.x, pan.y]);
 
   // Pre-calculate backbone line (ancestors, descendants) and spouses to cleanly handle branch collapses
   const { directBackboneSet, backboneSpouseSet } = useMemo(() => {
@@ -468,62 +515,31 @@ export const TreeView: React.FC<TreeViewProps> = ({
     const root = database.persons[activePersonId] || Object.values(database.persons)[0];
     if (!root) return { directBackboneSet: directSet, backboneSpouseSet: new Set<string>() };
 
+    const relIdx = getRelationshipIndex(database);
+
     const collectAncestors = (pId: string) => {
       if (!pId || directSet.has(pId)) return;
       directSet.add(pId);
-      const p = database.persons[pId];
-      if (!p) return;
-      let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-      let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-      if (!fId && !mId && database.families) {
-        const matchingFam = Object.values(database.families).find((fam) =>
-          fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
-        );
-        if (matchingFam) {
-          fId = matchingFam.husbandId;
-          mId = matchingFam.wifeId;
-        }
-      }
-      if (fId) collectAncestors(fId);
-      if (mId) collectAncestors(mId);
+      const parents = relIdx.childToParents.get(pId);
+      if (parents?.fatherId) collectAncestors(parents.fatherId);
+      if (parents?.motherId) collectAncestors(parents.motherId);
     };
     collectAncestors(root.id);
 
     const collectDescendants = (pId: string) => {
       if (!pId) return;
       directSet.add(pId);
-      const p = database.persons[pId];
-      if (!p) return;
-      const cIds = new Set<string>();
-      if (p.childrenIds) p.childrenIds.forEach((c) => cIds.add(c));
-      if (p.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach((fId) => {
-          const fam = database.families[fId];
-          if (fam?.children) fam.children.forEach((c: any) => cIds.add(c.personId || c.id));
-        });
-      }
-      Object.values(database.persons).forEach((cand) => {
-        if (cand.fatherId === pId || cand.motherId === pId) cIds.add(cand.id);
-      });
-      cIds.forEach((cId) => {
+      const cIds = relIdx.parentToChildren.get(pId) || [];
+      for (const cId of cIds) {
         if (!directSet.has(cId)) collectDescendants(cId);
-      });
+      }
     };
     collectDescendants(root.id);
 
     const spouseSet = new Set<string>();
     directSet.forEach((pId) => {
-      const p = database.persons[pId];
-      if (p?.spouseIds) p.spouseIds.forEach((sId) => spouseSet.add(sId));
-      if (p?.spouseFamilyIds) {
-        p.spouseFamilyIds.forEach((fId) => {
-          const fam = database.families[fId];
-          if (fam) {
-            if (fam.husbandId && fam.husbandId !== pId) spouseSet.add(fam.husbandId);
-            if (fam.wifeId && fam.wifeId !== pId) spouseSet.add(fam.wifeId);
-          }
-        });
-      }
+      const sps = relIdx.personSpouses.get(pId) || [];
+      for (const sId of sps) spouseSet.add(sId);
     });
 
     return { directBackboneSet: directSet, backboneSpouseSet: spouseSet };
@@ -534,14 +550,31 @@ export const TreeView: React.FC<TreeViewProps> = ({
   // List of all clans represented in the database (or tree)
   const availableClans = useMemo(() => {
     const clansMap = new Map<string, { id: string; name: string; color: string; count: number }>();
+    const lowerToKey = new Map<string, string>();
+    const existingKeys: string[] = [];
+
     Object.values(database.persons || {}).forEach((p) => {
       const rawRod = getPersonRodName(p);
       if (!rawRod || rawRod === 'Рід') return;
       const canonical = normalizeUkrainianSurnameGender(rawRod) || rawRod;
-      const existingKey = Array.from(clansMap.keys()).find(
-        (k) => k.toLowerCase() === canonical.toLowerCase() || areSurnamesEquivalent(k, canonical)
-      );
-      const key = existingKey || canonical;
+      const low = canonical.toLowerCase();
+
+      let key = lowerToKey.get(low);
+      if (!key) {
+        for (let i = 0; i < existingKeys.length; i++) {
+          const k = existingKeys[i];
+          if (areSurnamesEquivalent(k, canonical)) {
+            key = k;
+            break;
+          }
+        }
+        if (!key) {
+          key = canonical;
+          existingKeys.push(key);
+        }
+        lowerToKey.set(low, key);
+      }
+
       const clanName = formatClanName(key);
       const color = getPersonClanColor(p, lineageColorMap);
 
@@ -591,77 +624,47 @@ export const TreeView: React.FC<TreeViewProps> = ({
     } else if (focusType === 'direct-ancestors' && targetPerson) {
       title = `Прямі предки (${getFullName(targetPerson)})`;
       color = '#f59e0b';
+      const relIdx = getRelationshipIndex(database);
       const collectAncestors = (pId: string) => {
         if (!pId || pIds.has(pId)) return;
         pIds.add(pId);
-        const p = database.persons[pId];
-        if (!p) return;
-        let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-        let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-        if (!fId && !mId && database.families) {
-          const matchingFam = Object.values(database.families).find((fam) =>
-            fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)
-          );
-          if (matchingFam) {
-            fId = matchingFam.husbandId;
-            mId = matchingFam.wifeId;
-          }
-        }
-        if (fId) collectAncestors(fId);
-        if (mId) collectAncestors(mId);
+        const parents = relIdx.childToParents.get(pId);
+        if (parents?.fatherId) collectAncestors(parents.fatherId);
+        if (parents?.motherId) collectAncestors(parents.motherId);
       };
       collectAncestors(targetPerson.id);
     } else if (focusType === 'direct-descendants' && targetPerson) {
       title = `Прямі нащадки (${getFullName(targetPerson)})`;
       color = '#10b981';
+      const relIdx = getRelationshipIndex(database);
       const collectDescendants = (pId: string) => {
         if (!pId || pIds.has(pId)) return;
         pIds.add(pId);
-        const p = database.persons[pId];
-        if (!p) return;
-        const childIds = new Set<string>();
-        if (p.childrenIds) p.childrenIds.forEach((c) => childIds.add(c));
-        if (p.spouseFamilyIds && database.families) {
-          p.spouseFamilyIds.forEach((fId) => {
-            const fam = database.families[fId];
-            if (fam?.children) fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
-          });
+        const childIds = relIdx.parentToChildren.get(pId) || [];
+        for (const cId of childIds) {
+          collectDescendants(cId);
         }
-        Object.values(database.persons).forEach((cand) => {
-          if (cand.fatherId === pId || cand.motherId === pId) childIds.add(cand.id);
-        });
-        childIds.forEach((cId) => collectDescendants(cId));
       };
       collectDescendants(targetPerson.id);
     } else if (focusType === 'patrilineal' && targetPerson) {
       title = `Чоловіча Y-лінія (${getFullName(targetPerson)})`;
       color = '#0284c7';
-      let curr: Person | undefined = targetPerson;
-      while (curr) {
-        pIds.add(curr.id);
-        let fId = curr.fatherId || (curr.parentFamilyId ? database.families[curr.parentFamilyId]?.husbandId : undefined);
-        if (!fId && database.families) {
-          const fam = Object.values(database.families).find((f) =>
-            f.children && f.children.some((c: any) => (c.personId || c.id) === curr!.id)
-          );
-          if (fam) fId = fam.husbandId;
-        }
-        curr = fId ? database.persons[fId] : undefined;
+      const relIdx = getRelationshipIndex(database);
+      let currId: string | undefined = targetPerson.id;
+      while (currId) {
+        pIds.add(currId);
+        const parents = relIdx.childToParents.get(currId);
+        currId = parents?.fatherId;
       }
     } else if (focusType === 'matrilineal' && targetPerson) {
       title = `Жіноча mt-лінія (${getFullName(targetPerson)})`;
       color = '#e11d48';
-      let curr: Person | undefined = targetPerson;
-      while (curr) {
-        pIds.add(curr.id);
-        let mId = curr.motherId || (curr.parentFamilyId ? database.families[curr.parentFamilyId]?.wifeId : undefined);
-        if (!mId && database.families) {
-          const fam = Object.values(database.families).find((f) =>
-            f.children && f.children.some((c: any) => (c.personId || c.id) === curr!.id)
-          );
-          if (fam) mId = fam.wifeId;
-        }
-        curr = mId ? database.persons[mId] : undefined;
+      const relIdx = getRelationshipIndex(database);
+      let currId: string | undefined = targetPerson.id;
+      while (currId) {
+        pIds.add(currId);
+        const parents = relIdx.childToParents.get(currId);
+        currId = parents?.motherId;
       }
     } else if (focusType === 'kinship-path') {
       const aId = focusKinshipPair?.aId || rootPersonId;
@@ -802,108 +805,63 @@ export const TreeView: React.FC<TreeViewProps> = ({
     });
   }, [setAnchorForPerson, getParentsOfPerson, directAncestorsOnly, generations]);
 
-  // Helper to fetch all siblings for a person
+  // Pre-indexed siblings map across the entire database: O(1) instant lookup for every card render
+  const siblingsMap = useMemo(() => {
+    const relIdx = getRelationshipIndex(database);
+    const map = new Map<string, Person[]>();
+    for (const p of Object.values(database.persons || {})) {
+      if (!p || p.isDeleted) continue;
+      const sIds = relIdx.personSiblings.get(p.id) || [];
+      map.set(
+        p.id,
+        sIds.map((id) => database.persons[id]).filter(Boolean) as Person[]
+      );
+    }
+    return map;
+  }, [database]);
+
+  // Helper to fetch all siblings for a person - O(1) instant lookup
   const getSiblingsOfPerson = useCallback((personId: string): Person[] => {
-    const p = database.persons[personId];
-    if (!p) return [];
-    const { father, mother } = resolvePersonParents(p, database);
-    const fId = father?.id;
-    const mId = mother?.id;
-
-    const siblingIds = new Set<string>();
-    if (p.siblingIds) {
-      p.siblingIds.forEach(id => {
-        if (id !== personId) siblingIds.add(id);
-      });
-    }
-    Object.values(database.persons).forEach((cand: any) => {
-      if (cand.id === personId) return;
-      const cF = cand.fatherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.husbandId : undefined);
-      const cM = cand.motherId || (cand.parentFamilyId ? database.families[cand.parentFamilyId]?.wifeId : undefined);
-      if ((fId && cF === fId) || (mId && cM === mId) || (cand.siblingIds && cand.siblingIds.includes(personId)) || (p.siblingIds && p.siblingIds.includes(cand.id))) {
-        siblingIds.add(cand.id);
-      }
-    });
-
-    if (database.families) {
-      Object.values(database.families).forEach((fam) => {
-        if (fam.children && fam.children.some((c: any) => (c.personId || c.id) === p.id)) {
-          fam.children.forEach((c: any) => {
-            const cId = c.personId || c.id;
-            if (cId && cId !== personId) siblingIds.add(cId);
-          });
-        }
-      });
-    }
-
-    return Array.from(siblingIds)
-      .map(id => database.persons[id])
-      .filter(Boolean) as Person[];
-  }, [database.persons, database.families]);
+    return siblingsMap.get(personId) || [];
+  }, [siblingsMap]);
 
   // Helper to find all direct ancestors of a person (parents, grandparents, etc.)
   const getDirectAncestorIds = useCallback((personId: string): Set<string> => {
     const ancestors = new Set<string>();
+    const relIdx = getRelationshipIndex(database);
     const queue: string[] = [personId];
     while (queue.length > 0) {
       const curId = queue.shift()!;
-      const p = database.persons[curId];
-      if (!p) continue;
-      let fId = p.fatherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.husbandId : undefined);
-      let mId = p.motherId || (p.parentFamilyId ? database.families[p.parentFamilyId]?.wifeId : undefined);
-      if (!fId && !mId && database.families) {
-        const matchingFam = Object.values(database.families).find(
-          f => f.children && f.children.some((c: any) => (c.personId || c.id) === p.id)
-        );
-        if (matchingFam) {
-          fId = matchingFam.husbandId;
-          mId = matchingFam.wifeId;
-        }
+      const parents = relIdx.childToParents.get(curId);
+      if (parents?.fatherId && !ancestors.has(parents.fatherId)) {
+        ancestors.add(parents.fatherId);
+        queue.push(parents.fatherId);
       }
-      if (fId && !ancestors.has(fId)) {
-        ancestors.add(fId);
-        queue.push(fId);
-      }
-      if (mId && !ancestors.has(mId)) {
-        ancestors.add(mId);
-        queue.push(mId);
+      if (parents?.motherId && !ancestors.has(parents.motherId)) {
+        ancestors.add(parents.motherId);
+        queue.push(parents.motherId);
       }
     }
     return ancestors;
-  }, [database.persons, database.families]);
+  }, [database]);
 
   // Helper to find all direct descendants of a person (children, grandchildren, etc.)
   const getDirectDescendantIds = useCallback((personId: string): Set<string> => {
     const descendants = new Set<string>();
+    const relIdx = getRelationshipIndex(database);
     const queue: string[] = [personId];
     while (queue.length > 0) {
       const curId = queue.shift()!;
-      const p = database.persons[curId];
-      if (!p) continue;
-      const childIds = new Set<string>();
-      if (p.childrenIds) p.childrenIds.forEach(c => childIds.add(c));
-      if (p.spouseFamilyIds && database.families) {
-        p.spouseFamilyIds.forEach(fId => {
-          const fam = database.families[fId];
-          if (fam?.children) {
-            fam.children.forEach((c: any) => childIds.add(c.personId || c.id));
-          }
-        });
-      }
-      Object.values(database.persons).forEach(cand => {
-        if (cand.fatherId === curId || cand.motherId === curId) {
-          childIds.add(cand.id);
-        }
-      });
-      childIds.forEach(cId => {
+      const childIds = relIdx.parentToChildren.get(curId) || [];
+      for (const cId of childIds) {
         if (!descendants.has(cId)) {
           descendants.add(cId);
           queue.push(cId);
         }
-      });
+      }
     }
     return descendants;
-  }, [database.persons, database.families]);
+  }, [database]);
 
   // Hover Bloodline Highlighting: computes direct ancestors & descendants with connections
   const bloodlineData = useMemo(() => {
@@ -1130,23 +1088,25 @@ export const TreeView: React.FC<TreeViewProps> = ({
   }, []);
 
   // High-Performance Quantized Viewport Culling Bounding Box
-  // Uses 550px safety margin and quantizes pan shifts to 180px steps
-  // This allows the GPU to translate the canvas smoothly at 60-120 FPS without React re-filtering nodes/links on every single pixel mouse move!
+  // Uses 600px safety margin and quantizes pan shifts (240px) and scale (0.15)
+  // This allows the GPU to translate/scale the canvas smoothly at 60-120 FPS without React re-filtering nodes/links on every single pixel/zoom tick!
   const visibleBounds = useMemo(() => {
-    const margin = 550;
-    const quantStep = 180;
+    const margin = 600;
+    const quantStep = 240;
     const qX = Math.round(pan.x / quantStep) * quantStep;
     const qY = Math.round(pan.y / quantStep) * quantStep;
+    const quantScaleStep = 0.15;
+    const qScale = Math.max(0.1, Math.round(scale / quantScaleStep) * quantScaleStep);
     return {
-      minX: (-qX - margin) / scale,
-      maxX: (-qX + containerDimensions.width + margin) / scale,
-      minY: (-qY - margin) / scale,
-      maxY: (-qY + containerDimensions.height + margin) / scale
+      minX: (-qX - margin) / qScale,
+      maxX: (-qX + containerDimensions.width + margin) / qScale,
+      minY: (-qY - margin) / qScale,
+      maxY: (-qY + containerDimensions.height + margin) / qScale
     };
   }, [
-    Math.round(pan.x / 180),
-    Math.round(pan.y / 180),
-    scale,
+    Math.round(pan.x / 240),
+    Math.round(pan.y / 240),
+    Math.round(scale / 0.15),
     containerDimensions.width,
     containerDimensions.height
   ]);
@@ -1608,17 +1568,42 @@ export const TreeView: React.FC<TreeViewProps> = ({
     midPoint: { x: number; y: number };
   } | null>(null);
 
-  // High-performance RAF throttle for mouse & touch pan to deliver constant 60/120 FPS without React jank
+  // High-performance RAF throttle for mouse, touch and wheel zoom/pan to deliver constant 60/120 FPS
   const panRafRef = useRef<number | null>(null);
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingScaleRef = useRef<number | null>(null);
+  const wheelResetTimeoutRef = useRef<number | null>(null);
 
   const schedulePanUpdate = useCallback((newPan: { x: number; y: number }) => {
     pendingPanRef.current = newPan;
     if (panRafRef.current === null) {
       panRafRef.current = requestAnimationFrame(() => {
         panRafRef.current = null;
+        if (pendingScaleRef.current !== null) {
+          setScale(pendingScaleRef.current);
+          pendingScaleRef.current = null;
+        }
         if (pendingPanRef.current) {
           setPan(pendingPanRef.current);
+          pendingPanRef.current = null;
+        }
+      });
+    }
+  }, []);
+
+  const scheduleTransformUpdate = useCallback((newScale: number, newPan: { x: number; y: number }) => {
+    pendingScaleRef.current = newScale;
+    pendingPanRef.current = newPan;
+    if (panRafRef.current === null) {
+      panRafRef.current = requestAnimationFrame(() => {
+        panRafRef.current = null;
+        if (pendingScaleRef.current !== null) {
+          setScale(pendingScaleRef.current);
+          pendingScaleRef.current = null;
+        }
+        if (pendingPanRef.current) {
+          setPan(pendingPanRef.current);
+          pendingPanRef.current = null;
         }
       });
     }
@@ -1629,8 +1614,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
       cancelAnimationFrame(panRafRef.current);
       panRafRef.current = null;
     }
+    if (pendingScaleRef.current !== null) {
+      setScale(pendingScaleRef.current);
+      pendingScaleRef.current = null;
+    }
     if (pendingPanRef.current) {
       setPan(pendingPanRef.current);
+      pendingPanRef.current = null;
     }
   }, []);
 
@@ -1638,6 +1628,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return () => {
       if (panRafRef.current !== null) {
         cancelAnimationFrame(panRafRef.current);
+      }
+      if (wheelResetTimeoutRef.current !== null) {
+        clearTimeout(wheelResetTimeoutRef.current);
       }
     };
   }, []);
@@ -1750,38 +1743,43 @@ export const TreeView: React.FC<TreeViewProps> = ({
     const onNativeWheel = (e: WheelEvent) => {
       e.preventDefault();
 
+      setIsWheeling(true);
+      if (wheelResetTimeoutRef.current !== null) {
+        clearTimeout(wheelResetTimeoutRef.current);
+      }
+      wheelResetTimeoutRef.current = window.setTimeout(() => {
+        setIsWheeling(false);
+        wheelResetTimeoutRef.current = null;
+      }, 150);
+
       const rect = container.getBoundingClientRect();
       const cursorX = e.clientX - rect.left;
       const cursorY = e.clientY - rect.top;
 
+      const currentScale = pendingScaleRef.current ?? scaleRef.current;
+      const currentPan = pendingPanRef.current ?? panRef.current;
+
       if (e.ctrlKey || e.metaKey) {
         // Ctrl + Mouse wheel or Trackpad Pinch
-        // Smooth exponential factor based on deltaY
         const zoomFactor = Math.exp(-e.deltaY * 0.0035);
+        const newScale = Math.min(Math.max(currentScale * zoomFactor, 0.2), 2.5);
 
-        setScale((prevScale) => {
-          const newScale = Math.min(Math.max(prevScale * zoomFactor, 0.2), 2.5);
+        // Anchor point under cursor
+        const worldX = (cursorX - currentPan.x) / currentScale;
+        const worldY = (cursorY - currentPan.y) / currentScale;
 
-          setPan((prevPan) => {
-            // Anchor point under cursor
-            const worldX = (cursorX - prevPan.x) / prevScale;
-            const worldY = (cursorY - prevPan.y) / prevScale;
+        const newPanX = cursorX - worldX * newScale;
+        const newPanY = cursorY - worldY * newScale;
 
-            const newPanX = cursorX - worldX * newScale;
-            const newPanY = cursorY - worldY * newScale;
-            return { x: Math.round(newPanX), y: Math.round(newPanY) };
-          });
-
-          return newScale;
-        });
+        scheduleTransformUpdate(newScale, { x: Math.round(newPanX), y: Math.round(newPanY) });
       } else {
         // Natural 2D scroll (trackpad or mouse wheel)
         const deltaX = e.shiftKey ? e.deltaY : e.deltaX;
         const deltaY = e.shiftKey ? 0 : e.deltaY;
-        setPan((prev) => ({
-          x: Math.round(prev.x - deltaX),
-          y: Math.round(prev.y - deltaY)
-        }));
+        schedulePanUpdate({
+          x: Math.round(currentPan.x - deltaX),
+          y: Math.round(currentPan.y - deltaY)
+        });
       }
     };
 
@@ -1789,7 +1787,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return () => {
       container.removeEventListener('wheel', onNativeWheel);
     };
-  }, []);
+  }, [scheduleTransformUpdate, schedulePanUpdate]);
 
   const activePerson = database.persons[activePersonId];
 
@@ -2957,10 +2955,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
         {/* World Transform Layer with Hardware GPU Acceleration */}
         <div
-          className={`absolute origin-top-left ${isDragging ? '' : 'transition-transform duration-75'}`}
+          className={`absolute origin-top-left ${isDragging || isWheeling ? '' : 'transition-transform duration-75'}`}
           style={{
             transform: `translate3d(${pan.x}px, ${pan.y}px, 0px) scale(${scale})`,
-            willChange: isDragging ? 'transform' : 'auto',
+            willChange: isDragging || isWheeling ? 'transform' : 'auto',
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden',
             transformOrigin: '0 0'
@@ -3262,8 +3260,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         ? `0 0 16px ${focusColor}`
                         : undefined
                     }}
-                    onMouseEnter={() => setHoveredPersonId(p.id)}
-                    onMouseLeave={() => setHoveredPersonId(null)}
+                    onMouseEnter={() => handleCardMouseEnter(p.id)}
+                    onMouseLeave={handleCardMouseLeave}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (e.metaKey || e.ctrlKey || e.button === 1) {
@@ -3369,8 +3367,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         ? `0 0 16px ${focusColor}60`
                         : undefined
                     }}
-                    onMouseEnter={() => setHoveredPersonId(p.id)}
-                    onMouseLeave={() => setHoveredPersonId(null)}
+                    onMouseEnter={() => handleCardMouseEnter(p.id)}
+                    onMouseLeave={handleCardMouseLeave}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (e.metaKey || e.ctrlKey || e.button === 1) {
@@ -3547,8 +3545,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     : (isNodeFocused && focusType !== 'none' ? `0 0 20px ${focusColor}40` : undefined),
                   transition: 'opacity 0.25s ease, filter 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease'
                 }}
-                onMouseEnter={() => setHoveredPersonId(p.id)}
-                onMouseLeave={() => setHoveredPersonId(null)}
+                onMouseEnter={() => handleCardMouseEnter(p.id)}
+                onMouseLeave={handleCardMouseLeave}
                 className={`group rounded-xl transition-all cursor-pointer flex flex-col justify-between ${isCompact ? 'p-2' : 'p-3'} select-none relative shadow-xl ${
                   isLightCanvas
                     ? 'bg-white text-neutral-900 shadow-md hover:shadow-lg'
@@ -4488,15 +4486,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     siblingSide = 'left';
                     sideDescription = 'осіб зліва (чоловіча лінія)';
                   } else {
-                    const sibNodes = layout.nodes.filter(
-                      (n) => n.id !== node.id && n.generation === node.generation && (
-                        (p.fatherId && n.person.fatherId === p.fatherId) ||
-                        (p.motherId && n.person.motherId === p.motherId) ||
-                        (p.siblingIds && p.siblingIds.includes(n.id)) ||
-                        (n.person.siblingIds && n.person.siblingIds.includes(p.id))
-                      )
-                    );
-                    if (sibNodes.some((sn) => sn.x < node.x)) {
+                    const hasLeftSibling = personSiblings.some((s) => {
+                      const sn = nodeByPersonId.get(s.id);
+                      return sn && sn.generation === node.generation && sn.x < node.x;
+                    });
+                    if (hasLeftSibling) {
                       siblingSide = 'left';
                       sideDescription = 'осіб зліва';
                     } else {

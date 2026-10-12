@@ -94,7 +94,7 @@ export function applyBridgeJumpsToLinks(
   }
 ): ProcessedTreeLinksResult {
   const enableBridges = options?.enableBridges ?? true;
-  if (!enableBridges || !links || links.length < 2) {
+  if (!enableBridges || !links || links.length < 2 || links.length > 250) {
     return {
       links: links || [],
       cutouts: [],
@@ -171,31 +171,29 @@ export function applyBridgeJumpsToLinks(
     // In vertical mode: Vertical drop/stem lines jump OVER horizontal bus/marriage lines
     verticalSegments.forEach((vSeg) => {
       horizontalSegments.forEach((hSeg) => {
+        const crossX = vSeg.x;
+        if (crossX <= hSeg.minX + TERMINAL_MARGIN || crossX >= hSeg.maxX - TERMINAL_MARGIN) return;
+
+        const crossY = hSeg.y;
+        if (crossY <= vSeg.minY + TERMINAL_MARGIN || crossY >= vSeg.maxY - TERMINAL_MARGIN) return;
+
         // Don't cross segments of same link or same family T-junction
         if (vSeg.linkId === hSeg.linkId) return;
         if (vSeg.familyId && hSeg.familyId && vSeg.familyId === hSeg.familyId) return;
 
-        const crossX = vSeg.x;
-        const crossY = hSeg.y;
+        const key = `${vSeg.linkId}:${vSeg.segIndex}`;
+        if (!crossingMap.has(key)) crossingMap.set(key, []);
+        crossingMap.get(key)!.push(crossY);
 
-        const isStrictlyInsideH = crossX > hSeg.minX + TERMINAL_MARGIN && crossX < hSeg.maxX - TERMINAL_MARGIN;
-        const isStrictlyInsideV = crossY > vSeg.minY + TERMINAL_MARGIN && crossY < vSeg.maxY - TERMINAL_MARGIN;
-
-        if (isStrictlyInsideH && isStrictlyInsideV) {
-          const key = `${vSeg.linkId}:${vSeg.segIndex}`;
-          if (!crossingMap.has(key)) crossingMap.set(key, []);
-          crossingMap.get(key)!.push(crossY);
-
-          const cutoutKey = `${Math.round(crossX)}_${Math.round(crossY)}`;
-          if (!seenCutouts.has(cutoutKey)) {
-            seenCutouts.add(cutoutKey);
-            cutouts.push({
-              id: cutoutKey,
-              x: crossX,
-              y: crossY,
-              r: defaultRadius - 1.5
-            });
-          }
+        const cutoutKey = `${Math.round(crossX)}_${Math.round(crossY)}`;
+        if (!seenCutouts.has(cutoutKey)) {
+          seenCutouts.add(cutoutKey);
+          cutouts.push({
+            id: cutoutKey,
+            x: crossX,
+            y: crossY,
+            r: defaultRadius - 1.5
+          });
         }
       });
     });
@@ -203,30 +201,28 @@ export function applyBridgeJumpsToLinks(
     // In horizontal mode: Horizontal drop/stem lines jump OVER vertical bus lines
     horizontalSegments.forEach((hSeg) => {
       verticalSegments.forEach((vSeg) => {
+        const crossX = vSeg.x;
+        if (crossX <= hSeg.minX + TERMINAL_MARGIN || crossX >= hSeg.maxX - TERMINAL_MARGIN) return;
+
+        const crossY = hSeg.y;
+        if (crossY <= vSeg.minY + TERMINAL_MARGIN || crossY >= vSeg.maxY - TERMINAL_MARGIN) return;
+
         if (hSeg.linkId === vSeg.linkId) return;
         if (hSeg.familyId && vSeg.familyId && hSeg.familyId === vSeg.familyId) return;
 
-        const crossX = vSeg.x;
-        const crossY = hSeg.y;
+        const key = `${hSeg.linkId}:${hSeg.segIndex}`;
+        if (!crossingMap.has(key)) crossingMap.set(key, []);
+        crossingMap.get(key)!.push(crossX);
 
-        const isStrictlyInsideH = crossX > hSeg.minX + TERMINAL_MARGIN && crossX < hSeg.maxX - TERMINAL_MARGIN;
-        const isStrictlyInsideV = crossY > vSeg.minY + TERMINAL_MARGIN && crossY < vSeg.maxY - TERMINAL_MARGIN;
-
-        if (isStrictlyInsideH && isStrictlyInsideV) {
-          const key = `${hSeg.linkId}:${hSeg.segIndex}`;
-          if (!crossingMap.has(key)) crossingMap.set(key, []);
-          crossingMap.get(key)!.push(crossX);
-
-          const cutoutKey = `${Math.round(crossX)}_${Math.round(crossY)}`;
-          if (!seenCutouts.has(cutoutKey)) {
-            seenCutouts.add(cutoutKey);
-            cutouts.push({
-              id: cutoutKey,
-              x: crossX,
-              y: crossY,
-              r: defaultRadius - 1.5
-            });
-          }
+        const cutoutKey = `${Math.round(crossX)}_${Math.round(crossY)}`;
+        if (!seenCutouts.has(cutoutKey)) {
+          seenCutouts.add(cutoutKey);
+          cutouts.push({
+            id: cutoutKey,
+            x: crossX,
+            y: crossY,
+            r: defaultRadius - 1.5
+          });
         }
       });
     });
