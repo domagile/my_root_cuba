@@ -1,7 +1,21 @@
 import { create } from 'zustand';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig, PlaceDossier } from '../types';
 import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
-import { savePersonDoc, savePersonDeltaDoc, deletePersonDoc, saveFamilyDoc, deleteFamilyDoc, saveSourceDoc, deleteSourceDoc, saveEventDoc, deleteEventDoc, savePlaceDoc, deletePlaceDoc } from '../lib/firebase';
+import {
+  savePersonDoc,
+  savePersonDeltaDoc,
+  deletePersonDoc,
+  saveFamilyDoc,
+  deleteFamilyDoc,
+  saveSourceDoc,
+  deleteSourceDoc,
+  saveEventDoc,
+  deleteEventDoc,
+  savePlaceDoc,
+  deletePlaceDoc,
+  saveDeletedTombstonesToCloud,
+  saveMergedPersonsToCloud
+} from '../lib/firebase';
 import { useCloudSyncStore, EntitySyncType } from './useCloudSyncStore';
 import { computePersonDelta } from '../utils/personDelta';
 import { findRootPersonId } from '../rodovid/utils/relationship';
@@ -9,7 +23,7 @@ import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeStat
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { useAuthStore } from './useAuthStore';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
-import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord } from '../rodovid/utils/mergeDatabase';
+import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord, getPersonAncestorsIds } from '../rodovid/utils/mergeDatabase';
 
 export function notifySyncChange(
   arg1?: (() => void) | EntitySyncType,
@@ -74,7 +88,9 @@ export function addTombstoneIds(ids: string[]): void {
   try {
     const current = getTombstoneIds();
     ids.forEach((id) => current.add(id));
-    localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(Array.from(current)));
+    const list = Array.from(current);
+    localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(list));
+    saveDeletedTombstonesToCloud(list).catch(() => {});
   } catch {}
 }
 
@@ -82,7 +98,9 @@ export function removeTombstoneId(id: string): void {
   try {
     const current = getTombstoneIds();
     current.delete(id);
-    localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(Array.from(current)));
+    const list = Array.from(current);
+    localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(list));
+    saveDeletedTombstonesToCloud(list).catch(() => {});
   } catch {}
 }
 
@@ -201,6 +219,11 @@ export interface GenealogyDataState {
   permanentlyDeletePersons: (ids: string[]) => void;
   emptyTrash: () => void;
   getPersonById: (id: string) => Person | undefined;
+  deleteAncestorsOfPerson: (personId: string) => {
+    deletedCount: number;
+    deletedPersonIds: string[];
+    rootPersonName: string;
+  };
   mergePersons: (payload: {
     updatedPersons: Person[];
     updatedFamilies: Record<string, Family>;
@@ -494,6 +517,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   deletePerson: (id) =>
     set((state) => {
       addTombstoneIds([id]);
+      deletePersonDoc(id).catch(() => {});
       const target = state.persons.find((p) => p.id === id);
       const nextTrash = target
         ? [...state.trashPersons, { ...target, isDeleted: true, deletedAt: new Date().toISOString() }]
@@ -525,6 +549,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   deletePersons: (ids) =>
     set((state) => {
       addTombstoneIds(ids);
+      ids.forEach((id) => deletePersonDoc(id).catch(() => {}));
       const targets = state.persons.filter((p) => ids.includes(p.id));
       const nextTrash = [
         ...state.trashPersons,
@@ -588,6 +613,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   permanentlyDeletePerson: (id) =>
     set((state) => {
       addTombstoneIds([id]);
+      deletePersonDoc(id).catch(() => {});
       const nextTrash = state.trashPersons.filter((p) => p.id !== id);
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
@@ -599,6 +625,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   permanentlyDeletePersons: (ids) =>
     set((state) => {
       addTombstoneIds(ids);
+      ids.forEach((id) => deletePersonDoc(id).catch(() => {}));
       const nextTrash = state.trashPersons.filter((p) => !ids.includes(p.id));
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
@@ -611,6 +638,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const ids = state.trashPersons.map((p) => p.id);
       addTombstoneIds(ids);
+      ids.forEach((id) => deletePersonDoc(id).catch(() => {}));
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify([]));
       } catch {}
@@ -620,12 +648,105 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   getPersonById: (id) => get().persons.find((p) => p.id === id),
 
+  deleteAncestorsOfPerson: (personId: string) => {
+    const state = get();
+    const personsMap: Record<string, Person> = {};
+    state.persons.forEach((p) => {
+      personsMap[p.id] = p;
+    });
+
+    const target = personsMap[personId];
+    if (!target) {
+      return { deletedCount: 0, deletedPersonIds: [], rootPersonName: '' };
+    }
+
+    const ancestorIds = getPersonAncestorsIds(personId, personsMap, state.families);
+    const targetName = `${target.name?.surname || target.lastName || ''} ${target.name?.given || target.firstName || ''}`.trim() || target.id;
+
+    if (ancestorIds.size === 0) {
+      if (target.fatherId || target.motherId || target.parentFamilyId) {
+        const updatedTarget = { ...target, fatherId: undefined, motherId: undefined, parentFamilyId: undefined };
+        const next = state.persons.map((p) => (p.id === target.id ? updatedTarget : p));
+        try {
+          localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
+        } catch {}
+        savePersonDoc(updatedTarget).catch(() => {});
+        set({ persons: next });
+      }
+      return { deletedCount: 0, deletedPersonIds: [], rootPersonName: targetName };
+    }
+
+    const ancestorIdsList = Array.from(ancestorIds);
+    const ancestorIdsSet = new Set(ancestorIdsList);
+
+    // 1. Immediately record in tombstones (both local and cloud)
+    addTombstoneIds(ancestorIdsList);
+
+    // 2. Immediately delete each ancestor doc from Firestore in background
+    ancestorIdsList.forEach((id) => {
+      deletePersonDoc(id).catch(() => {});
+      notifySyncDelete('persons', id, () => deletePersonDoc(id));
+    });
+
+    // 3. Sever parents on target person
+    const updatedTarget: Person = {
+      ...target,
+      fatherId: undefined,
+      motherId: undefined,
+      parentFamilyId: undefined
+    };
+
+    // 4. Filter remaining persons
+    const remainingPersons = state.persons
+      .filter((p) => !ancestorIdsSet.has(p.id))
+      .map((p) => (p.id === target.id ? updatedTarget : p));
+
+    // 5. Clean up families
+    const nextFamilies: Record<string, Family> = {};
+    Object.entries(state.families).forEach(([fId, fam]) => {
+      const isHusbandAncestor = fam.husbandId && ancestorIdsSet.has(fam.husbandId);
+      const isWifeAncestor = fam.wifeId && ancestorIdsSet.has(fam.wifeId);
+      if (isHusbandAncestor && isWifeAncestor) {
+        deleteFamilyDoc(fId).catch(() => {});
+        notifySyncDelete('families', fId, () => deleteFamilyDoc(fId));
+        return;
+      }
+      nextFamilies[fId] = {
+        ...fam,
+        husbandId: isHusbandAncestor ? undefined : fam.husbandId,
+        wifeId: isWifeAncestor ? undefined : fam.wifeId,
+        children: (fam.children || []).filter((c) => !ancestorIdsSet.has(c.personId)),
+        childrenIds: (fam.childrenIds || []).filter((cId) => !ancestorIdsSet.has(cId))
+      };
+    });
+
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(remainingPersons));
+      localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
+    } catch {}
+
+    savePersonDoc(updatedTarget).catch(() => {});
+    notifySyncChange('persons', updatedTarget.id, () => savePersonDoc(updatedTarget));
+
+    set({
+      persons: remainingPersons,
+      families: nextFamilies
+    });
+
+    return {
+      deletedCount: ancestorIdsList.length,
+      deletedPersonIds: ancestorIdsList,
+      rootPersonName: targetName
+    };
+  },
+
   mergePersons: (payload) =>
     set((state) => {
       const deletedIds = payload.deletedPersonIds || [];
       const deletedSet = new Set(deletedIds);
       if (deletedIds.length > 0) {
         addTombstoneIds(deletedIds);
+        deletedIds.forEach((id) => deletePersonDoc(id).catch(() => {}));
       }
 
       // Filter deleted from updated persons
@@ -662,6 +783,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
           mergedMap[id] = payload.masterPerson?.id || 'merged';
         });
         localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(mergedMap));
+        saveMergedPersonsToCloud(mergedMap).catch(() => {});
       } catch {}
 
       try {
@@ -672,6 +794,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
       // Fire synchronization: register deleted docs in dirtyTracker & delete from Firestore
       deletedIds.forEach((id) => {
+        deletePersonDoc(id).catch(() => {});
         notifySyncDelete('persons', id, () => deletePersonDoc(id));
       });
 
@@ -942,6 +1065,18 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       };
       const updatedHistory = [newSession, ...(state.importHistory || [])].slice(0, 50);
 
+      // Any persons that previously existed but are not in incoming replacement must be tombstoned and deleted from Firestore
+      const incomingIds = new Set(incomingPersons.map((p) => p.id));
+      const deletedPreviousPersons = state.persons.filter((p) => !incomingIds.has(p.id));
+      if (deletedPreviousPersons.length > 0) {
+        const delIds = deletedPreviousPersons.map((p) => p.id);
+        addTombstoneIds(delIds);
+        delIds.forEach((id) => {
+          deletePersonDoc(id).catch(() => {});
+          notifySyncDelete('persons', id, () => deletePersonDoc(id));
+        });
+      }
+
       try {
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(incomingPersons));
         localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(incomingFamilies));
@@ -976,6 +1111,24 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     const mergedSources = result.database.sources || {};
     const mergedEvents = result.database.events || {};
     const mergedPlaces = result.database.places || {};
+
+    // CRITICAL: Any persons from currentDb that are missing in mergedPersons or explicitly excluded (ancestors of excluded branches)
+    // MUST be permanently tombstoned and deleted from Firestore docs so they NEVER resurrect!
+    const excludedIds = new Set<string>(result.excludedAncestorIds || []);
+    Object.keys(currentDb.persons || {}).forEach((existingId) => {
+      if (!result.database.persons?.[existingId]) {
+        excludedIds.add(existingId);
+      }
+    });
+
+    if (excludedIds.size > 0) {
+      const excludedList = Array.from(excludedIds);
+      addTombstoneIds(excludedList);
+      excludedList.forEach((id) => {
+        deletePersonDoc(id).catch(() => {});
+        notifySyncDelete('persons', id, () => deletePersonDoc(id));
+      });
+    }
 
     const newSession: ImportHistorySession = {
       id: `import_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,

@@ -74,7 +74,7 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
   const [excludeIndividuals, setExcludeIndividuals] = useState<string[]>([]);
   const [branchSearch, setBranchSearch] = useState('');
 
-  // Detect special preset persons (like Новік Анатолій and Сергій Кочанов) in the incoming database
+  // Detect special preset persons (like Новік Анатолій and Сергій Кочанов) in incoming OR current database
   const detectedBranchPresets = useMemo(() => {
     const list: {
       person: Person;
@@ -82,9 +82,17 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
       ancestorsCount: number;
       ancestorsNames: string[];
     }[] = [];
-    const persons = incomingDatabase.persons || {};
+    const incomingPersons = incomingDatabase.persons || {};
+    const currentPersons = currentDatabase.persons || {};
+    const combinedPersons: Record<string, Person> = {
+      ...currentPersons,
+      ...incomingPersons
+    };
 
-    for (const p of Object.values(persons)) {
+    const seenIds = new Set<string>();
+
+    for (const p of Object.values(combinedPersons)) {
+      if (seenIds.has(p.id)) continue;
       const fullName = `${p.lastName || ''} ${p.firstName || ''} ${p.patronymic || ''} ${p.name?.surname || ''} ${p.name?.given || ''}`.toLowerCase();
 
       const isNovikAnatoliy =
@@ -95,13 +103,22 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
         (fullName.includes('серг') || fullName.includes('serh') || fullName.includes('serg'));
 
       if (isNovikAnatoliy || isKochanovSerhiy) {
-        const ancIds = getPersonAncestorsIds(p.id, persons);
+        seenIds.add(p.id);
+        const ancIds = new Set<string>();
+        if (incomingPersons[p.id]) {
+          getPersonAncestorsIds(p.id, incomingPersons).forEach((id) => ancIds.add(id));
+        }
+        if (currentPersons[p.id]) {
+          getPersonAncestorsIds(p.id, currentPersons).forEach((id) => ancIds.add(id));
+        }
+
         const ancNames = Array.from(ancIds)
           .slice(0, 6)
           .map((id) => {
-            const anc = persons[id];
+            const anc = combinedPersons[id];
             return anc ? `${anc.lastName || ''} ${anc.firstName || ''}`.trim() : id;
           });
+
         list.push({
           person: p,
           label: isNovikAnatoliy ? 'Анатолій Новік' : 'Сергій Кочанов',
@@ -111,7 +128,7 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
       }
     }
     return list;
-  }, [incomingDatabase]);
+  }, [incomingDatabase, currentDatabase]);
 
   // Compute filtered incoming database excluding requested branches and individuals
   const { filteredDb: effectiveIncomingDb, excludedPersonIds, severedPersonIds } = useMemo(() => {
@@ -247,7 +264,7 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
   }, [analysis.conflicts, searchQuery, categoryFilter]);
 
   const handleMergeClick = () => {
-    const result = executeMerge(currentDatabase, effectiveIncomingDb, analysis, resolutions);
+    const result = executeMerge(currentDatabase, effectiveIncomingDb, analysis, resolutions, excludeAncestorsOf);
     onApplyMerge(result);
   };
 

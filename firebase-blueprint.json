@@ -222,9 +222,23 @@
         "updatedBy": { "type": "string" }
       },
       "required": ["id", "placeName"]
+    },
+    "SystemSetting": {
+      "title": "SystemSetting",
+      "description": "System configuration and persistence setting document (ignoredDuplicates, tombstones, mergedPersons)",
+      "type": "object",
+      "properties": {
+        "keys": { "type": "array" },
+        "mapping": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      }
     }
   },
   "firestore": {
+    "/projects/{projectId}/systemSettings/{settingId}": {
+      "schema": "SystemSetting",
+      "description": "System settings such as ignored duplicates, deleted person tombstones, and merged person mappings"
+    },
     "/projects/{projectId}/places/{placeId}": {
       "schema": "PlaceDossier",
       "description": "Individual village or city genealogical dossier document"

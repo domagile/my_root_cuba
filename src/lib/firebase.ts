@@ -21,6 +21,11 @@ import {
 } from 'firebase/firestore';
 import {
   getAuth,
+  initializeAuth,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  indexedDBLocalPersistence,
+  inMemoryPersistence,
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -100,7 +105,20 @@ export function getFirebaseAuth(): Auth | null {
   try {
     const app = getFirebaseApp();
     if (!app) return null;
-    cachedAuth = getAuth(app);
+    try {
+      // In embedded iframe or environments where IndexedDB is closing or restricted,
+      // providing browserLocalPersistence first prevents fatal "Database is closing/hidden" crashes
+      cachedAuth = initializeAuth(app, {
+        persistence: [
+          browserLocalPersistence,
+          indexedDBLocalPersistence,
+          browserSessionPersistence,
+          inMemoryPersistence
+        ]
+      });
+    } catch {
+      cachedAuth = getAuth(app);
+    }
     return cachedAuth;
   } catch (e) {
     console.warn('Firebase Auth initialization warning:', e);
@@ -261,10 +279,18 @@ export function subscribeToFirebaseAuth(callback: (user: FirebaseUser | null) =>
       callback(null);
       return () => {};
     }
-    return onAuthStateChanged(auth, (user) => {
-      callback(user);
-    });
-  } catch {
+    return onAuthStateChanged(
+      auth,
+      (user) => {
+        callback(user);
+      },
+      (error) => {
+        console.warn('Firebase Auth state change error (handled gracefully):', error);
+        callback(null);
+      }
+    );
+  } catch (err) {
+    console.warn('Firebase Auth subscribe error:', err);
     callback(null);
     return () => {};
   }
@@ -792,6 +818,141 @@ export function subscribeToAccessConfigCloud(
   }
 }
 
+// Ignored Duplicate Pairs Cloud Persistence Helpers
+export async function saveIgnoredDuplicatePairsToCloud(
+  keys: string[],
+  projectId: string = DEFAULT_PROJECT_ID
+): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) return false;
+  try {
+    const db = getDbInstance();
+    if (!db) return false;
+    const docRef = doc(db, 'projects', projectId, 'systemSettings', 'ignoredDuplicates');
+    await setDoc(docRef, { keys: Array.from(new Set(keys)), updatedAt: new Date().toISOString() }, { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/ignoredDuplicates`);
+    return false;
+  }
+}
+
+export function subscribeToIgnoredDuplicatePairsCloud(
+  onUpdate: (keys: string[]) => void,
+  projectId: string = DEFAULT_PROJECT_ID
+): () => void {
+  try {
+    const db = getDbInstance();
+    if (!db) return () => {};
+    const docRef = doc(db, 'projects', projectId, 'systemSettings', 'ignoredDuplicates');
+    return onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (Array.isArray(data?.keys)) {
+            onUpdate(data.keys);
+          }
+        }
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, `projects/${projectId}/systemSettings/ignoredDuplicates`);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
+// Deleted Tombstones Cloud Persistence Helpers
+export async function saveDeletedTombstonesToCloud(
+  ids: string[],
+  projectId: string = DEFAULT_PROJECT_ID
+): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) return false;
+  try {
+    const db = getDbInstance();
+    if (!db) return false;
+    const docRef = doc(db, 'projects', projectId, 'systemSettings', 'deletedTombstones');
+    await setDoc(docRef, { ids: Array.from(new Set(ids)), updatedAt: new Date().toISOString() }, { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/deletedTombstones`);
+    return false;
+  }
+}
+
+export function subscribeToDeletedTombstonesCloud(
+  onUpdate: (ids: string[]) => void,
+  projectId: string = DEFAULT_PROJECT_ID
+): () => void {
+  try {
+    const db = getDbInstance();
+    if (!db) return () => {};
+    const docRef = doc(db, 'projects', projectId, 'systemSettings', 'deletedTombstones');
+    return onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (Array.isArray(data?.ids)) {
+            onUpdate(data.ids);
+          }
+        }
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, `projects/${projectId}/systemSettings/deletedTombstones`);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
+// Merged Persons Mapping Cloud Persistence Helpers
+export async function saveMergedPersonsToCloud(
+  mapping: Record<string, string>,
+  projectId: string = DEFAULT_PROJECT_ID
+): Promise<boolean> {
+  if (useCloudSyncStore.getState().isQuotaExceeded) return false;
+  try {
+    const db = getDbInstance();
+    if (!db) return false;
+    const docRef = doc(db, 'projects', projectId, 'systemSettings', 'mergedPersons');
+    await setDoc(docRef, { mapping: mapping || {}, updatedAt: new Date().toISOString() }, { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/mergedPersons`);
+    return false;
+  }
+}
+
+export function subscribeToMergedPersonsCloud(
+  onUpdate: (mapping: Record<string, string>) => void,
+  projectId: string = DEFAULT_PROJECT_ID
+): () => void {
+  try {
+    const db = getDbInstance();
+    if (!db) return () => {};
+    const docRef = doc(db, 'projects', projectId, 'systemSettings', 'mergedPersons');
+    return onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data?.mapping && typeof data.mapping === 'object') {
+            onUpdate(data.mapping);
+          }
+        }
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, `projects/${projectId}/systemSettings/mergedPersons`);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
 /**
  * Batch write items into a subcollection in chunks of 450 items
  * (Firestore limits batch writes to max 500 ops per batch)
@@ -1101,6 +1262,59 @@ export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_P
         }
       })
     );
+
+    // Also fetch and synchronize systemSettings (ignoredDuplicates, deletedTombstones, mergedPersons)
+    try {
+      const ignoredSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'ignoredDuplicates'));
+      if (ignoredSnap.exists()) {
+        const d = ignoredSnap.data();
+        if (Array.isArray(d?.keys) && d.keys.length > 0) {
+          try {
+            const raw = localStorage.getItem('rodovid_ignored_duplicate_pairs');
+            const localSet = new Set<string>(raw ? JSON.parse(raw) : []);
+            d.keys.forEach((k: string) => {
+              if (typeof k === 'string' && k.trim()) localSet.add(k.trim());
+            });
+            localStorage.setItem('rodovid_ignored_duplicate_pairs', JSON.stringify(Array.from(localSet)));
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed'));
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    try {
+      const tombSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'deletedTombstones'));
+      if (tombSnap.exists()) {
+        const d = tombSnap.data();
+        if (Array.isArray(d?.ids) && d.ids.length > 0) {
+          try {
+            const raw = localStorage.getItem('genealogy_deleted_tombstone_ids_v1');
+            const localSet = new Set<string>(raw ? JSON.parse(raw) : []);
+            d.ids.forEach((id: string) => {
+              if (typeof id === 'string' && id.trim()) localSet.add(id.trim());
+            });
+            localStorage.setItem('genealogy_deleted_tombstone_ids_v1', JSON.stringify(Array.from(localSet)));
+          } catch {}
+        }
+      }
+    } catch {}
+
+    try {
+      const mergedSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'mergedPersons'));
+      if (mergedSnap.exists()) {
+        const d = mergedSnap.data();
+        if (d?.mapping && typeof d.mapping === 'object') {
+          try {
+            const raw = localStorage.getItem('genealogy_merged_person_ids');
+            const localMerged = raw ? JSON.parse(raw) : {};
+            const combined = { ...localMerged, ...d.mapping };
+            localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(combined));
+          } catch {}
+        }
+      }
+    } catch {}
 
     return {
       success: true,

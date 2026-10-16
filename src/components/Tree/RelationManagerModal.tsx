@@ -22,6 +22,7 @@ import {
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
 import { Person, GodparentItem } from '../../types';
+import { areSurnamesEquivalent } from '../../utils/ukrainianPhonetics';
 
 export interface RelationManagerModalProps {
   targetPerson: Person;
@@ -215,10 +216,23 @@ export const RelationManagerModal: React.FC<RelationManagerModalProps> = ({
       }
 
       if (!q) return true;
-      const fullName = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''}`.toLowerCase();
+      const sur = (p.name?.surname || p.lastName || '').toLowerCase();
+      const given = (p.name?.given || p.firstName || '').toLowerCase();
+      const patron = (p.name?.patronymic || p.patronymic || '').toLowerCase();
+      const maiden = (p.name?.maidenName || p.maidenName || '').toLowerCase();
+      const nameParts = [sur, given, patron, maiden].filter(Boolean);
+      const qTokens = q.split(/[\s,.\-–—()]+/).filter(Boolean);
+
+      const allTokensMatchName =
+        qTokens.length > 0 &&
+        qTokens.every((token) =>
+          nameParts.some((np) => np.includes(token) || token.includes(np) || areSurnamesEquivalent(token, np))
+        );
+
+      const fullName = `${sur} ${given} ${patron} ${maiden}`.toLowerCase();
       const birth = (p.birthYear || p.birthDate || '').toString().toLowerCase();
       const place = (p.birthPlace || '').toLowerCase();
-      return fullName.includes(q) || birth.includes(q) || place.includes(q);
+      return allTokensMatchName || fullName.includes(q) || birth.includes(q) || place.includes(q);
     }).slice(0, 15);
   }, [liveTargetPerson, persons, searchQuery, attachingType]);
 

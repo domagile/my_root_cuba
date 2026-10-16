@@ -78,6 +78,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
   const updatePersonInStore = useGenealogyStore((s) => s.updatePerson);
+  const deleteAncestorsOfPerson = useGenealogyStore((s) => s.deleteAncestorsOfPerson);
 
   const isWhitelisted = useMemo(() => isUserWhitelisted(currentUser, whitelist), [currentUser, whitelist]);
   const isAdmin = useMemo(() => {
@@ -124,6 +125,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [sortAsc, setSortAsc] = useState(true);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [personToDelete, setPersonToDelete] = useState<Person | null>(null);
+  const [personToDeleteAncestors, setPersonToDeleteAncestors] = useState<Person | null>(null);
   const [reportPersonId, setReportPersonId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; actionText?: string; onAction?: () => void } | null>(null);
   const [statusMenuPersonId, setStatusMenuPersonId] = useState<string | null>(null);
@@ -319,7 +321,18 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       const customClan = (p.clan || '').toLowerCase();
 
       const searchTag = q.startsWith('#') ? q.slice(1).trim() : q;
-      const qTokens = (qWithoutRod || q).split(/\s+/).filter(Boolean);
+      const qTokens = (qWithoutRod || q).split(/[\s,.\-–—()]+/).filter(Boolean);
+      const given = (p.name?.given || p.firstName || '').toLowerCase();
+      const patron = (p.name?.patronymic || p.patronymic || '').toLowerCase();
+      const nameParts = [sur, given, patron, maiden].filter(Boolean);
+
+      // Any-order token matching across name parts (e.g. "Ольга Михайлівна Болотна", "Болотна Ольга", "Ольга Болотна")
+      const allTokensMatchName =
+        qTokens.length > 0 &&
+        qTokens.every((token) =>
+          nameParts.some((np) => np.includes(token) || token.includes(np) || areSurnamesEquivalent(token, np))
+        );
+
       const matchesSurnameEquiv =
         (sur && areSurnamesEquivalent(q, sur)) ||
         (sur && areSurnamesEquivalent(qWithoutRod, sur)) ||
@@ -334,6 +347,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
       const matchesSearch =
         !q ||
+        allTokensMatchName ||
         fullName.includes(q) ||
         fullName.includes(qWithoutRod) ||
         matchesSurnameEquiv ||
@@ -1282,6 +1296,14 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                               </button>
                               <button
                                 type="button"
+                                onClick={() => setPersonToDeleteAncestors(rawP)}
+                                className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+                                title="Видалити предків особи"
+                              >
+                                <GitFork className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => {
                                   setPersonToDelete(rawP);
                                 }}
@@ -1626,13 +1648,23 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       <FileText className="w-3.5 h-3.5" />
                     </button>
                     {canEdit && !isMasked && (
-                      <button
-                        onClick={() => onEditPerson(p.id)}
-                        className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer`}
-                        title="Редагувати"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setPersonToDeleteAncestors(rawP)}
+                          className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer`}
+                          title="Видалити предків особи"
+                        >
+                          <GitFork className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => onEditPerson(p.id)}
+                          className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer`}
+                          title="Редагувати"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1683,6 +1715,30 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             }
           }}
           onClose={() => setPersonToDelete(null)}
+          isPermanent={true}
+        />
+      )}
+
+      {/* Confirm Delete Ancestors Modal */}
+      {personToDeleteAncestors && (
+        <ConfirmDeleteModal
+          isOpen={!!personToDeleteAncestors}
+          title="Видалення предків"
+          itemName={getFullName(personToDeleteAncestors)}
+          itemType="гілку предків"
+          message={`Всі висхідні предки для особи «${getFullName(personToDeleteAncestors)}» будуть остаточно вилучені з родинного дерева та бази даних, а батьківські зв'язки розірвано. Сама особа залишиться у дереві.`}
+          confirmText="Так, видалити предків"
+          cancelText="Скасувати"
+          onConfirm={() => {
+            if (personToDeleteAncestors) {
+              const res = deleteAncestorsOfPerson(personToDeleteAncestors.id);
+              setPersonToDeleteAncestors(null);
+              setToast({
+                message: `Успішно видалено ${res.deletedCount} предків для «${res.rootPersonName}».`
+              });
+            }
+          }}
+          onClose={() => setPersonToDeleteAncestors(null)}
           isPermanent={true}
         />
       )}

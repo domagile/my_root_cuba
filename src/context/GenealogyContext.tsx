@@ -32,10 +32,26 @@ import {
   deleteFamilyDoc,
   deleteEventDoc,
   deleteSourceDoc,
-  deletePlaceDoc
+  deletePlaceDoc,
+  subscribeToIgnoredDuplicatePairsCloud,
+  subscribeToDeletedTombstonesCloud,
+  subscribeToMergedPersonsCloud,
+  saveDeletedTombstonesToCloud,
+  saveMergedPersonsToCloud
 } from '../lib/firebase';
 import { useUIStore } from '../stores/useUIStore';
-import { useGenealogyStore, normalizePerson, INITIAL_PERSONS, getTombstoneIds } from '../stores/useGenealogyStore';
+import {
+  useGenealogyStore,
+  normalizePerson,
+  INITIAL_PERSONS,
+  getTombstoneIds,
+  addTombstoneIds,
+  TOMBSTONE_STORAGE_KEY
+} from '../stores/useGenealogyStore';
+import {
+  RODOVID_IGNORED_DUPLICATE_PAIRS_KEY,
+  getIgnoredDuplicatePairKeys
+} from '../utils/duplicateDetector';
 import { useResearchStore, INITIAL_METRICS, INITIAL_DOCUMENTS, INITIAL_TASKS, INITIAL_FINDINGS, INITIAL_HYPOTHESES, INITIAL_REQUESTS, INITIAL_MATRIX } from '../stores/useResearchStore';
 import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode, countDirtyItems } from '../stores/useCloudSyncStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -97,6 +113,11 @@ export interface GenealogyContextType {
   permanentlyDeletePersons: (ids: string[]) => void;
   emptyTrash: () => void;
   getPersonById: (id: string) => Person | undefined;
+  deleteAncestorsOfPerson: (personId: string) => {
+    deletedCount: number;
+    deletedPersonIds: string[];
+    rootPersonName: string;
+  };
   mergePersons: (payload: {
     updatedPersons: Person[];
     updatedFamilies: Record<string, any>;
@@ -222,6 +243,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const emptyTrash = useGenealogyStore((s) => s.emptyTrash);
   const getPersonById = useGenealogyStore((s) => s.getPersonById);
   const mergePersons = useGenealogyStore((s) => s.mergePersons);
+  const deleteAncestorsOfPerson = useGenealogyStore((s) => s.deleteAncestorsOfPerson);
   const gitConfig = useGenealogyStore((s) => s.gitConfig);
   const setGitConfig = useGenealogyStore((s) => s.setGitConfig);
   const googleDriveEmail = useGenealogyStore((s) => s.googleDriveEmail);
@@ -344,6 +366,53 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [currentUser, whitelist, persons, setSelectedPersonId]);
 
+  // Realtime Cloud Settings Listener (Tombstones, Ignored Duplicates, Merged Persons)
+  // Ensures cross-session and cross-device consistency so deleted persons and resolved duplicates never reappear
+  useEffect(() => {
+    const unsubTombstones = subscribeToDeletedTombstonesCloud((cloudTombstones) => {
+      if (Array.isArray(cloudTombstones) && cloudTombstones.length > 0) {
+        addTombstoneIds(cloudTombstones);
+        const tombSet = new Set(cloudTombstones);
+        setPersons((prev) => prev.filter((p) => !tombSet.has(p.id)));
+      }
+    });
+
+    const unsubIgnored = subscribeToIgnoredDuplicatePairsCloud((cloudKeys) => {
+      if (Array.isArray(cloudKeys) && cloudKeys.length > 0) {
+        const localKeys = getIgnoredDuplicatePairKeys();
+        cloudKeys.forEach((k) => localKeys.add(k));
+        try {
+          localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(Array.from(localKeys)));
+        } catch {}
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed'));
+        }
+      }
+    });
+
+    const unsubMerged = subscribeToMergedPersonsCloud((cloudMapping) => {
+      if (cloudMapping && typeof cloudMapping === 'object' && Object.keys(cloudMapping).length > 0) {
+        let localMerged: Record<string, string> = {};
+        try {
+          const raw = localStorage.getItem('genealogy_merged_person_ids');
+          if (raw) localMerged = JSON.parse(raw);
+        } catch {}
+        const combined = { ...localMerged, ...cloudMapping };
+        try {
+          localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(combined));
+        } catch {}
+        const mergedIdsSet = new Set(Object.keys(combined));
+        setPersons((prev) => prev.filter((p) => !mergedIdsSet.has(p.id)));
+      }
+    });
+
+    return () => {
+      unsubTombstones();
+      unsubIgnored();
+      unsubMerged();
+    };
+  }, [setPersons]);
+
   // Firestore Sync Listener
   useEffect(() => {
     const unsubscribe = subscribeToProjectData((cloudData) => {
@@ -369,9 +438,18 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const isExcluded = (id: string) => trashIds.has(id) || mergedIds.has(id) || tombstoneIds.has(id);
 
           // Filter out demo persons, trashed persons, and merged duplicate persons
-          const cloudList = cloudData.persons
-            .filter((p: any) => p?.id && !isDemoPerson(p) && !isExcluded(p.id))
-            .map(normalizePerson);
+          const cloudList: Person[] = [];
+          for (const p of cloudData.persons) {
+            if (!p?.id) continue;
+            if (isDemoPerson(p)) continue;
+            if (isExcluded(p.id)) {
+              // Actively purge ghost doc from Firestore so it never resurrects again
+              deletePersonDoc(p.id).catch(() => {});
+              continue;
+            }
+            cloudList.push(normalizePerson(p));
+          }
+
           const cloudMap = new Map(cloudList.map((p) => [p.id, p]));
           const merged: Person[] = [...cloudMap.values()];
 
@@ -779,7 +857,26 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         let totalCount = 0;
 
         if (Array.isArray(d.persons) && d.persons.length > 0) {
-          const validPersons = d.persons.filter((p: any) => !isDemoPerson(p)).map(normalizePerson);
+          const tombstoneIds = getTombstoneIds();
+          const trashIds = new Set(useGenealogyStore.getState().trashPersons.map((p) => p.id));
+          let mergedIdsMap: Record<string, string> = {};
+          try {
+            const raw = localStorage.getItem('genealogy_merged_person_ids');
+            if (raw) mergedIdsMap = JSON.parse(raw);
+          } catch {}
+          const mergedIds = new Set(Object.keys(mergedIdsMap));
+          const isExcluded = (id: string) => tombstoneIds.has(id) || trashIds.has(id) || mergedIds.has(id);
+
+          const validPersons: Person[] = [];
+          for (const p of d.persons) {
+            if (!p || !p.id) continue;
+            if (isDemoPerson(p)) continue;
+            if (isExcluded(p.id)) {
+              deletePersonDoc(p.id).catch(() => {});
+              continue;
+            }
+            validPersons.push(normalizePerson(p));
+          }
           setPersons(validPersons);
           totalCount += validPersons.length;
         }
@@ -961,6 +1058,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       permanentlyDeletePersons,
       emptyTrash,
       getPersonById,
+      deleteAncestorsOfPerson,
       mergePersons,
       families,
       setFamilies,
@@ -1061,6 +1159,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       permanentlyDeletePersons,
       emptyTrash,
       getPersonById,
+      deleteAncestorsOfPerson,
       mergePersons,
       families,
       setFamilies,

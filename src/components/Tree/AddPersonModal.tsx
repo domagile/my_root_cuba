@@ -158,7 +158,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   onOpenAddRelation,
   isReadOnly = false
 }) => {
-  const { persons, addPerson, updatePerson, saveFamily, themePalette, setSelectedPersonId, getGenealogyDatabase, families, sources, events } = useGenealogy();
+  const { persons, addPerson, updatePerson, saveFamily, themePalette, setSelectedPersonId, getGenealogyDatabase, families, sources, events, deleteAncestorsOfPerson } = useGenealogy();
   const theme = getThemeConfig(themePalette);
   const isDark = themePalette.includes('dark');
 
@@ -716,6 +716,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   // Family quick add modal state
   const [showFamilyQuickAddModal, setShowFamilyQuickAddModal] = useState(false);
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
+  const [isConfirmDeleteAncestorsOpen, setIsConfirmDeleteAncestorsOpen] = useState(false);
 
   // Draft auto-save and recovery state
   const [availableDraft, setAvailableDraft] = useState<PersonDraftData | null>(null);
@@ -2618,6 +2619,18 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     <span className="hidden md:inline">Обʼєднати по ID</span>
                   </button>
                 )}
+
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmDeleteAncestorsOpen(true)}
+                    className="flex px-2.5 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 border border-rose-500/30 transition-colors cursor-pointer items-center gap-1.5 text-xs font-semibold"
+                    title="Видалити всіх предків цієї особи з дерева"
+                  >
+                    <GitFork className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Видалити предків</span>
+                  </button>
+                )}
               </>
             )}
 
@@ -2723,6 +2736,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               onOpenReport={() => setIsReportModalOpen(true)}
               onOpenContact={() => setIsContactModalOpen(true)}
               onDeletePerson={onDeletePerson ? () => setIsConfirmDeleteOpen(true) : undefined}
+              onDeleteAncestors={() => setIsConfirmDeleteAncestorsOpen(true)}
               isReadOnly={isReadOnly}
             />
           </div>
@@ -6166,6 +6180,25 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             }
           }}
           onClose={() => setIsConfirmDeleteOpen(false)}
+        />
+      )}
+      {/* Confirm Delete Ancestors Modal */}
+      {effectivePerson && (
+        <ConfirmDeleteModal
+          isOpen={isConfirmDeleteAncestorsOpen}
+          itemName={`предків для «${computedFullName}»`}
+          itemType="гілку предків"
+          message={`Всі висхідні предки (батьки, дідусі, бабусі тощо) для особи «${computedFullName}» будуть остаточно вилучені з родинного дерева та бази даних, а батьківські зв'язки розірвано. Сама особа залишиться у родинному дереві.`}
+          confirmText="Так, видалити предків"
+          cancelText="Скасувати"
+          onConfirm={() => {
+            setIsConfirmDeleteAncestorsOpen(false);
+            if (effectivePerson) {
+              deleteAncestorsOfPerson(effectivePerson.id);
+              onClose();
+            }
+          }}
+          onClose={() => setIsConfirmDeleteAncestorsOpen(false)}
         />
       )}
     </div>

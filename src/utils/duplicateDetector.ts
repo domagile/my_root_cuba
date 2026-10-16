@@ -18,6 +18,7 @@ import {
   areSurnamesBilingualEquivalent
 } from './ukrainianPhonetics';
 import { extractYear } from './treeAudit';
+import { saveIgnoredDuplicatePairsToCloud } from '../lib/firebase';
 
 export interface PersonDuplicateMatch {
   person: Person;
@@ -736,6 +737,10 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
       const mB = metaList[j];
       const pB = mB.person;
 
+      if ((pA as any).isDeleted || (pB as any).isDeleted) {
+        continue;
+      }
+
       if (filterIgnored && ignoredSet && isDuplicatePairIgnored(pA.id, pB.id, ignoredSet)) {
         continue;
       }
@@ -801,7 +806,9 @@ export const RODOVID_IGNORED_DUPLICATE_PAIRS_KEY = 'rodovid_ignored_duplicate_pa
  * Standardizes a pair key regardless of order
  */
 export function getDuplicatePairKey(idA: string, idB: string): string {
-  return [idA, idB].sort().join('___');
+  const a = (idA || '').trim();
+  const b = (idB || '').trim();
+  return [a, b].sort().join('___');
 }
 
 /**
@@ -815,13 +822,23 @@ export function getIgnoredDuplicatePairKeys(): Set<string> {
       const list = JSON.parse(raw);
       if (Array.isArray(list)) {
         list.forEach((item) => {
-          if (typeof item === 'string') {
-            set.add(item);
-            // If item has format dup_A_B, also normalize to A___B
-            if (item.startsWith('dup_')) {
-              const parts = item.slice(4).split('_');
-              if (parts.length >= 2) {
-                set.add([parts[0], parts.slice(1).join('_')].sort().join('___'));
+          if (typeof item === 'string' && item.trim()) {
+            const trimmed = item.trim();
+            set.add(trimmed);
+            if (trimmed.includes('___')) {
+              const clean = trimmed.replace(/^dup_/, '');
+              const parts = clean.split('___');
+              if (parts.length === 2 && parts[0] && parts[1]) {
+                const norm = [parts[0], parts[1]].sort().join('___');
+                set.add(norm);
+                set.add(`dup_${parts[0]}___${parts[1]}`);
+                set.add(`dup_${parts[1]}___${parts[0]}`);
+              }
+            } else if (trimmed.includes(':::')) {
+              const parts = trimmed.split(':::');
+              if (parts.length === 2 && parts[0] && parts[1]) {
+                const norm = [parts[0], parts[1]].sort().join('___');
+                set.add(norm);
               }
             }
           }
@@ -840,7 +857,9 @@ export function isDuplicatePairIgnored(idA: string, idB: string, ignoredSet?: Se
   const set = ignoredSet || getIgnoredDuplicatePairKeys();
   const normalizedKey = getDuplicatePairKey(idA, idB);
   if (set.has(normalizedKey)) return true;
+  if (set.has(`dup_${idA}___${idB}`) || set.has(`dup_${idB}___${idA}`)) return true;
   if (set.has(`dup_${idA}_${idB}`) || set.has(`dup_${idB}_${idA}`)) return true;
+  if (set.has(`${idA}:::${idB}`) || set.has(`${idB}:::${idA}`)) return true;
   return false;
 }
 
@@ -852,9 +871,16 @@ export function ignoreDuplicatePair(idA: string, idB: string): void {
     const set = getIgnoredDuplicatePairKeys();
     const key = getDuplicatePairKey(idA, idB);
     set.add(key);
+    set.add(`dup_${idA}___${idB}`);
+    set.add(`dup_${idB}___${idA}`);
     set.add(`dup_${idA}_${idB}`);
     set.add(`dup_${idB}_${idA}`);
-    localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(Array.from(set)));
+    set.add(`${idA}:::${idB}`);
+    set.add(`${idB}:::${idA}`);
+    const list = Array.from(set);
+    localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(list));
+    // Persist to Firestore cloud settings so it survives refresh and cross-device sessions
+    saveIgnoredDuplicatePairsToCloud(list).catch(() => {});
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed', { detail: { idA, idB, ignored: true } }));
     }
@@ -871,9 +897,16 @@ export function unignoreDuplicatePair(idA: string, idB: string): void {
     const set = getIgnoredDuplicatePairKeys();
     const key = getDuplicatePairKey(idA, idB);
     set.delete(key);
+    set.delete(`dup_${idA}___${idB}`);
+    set.delete(`dup_${idB}___${idA}`);
     set.delete(`dup_${idA}_${idB}`);
     set.delete(`dup_${idB}_${idA}`);
-    localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(Array.from(set)));
+    set.delete(`${idA}:::${idB}`);
+    set.delete(`${idB}:::${idA}`);
+    const list = Array.from(set);
+    localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(list));
+    // Persist to Firestore cloud settings
+    saveIgnoredDuplicatePairsToCloud(list).catch(() => {});
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed', { detail: { idA, idB, ignored: false } }));
     }

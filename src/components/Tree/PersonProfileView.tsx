@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   User,
   Pencil,
@@ -24,6 +24,7 @@ import {
   Image as ImageIcon,
   Sparkles,
   ExternalLink,
+  ChevronLeft,
   ChevronRight,
   Cross,
   Baby,
@@ -40,7 +41,8 @@ import {
   Share2,
   Route,
   Layers,
-  Search
+  Search,
+  Scissors
 } from 'lucide-react';
 import { Person, Gender } from '../../types';
 import { isPersonMale, isPersonFemale } from '../../rodovid/utils/genderUtils';
@@ -48,6 +50,8 @@ import { comparePersonsByAge, getPersonRodName } from '../../rodovid/utils/treeL
 import { formatClanName } from '../../utils/ukrainianPhonetics';
 import { getMetricSearchStatus, getMetricStatusConfig } from '../../utils/researchStatusUtils';
 import { getPersonUrl, openPersonInNewWindow, useUIStore } from '../../stores/useUIStore';
+import { useGenealogyStore } from '../../stores/useGenealogyStore';
+import { getPersonAncestorsIds } from '../../rodovid/utils/mergeDatabase';
 import {
   calculateKinship,
   findRootPerson,
@@ -76,6 +80,7 @@ export interface PersonProfileViewProps {
   onOpenReport?: () => void;
   onOpenContact?: () => void;
   onDeletePerson?: () => void;
+  onDeleteAncestors?: () => void;
   isReadOnly?: boolean;
 }
 
@@ -96,6 +101,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   onOpenReport,
   onOpenContact,
   onDeletePerson,
+  onDeleteAncestors,
   isReadOnly = false
 }) => {
   const familiesList = useMemo(() => {
@@ -203,6 +209,41 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
 
   // Backwards compatibility alias
   const kinshipToRoot = kinshipToSelected;
+
+  // Horizontal scroll state and handlers for kinship chain
+  const kinshipChainScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkKinshipScroll = useCallback(() => {
+    const el = kinshipChainScrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 6);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 6);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      checkKinshipScroll();
+    }, 120);
+    const el = kinshipChainScrollRef.current;
+    if (!el) return () => clearTimeout(timer);
+
+    el.addEventListener('scroll', checkKinshipScroll, { passive: true });
+    window.addEventListener('resize', checkKinshipScroll);
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener('scroll', checkKinshipScroll);
+      window.removeEventListener('resize', checkKinshipScroll);
+    };
+  }, [kinshipToSelected?.path, checkKinshipScroll]);
+
+  const handleScrollKinship = (direction: 'left' | 'right') => {
+    if (!kinshipChainScrollRef.current) return;
+    const amount = direction === 'left' ? -260 : 260;
+    kinshipChainScrollRef.current.scrollBy({ left: amount, behavior: 'smooth' });
+    setTimeout(checkKinshipScroll, 320);
+  };
 
   const handleCopyKinshipText = () => {
     if (!kinshipToSelected || !kinshipToSelected.path || kinshipToSelected.path.length === 0 || !selectedKinshipPerson) return;
@@ -353,6 +394,30 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
     const all = [person, ...siblings];
     return all.sort(comparePersonsByAge);
   }, [person, siblings]);
+
+  const hasAncestors = useMemo(() => {
+    if (father || mother || person.fatherId || person.motherId || person.parentFamilyId) {
+      return true;
+    }
+    const famObj = Array.isArray(families) ? undefined : families;
+    const personsMap: Record<string, Person> = {};
+    persons.forEach((p) => {
+      personsMap[p.id] = p;
+    });
+    const anc = getPersonAncestorsIds(person.id, personsMap, famObj);
+    return anc.size > 0;
+  }, [father, mother, person.fatherId, person.motherId, person.parentFamilyId, person.id, families, persons]);
+
+  const deleteAncestorsOfPerson = useGenealogyStore((s) => s.deleteAncestorsOfPerson);
+  const [isLocalConfirmAncestorsOpen, setIsLocalConfirmAncestorsOpen] = useState(false);
+
+  const handleDeleteAncestorsClick = () => {
+    if (onDeleteAncestors) {
+      onDeleteAncestors();
+    } else {
+      setIsLocalConfirmAncestorsOpen(true);
+    }
+  };
 
   // Spouses
   const spouses = useMemo(() => {
@@ -781,6 +846,18 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
               </button>
             )}
 
+            {!isReadOnly && hasAncestors && (
+              <button
+                type="button"
+                onClick={handleDeleteAncestorsClick}
+                className="px-2.5 py-1.5 rounded-xl border border-amber-500/40 hover:border-amber-500 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
+                title="Видалити всіх предків цієї особи з родинного дерева"
+              >
+                <GitFork className="w-3.5 h-3.5 shrink-0" />
+                <span className="whitespace-nowrap">Видалити предків</span>
+              </button>
+            )}
+
             {onDeletePerson && !isReadOnly && (
               <button
                 type="button"
@@ -796,7 +873,12 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
         </div>
 
         {/* Tabs Navigation */}
-        <div className="px-3 sm:px-6 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex items-center gap-1.5 overflow-x-auto scrollbar-none flex-nowrap shrink-0">
+        <div
+          onWheel={(e) => {
+            if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY;
+          }}
+          className="px-3 sm:px-6 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex items-center gap-1.5 overflow-x-auto scrollbar-none flex-nowrap shrink-0"
+        >
           <button
             type="button"
             onClick={() => setActiveTab('family')}
@@ -1075,50 +1157,101 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                     )}
                   </div>
 
-                  {/* Concise chain preview */}
+                  {/* Concise chain preview with clear horizontal scrollbar and navigation controls */}
                   {kinshipToSelected.path && kinshipToSelected.path.length > 0 && (
-                    <div className="flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none">
-                      {kinshipToSelected.path.map((step, sIdx) => {
-                        const stepP = databaseForKinship.persons[step.personId];
-                        if (!stepP) return null;
-                        const isStartStep = sIdx === 0;
-                        const isTargetStep = sIdx === kinshipToSelected.path.length - 1;
-                        const isRootP = rootPerson && rootPerson.id === stepP.id;
-                        return (
-                          <React.Fragment key={`kin_prev_${step.personId}_${sIdx}`}>
-                            {sIdx > 0 && (
-                              <div className="flex flex-col items-center px-1 text-[10px] text-neutral-400 dark:text-slate-500 shrink-0">
-                                <ArrowRight className="w-3.5 h-3.5 text-sky-500" />
-                                <span className="text-[9px] font-semibold text-sky-600 dark:text-sky-400">
-                                  {step.relationFromPrevious || ''}
-                                </span>
-                              </div>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (stepP.id !== person.id && onSelectPerson) {
-                                  onSelectPerson(stepP.id);
-                                }
-                              }}
-                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs text-left shrink-0 transition-all cursor-pointer ${
-                                isTargetStep
-                                  ? 'bg-sky-600 text-white border-sky-500 font-bold shadow-xs'
-                                  : isStartStep
-                                  ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/40 font-bold'
-                                  : 'bg-white dark:bg-[#1a1e24] text-neutral-700 dark:text-slate-300 border-stone-200 dark:border-[#2d333b] hover:border-sky-400'
-                              }`}
-                              title={`Натисніть для перегляду: ${getFullName(stepP)}`}
-                            >
-                              {isRootP && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
-                              <span className="truncate max-w-[130px]">{getFullName(stepP)}</span>
-                              {stepP.birthYear && (
-                                <span className="text-[10px] opacity-75 font-mono">({stepP.birthYear})</span>
-                              )}
-                            </button>
-                          </React.Fragment>
-                        );
-                      })}
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="flex items-center gap-1.5 font-bold text-sky-800 dark:text-sky-300">
+                          <Route className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                          <span>Родинний ланцюжок ({kinshipToSelected.path.length} осіб):</span>
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+                            (прокрутка знизу або стрілками)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleScrollKinship('left')}
+                            disabled={!canScrollLeft}
+                            className={`p-1.5 rounded-lg border transition-all flex items-center justify-center ${
+                              canScrollLeft
+                                ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 border-sky-300 dark:border-sky-700 hover:bg-sky-50 dark:hover:bg-sky-950/40 cursor-pointer shadow-xs active:scale-95'
+                                : 'bg-transparent text-neutral-300 dark:text-slate-700 border-neutral-200 dark:border-slate-800 cursor-not-allowed opacity-35'
+                            }`}
+                            title="Прокрутити вліво (←)"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleScrollKinship('right')}
+                            disabled={!canScrollRight}
+                            className={`p-1.5 rounded-lg border transition-all flex items-center justify-center ${
+                              canScrollRight
+                                ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 border-sky-300 dark:border-sky-700 hover:bg-sky-50 dark:hover:bg-sky-950/40 cursor-pointer shadow-xs active:scale-95'
+                                : 'bg-transparent text-neutral-300 dark:text-slate-700 border-neutral-200 dark:border-slate-800 cursor-not-allowed opacity-35'
+                            }`}
+                            title="Прокрутити вправо (→)"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Scrollable chain container with prominent, tactile bottom scrollbar */}
+                      <div className="relative rounded-2xl bg-white/70 dark:bg-black/25 p-2 sm:p-2.5 border border-sky-200/60 dark:border-sky-900/40 shadow-xs">
+                        <div
+                          ref={kinshipChainScrollRef}
+                          onWheel={(e) => {
+                            if (e.deltaY !== 0) {
+                              e.currentTarget.scrollLeft += e.deltaY;
+                            }
+                          }}
+                          className="flex items-center gap-1.5 overflow-x-auto pb-3 pt-1 px-1 select-none [scrollbar-width:thin] [scrollbar-color:#0284c7_rgba(14,165,233,0.18)] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar-track]:bg-sky-100/80 dark:[&::-webkit-scrollbar-track]:bg-slate-800/90 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sky-500 hover:[&::-webkit-scrollbar-thumb]:bg-sky-400 active:[&::-webkit-scrollbar-thumb]:bg-sky-600 [&::-webkit-scrollbar-thumb]:rounded-full cursor-grab active:cursor-grabbing"
+                        >
+                          {kinshipToSelected.path.map((step, sIdx) => {
+                            const stepP = databaseForKinship.persons[step.personId];
+                            if (!stepP) return null;
+                            const isStartStep = sIdx === 0;
+                            const isTargetStep = sIdx === kinshipToSelected.path.length - 1;
+                            const isRootP = rootPerson && rootPerson.id === stepP.id;
+                            return (
+                              <React.Fragment key={`kin_prev_${step.personId}_${sIdx}`}>
+                                {sIdx > 0 && (
+                                  <div className="flex flex-col items-center px-1 text-[10px] text-neutral-400 dark:text-slate-500 shrink-0">
+                                    <ArrowRight className="w-3.5 h-3.5 text-sky-500" />
+                                    <span className="text-[9px] font-semibold text-sky-600 dark:text-sky-400">
+                                      {step.relationFromPrevious || ''}
+                                    </span>
+                                  </div>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (stepP.id !== person.id && onSelectPerson) {
+                                      onSelectPerson(stepP.id);
+                                    }
+                                  }}
+                                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs text-left shrink-0 transition-all cursor-pointer ${
+                                    isTargetStep
+                                      ? 'bg-sky-600 text-white border-sky-500 font-bold shadow-sm ring-2 ring-sky-400/50'
+                                      : isStartStep
+                                      ? 'bg-amber-500/20 text-amber-900 dark:text-amber-300 border-amber-500/50 font-bold shadow-2xs'
+                                      : 'bg-white dark:bg-[#1a1e24] text-neutral-700 dark:text-slate-300 border-stone-200 dark:border-[#2d333b] hover:border-sky-400 hover:shadow-xs'
+                                  }`}
+                                  title={`Натисніть для перегляду: ${getFullName(stepP)}`}
+                                >
+                                  {isRootP && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
+                                  <span className="truncate max-w-[150px] font-medium">{getFullName(stepP)}</span>
+                                  {stepP.birthYear && (
+                                    <span className="text-[10px] opacity-75 font-mono">({stepP.birthYear})</span>
+                                  )}
+                                </button>
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1218,12 +1351,24 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
 
               {/* Right Column: Батьки та брати/сестри */}
               <div className="bg-white dark:bg-[#1a1e24] rounded-2xl border border-stone-200 dark:border-[#2d333b] p-4 sm:p-5 shadow-xs space-y-4">
-                <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-[#272c33]">
+                <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-[#272c33] gap-2 flex-wrap">
                   <h3 className="font-extrabold text-sm sm:text-base text-neutral-900 dark:text-white flex items-center gap-2">
                     <Users className="w-4 h-4 text-amber-500" />
                     <span>Батьки та брати/сестри</span>
                   </h3>
-                  {!isReadOnly && (onOpenFamilyQuickAdd || onOpenAddRelation) && (!father || !mother) && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!isReadOnly && hasAncestors && (
+                      <button
+                        type="button"
+                        onClick={handleDeleteAncestorsClick}
+                        className="px-2 py-1 rounded-lg border border-rose-500/30 hover:border-rose-500 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Видалити всіх висхідних предків цієї особи"
+                      >
+                        <GitFork className="w-3 h-3" />
+                        <span>Видалити предків</span>
+                      </button>
+                    )}
+                    {!isReadOnly && (onOpenFamilyQuickAdd || onOpenAddRelation) && (!father || !mother) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1239,6 +1384,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                       Додати батьків
                     </button>
                   )}
+                  </div>
                 </div>
 
                 {/* Parents Section */}
@@ -2065,7 +2211,18 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
             {person.isLiving ? 'Жива особа' : 'Померлий'}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {!isReadOnly && hasAncestors && (
+            <button
+              type="button"
+              onClick={handleDeleteAncestorsClick}
+              className="px-3 py-1.5 rounded-lg border border-amber-500/40 hover:border-amber-500 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1.5 cursor-pointer text-xs transition-colors shrink-0 whitespace-nowrap"
+              title="Видалити всіх висхідних предків цієї особи"
+            >
+              <GitFork className="w-3.5 h-3.5" />
+              <span>Видалити предків</span>
+            </button>
+          )}
           {onDeletePerson && !isReadOnly && (
             <button
               type="button"
@@ -2096,6 +2253,48 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Confirmation Modal Fallback for Deleting Ancestors */}
+      {isLocalConfirmAncestorsOpen && (
+        <div className="fixed inset-0 z-70 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#1f242c] border border-rose-500/50 rounded-2xl max-w-md w-full p-6 shadow-2xl text-neutral-900 dark:text-white space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-500 flex items-center justify-center shrink-0 border border-rose-500/40">
+                <GitFork className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base">Видалити предків цієї особи?</h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  {person.lastName} {person.firstName}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
+              Ця дія від'єднає батьків та остаточно вилучить усю висхідну гілку предків (батьків, бабусь, дідусів тощо) з родинного дерева та бази даних. Сама особа залишиться у дереві.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsLocalConfirmAncestorsOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-500 dark:text-neutral-400 hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                Скасувати
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLocalConfirmAncestorsOpen(false);
+                  deleteAncestorsOfPerson(person.id);
+                  onClose();
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors shadow-lg cursor-pointer"
+              >
+                Так, видалити предків
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

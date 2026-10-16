@@ -180,7 +180,14 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
 
       {/* HORIZONTAL FLOW */}
       {orientation === 'horizontal' ? (
-        <div className={`p-4 rounded-xl border ${theme.cardBorder} ${theme.surfaceBg} overflow-x-auto shadow-inner`}>
+        <div
+          onWheel={(e) => {
+            if (e.deltaY !== 0) {
+              e.currentTarget.scrollLeft += e.deltaY;
+            }
+          }}
+          className={`p-4 rounded-xl border ${theme.cardBorder} ${theme.surfaceBg} overflow-x-auto shadow-inner pb-5 [scrollbar-width:thin] [scrollbar-color:#10b981_rgba(16,185,129,0.15)] [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-track]:bg-stone-200/70 dark:[&::-webkit-scrollbar-track]:bg-slate-800/80 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-500 hover:[&::-webkit-scrollbar-thumb]:bg-emerald-400 [&::-webkit-scrollbar-thumb]:rounded-full`}
+        >
           <div className="flex items-center min-w-max py-6 px-2 gap-0">
             {path.map((step, idx) => {
               const rawPerson = database.persons[step.personId];

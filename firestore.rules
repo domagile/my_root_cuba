@@ -57,6 +57,12 @@ service cloud.firestore {
         allow write: if true;
       }
 
+      // System settings subcollection (ignoredDuplicates, tombstones, mergedPersons)
+      match /systemSettings/{settingId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
       // Documents subcollection
       match /documents/{documentId} {
         allow read: if true;

@@ -235,9 +235,20 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         const rawRod = getPersonRodName(p);
         const clanFormatted = formatClanName(rawRod).toLowerCase();
         const sur = (p.lastName || '').toLowerCase();
+        const given = (p.firstName || '').toLowerCase();
+        const patron = (p.patronymic || '').toLowerCase();
         const maiden = (p.maidenName || '').toLowerCase();
         const branch = (p.researchBranch || '').toLowerCase();
         const customClan = (p.clan || '').toLowerCase();
+
+        // Any-order token matching across name parts (e.g. "Ольга Михайлівна Болотна", "Болотна Ольга", "Ольга Болотна")
+        const nameParts = [sur, given, patron, maiden].filter(Boolean);
+        const qTokens = (qWithoutRod || q).split(/[\s,.\-–—()]+/).filter(Boolean);
+        const allTokensMatchName =
+          qTokens.length > 0 &&
+          qTokens.every((token) =>
+            nameParts.some((np) => np.includes(token) || token.includes(np) || areSurnamesEquivalent(token, np))
+          );
 
         const matchesClanText =
           clanFormatted.includes(q) ||
@@ -248,9 +259,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           (sur && areSurnamesEquivalent(q, sur)) ||
           (sur && areSurnamesEquivalent(qWithoutRod, sur)) ||
           (maiden && areSurnamesEquivalent(q, maiden)) ||
-          (maiden && areSurnamesEquivalent(qWithoutRod, maiden));
+          (maiden && areSurnamesEquivalent(qWithoutRod, maiden)) ||
+          qTokens.some((token) => (sur && areSurnamesEquivalent(token, sur)) || (maiden && areSurnamesEquivalent(token, maiden)));
 
         if (
+          !allTokensMatchName &&
           !fullName.includes(q) &&
           !fullName.includes(qWithoutRod) &&
           !matchesSurnameEquiv &&

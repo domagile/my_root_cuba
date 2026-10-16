@@ -101,6 +101,7 @@ export interface MergeResult {
   familiesMergedCount: number;
   familiesAddedCount: number;
   resolvedPersonsWithConflicts: ResolvedPersonConflictRecord[];
+  excludedAncestorIds?: string[];
 }
 
 /**
@@ -772,13 +773,62 @@ export function executeMerge(
   currentDb: GenealogyDatabase,
   incomingDb: GenealogyDatabase,
   preAnalysis?: MergeAnalysis,
-  conflictResolutions?: ConflictResolutions
+  conflictResolutions?: ConflictResolutions,
+  excludeAncestorsOfPersonIds: string[] = []
 ): MergeResult {
   const analysis = preAnalysis || analyzeMerge(currentDb, incomingDb);
   const { idMapping, matchedPersons, newPersons } = analysis;
 
   const mergedPersons: Record<string, Person> = { ...(currentDb.persons || {}) };
   let conflictsResolvedCount = 0;
+
+  // Track all ancestor IDs that are excluded across both current and incoming databases
+  const excludedAncestorIds = new Set<string>();
+  const currentPersons = currentDb.persons || {};
+  const incomingPersons = incomingDb.persons || {};
+
+  if (excludeAncestorsOfPersonIds.length > 0) {
+    for (const rootId of excludeAncestorsOfPersonIds) {
+      // Find root person in current or incoming
+      const mappedInCurrent = rootId in currentPersons
+        ? rootId
+        : Object.keys(idMapping).find((k) => k === rootId || idMapping[k] === rootId) || rootId;
+
+      if (currentPersons[mappedInCurrent]) {
+        const currentAncs = getPersonAncestorsIds(mappedInCurrent, currentPersons);
+        currentAncs.forEach((id) => excludedAncestorIds.add(id));
+      }
+      if (incomingPersons[rootId]) {
+        const incomingAncs = getPersonAncestorsIds(rootId, incomingPersons);
+        incomingAncs.forEach((id) => {
+          excludedAncestorIds.add(id);
+          const mapped = idMapping[id];
+          if (mapped) excludedAncestorIds.add(mapped);
+        });
+      }
+
+      // Sever parents on the root person so they never link back to excluded ancestors
+      if (mergedPersons[mappedInCurrent]) {
+        mergedPersons[mappedInCurrent] = {
+          ...mergedPersons[mappedInCurrent],
+          fatherId: undefined,
+          motherId: undefined
+        };
+      }
+      if (mergedPersons[rootId]) {
+        mergedPersons[rootId] = {
+          ...mergedPersons[rootId],
+          fatherId: undefined,
+          motherId: undefined
+        };
+      }
+    }
+
+    // Purge these ancestor records from mergedPersons
+    for (const ancId of excludedAncestorIds) {
+      delete mergedPersons[ancId];
+    }
+  }
 
   // 1. Enrich existing matched persons with conflict choices applied
   for (const match of matchedPersons) {
@@ -888,8 +938,12 @@ export function executeMerge(
     }
 
     // Parents
-    let fatherId = ext.fatherId || (inc.fatherId ? idMapping[inc.fatherId] : undefined);
-    if (ext.fatherId && inc.fatherId) {
+    const isAncestorsExcluded = excludeAncestorsOfPersonIds.some(
+      (id) => id === ext.id || id === inc.id || idMapping[id] === ext.id || idMapping[inc.id] === ext.id
+    );
+
+    let fatherId = isAncestorsExcluded ? undefined : (ext.fatherId || (inc.fatherId ? idMapping[inc.fatherId] : undefined));
+    if (!isAncestorsExcluded && ext.fatherId && inc.fatherId) {
       const remapped = idMapping[inc.fatherId] || inc.fatherId;
       if (ext.fatherId !== remapped && resolutions.father === 'take_incoming') {
         fatherId = remapped;
@@ -897,14 +951,17 @@ export function executeMerge(
       }
     }
 
-    let motherId = ext.motherId || (inc.motherId ? idMapping[inc.motherId] : undefined);
-    if (ext.motherId && inc.motherId) {
+    let motherId = isAncestorsExcluded ? undefined : (ext.motherId || (inc.motherId ? idMapping[inc.motherId] : undefined));
+    if (!isAncestorsExcluded && ext.motherId && inc.motherId) {
       const remapped = idMapping[inc.motherId] || inc.motherId;
       if (ext.motherId !== remapped && resolutions.mother === 'take_incoming') {
         motherId = remapped;
         conflictsResolvedCount++;
       }
     }
+
+    if (fatherId && excludedAncestorIds.has(fatherId)) fatherId = undefined;
+    if (motherId && excludedAncestorIds.has(motherId)) motherId = undefined;
 
     const updated: Person = {
       ...ext,
@@ -961,12 +1018,30 @@ export function executeMerge(
 
   // 2. Add brand-new persons with remapped relation IDs
   for (const inc of newPersons) {
+    if (excludedAncestorIds.has(inc.id) || (idMapping[inc.id] && excludedAncestorIds.has(idMapping[inc.id]))) {
+      continue;
+    }
     const targetId = idMapping[inc.id] || inc.id;
 
-    const remappedChildren = (inc.childrenIds || []).map((cid) => idMapping[cid] || cid);
-    const remappedSpouses = (inc.spouseIds || []).map((sid) => idMapping[sid] || sid);
-    const remappedFather = inc.fatherId ? (idMapping[inc.fatherId] || inc.fatherId) : undefined;
-    const remappedMother = inc.motherId ? (idMapping[inc.motherId] || inc.motherId) : undefined;
+    const remappedChildren = (inc.childrenIds || [])
+      .map((cid) => idMapping[cid] || cid)
+      .filter((cid) => !excludedAncestorIds.has(cid));
+    const remappedSpouses = (inc.spouseIds || [])
+      .map((sid) => idMapping[sid] || sid)
+      .filter((sid) => !excludedAncestorIds.has(sid));
+    let remappedFather = inc.fatherId ? (idMapping[inc.fatherId] || inc.fatherId) : undefined;
+    let remappedMother = inc.motherId ? (idMapping[inc.motherId] || inc.motherId) : undefined;
+
+    if (remappedFather && excludedAncestorIds.has(remappedFather)) remappedFather = undefined;
+    if (remappedMother && excludedAncestorIds.has(remappedMother)) remappedMother = undefined;
+
+    const isAncestorsExcluded = excludeAncestorsOfPersonIds.some(
+      (id) => id === inc.id || id === targetId || idMapping[id] === targetId
+    );
+    if (isAncestorsExcluded) {
+      remappedFather = undefined;
+      remappedMother = undefined;
+    }
 
     mergedPersons[targetId] = {
       ...inc,
@@ -988,7 +1063,16 @@ export function executeMerge(
   for (const incFam of incomingFamilies) {
     const remappedHusband = incFam.husbandId ? idMapping[incFam.husbandId] : undefined;
     const remappedWife = incFam.wifeId ? idMapping[incFam.wifeId] : undefined;
-    const remappedChildren = (incFam.childrenIds || []).map((cid) => idMapping[cid] || cid);
+    const remappedChildren = (incFam.childrenIds || [])
+      .map((cid) => idMapping[cid] || cid)
+      .filter((cid) => !excludedAncestorIds.has(cid));
+
+    if (
+      (remappedHusband && excludedAncestorIds.has(remappedHusband)) &&
+      (remappedWife && excludedAncestorIds.has(remappedWife))
+    ) {
+      continue;
+    }
 
     // Look for existing family with same husband & wife
     const existingFamilyEntry = Object.entries(mergedFamilies).find(([, f]) => {
@@ -1009,7 +1093,7 @@ export function executeMerge(
       const [existingFamId, existingFam] = existingFamilyEntry;
       const combinedChildren = Array.from(
         new Set([...(existingFam.childrenIds || []), ...remappedChildren])
-      );
+      ).filter((cid) => !excludedAncestorIds.has(cid));
 
       mergedFamilies[existingFamId] = {
         ...existingFam,
@@ -1029,12 +1113,31 @@ export function executeMerge(
       mergedFamilies[targetFamId] = {
         ...incFam,
         id: targetFamId,
-        husbandId: remappedHusband,
-        wifeId: remappedWife,
+        husbandId: remappedHusband && !excludedAncestorIds.has(remappedHusband) ? remappedHusband : undefined,
+        wifeId: remappedWife && !excludedAncestorIds.has(remappedWife) ? remappedWife : undefined,
         childrenIds: remappedChildren,
         children: remappedChildren.map((cId) => ({ personId: cId, relationType: 'Biological' }))
       };
       familiesAddedCount++;
+    }
+  }
+
+  // Clean up any existing families that belonged entirely to excluded ancestors
+  if (excludedAncestorIds.size > 0) {
+    for (const [fId, fam] of Object.entries(mergedFamilies)) {
+      const isHusbandExcluded = fam.husbandId && excludedAncestorIds.has(fam.husbandId);
+      const isWifeExcluded = fam.wifeId && excludedAncestorIds.has(fam.wifeId);
+      if (isHusbandExcluded && isWifeExcluded) {
+        delete mergedFamilies[fId];
+      } else {
+        mergedFamilies[fId] = {
+          ...fam,
+          husbandId: isHusbandExcluded ? undefined : fam.husbandId,
+          wifeId: isWifeExcluded ? undefined : fam.wifeId,
+          children: (fam.children || []).filter((c) => !excludedAncestorIds.has(c.personId)),
+          childrenIds: (fam.childrenIds || []).filter((cId) => !excludedAncestorIds.has(cId))
+        };
+      }
     }
   }
 
@@ -1102,7 +1205,8 @@ export function executeMerge(
     conflictsResolvedCount,
     familiesMergedCount,
     familiesAddedCount,
-    resolvedPersonsWithConflicts
+    resolvedPersonsWithConflicts,
+    excludedAncestorIds: Array.from(excludedAncestorIds)
   };
 }
 
@@ -1112,27 +1216,47 @@ export function executeMerge(
  */
 export function getPersonAncestorsIds(
   personId: string,
-  persons: Record<string, Person>
+  persons: Record<string, Person>,
+  families?: Record<string, Family>
 ): Set<string> {
   const ancestorIds = new Set<string>();
   const queue: string[] = [];
 
-  const root = persons[personId];
-  if (!root) return ancestorIds;
+  const enqueueParents = (pId: string) => {
+    const p = persons[pId];
+    if (!p) return;
+    if (p.fatherId && persons[p.fatherId]) queue.push(p.fatherId);
+    if (p.motherId && persons[p.motherId]) queue.push(p.motherId);
+    if (p.parentFamilyId && families && families[p.parentFamilyId]) {
+      const fam = families[p.parentFamilyId];
+      if (fam.husbandId && persons[fam.husbandId]) queue.push(fam.husbandId);
+      if (fam.wifeId && persons[fam.wifeId]) queue.push(fam.wifeId);
+    }
+    if (families) {
+      Object.values(families).forEach((fam) => {
+        const isChild =
+          fam.childrenIds?.includes(p.id) ||
+          fam.children?.some((c) => c.personId === p.id);
+        if (isChild) {
+          if (fam.husbandId && persons[fam.husbandId]) queue.push(fam.husbandId);
+          if (fam.wifeId && persons[fam.wifeId]) queue.push(fam.wifeId);
+        }
+      });
+    }
+    Object.values(persons).forEach((other) => {
+      if (other.id !== p.id && other.childrenIds?.includes(p.id)) {
+        queue.push(other.id);
+      }
+    });
+  };
 
-  if (root.fatherId && persons[root.fatherId]) queue.push(root.fatherId);
-  if (root.motherId && persons[root.motherId]) queue.push(root.motherId);
+  enqueueParents(personId);
 
   while (queue.length > 0) {
     const currentId = queue.shift()!;
-    if (ancestorIds.has(currentId)) continue;
+    if (ancestorIds.has(currentId) || currentId === personId) continue;
     ancestorIds.add(currentId);
-
-    const current = persons[currentId];
-    if (current) {
-      if (current.fatherId && persons[current.fatherId]) queue.push(current.fatherId);
-      if (current.motherId && persons[current.motherId]) queue.push(current.motherId);
-    }
+    enqueueParents(currentId);
   }
 
   return ancestorIds;
