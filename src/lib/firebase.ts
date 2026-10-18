@@ -26,6 +26,7 @@ import {
   browserSessionPersistence,
   indexedDBLocalPersistence,
   inMemoryPersistence,
+  browserPopupRedirectResolver,
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -114,7 +115,8 @@ export function getFirebaseAuth(): Auth | null {
           indexedDBLocalPersistence,
           browserSessionPersistence,
           inMemoryPersistence
-        ]
+        ],
+        popupRedirectResolver: browserPopupRedirectResolver
       });
     } catch {
       cachedAuth = getAuth(app);
@@ -130,17 +132,19 @@ export function getFirebaseAuth(): Auth | null {
 export const db = getDbInstance();
 
 // Test connection on boot according to skill guidelines
-export async function testConnection() {
+export async function testConnection(force: boolean = false): Promise<boolean> {
   if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
-    return;
+    return false;
   }
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
-    return;
+  if (!force && useCloudSyncStore.getState().isQuotaExceeded) {
+    return false;
   }
   try {
     const firestore = getDbInstance();
     if (firestore) {
       await getDocFromServer(doc(firestore, 'test', 'connection'));
+      useCloudSyncStore.getState().setQuotaExceeded(false);
+      return true;
     }
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -159,7 +163,9 @@ export async function testConnection() {
     } else {
       console.warn('Firestore connection check notice:', errMsg);
     }
+    return false;
   }
+  return false;
 }
 
 if (typeof window !== 'undefined') {
@@ -252,11 +258,21 @@ export async function signInWithGoogle(): Promise<{ user: FirebaseUser | null; e
     }
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    const res = await signInWithPopup(auth, provider);
+    const res = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
     return { user: res.user, error: null };
   } catch (err: any) {
     console.warn('Google sign-in error:', err);
-    return { user: null, error: err?.message || 'Помилка авторизації через Google' };
+    let msg = err?.message || 'Помилка авторизації через Google';
+    if (err?.code === 'auth/popup-blocked') {
+      msg = 'Спливаюче вікно входу Google було заблоковано браузером. Будь ласка, дозвольте спливаючі вікна для цієї вкладки.';
+    } else if (err?.code === 'auth/popup-closed-by-user') {
+      msg = 'Вікно авторизації було закрито до завершення входу.';
+    } else if (err?.code === 'auth/cancelled-popup-request') {
+      msg = 'Попередній запит авторизації скасовано.';
+    } else if (err?.code === 'auth/unauthorized-domain') {
+      msg = 'Цей домен ще не додано до списку дозволених у Firebase Console (Authentication -> Settings -> Authorized domains).';
+    }
+    return { user: null, error: msg };
   }
 }
 

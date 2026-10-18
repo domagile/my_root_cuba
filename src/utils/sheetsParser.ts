@@ -84,7 +84,7 @@ export function matchesTargetSurname(text: string, targetSurnames: string[]): { 
 export function parseFullName(rawName: string): { lastName: string; firstName: string; patronymic?: string; gender: 'male' | 'female' } {
   const parts = rawName.trim().replace(/[,;]/g, ' ').split(/\s+/).filter(Boolean);
   if (parts.length === 0) {
-    return { lastName: 'Невідомо', firstName: '', gender: 'male' };
+    return { lastName: '', firstName: '', gender: 'male' };
   }
 
   let lastName = '';
@@ -323,17 +323,22 @@ export function extractRecordsFromSheets(
         const motherMatch = rawParents.match(/(?:мати|матерь|мать|дружина)[:\s]+([^,;]+)/i);
 
         if (fatherMatch) {
-          const p = parseFullName(fatherMatch[1]);
-          fatherMeta = {
-            fullName: fatherMatch[1].trim(),
-            firstName: p.firstName,
-            lastName: p.lastName || parsedPrimary.lastName,
-            patronymic: p.patronymic,
-            gender: 'male'
-          };
+          const rawFatherStr = fatherMatch[1].trim();
+          if (rawFatherStr && !/^(невідомо|невідомий|unknown|\?|—|-|не вказан)/i.test(rawFatherStr)) {
+            const p = parseFullName(rawFatherStr);
+            if (p.firstName || (p.lastName && !/^(невідомо|невідомий|unknown|\?|—|-)$/i.test(p.lastName))) {
+              fatherMeta = {
+                fullName: rawFatherStr,
+                firstName: p.firstName,
+                lastName: p.lastName || parsedPrimary.lastName,
+                patronymic: p.patronymic,
+                gender: 'male'
+              };
+            }
+          }
         } else if (parsedPrimary.patronymic) {
           const derivedFatherFirst = deriveFatherNameFromPatronymic(parsedPrimary.patronymic);
-          if (derivedFatherFirst && parsedPrimary.lastName) {
+          if (derivedFatherFirst && parsedPrimary.lastName && !/^(невідомо|unknown)$/i.test(derivedFatherFirst)) {
             fatherMeta = {
               fullName: `${parsedPrimary.lastName} ${derivedFatherFirst}`,
               firstName: derivedFatherFirst,
@@ -344,18 +349,23 @@ export function extractRecordsFromSheets(
         }
 
         if (motherMatch) {
-          const p = parseFullName(motherMatch[1]);
-          motherMeta = {
-            fullName: motherMatch[1].trim(),
-            firstName: p.firstName,
-            lastName: p.lastName || parsedPrimary.lastName,
-            patronymic: p.patronymic,
-            gender: 'female'
-          };
+          const rawMotherStr = motherMatch[1].trim();
+          if (rawMotherStr && !/^(невідомо|невідома|unknown|\?|—|-|не вказан)/i.test(rawMotherStr)) {
+            const p = parseFullName(rawMotherStr);
+            if (p.firstName || (p.lastName && !/^(невідомо|невідома|unknown|\?|—|-)$/i.test(p.lastName))) {
+              motherMeta = {
+                fullName: rawMotherStr,
+                firstName: p.firstName,
+                lastName: p.lastName || parsedPrimary.lastName,
+                patronymic: p.patronymic,
+                gender: 'female'
+              };
+            }
+          }
         }
       } else if (parsedPrimary.patronymic) {
         const derivedFatherFirst = deriveFatherNameFromPatronymic(parsedPrimary.patronymic);
-        if (derivedFatherFirst && parsedPrimary.lastName) {
+        if (derivedFatherFirst && parsedPrimary.lastName && !/^(невідомо|unknown)$/i.test(derivedFatherFirst)) {
           fatherMeta = {
             fullName: `${parsedPrimary.lastName} ${derivedFatherFirst}`,
             firstName: derivedFatherFirst,

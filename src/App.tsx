@@ -33,7 +33,6 @@ import { ExperimentView } from './components/ExperimentView';
 import { SharedPinScreen } from './components/SharedPinScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from './components/ContactAuthorModal';
-import { GuestContactBanner } from './components/GuestContactBanner';
 import { getThemeConfig } from './utils/theme';
 import { isUserWhitelisted } from './rodovid/utils/privacy';
 import { RefreshCw, AlertCircle, ArrowLeft, Lock, Mail } from 'lucide-react';
@@ -253,9 +252,6 @@ function AppContent() {
           onInspectPerson={(id) => setInspectPersonId(id)}
           onOpenContactModal={() => setShowContactModal(true)}
         />
-
-        {/* Guest / Visitor Contact Banner */}
-        <GuestContactBanner onOpenContactModal={() => setShowContactModal(true)} />
 
         {/* Tab Router */}
         <main className="flex-1 flex flex-col h-full min-h-0 relative overflow-x-auto overflow-y-hidden">

@@ -12,6 +12,7 @@ import { ShareTreeModal } from '../rodovid/components/modals/ShareTreeModal';
 import { GedcomModal } from '../rodovid/components/modals/GedcomModal';
 import { HeaderSearchBar } from './HeaderSearchBar';
 import { GlobalSearchModal } from './GlobalSearchModal';
+import { testConnection } from '../lib/firebase';
 
 interface HeaderProps {
   onOpenAddPerson: () => void;
@@ -171,6 +172,26 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
       setCloudActionMsg({ text: e?.message || 'Помилка синхронізації з Firestore', isError: true });
     } finally {
       setIsFullSyncing(false);
+      setTimeout(() => setCloudActionMsg(null), 5000);
+    }
+  };
+
+  const [isCheckingQuota, setIsCheckingQuota] = useState(false);
+
+  const handleCheckQuotaAgain = async () => {
+    setIsCheckingQuota(true);
+    setCloudActionMsg(null);
+    try {
+      const ok = await testConnection(true);
+      if (ok) {
+        setCloudActionMsg({ text: 'Підключення до Firestore відновлено! Добова квота активна.', isError: false });
+      } else {
+        setCloudActionMsg({ text: 'Сервер Firebase все ще повертає перевищення добового ліміту (resource-exhausted).', isError: true });
+      }
+    } catch {
+      setCloudActionMsg({ text: 'Не вдалося перевірити квоту Firestore.', isError: true });
+    } finally {
+      setIsCheckingQuota(false);
       setTimeout(() => setCloudActionMsg(null), 5000);
     }
   };
@@ -393,23 +414,36 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
                   {/* Quota Notice Banner */}
                   {isQuotaExceeded && (
-                    <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] space-y-1.5 leading-relaxed">
+                    <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] space-y-2 leading-relaxed">
                       <div className="flex items-center gap-1.5 font-bold text-xs">
                         <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
                         <span>Локальний захищений режим</span>
                       </div>
                       <p className="text-[10px] opacity-90">
-                        Вичерпано добовий безкоштовний ліміт операцій запису Firestore. Ваші дані автоматично зберігаються в безпечному сховищі браузера (LocalStorage). Квота оновлюється щодня опівночі за тихоокеанським часом.
+                        Сервер Google Firebase повідомляє про вичерпання безкоштовного добового ліміту операцій. <strong>Ваш ручний режим працює коректно</strong> — дерево не вивантажувалось автоматично, а перевірка відбулася під час запиту статусу зв’язку.
                       </p>
-                      <a
-                        href="https://console.firebase.google.com/project/smiling-spanner-31ttq/firestore/databases/ai-studio-a567c750-fcc0-4247-9c87-f3613091d667/data?openUpgradeDialog=true"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:underline pt-0.5"
-                      >
-                        <span>Деталі квоти у консолі Firebase</span>
-                        <span>↗</span>
-                      </a>
+                      <p className="text-[10px] opacity-90">
+                        Усі ваші дані надійно зберігаються в пам’яті вашого браузера (LocalStorage). Ліміт скидається Google Cloud щодня.
+                      </p>
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-amber-500/20">
+                        <button
+                          type="button"
+                          onClick={handleCheckQuotaAgain}
+                          disabled={isCheckingQuota}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[10px] transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-xs"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isCheckingQuota ? 'animate-spin' : ''}`} />
+                          <span>{isCheckingQuota ? 'Перевірка...' : 'Перевірити зв’язок з БД зараз'}</span>
+                        </button>
+                        <a
+                          href="https://console.firebase.google.com/project/smiling-spanner-31ttq/firestore/databases/ai-studio-a567c750-fcc0-4247-9c87-f3613091d667/data?openUpgradeDialog=true"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:underline"
+                        >
+                          <span>Консоль Firebase ↗</span>
+                        </a>
+                      </div>
                     </div>
                   )}
 

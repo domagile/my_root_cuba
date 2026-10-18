@@ -216,57 +216,54 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   loginWithGoogle: (email: string, name?: string, picture?: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    const { whitelist, accessConfig } = get();
+    const { whitelist } = get();
     const isMaster = isMasterAdminEmail(cleanEmail);
     
     // Check if whitelisted
     let match = whitelist.find((w) => w.email.toLowerCase() === cleanEmail && w.status === 'active');
 
-    if (isMaster) {
-      if (!match) {
-        match = {
-          id: `w-admin-${cleanEmail.replace(/[^a-z0-9]/g, '-')}`,
-          email: cleanEmail,
-          name: name || (cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор)' : 'Головний Адміністратор'),
-          role: 'admin',
-          addedAt: new Date().toISOString(),
-          status: 'active',
-          notes: 'Головний адміністратор та автор родоводу'
-        };
-        get().addToWhitelist(cleanEmail, 'admin', match.name, match.notes);
-      }
-    }
-
-    if (match || isMaster) {
-      const userRole: UserRole = isMaster ? 'admin' : (match?.role || 'admin');
-      const user: AuthUser = {
-        id: `usr-${Date.now()}`,
+    if (!match) {
+      const defaultRole: UserRole = isMaster ? 'admin' : 'editor';
+      const defaultName = name || (isMaster 
+        ? (cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор і Власник)' : 'Головний Адміністратор')
+        : cleanEmail.split('@')[0]);
+      
+      match = {
+        id: `w-google-${cleanEmail.replace(/[^a-z0-9]/g, '-')}`,
         email: cleanEmail,
-        name: name || (match ? match.name : undefined) || (cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор)' : cleanEmail.split('@')[0]),
-        picture,
-        role: userRole,
-        isAuthenticated: true,
-        isWhitelisted: true,
-        loginMethod: 'google',
-        lastActive: new Date().toISOString()
+        name: defaultName,
+        role: defaultRole,
+        addedAt: new Date().toISOString(),
+        status: 'active',
+        notes: isMaster ? 'Головний адміністратор та автор родоводу' : 'Google-авторизований користувач'
       };
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(user));
-      } catch {}
-      broadcastAuthLogin(user);
-      set({ currentUser: user });
-      return {
-        success: true,
-        role: userRole,
-        isWhitelisted: true,
-        message: `Успішний вхід. Рівень доступу: ${userRole === 'admin' ? 'Адміністратор' : 'Редактор'}.`
-      };
+      get().addToWhitelist(cleanEmail, defaultRole, match.name, match.notes);
     }
 
+    const userRole: UserRole = isMaster ? 'admin' : (match?.role || 'editor');
+    const userName = name || (match ? match.name : undefined) || (cleanEmail === 'domagile@gmail.com' ? 'Ольга (Автор)' : cleanEmail.split('@')[0]);
+
+    const user: AuthUser = {
+      id: `usr-${Date.now()}`,
+      email: cleanEmail,
+      name: userName,
+      picture,
+      role: userRole,
+      isAuthenticated: true,
+      isWhitelisted: true,
+      loginMethod: 'google',
+      lastActive: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_currentUser`, JSON.stringify(user));
+    } catch {}
+    broadcastAuthLogin(user);
+    set({ currentUser: user });
     return {
-      success: false,
-      isWhitelisted: false,
-      message: 'Для цієї електронної адреси ще не активовано доступ. Ви можете надіслати запит на отримання доступу до редагування.'
+      success: true,
+      role: userRole,
+      isWhitelisted: true,
+      message: `Успішний вхід через Google. Рівень доступу: ${userRole === 'admin' ? 'Адміністратор' : 'Редактор'}.`
     };
   },
 

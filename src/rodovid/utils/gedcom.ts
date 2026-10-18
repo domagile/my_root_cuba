@@ -5,6 +5,7 @@
 
 import { GenealogyDatabase, Person, Family } from '../types/genealogy';
 import { detectGenderFromName } from '../../utils/genderUtils';
+import { purgeUnknownPlaceholderPersons } from './unknownPersonCleaner';
 
 /**
  * Robust GEDCOM 5.5 / 5.5.1 / 7.0 Parser
@@ -26,7 +27,7 @@ export function parseGedcom(text: string): GenealogyDatabase {
 
   const saveCurrentEntity = () => {
     if (currentType === 'INDI' && currentId) {
-      const given = (currentPerson.firstName || currentPerson.name?.given || 'Невідомо').trim();
+      const given = (currentPerson.firstName || currentPerson.name?.given || '').trim();
       const surname = (currentPerson.lastName || currentPerson.name?.surname || '').trim();
       const detected = detectGenderFromName(given, surname, currentPerson.patronymic, currentPerson.maidenName);
       const resolvedGender = currentPerson.gender || (detected === 'female' ? 'female' : 'male');
@@ -266,8 +267,18 @@ export function parseGedcom(text: string): GenealogyDatabase {
     }
   });
 
+  // Purge any unknown placeholder persons who have no specified ancestors
+  const { cleanedPersons, cleanedFamilies } = purgeUnknownPlaceholderPersons(
+    Object.values(persons),
+    families
+  );
+  const finalPersonsMap: Record<string, Person> = {};
+  cleanedPersons.forEach((p) => {
+    finalPersonsMap[p.id] = p;
+  });
+
   // Determine an initial root person ID
-  const personList = Object.values(persons);
+  const personList = cleanedPersons;
   let rootPersonId = personList[0]?.id;
 
   // Prefer a person with both ancestors/children or oldest identified
@@ -277,8 +288,8 @@ export function parseGedcom(text: string): GenealogyDatabase {
   }
 
   return {
-    persons,
-    families,
+    persons: finalPersonsMap,
+    families: cleanedFamilies,
     sources: {},
     events: {},
     places: {},

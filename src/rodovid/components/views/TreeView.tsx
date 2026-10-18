@@ -12,6 +12,7 @@ import {
   ArrowDownUp,
   ArrowLeftRight,
   User,
+  UserPlus,
   Plus,
   Minus,
   BookOpen,
@@ -4872,7 +4873,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
         )}
 
         {/* Floating Canvas Navigation HUD (Quick 1-tap zoom, fit and root focus on mobile & tablet) */}
-        <div className="absolute bottom-5 right-3 sm:bottom-7 sm:right-6 z-20 flex items-center gap-0.5 sm:gap-1 bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] p-1 rounded-xl shadow-2xl">
+        <div className="absolute bottom-4 sm:bottom-5 right-4 sm:right-6 z-20 flex items-center gap-0.5 sm:gap-1 bg-[#1a1e22]/95 backdrop-blur-md border border-[#323840] p-1 rounded-xl shadow-2xl">
           <button
             type="button"
             onClick={handleFocusRootPerson}
@@ -4920,21 +4921,17 @@ export const TreeView: React.FC<TreeViewProps> = ({
         {!showMinimap && (
           <button
             onClick={() => setShowMinimap(true)}
-            className="absolute bottom-5 left-3 sm:bottom-6 sm:left-4 z-20 px-2.5 py-1.5 rounded-lg bg-[#1a1e22]/90 hover:bg-[#252a30] text-slate-300 text-xs font-medium border border-[#323840] shadow-lg flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="absolute bottom-4 sm:bottom-5 left-3 sm:left-4 z-20 px-2.5 py-1.5 rounded-lg bg-[#1a1e22]/90 hover:bg-[#252a30] text-slate-300 text-xs font-medium border border-[#323840] shadow-lg flex items-center gap-1.5 cursor-pointer transition-colors"
           >
             <Compass className="w-3.5 h-3.5 text-emerald-400" />
             <span className="hidden xs:inline">Міні-мапа</span>
           </button>
         )}
 
-        {/* Sleek Fixed Bottom Horizontal Scrollbar */}
+        {/* Compact Pure Horizontal Scrollbar */}
         {layout.nodes.length > 0 && (
           <div
-            className={`absolute bottom-0 left-0 right-4 h-4 z-30 flex items-center select-none cursor-pointer border-t transition-colors shadow-xs ${
-              canvasTheme === 'parchment' || canvasTheme === 'light'
-                ? 'bg-[#e5dbc9] hover:bg-[#ded3bf] border-[#cfc2ad]'
-                : 'bg-[#121518] hover:bg-[#161a1e] border-[#292f38]'
-            }`}
+            className="absolute bottom-0 left-0 right-2 sm:right-3 h-2.5 sm:h-3 z-30 flex items-center px-1 select-none cursor-pointer bg-transparent hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const clickX = e.clientX - rect.left;
@@ -4945,62 +4942,77 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 x: Math.round(containerDimensions.width / 2 - targetWorldX * scale)
               }));
             }}
+            title="Прокрутка дерева родоводу по горизонталі"
           >
-            {(() => {
-              const totalW = treeBounds.width;
-              const viewW = (containerDimensions.width || 1200) / scale;
-              const viewLeft = -pan.x / scale;
-              const thumbWPct = Math.max(6, Math.min(100, (viewW / totalW) * 100));
-              const thumbLeftPct = Math.max(0, Math.min(100 - thumbWPct, ((viewLeft - treeBounds.minX) / totalW) * 100));
+            <div className="w-full h-1.5 sm:h-2 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/15 dark:hover:bg-white/15 relative overflow-hidden transition-colors">
+              {(() => {
+                const totalW = treeBounds.width;
+                const viewW = (containerDimensions.width || 1200) / scale;
+                const viewLeft = -pan.x / scale;
+                const thumbWPct = Math.max(6, Math.min(100, (viewW / totalW) * 100));
+                const thumbLeftPct = Math.max(0, Math.min(100 - thumbWPct, ((viewLeft - treeBounds.minX) / totalW) * 100));
 
-              return (
-                <div
-                  style={{
-                    left: `${thumbLeftPct}%`,
-                    width: `${thumbWPct}%`
-                  }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    const startX = e.clientX;
-                    const startPanX = pan.x;
-                    const onMouseMove = (moveEvent: MouseEvent) => {
-                      const deltaPixels = moveEvent.clientX - startX;
-                      const barWidth = containerDimensions.width || 1200;
-                      const worldDelta = (deltaPixels / barWidth) * treeBounds.width;
-                      setPan((prev) => ({
-                        ...prev,
-                        x: Math.round(startPanX - worldDelta * scale)
-                      }));
-                    };
-                    const onMouseUp = () => {
-                      window.removeEventListener('mousemove', onMouseMove);
-                      window.removeEventListener('mouseup', onMouseUp);
-                    };
-                    window.addEventListener('mousemove', onMouseMove);
-                    window.addEventListener('mouseup', onMouseUp);
-                  }}
-                  className={`absolute top-0.5 bottom-0.5 rounded-full transition-all cursor-grab active:cursor-grabbing flex items-center justify-center ${
-                    canvasTheme === 'parchment' || canvasTheme === 'light'
-                      ? 'bg-stone-500/80 hover:bg-emerald-600 active:bg-emerald-700 shadow-sm'
-                      : 'bg-slate-400/90 hover:bg-emerald-500 active:bg-emerald-400 shadow-sm'
-                  }`}
-                  title="Перетягніть для горизонтальної навігації деревом"
-                >
-                  <div className="w-4 h-1 rounded-full bg-white/40 pointer-events-none" />
-                </div>
-              );
-            })()}
+                return (
+                  <div
+                    style={{
+                      left: `${thumbLeftPct}%`,
+                      width: `${thumbWPct}%`
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const startPanX = pan.x;
+                      const onMouseMove = (moveEvent: MouseEvent) => {
+                        const deltaPixels = moveEvent.clientX - startX;
+                        const barWidth = containerDimensions.width || 1200;
+                        const worldDelta = (deltaPixels / barWidth) * treeBounds.width;
+                        setPan((prev) => ({
+                          ...prev,
+                          x: Math.round(startPanX - worldDelta * scale)
+                        }));
+                      };
+                      const onMouseUp = () => {
+                        window.removeEventListener('mousemove', onMouseMove);
+                        window.removeEventListener('mouseup', onMouseUp);
+                      };
+                      window.addEventListener('mousemove', onMouseMove);
+                      window.addEventListener('mouseup', onMouseUp);
+                    }}
+                    onTouchStart={(e) => {
+                      e.stopPropagation();
+                      if (!e.touches[0]) return;
+                      const startX = e.touches[0].clientX;
+                      const startPanX = pan.x;
+                      const onTouchMove = (moveEvent: TouchEvent) => {
+                        if (!moveEvent.touches[0]) return;
+                        const deltaPixels = moveEvent.touches[0].clientX - startX;
+                        const barWidth = containerDimensions.width || 1200;
+                        const worldDelta = (deltaPixels / barWidth) * treeBounds.width;
+                        setPan((prev) => ({
+                          ...prev,
+                          x: Math.round(startPanX - worldDelta * scale)
+                        }));
+                      };
+                      const onTouchEnd = () => {
+                        window.removeEventListener('touchmove', onTouchMove);
+                        window.removeEventListener('touchend', onTouchEnd);
+                      };
+                      window.addEventListener('touchmove', onTouchMove, { passive: true });
+                      window.addEventListener('touchend', onTouchEnd);
+                    }}
+                    className="absolute top-0 bottom-0 rounded-full bg-neutral-400/60 dark:bg-neutral-500/60 hover:bg-neutral-500 dark:hover:bg-neutral-400 active:bg-neutral-600 dark:active:bg-neutral-300 transition-colors cursor-grab active:cursor-grabbing min-w-[24px]"
+                    title="Перетягніть для горизонтальної навігації деревом"
+                  />
+                );
+              })()}
+            </div>
           </div>
         )}
 
-        {/* Sleek Fixed Right Vertical Scrollbar */}
+        {/* Compact Pure Vertical Scrollbar */}
         {layout.nodes.length > 0 && (
           <div
-            className={`absolute top-0 bottom-4 right-0 w-4 z-30 flex justify-center select-none cursor-pointer border-l transition-colors shadow-xs ${
-              canvasTheme === 'parchment' || canvasTheme === 'light'
-                ? 'bg-[#e5dbc9] hover:bg-[#ded3bf] border-[#cfc2ad]'
-                : 'bg-[#121518] hover:bg-[#161a1e] border-[#292f38]'
-            }`}
+            className="absolute top-0 bottom-2.5 sm:bottom-3 right-0 w-2.5 sm:w-3 z-30 flex items-center justify-center select-none cursor-pointer bg-transparent hover:bg-black/5 dark:hover:bg-white/5 py-1 transition-colors"
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const clickY = e.clientY - rect.top;
@@ -5011,63 +5023,71 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 y: Math.round(containerDimensions.height / 2 - targetWorldY * scale)
               }));
             }}
+            title="Прокрутка дерева родоводу по вертикалі"
           >
-            {(() => {
-              const totalH = treeBounds.height;
-              const viewH = (containerDimensions.height || 800) / scale;
-              const viewTop = -pan.y / scale;
-              const thumbHPct = Math.max(6, Math.min(100, (viewH / totalH) * 100));
-              const thumbTopPct = Math.max(0, Math.min(100 - thumbHPct, ((viewTop - treeBounds.minY) / totalH) * 100));
+            <div className="h-full w-1.5 sm:w-2 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/15 dark:hover:bg-white/15 relative overflow-hidden transition-colors">
+              {(() => {
+                const totalH = treeBounds.height;
+                const viewH = (containerDimensions.height || 800) / scale;
+                const viewTop = -pan.y / scale;
+                const thumbHPct = Math.max(6, Math.min(100, (viewH / totalH) * 100));
+                const thumbTopPct = Math.max(0, Math.min(100 - thumbHPct, ((viewTop - treeBounds.minY) / totalH) * 100));
 
-              return (
-                <div
-                  style={{
-                    top: `${thumbTopPct}%`,
-                    height: `${thumbHPct}%`
-                  }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    const startY = e.clientY;
-                    const startPanY = pan.y;
-                    const onMouseMove = (moveEvent: MouseEvent) => {
-                      const deltaPixels = moveEvent.clientY - startY;
-                      const barHeight = containerDimensions.height || 800;
-                      const worldDelta = (deltaPixels / barHeight) * treeBounds.height;
-                      setPan((prev) => ({
-                        ...prev,
-                        y: Math.round(startPanY - worldDelta * scale)
-                      }));
-                    };
-                    const onMouseUp = () => {
-                      window.removeEventListener('mousemove', onMouseMove);
-                      window.removeEventListener('mouseup', onMouseUp);
-                    };
-                    window.addEventListener('mousemove', onMouseMove);
-                    window.addEventListener('mouseup', onMouseUp);
-                  }}
-                  className={`absolute left-0.5 right-0.5 rounded-full transition-all cursor-grab active:cursor-grabbing flex items-center justify-center ${
-                    canvasTheme === 'parchment' || canvasTheme === 'light'
-                      ? 'bg-stone-500/80 hover:bg-emerald-600 active:bg-emerald-700 shadow-sm'
-                      : 'bg-slate-400/90 hover:bg-emerald-500 active:bg-emerald-400 shadow-sm'
-                  }`}
-                  title="Перетягніть для вертикальної навігації деревом"
-                >
-                  <div className="h-4 w-1 rounded-full bg-white/40 pointer-events-none" />
-                </div>
-              );
-            })()}
+                return (
+                  <div
+                    style={{
+                      top: `${thumbTopPct}%`,
+                      height: `${thumbHPct}%`
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      const startY = e.clientY;
+                      const startPanY = pan.y;
+                      const onMouseMove = (moveEvent: MouseEvent) => {
+                        const deltaPixels = moveEvent.clientY - startY;
+                        const barHeight = containerDimensions.height || 800;
+                        const worldDelta = (deltaPixels / barHeight) * treeBounds.height;
+                        setPan((prev) => ({
+                          ...prev,
+                          y: Math.round(startPanY - worldDelta * scale)
+                        }));
+                      };
+                      const onMouseUp = () => {
+                        window.removeEventListener('mousemove', onMouseMove);
+                        window.removeEventListener('mouseup', onMouseUp);
+                      };
+                      window.addEventListener('mousemove', onMouseMove);
+                      window.addEventListener('mouseup', onMouseUp);
+                    }}
+                    onTouchStart={(e) => {
+                      e.stopPropagation();
+                      if (!e.touches[0]) return;
+                      const startY = e.touches[0].clientY;
+                      const startPanY = pan.y;
+                      const onTouchMove = (moveEvent: TouchEvent) => {
+                        if (!moveEvent.touches[0]) return;
+                        const deltaPixels = moveEvent.touches[0].clientY - startY;
+                        const barHeight = containerDimensions.height || 800;
+                        const worldDelta = (deltaPixels / barHeight) * treeBounds.height;
+                        setPan((prev) => ({
+                          ...prev,
+                          y: Math.round(startPanY - worldDelta * scale)
+                        }));
+                      };
+                      const onTouchEnd = () => {
+                        window.removeEventListener('touchmove', onTouchMove);
+                        window.removeEventListener('touchend', onTouchEnd);
+                      };
+                      window.addEventListener('touchmove', onTouchMove, { passive: true });
+                      window.addEventListener('touchend', onTouchEnd);
+                    }}
+                    className="absolute left-0 right-0 rounded-full bg-neutral-400/60 dark:bg-neutral-500/60 hover:bg-neutral-500 dark:hover:bg-neutral-400 active:bg-neutral-600 dark:active:bg-neutral-300 transition-colors cursor-grab active:cursor-grabbing min-h-[24px]"
+                    title="Перетягніть для вертикальної навігації деревом"
+                  />
+                );
+              })()}
+            </div>
           </div>
-        )}
-
-        {/* Scrollbars Corner Intersection */}
-        {layout.nodes.length > 0 && (
-          <div
-            className={`absolute bottom-0 right-0 w-4 h-4 z-30 border-t border-l ${
-              canvasTheme === 'parchment' || canvasTheme === 'light'
-                ? 'bg-[#d8ccb8] border-[#cfc2ad]'
-                : 'bg-[#0f1215] border-[#292f38]'
-            }`}
-          />
         )}
 
         {/* Floating GEDCOM Import Toast Notification */}
@@ -5309,24 +5329,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     }}
                     className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
                   >
-                    <Plus className="w-4 h-4 shrink-0 text-purple-500" />
-                    <span>Додати родича (+)</span>
-                  </button>
-                )}
-
-                {/* Delete Ancestors Action */}
-                {!isReadOnly && personHasAncestors(p) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAncestorDeleteConfirmTarget(p);
-                      setContextMenu(null);
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors text-left cursor-pointer"
-                    title="Видалити всіх висхідних предків цієї особи"
-                  >
-                    <GitFork className="w-4 h-4 shrink-0 text-rose-500" />
-                    <span className="font-semibold">Видалити предків особи</span>
+                    <UserPlus className="w-4 h-4 shrink-0 text-emerald-500" />
+                    <span>Додати родича</span>
                   </button>
                 )}
 
@@ -5352,55 +5356,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
           </div>
         );
       })()}
-
-      {/* Confirmation Modal for Deleting Ancestors of a Person */}
-      {ancestorDeleteConfirmTarget && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-neutral-900 border border-rose-500/50 rounded-2xl max-w-md w-full p-6 shadow-2xl text-white space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/40">
-                <GitFork className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-base text-white">Видалити предків цієї особи?</h3>
-                <p className="text-xs text-neutral-400">
-                  {ancestorDeleteConfirmTarget.lastName} {ancestorDeleteConfirmTarget.firstName}
-                </p>
-              </div>
-            </div>
-            <p className="text-xs text-neutral-300 leading-relaxed">
-              Ця дія від'єднає батьків та остаточно вилучить усю висхідну гілку предків (батьків, бабусь, дідусів тощо) з родинного дерева та хмари.
-              Сама особа <strong>«{ancestorDeleteConfirmTarget.lastName} {ancestorDeleteConfirmTarget.firstName}»</strong> залишиться у вашому дереві.
-            </p>
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setAncestorDeleteConfirmTarget(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
-              >
-                Скасувати
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const target = ancestorDeleteConfirmTarget;
-                  setAncestorDeleteConfirmTarget(null);
-                  if (target) {
-                    const res = deleteAncestorsOfPerson(target.id);
-                    setImportNotification({
-                      message: `Успішно видалено ${res.deletedCount} предків для «${res.rootPersonName}». Батьківські зв'язки розірвано.`
-                    });
-                    setTimeout(() => centerTree(), 200);
-                  }
-                }}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors shadow-lg cursor-pointer"
-              >
-                Так, видалити предків
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

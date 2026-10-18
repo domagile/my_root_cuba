@@ -609,7 +609,7 @@ export const DocumentsView: React.FC = () => {
         </div>
 
         {/* Documents Table */}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto custom-scrollbar pb-2">
           <table className="w-full min-w-[760px] text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-[#2A2A2A] bg-[#141414]">

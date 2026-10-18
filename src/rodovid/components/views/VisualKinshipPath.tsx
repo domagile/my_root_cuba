@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   User,
   Crown,
@@ -16,6 +16,8 @@ import {
   Copy,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Layers,
   ArrowLeftRight
 } from 'lucide-react';
@@ -51,6 +53,7 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
   const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
   const [copied, setCopied] = useState(false);
   const [hoveredStepIndex, setHoveredStepIndex] = useState<number | null>(null);
+  const horizontalContainerRef = useRef<HTMLDivElement>(null);
 
   const path = result.path || [];
 
@@ -180,14 +183,16 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
 
       {/* HORIZONTAL FLOW */}
       {orientation === 'horizontal' ? (
-        <div
-          onWheel={(e) => {
-            if (e.deltaY !== 0) {
-              e.currentTarget.scrollLeft += e.deltaY;
-            }
-          }}
-          className={`p-4 rounded-xl border ${theme.cardBorder} ${theme.surfaceBg} overflow-x-auto shadow-inner pb-5 [scrollbar-width:thin] [scrollbar-color:#10b981_rgba(16,185,129,0.15)] [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-track]:bg-stone-200/70 dark:[&::-webkit-scrollbar-track]:bg-slate-800/80 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-500 hover:[&::-webkit-scrollbar-thumb]:bg-emerald-400 [&::-webkit-scrollbar-thumb]:rounded-full`}
-        >
+        <div className="space-y-2">
+          <div
+            ref={horizontalContainerRef}
+            onWheel={(e) => {
+              if (e.deltaY !== 0) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+            className={`p-4 rounded-xl border ${theme.cardBorder} ${theme.surfaceBg} overflow-x-auto shadow-inner pb-4 custom-scrollbar`}
+          >
           <div className="flex items-center min-w-max py-6 px-2 gap-0">
             {path.map((step, idx) => {
               const rawPerson = database.persons[step.personId];
@@ -392,6 +397,68 @@ export const VisualKinshipPath: React.FC<VisualKinshipPathProps> = ({
                 </React.Fragment>
               );
             })}
+          </div>
+        </div>
+
+        {/* Bottom Horizontal Scroll Controls for Long Kinship Chains */}
+          <div className={`flex items-center justify-between gap-2 p-2 rounded-xl ${theme.cardBorder} border ${theme.surfaceBg} text-xs select-none shadow-xs`}>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  if (horizontalContainerRef.current) {
+                    horizontalContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-lg border ${theme.cardBorder} hover:border-emerald-500 hover:text-emerald-500 transition-colors cursor-pointer text-xs font-medium ${theme.textPrimary}`}
+                title="Перейти до першої особи (Початок ланцюжка)"
+              >
+                <span>⏮ Початок (А)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (horizontalContainerRef.current) {
+                    horizontalContainerRef.current.scrollBy({ left: -300, behavior: 'smooth' });
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-lg border ${theme.cardBorder} hover:border-emerald-500 hover:text-emerald-500 transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium ${theme.textPrimary}`}
+                title="Прокрутити родовідний ланцюжок вліво"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Вліво</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (horizontalContainerRef.current) {
+                    horizontalContainerRef.current.scrollBy({ left: 300, behavior: 'smooth' });
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-lg border ${theme.cardBorder} hover:border-emerald-500 hover:text-emerald-500 transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium ${theme.textPrimary}`}
+                title="Прокрутити родовідний ланцюжок вправо"
+              >
+                <span>Вправо</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (horizontalContainerRef.current) {
+                    horizontalContainerRef.current.scrollTo({ left: horizontalContainerRef.current.scrollWidth, behavior: 'smooth' });
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-lg border ${theme.cardBorder} hover:border-emerald-500 hover:text-emerald-500 transition-colors cursor-pointer text-xs font-medium ${theme.textPrimary}`}
+                title="Перейти до кінцевої особи (Особа Б)"
+              >
+                <span>Кінець (Б) ⏭</span>
+              </button>
+            </div>
+            <div className="text-[11px] text-slate-400 font-mono hidden sm:flex items-center gap-1.5">
+              <span>Ланцюжок родових зв'язків:</span>
+              <span className="font-bold text-emerald-500">{path.length}</span>
+              <span>{path.length === 1 ? 'особа' : path.length < 5 ? 'особи' : 'осіб'}</span>
+            </div>
           </div>
         </div>
       ) : (

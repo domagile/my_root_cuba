@@ -1258,9 +1258,9 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       ) : viewMode === 'table' ? (
         /* TABLE VIEW */
         <div className="rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] overflow-hidden shadow-sm">
-          <div ref={tableContainerRef} className="overflow-x-auto max-h-[calc(100vh-270px)] overflow-y-auto">
-            <table className="w-full min-w-[650px] text-left text-xs text-[#E5E5E5] relative border-collapse">
-              <thead className="bg-[#121212] text-[#B88E3E] uppercase tracking-wider font-bold text-[10px] border-b border-[#2A2A2A] sticky top-0 z-10">
+          <div ref={tableContainerRef} className="overflow-x-auto max-h-[calc(100vh-270px)] overflow-y-auto custom-scrollbar">
+            <table className="w-full min-w-[850px] text-left text-xs text-[#E5E5E5] relative border-separate border-spacing-0">
+              <thead className="bg-[#121212] text-[#B88E3E] uppercase tracking-wider font-bold text-[10px] border-b border-[#2A2A2A] sticky top-0 z-20">
                 <tr>
                   <th className="p-3 w-10 text-center bg-[#121212]">
                     {isSelectionMode ? (
@@ -1280,7 +1280,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                   <th className="p-3 bg-[#121212]">СТАТУС ДОСЛІДЖЕННЯ</th>
                   <th className="p-3 bg-[#121212]">КЛЮЧОВИЙ ЗВ'ЯЗОК</th>
                   <th className="p-3 bg-[#121212]">МІСЦЯ</th>
-                  <th className="p-3 text-right bg-[#121212]">ДІЇ</th>
+                  <th className="p-3 text-right bg-[#121212] sticky right-0 z-20 shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.5)]">ДІЇ</th>
                 </tr>
               </thead>
               <tbody>
@@ -1529,7 +1529,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       </td>
 
                       {/* Actions */}
-                      <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <td className="p-3 text-right sticky right-0 z-10 bg-[#1A1A1A] shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.4)]" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           {tabFilter !== 'trash' ? (
                             <>
@@ -1614,6 +1614,67 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Bottom Horizontal Scrollbar Dock */}
+          <div className="px-3 py-2 bg-[#121212] border-t border-[#2A2A2A] flex items-center justify-between gap-2 text-xs select-none">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (tableContainerRef.current) {
+                    tableContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+                  }
+                }}
+                className="px-2.5 py-1 rounded-lg border border-[#333333] hover:border-[#B88E3E] hover:text-[#B88E3E] text-[#A3A3A3] text-xs font-semibold cursor-pointer transition-colors"
+                title="Перейти на початок (Особа)"
+              >
+                <span>⏮ Початок</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (tableContainerRef.current) {
+                    tableContainerRef.current.scrollBy({ left: -260, behavior: 'smooth' });
+                  }
+                }}
+                className="px-2 py-1 rounded-lg border border-[#333333] hover:border-[#B88E3E] hover:text-[#B88E3E] text-[#A3A3A3] text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                title="Прокрутити вліво"
+              >
+                <ChevronDown className="w-3.5 h-3.5 rotate-90" />
+                <span className="hidden sm:inline">Вліво</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (tableContainerRef.current) {
+                    tableContainerRef.current.scrollBy({ left: 260, behavior: 'smooth' });
+                  }
+                }}
+                className="px-2 py-1 rounded-lg border border-[#333333] hover:border-[#B88E3E] hover:text-[#B88E3E] text-[#A3A3A3] text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                title="Прокрутити вправо"
+              >
+                <span className="hidden sm:inline">Вправо</span>
+                <ChevronDown className="w-3.5 h-3.5 -rotate-90" />
+              </button>
+            </div>
+
+            <div className="text-[11px] text-[#737373] hidden md:block">
+              Колонка «Дії» закріплена праворуч • Використовуйте скрол для перегляду всіх колонок
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (tableContainerRef.current) {
+                  tableContainerRef.current.scrollTo({ left: tableContainerRef.current.scrollWidth, behavior: 'smooth' });
+                }
+              }}
+              className="px-3 py-1 rounded-lg bg-[#B88E3E]/15 hover:bg-[#B88E3E]/25 text-[#B88E3E] border border-[#B88E3E]/40 text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+              title="Перейти до колонки Дії"
+            >
+              <span>До дій →</span>
+            </button>
           </div>
         </div>
       ) : (

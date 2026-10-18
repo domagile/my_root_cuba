@@ -244,7 +244,8 @@ export function buildCandidateDraftTree(
 
     // 2. Father
     let fatherNode: CandidateTreeNode | undefined = undefined;
-    if (rec.father && rec.father.fullName) {
+    const isFatherUnknown = !rec.father?.fullName || /^(невідомо|невідомий|unknown|\?|—|-)$/i.test(rec.father.fullName.trim()) || (!rec.father.firstName && !rec.father.lastName);
+    if (rec.father && rec.father.fullName && !isFatherUnknown) {
       fatherNode = getOrCreateNode(
         {
           fullName: rec.father.fullName,
@@ -270,7 +271,8 @@ export function buildCandidateDraftTree(
 
     // 3. Mother
     let motherNode: CandidateTreeNode | undefined = undefined;
-    if (rec.mother && rec.mother.fullName) {
+    const isMotherUnknown = !rec.mother?.fullName || /^(невідомо|невідома|unknown|\?|—|-)$/i.test(rec.mother.fullName.trim()) || (!rec.mother.firstName && !rec.mother.lastName);
+    if (rec.mother && rec.mother.fullName && !isMotherUnknown) {
       motherNode = getOrCreateNode(
         {
           fullName: rec.mother.fullName,

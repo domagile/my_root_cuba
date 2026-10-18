@@ -1,6 +1,7 @@
 import { GenealogyDatabase, Person, Family } from '../types/genealogy';
 import { areGivenNamesEquivalent, arePatronymicsEquivalent } from '../../utils/duplicateDetector';
 import { areSurnamesBilingualEquivalent, arePlacesEquivalent } from '../../utils/ukrainianPhonetics';
+import { cleanDatabaseFromUnknownPersons, isUnknownPlaceholderPerson } from './unknownPersonCleaner';
 
 export interface MatchedPersonRecord {
   existingPerson: Person;
@@ -692,8 +693,8 @@ export function analyzeMerge(
   currentDb: GenealogyDatabase,
   incomingDb: GenealogyDatabase
 ): MergeAnalysis {
-  const existingPersons = Object.values(currentDb.persons || {});
-  const incomingPersons = Object.values(incomingDb.persons || {});
+  const existingPersons = Object.values(currentDb.persons || {}).filter((p) => !isUnknownPlaceholderPerson(p));
+  const incomingPersons = Object.values(incomingDb.persons || {}).filter((p) => !isUnknownPlaceholderPerson(p));
 
   const idMapping: Record<string, string> = {};
   const matchedPersons: MatchedPersonRecord[] = [];
@@ -1198,8 +1199,10 @@ export function executeMerge(
     lastModified: new Date().toISOString()
   };
 
+  const cleanedFinalDb = cleanDatabaseFromUnknownPersons(finalDb);
+
   return {
-    database: finalDb,
+    database: cleanedFinalDb,
     matchedCount: matchedPersons.length,
     newPersonsCount: newPersons.length,
     conflictsResolvedCount,

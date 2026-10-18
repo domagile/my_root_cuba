@@ -172,6 +172,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const expandAllPersonModalSections = useUIStore((s) => s.expandAllPersonModalSections);
   const collapseAllPersonModalSections = useUIStore((s) => s.collapseAllPersonModalSections);
   const resetPersonModalSectionsToDefault = useUIStore((s) => s.resetPersonModalSectionsToDefault);
+  const openAuthModal = useUIStore((s) => s.openAuthModal);
 
   const [isMobileNavCollapsed, setIsMobileNavCollapsed] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -828,14 +829,11 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const handleFamilyQuickAddSave = (fatherData: Partial<Person>, motherData: Partial<Person>) => {
     const hasFather = Boolean(
       fatherData.id ||
-      (fatherData.firstName && fatherData.firstName.trim()) ||
-      (fatherData.lastName && fatherData.lastName.trim())
+      (fatherData.firstName && fatherData.firstName.trim() && !/^(невідомо|невідомий|unknown|\?|—|-)$/i.test(fatherData.firstName.trim()))
     );
     const hasMother = Boolean(
       motherData.id ||
-      (motherData.firstName && motherData.firstName.trim()) ||
-      (motherData.lastName && motherData.lastName.trim()) ||
-      (motherData.maidenName && motherData.maidenName.trim())
+      (motherData.firstName && motherData.firstName.trim() && !/^(невідомо|невідома|unknown|\?|—|-)$/i.test(motherData.firstName.trim()))
     );
 
     if (!hasFather && !hasMother) {
@@ -1973,6 +1971,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       return;
     }
 
+    const isUnknownFirst = /^(невідомо|невідомий|невідома|unknown|\?|—|-)$/i.test(firstName.trim());
+    const isUnknownLast = /^(невідомо|невідомий|невідома|unknown|\?|—|-)$/i.test(lastName.trim());
+    const isFullUnknown = /^(невідомо|невідомий|невідома|unknown|\?|—|-)$/i.test(`${lastName.trim()} ${firstName.trim()}`.trim());
+    if ((isFullUnknown || isUnknownFirst || isUnknownLast) && !fatherId && !motherId) {
+      alert('Якщо предок або родич невідомий, створювати окрему особу «Невідомо» не потрібно — просто залиште відповідний родинний зв\'язок порожнім.');
+      return;
+    }
+
     // Duplicate check for new persons: warn if high confidence matches exist
     if (
       !effectivePerson &&
@@ -2620,17 +2626,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </button>
                 )}
 
-                {!isReadOnly && (
-                  <button
-                    type="button"
-                    onClick={() => setIsConfirmDeleteAncestorsOpen(true)}
-                    className="flex px-2.5 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 border border-rose-500/30 transition-colors cursor-pointer items-center gap-1.5 text-xs font-semibold"
-                    title="Видалити всіх предків цієї особи з дерева"
-                  >
-                    <GitFork className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Видалити предків</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isReadOnly) {
+                      openAuthModal('Видалення предків');
+                      return;
+                    }
+                    setIsConfirmDeleteAncestorsOpen(true);
+                  }}
+                  className="flex px-2.5 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 border border-rose-500/30 transition-colors cursor-pointer items-center gap-1.5 text-xs font-semibold shrink-0"
+                  title="Видалити всіх предків цієї особи з дерева"
+                >
+                  <GitFork className="w-3.5 h-3.5 shrink-0" />
+                  <span className="whitespace-nowrap">Видалити предків</span>
+                </button>
               </>
             )}
 

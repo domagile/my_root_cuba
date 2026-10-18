@@ -366,6 +366,13 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [currentUser, whitelist, persons, setSelectedPersonId]);
 
+  // Automatically purge any unknown placeholder persons who have no specified ancestors
+  useEffect(() => {
+    try {
+      useGenealogyStore.getState().purgeUnknownPersons();
+    } catch {}
+  }, []);
+
   // Realtime Cloud Settings Listener (Tombstones, Ignored Duplicates, Merged Persons)
   // Ensures cross-session and cross-device consistency so deleted persons and resolved duplicates never reappear
   useEffect(() => {

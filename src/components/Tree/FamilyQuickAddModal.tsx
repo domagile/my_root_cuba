@@ -266,76 +266,80 @@ export const FamilyQuickAddModal: React.FC<FamilyQuickAddModalProps> = ({
   const executeSave = () => {
     const hasFather = Boolean(
       selectedExistingFather ||
-      fatherFirstName.trim() ||
-      fatherLastName.trim()
+      (fatherFirstName.trim() && !/^(невідомо|невідомий|unknown|\?|—|-)$/i.test(fatherFirstName.trim()))
     );
     const hasMother = Boolean(
       selectedExistingMother ||
-      motherFirstName.trim() ||
-      motherMaidenName.trim()
+      (motherFirstName.trim() && !/^(невідомо|невідома|unknown|\?|—|-)$/i.test(motherFirstName.trim()))
     );
 
     if (!hasFather && !hasMother) {
-      alert('Будь ласка, вкажіть ім\'я хоча б одного з батьків або виберіть існуючу особу.');
+      alert('Будь ласка, вкажіть ім\'я хоча б одного з батьків або виберіть існуючу особу. Якщо предок невідомий, створювати особу «Невідомо» не потрібно.');
       return;
     }
 
-    let fatherData: Partial<Person>;
-    if (selectedExistingFather) {
-      fatherData = {
-        id: selectedExistingFather.id,
-        firstName: selectedExistingFather.firstName,
-        lastName: selectedExistingFather.lastName,
-        gender: 'male',
-        birthYear: selectedExistingFather.birthYear,
-        isLiving: selectedExistingFather.isLiving
-      };
-    } else {
-      fatherData = {
-        firstName: fatherFirstName.trim(),
-        lastName: (fatherLastName || childSurname).trim(),
-        gender: 'male',
-        birthYear: parsedFatherYear && !isNaN(parsedFatherYear) ? parsedFatherYear : undefined,
-        isLiving: fatherIsLiving,
-        birthPlace: sharedPlace.trim() || undefined,
-        residencePlace: sharedPlace.trim() || undefined
-      };
+    let fatherData: Partial<Person> = {};
+    if (hasFather) {
+      if (selectedExistingFather) {
+        fatherData = {
+          id: selectedExistingFather.id,
+          firstName: selectedExistingFather.firstName,
+          lastName: selectedExistingFather.lastName,
+          gender: 'male',
+          birthYear: selectedExistingFather.birthYear,
+          isLiving: selectedExistingFather.isLiving
+        };
+      } else {
+        fatherData = {
+          firstName: fatherFirstName.trim(),
+          lastName: (fatherLastName || childSurname).trim(),
+          gender: 'male',
+          birthYear: parsedFatherYear && !isNaN(parsedFatherYear) ? parsedFatherYear : undefined,
+          isLiving: fatherIsLiving,
+          birthPlace: sharedPlace.trim() || undefined,
+          residencePlace: sharedPlace.trim() || undefined
+        };
+      }
     }
 
-    let motherData: Partial<Person>;
-    if (selectedExistingMother) {
-      motherData = {
-        id: selectedExistingMother.id,
-        firstName: selectedExistingMother.firstName,
-        lastName: selectedExistingMother.lastName,
-        maidenName: selectedExistingMother.maidenName,
-        gender: 'female',
-        birthYear: selectedExistingMother.birthYear,
-        isLiving: selectedExistingMother.isLiving
-      };
-    } else {
-      const motherSurname = motherMaidenName.trim()
-        ? motherMaidenName.trim()
-        : adaptUkrainianSurnameForGender(fatherLastName || childSurname, 'female');
+    let motherData: Partial<Person> = {};
+    if (hasMother) {
+      if (selectedExistingMother) {
+        motherData = {
+          id: selectedExistingMother.id,
+          firstName: selectedExistingMother.firstName,
+          lastName: selectedExistingMother.lastName,
+          maidenName: selectedExistingMother.maidenName,
+          gender: 'female',
+          birthYear: selectedExistingMother.birthYear,
+          isLiving: selectedExistingMother.isLiving
+        };
+      } else {
+        const motherSurname = motherMaidenName.trim()
+          ? motherMaidenName.trim()
+          : adaptUkrainianSurnameForGender(fatherLastName || childSurname, 'female');
 
-      motherData = {
-        firstName: motherFirstName.trim(),
-        lastName: motherSurname,
-        maidenName: motherMaidenName.trim() || undefined,
-        gender: 'female',
-        birthYear: parsedMotherYear && !isNaN(parsedMotherYear) ? parsedMotherYear : undefined,
-        isLiving: motherIsLiving,
-        birthPlace: sharedPlace.trim() || undefined,
-        residencePlace: sharedPlace.trim() || undefined
-      };
+        motherData = {
+          firstName: motherFirstName.trim(),
+          lastName: motherSurname,
+          maidenName: motherMaidenName.trim() || undefined,
+          gender: 'female',
+          birthYear: parsedMotherYear && !isNaN(parsedMotherYear) ? parsedMotherYear : undefined,
+          isLiving: motherIsLiving,
+          birthPlace: sharedPlace.trim() || undefined,
+          residencePlace: sharedPlace.trim() || undefined
+        };
+      }
     }
 
     onSaveParents(fatherData, motherData);
   };
 
   const handlePreSaveClick = () => {
-    if (!fatherFirstName.trim() && !motherFirstName.trim() && !selectedExistingFather && !selectedExistingMother) {
-      alert('Будь ласка, вкажіть ім\'я хоча б одного з батьків.');
+    const hasF = Boolean(selectedExistingFather || (fatherFirstName.trim() && !/^(невідомо|невідомий|unknown|\?|—|-)$/i.test(fatherFirstName.trim())));
+    const hasM = Boolean(selectedExistingMother || (motherFirstName.trim() && !/^(невідомо|невідома|unknown|\?|—|-)$/i.test(motherFirstName.trim())));
+    if (!hasF && !hasM) {
+      alert('Будь ласка, вкажіть ім\'я хоча б одного з батьків. Якщо предок невідомий, створювати особу «Невідомо» не потрібно.');
       return;
     }
 

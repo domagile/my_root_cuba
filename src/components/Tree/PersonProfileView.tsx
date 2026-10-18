@@ -409,9 +409,14 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   }, [father, mother, person.fatherId, person.motherId, person.parentFamilyId, person.id, families, persons]);
 
   const deleteAncestorsOfPerson = useGenealogyStore((s) => s.deleteAncestorsOfPerson);
+  const openAuthModal = useUIStore((s) => s.openAuthModal);
   const [isLocalConfirmAncestorsOpen, setIsLocalConfirmAncestorsOpen] = useState(false);
 
   const handleDeleteAncestorsClick = () => {
+    if (isReadOnly) {
+      openAuthModal('Видалення предків');
+      return;
+    }
     if (onDeleteAncestors) {
       onDeleteAncestors();
     } else {
@@ -846,17 +851,25 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
               </button>
             )}
 
-            {!isReadOnly && hasAncestors && (
-              <button
-                type="button"
-                onClick={handleDeleteAncestorsClick}
-                className="px-2.5 py-1.5 rounded-xl border border-amber-500/40 hover:border-amber-500 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
-                title="Видалити всіх предків цієї особи з родинного дерева"
-              >
-                <GitFork className="w-3.5 h-3.5 shrink-0" />
-                <span className="whitespace-nowrap">Видалити предків</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleDeleteAncestorsClick}
+              disabled={!hasAncestors}
+              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0 shadow-xs ${
+                !hasAncestors
+                  ? 'opacity-40 cursor-not-allowed border-stone-200 dark:border-slate-800 text-stone-400'
+                  : 'border-amber-500/40 hover:border-amber-500 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 cursor-pointer'
+              }`}
+              title={
+                !hasAncestors
+                  ? 'У цієї особи немає висхідних предків у дереві'
+                  : 'Видалити всіх предків цієї особи з родинного дерева'
+              }
+            >
+              <GitFork className="w-3.5 h-3.5 shrink-0" />
+              <span className="whitespace-nowrap">Видалити предків</span>
+              {!hasAncestors && <span className="text-[10px] font-normal opacity-60">(немає)</span>}
+            </button>
 
             {onDeletePerson && !isReadOnly && (
               <button
@@ -877,7 +890,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
           onWheel={(e) => {
             if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY;
           }}
-          className="px-3 sm:px-6 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex items-center gap-1.5 overflow-x-auto scrollbar-none flex-nowrap shrink-0"
+          className="px-3 sm:px-6 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex items-center gap-1.5 overflow-x-auto custom-scrollbar flex-nowrap shrink-0"
         >
           <button
             type="button"
@@ -1207,7 +1220,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                               e.currentTarget.scrollLeft += e.deltaY;
                             }
                           }}
-                          className="flex items-center gap-1.5 overflow-x-auto pb-3 pt-1 px-1 select-none [scrollbar-width:thin] [scrollbar-color:#0284c7_rgba(14,165,233,0.18)] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar-track]:bg-sky-100/80 dark:[&::-webkit-scrollbar-track]:bg-slate-800/90 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sky-500 hover:[&::-webkit-scrollbar-thumb]:bg-sky-400 active:[&::-webkit-scrollbar-thumb]:bg-sky-600 [&::-webkit-scrollbar-thumb]:rounded-full cursor-grab active:cursor-grabbing"
+                          className="flex items-center gap-1.5 overflow-x-auto pb-2 pt-1 px-1 select-none custom-scrollbar cursor-grab active:cursor-grabbing"
                         >
                           {kinshipToSelected.path.map((step, sIdx) => {
                             const stepP = databaseForKinship.persons[step.personId];
@@ -1357,17 +1370,25 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                     <span>Батьки та брати/сестри</span>
                   </h3>
                   <div className="flex items-center gap-2 flex-wrap">
-                    {!isReadOnly && hasAncestors && (
-                      <button
-                        type="button"
-                        onClick={handleDeleteAncestorsClick}
-                        className="px-2 py-1 rounded-lg border border-rose-500/30 hover:border-rose-500 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                        title="Видалити всіх висхідних предків цієї особи"
-                      >
-                        <GitFork className="w-3 h-3" />
-                        <span>Видалити предків</span>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={handleDeleteAncestorsClick}
+                      disabled={!hasAncestors}
+                      className={`px-2 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 transition-colors ${
+                        !hasAncestors
+                          ? 'opacity-40 cursor-not-allowed border-stone-200 dark:border-slate-800 text-stone-400'
+                          : 'border-rose-500/30 hover:border-rose-500 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 cursor-pointer'
+                      }`}
+                      title={
+                        !hasAncestors
+                          ? 'У цієї особи немає висхідних предків у дереві'
+                          : 'Видалити всіх висхідних предків цієї особи'
+                      }
+                    >
+                      <GitFork className="w-3 h-3" />
+                      <span>Видалити предків</span>
+                      {!hasAncestors && <span className="text-[10px] font-normal opacity-60">(немає)</span>}
+                    </button>
                     {!isReadOnly && (onOpenFamilyQuickAdd || onOpenAddRelation) && (!father || !mother) && (
                     <button
                       type="button"
@@ -2212,17 +2233,25 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
           </span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {!isReadOnly && hasAncestors && (
-            <button
-              type="button"
-              onClick={handleDeleteAncestorsClick}
-              className="px-3 py-1.5 rounded-lg border border-amber-500/40 hover:border-amber-500 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1.5 cursor-pointer text-xs transition-colors shrink-0 whitespace-nowrap"
-              title="Видалити всіх висхідних предків цієї особи"
-            >
-              <GitFork className="w-3.5 h-3.5" />
-              <span>Видалити предків</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleDeleteAncestorsClick}
+            disabled={!hasAncestors}
+            className={`px-3 py-1.5 rounded-lg border font-semibold flex items-center gap-1.5 cursor-pointer text-xs transition-colors shrink-0 whitespace-nowrap ${
+              !hasAncestors
+                ? 'opacity-40 cursor-not-allowed border-stone-200 dark:border-slate-800 text-stone-400'
+                : 'border-amber-500/40 hover:border-amber-500 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 cursor-pointer'
+            }`}
+            title={
+              !hasAncestors
+                ? 'У цієї особи немає висхідних предків у дереві'
+                : 'Видалити всіх висхідних предків цієї особи'
+            }
+          >
+            <GitFork className="w-3.5 h-3.5" />
+            <span>Видалити предків</span>
+            {!hasAncestors && <span className="text-[10px] font-normal opacity-60">(немає)</span>}
+          </button>
           {onDeletePerson && !isReadOnly && (
             <button
               type="button"

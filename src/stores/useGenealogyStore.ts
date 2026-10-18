@@ -24,6 +24,7 @@ import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { useAuthStore } from './useAuthStore';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
 import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord, getPersonAncestorsIds } from '../rodovid/utils/mergeDatabase';
+import { purgeUnknownPlaceholderPersons, cleanDatabaseFromUnknownPersons, isUnknownPlaceholderPerson } from '../rodovid/utils/unknownPersonCleaner';
 
 export function notifySyncChange(
   arg1?: (() => void) | EntitySyncType,
@@ -262,6 +263,7 @@ export interface GenealogyDataState {
   setGoogleDriveEmail: (email: string) => void;
   exportGedcomData: () => void;
   purgeDemoDataFromTree: () => void;
+  purgeUnknownPersons: () => { deletedCount: number; deletedIds: string[] };
 }
 
 export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
@@ -288,16 +290,32 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
                 deduplicated.push(p);
               }
             }
+            // Auto-clean unknown placeholder persons with no specified ancestors
+            let rawFam: Record<string, Family> = {};
             try {
-              localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(deduplicated));
+              const sf = localStorage.getItem(`${STORAGE_KEY}_families`);
+              if (sf) rawFam = JSON.parse(sf);
             } catch {}
-            return deduplicated;
+            const { cleanedPersons, cleanedFamilies, deletedIds } = purgeUnknownPlaceholderPersons(deduplicated, rawFam);
+            if (deletedIds.length > 0) {
+              addTombstoneIds(deletedIds);
+              deletedIds.forEach((id) => deletePersonDoc(id).catch(() => {}));
+              try {
+                localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(cleanedFamilies));
+              } catch {}
+            }
+            try {
+              localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(cleanedPersons));
+            } catch {}
+            return cleanedPersons;
           }
         }
       }
-      return INITIAL_PERSONS.map(normalizePerson);
+      const { cleanedPersons } = purgeUnknownPlaceholderPersons(INITIAL_PERSONS.map(normalizePerson), INITIAL_FAMILIES);
+      return cleanedPersons;
     } catch {
-      return INITIAL_PERSONS.map(normalizePerson);
+      const { cleanedPersons } = purgeUnknownPlaceholderPersons(INITIAL_PERSONS.map(normalizePerson), INITIAL_FAMILIES);
+      return cleanedPersons;
     }
   })(),
 
@@ -421,11 +439,27 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
           deduplicated.push(p);
         }
       }
+
+      const { cleanedPersons, cleanedFamilies, deletedIds } = purgeUnknownPlaceholderPersons(deduplicated, state.families);
+      if (deletedIds.length > 0) {
+        addTombstoneIds(deletedIds);
+        deletedIds.forEach((id) => {
+          deletePersonDoc(id).catch(() => {});
+          notifySyncDelete('persons', id, () => deletePersonDoc(id));
+        });
+      }
+
       try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(deduplicated));
+        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(cleanedPersons));
+        if (deletedIds.length > 0) {
+          localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(cleanedFamilies));
+        }
       } catch {}
 
-      return { persons: deduplicated };
+      return {
+        persons: cleanedPersons,
+        ...(deletedIds.length > 0 ? { families: cleanedFamilies } : {})
+      };
     }),
 
   setSelectedPersonId: (selectedPersonId) => {
@@ -448,7 +482,13 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   addPerson: (person) =>
     set((state) => {
+      if (isUnknownPlaceholderPerson(person)) {
+        return state;
+      }
       const normalized = normalizePerson(person);
+      if (isUnknownPlaceholderPerson(normalized)) {
+        return state;
+      }
       const exists = state.persons.some((p) => p.id === normalized.id);
       const next = exists
         ? state.persons.map((p) => (p.id === normalized.id ? normalized : p))
@@ -1034,8 +1074,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     };
   },
 
-  loadGenealogyDatabase: (db: GenealogyDatabase, meta?: { fileName?: string }) =>
+  loadGenealogyDatabase: (rawDb: GenealogyDatabase, meta?: { fileName?: string }) =>
     set((state) => {
+      const db = cleanDatabaseFromUnknownPersons(rawDb);
       const rawIncoming = db.persons ? Object.values(db.persons).map(normalizePerson) : [];
       const seen = new Set<string>();
       const incomingPersons: Person[] = [];
@@ -1273,5 +1314,23 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         sources: cleanSources,
         events: cleanEvents
       };
-    })
+    }),
+
+  purgeUnknownPersons: () => {
+    const state = get();
+    const { cleanedPersons, cleanedFamilies, deletedIds } = purgeUnknownPlaceholderPersons(state.persons, state.families);
+    if (deletedIds.length > 0) {
+      addTombstoneIds(deletedIds);
+      deletedIds.forEach((id) => {
+        deletePersonDoc(id).catch(() => {});
+        notifySyncDelete('persons', id, () => deletePersonDoc(id));
+      });
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(cleanedPersons));
+        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(cleanedFamilies));
+      } catch {}
+      set({ persons: cleanedPersons, families: cleanedFamilies });
+    }
+    return { deletedCount: deletedIds.length, deletedIds };
+  }
 }));

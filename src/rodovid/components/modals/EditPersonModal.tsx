@@ -138,6 +138,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
       return;
     }
 
+    const isUnknownFirst = /^(невідомо|невідомий|невідома|unknown|\?|—|-)$/i.test(given.trim());
+    const isUnknownLast = /^(невідомо|невідомий|невідома|unknown|\?|—|-)$/i.test(surname.trim());
+    const isFullUnknown = /^(невідомо|невідомий|невідома|unknown|\?|—|-)$/i.test(`${surname.trim()} ${given.trim()}`.trim());
+    if ((isFullUnknown || isUnknownFirst || isUnknownLast) && !fatherId && !motherId) {
+      alert('Якщо предок невідомий, створювати особу «Невідомо» не потрібно — просто залиште відповідний зв\'язок порожнім.');
+      return;
+    }
+
     const birthYearMatch = birthDate.match(/\b(1\d{3}|20\d{2})\b/);
     const birthYear = birthYearMatch ? parseInt(birthYearMatch[1], 10) : undefined;
 

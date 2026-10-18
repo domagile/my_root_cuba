@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   Search,
   Filter,
@@ -25,6 +25,10 @@ import {
   FileText,
   GitMerge,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ArrowLeft,
+  ArrowRight,
   Check,
   ExternalLink
 } from 'lucide-react';
@@ -98,8 +102,124 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const themePalette = useUIStore((s) => s.themePalette);
   const personClanFilter = useUIStore((s) => s.personClanFilter);
   const setPersonClanFilter = useUIStore((s) => s.setPersonClanFilter);
+  const openAuthModal = useUIStore((s) => s.openAuthModal);
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
+
+  // Table horizontal scrolling synchronization and sticky bottom scroll dock
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const scrollTrackRef = useRef<HTMLDivElement>(null);
+  const [tableScrollInfo, setTableScrollInfo] = useState({
+    scrollLeft: 0,
+    maxScroll: 0,
+    clientWidth: 0,
+    scrollWidth: 0,
+    canScrollLeft: false,
+    canScrollRight: false
+  });
+
+  const updateTableScrollInfo = useCallback(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const scrollLeft = el.scrollLeft;
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+    setTableScrollInfo({
+      scrollLeft,
+      maxScroll,
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+      canScrollLeft: scrollLeft > 2,
+      canScrollRight: scrollLeft < maxScroll - 2
+    });
+  }, []);
+
+  const scrollTable = useCallback((direction: 'left' | 'right' | 'start' | 'end') => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const step = 340;
+    if (direction === 'left') {
+      el.scrollBy({ left: -step, behavior: 'smooth' });
+    } else if (direction === 'right') {
+      el.scrollBy({ left: step, behavior: 'smooth' });
+    } else if (direction === 'start') {
+      el.scrollTo({ left: 0, behavior: 'smooth' });
+    } else if (direction === 'end') {
+      el.scrollTo({ left: el.scrollWidth, behavior: 'smooth' });
+    }
+  }, []);
+
+  const handleTrackClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const track = scrollTrackRef.current;
+    const table = tableScrollRef.current;
+    if (!track || !table) return;
+    const rect = track.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, clickX / rect.width));
+    const maxScroll = table.scrollWidth - table.clientWidth;
+    table.scrollTo({ left: ratio * maxScroll, behavior: 'smooth' });
+  }, []);
+
+  const handleThumbMouseDown = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const table = tableScrollRef.current;
+    const track = scrollTrackRef.current;
+    if (!table || !track) return;
+    const startX = e.clientX;
+    const startScrollLeft = table.scrollLeft;
+    const trackWidth = track.clientWidth;
+    const maxScroll = table.scrollWidth - table.clientWidth;
+
+    const onMouseMove = (moveEv: MouseEvent) => {
+      const deltaX = moveEv.clientX - startX;
+      const scrollDelta = (deltaX / trackWidth) * table.scrollWidth;
+      table.scrollLeft = Math.max(0, Math.min(maxScroll, startScrollLeft + scrollDelta));
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, []);
+
+  const handleThumbTouchStart = useCallback((e: React.TouchEvent) => {
+    e.stopPropagation();
+    const table = tableScrollRef.current;
+    const track = scrollTrackRef.current;
+    if (!table || !track || !e.touches[0]) return;
+    const startX = e.touches[0].clientX;
+    const startScrollLeft = table.scrollLeft;
+    const trackWidth = track.clientWidth;
+    const maxScroll = table.scrollWidth - table.clientWidth;
+
+    const onTouchMove = (moveEv: TouchEvent) => {
+      if (!moveEv.touches[0]) return;
+      const deltaX = moveEv.touches[0].clientX - startX;
+      const scrollDelta = (deltaX / trackWidth) * table.scrollWidth;
+      table.scrollLeft = Math.max(0, Math.min(maxScroll, startScrollLeft + scrollDelta));
+    };
+
+    const onTouchEnd = () => {
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd);
+  }, []);
+
+  const thumbWidthPercent = useMemo(() => {
+    if (!tableScrollInfo.scrollWidth || tableScrollInfo.scrollWidth <= tableScrollInfo.clientWidth) return 100;
+    return Math.max(12, Math.min(100, (tableScrollInfo.clientWidth / tableScrollInfo.scrollWidth) * 100));
+  }, [tableScrollInfo.clientWidth, tableScrollInfo.scrollWidth]);
+
+  const thumbLeftPercent = useMemo(() => {
+    if (!tableScrollInfo.maxScroll || tableScrollInfo.maxScroll <= 0) return 0;
+    const ratio = Math.max(0, Math.min(1, tableScrollInfo.scrollLeft / tableScrollInfo.maxScroll));
+    return ratio * (100 - thumbWidthPercent);
+  }, [tableScrollInfo.scrollLeft, tableScrollInfo.maxScroll, thumbWidthPercent]);
 
   const [searchInputValue, setSearchInputValue] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -130,6 +250,29 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [toast, setToast] = useState<{ message: string; actionText?: string; onAction?: () => void } | null>(null);
   const [statusMenuPersonId, setStatusMenuPersonId] = useState<string | null>(null);
   const [metricMenuPersonId, setMetricMenuPersonId] = useState<string | null>(null);
+
+  // Ensure scroll information is always synchronized on mount, resize, and data slice updates
+  useEffect(() => {
+    updateTableScrollInfo();
+    const el = tableScrollRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', updateTableScrollInfo, { passive: true });
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        updateTableScrollInfo();
+      });
+      ro.observe(el);
+    }
+    window.addEventListener('resize', updateTableScrollInfo);
+    const timer = setTimeout(updateTableScrollInfo, 120);
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener('scroll', updateTableScrollInfo);
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', updateTableScrollInfo);
+    };
+  }, [updateTableScrollInfo, displayLimit, viewMode]);
 
   // Reset display limit when search term or any filter changes
   useEffect(() => {
@@ -459,7 +602,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   };
 
   return (
-    <div className={`max-w-7xl mx-auto px-4 py-6 space-y-6 ${theme.textPrimary}`}>
+    <div className={`max-w-7xl mx-auto px-4 py-6 pb-24 md:pb-8 space-y-6 ${theme.textPrimary}`}>
       {/* Top Header & Search Bar */}
       <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 shadow-xs space-y-4`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -755,6 +898,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
             {/* View Mode Toggle (Table / Cards) */}
             <div className="ml-auto flex items-center shrink-0">
+
               <div className={`flex border ${theme.borderSubtle} rounded-lg overflow-hidden ${theme.surfaceBg} shrink-0`}>
                 <button
                   type="button"
@@ -848,20 +992,22 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
       ) : viewMode === 'table' ? (
         <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl overflow-hidden shadow-xs`}>
-          <div className="overflow-x-auto">
-            <table className={`w-full min-w-[680px] text-left text-xs ${theme.textSecondary}`}>
-              <thead className={`${theme.surfaceBg} ${theme.textMuted} font-semibold border-b ${theme.borderSubtle} uppercase tracking-wider text-[10px]`}>
+          <div className="overflow-x-auto max-h-[calc(100vh-240px)] [scrollbar-width:thin] [scrollbar-color:rgba(150,150,150,0.25)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-700 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-neutral-600 [&::-webkit-scrollbar-thumb]:rounded-full">
+            <table className={`w-full text-left text-xs ${theme.textSecondary}`}>
+              <thead className={`sticky top-0 z-10 ${theme.surfaceBg} ${theme.textMuted} font-semibold uppercase tracking-wider text-[10px]`}>
                 <tr>
-                  <th className="py-3 px-4">ПІБ / Особа</th>
-                  <th className="py-3 px-4">Стать</th>
-                  <th className="py-3 px-4">Роки життя</th>
-                  <th className="py-3 px-4">Дослідження</th>
-                  <th className="py-3 px-4">Метрики / Пошук</th>
-                  <th className="py-3 px-4">Місце народження</th>
-                  <th className="py-3 px-4">Професія / Статус</th>
-                  <th className="py-3 px-4 text-center">Подій</th>
-                  <th className="py-3 px-4 text-center">Джерел</th>
-                  <th className="py-3 px-4 text-right">Дії</th>
+                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>ПІБ / Особа</th>
+                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Стать</th>
+                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Роки життя</th>
+                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Дослідження</th>
+                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Метрики / Пошук</th>
+                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Місце народження</th>
+                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Професія / Статус</th>
+                  <th className={`py-3 px-4 text-center border-b ${theme.borderSubtle}`}>Подій</th>
+                  <th className={`py-3 px-4 text-center border-b ${theme.borderSubtle}`}>Джерел</th>
+                  <th className={`py-3 px-4 text-right border-b ${theme.borderSubtle}`}>
+                    Зв'язки та дії
+                  </th>
                 </tr>
               </thead>
               <tbody className={`divide-y ${theme.borderSubtle}`}>
@@ -891,7 +1037,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       }}
                       className={`hover:bg-neutral-500/5 cursor-pointer transition-colors`}
                     >
-                      <td className="py-3 px-4">
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle}`}>
                         <div className="flex items-center gap-3">
                           {isMasked ? (
                             <div
@@ -1028,7 +1174,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         </div>
                       </td>
 
-                      <td className="py-3 px-4">
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle}`}>
                         <span
                           className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium ${
                             isDark
@@ -1048,11 +1194,11 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         </span>
                       </td>
 
-                      <td className={`py-3 px-4 font-mono ${theme.textPrimary}`}>
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle} font-mono ${theme.textPrimary}`}>
                         {isMasked ? '🔒 Скрито' : `${p.birthYear || '?'} — ${p.isLiving ? 'живий' : p.deathYear || '?'}`}
                       </td>
 
-                      <td className="py-3 px-4 relative" onClick={(e) => e.stopPropagation()}>
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle} relative`} onClick={(e) => e.stopPropagation()}>
                         {isMasked ? (
                           <span className={theme.textMuted}>—</span>
                         ) : isAdmin ? (
@@ -1166,7 +1312,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                       </td>
 
                       {/* Metric Search Status Column */}
-                      <td className="py-3 px-4 relative" onClick={(e) => e.stopPropagation()}>
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle} relative`} onClick={(e) => e.stopPropagation()}>
                         {isMasked ? (
                           <span className={theme.textMuted}>—</span>
                         ) : (() => {
@@ -1232,19 +1378,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         })()}
                       </td>
 
-                      <td className={`py-3 px-4 ${theme.textMuted} max-w-[160px] truncate`}>
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle} ${theme.textMuted} max-w-[160px] truncate`}>
                         {isMasked ? '🔒 Скрито' : (p.birthPlace || '—')}
                       </td>
 
-                      <td className={`py-3 px-4 ${theme.textSecondary} max-w-[180px] truncate`}>
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle} ${theme.textSecondary} max-w-[180px] truncate`}>
                         {isMasked ? '🔒 Скрито' : (p.occupation || '—')}
                       </td>
 
-                      <td className={`py-3 px-4 text-center font-mono ${theme.textMuted}`}>
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle} text-center font-mono ${theme.textMuted}`}>
                         {isMasked ? '—' : (p.events?.length || 0)}
                       </td>
 
-                      <td className="py-3 px-4 text-center">
+                      <td className={`py-3 px-4 border-b ${theme.borderSubtle} text-center`}>
                         {isMasked ? (
                           <span className={theme.textMuted}>—</span>
                         ) : p.citations && p.citations.length > 0 ? (
@@ -1259,61 +1405,79 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                         )}
                       </td>
 
-                      <td className="py-3 px-4 text-right">
+                      <td className={`py-2.5 px-4 text-right whitespace-nowrap border-b ${theme.borderSubtle}`}>
                         <div
                           className="flex items-center justify-end gap-1"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
+                            type="button"
+                            onClick={() => onOpenKinshipWith(p.id)}
+                            className="p-1.5 rounded-lg border border-cyan-500/30 hover:border-cyan-500 hover:bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                            title="Розрахувати спорідненість та родові зв'язки"
+                          >
+                            <Compass className="w-3.5 h-3.5 text-cyan-500" />
+                            <span className="text-[10px] font-bold hidden xl:inline">Зв'язки</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!canEdit) {
+                                openAuthModal('Видалення предків');
+                                return;
+                              }
+                              setPersonToDeleteAncestors(rawP);
+                            }}
+                            className="p-1.5 rounded-lg border border-amber-500/30 hover:border-amber-500 hover:bg-amber-500/15 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                            title="Видалити всіх предків цієї особи з родинного дерева"
+                          >
+                            <GitFork className="w-3.5 h-3.5 text-amber-500" />
+                            <span className="text-[10px] font-bold hidden xl:inline">Предки</span>
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => onChangeRoot(p.id)}
-                            className={`p-1.5 ${theme.textMuted} hover:text-emerald-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+                            className={`p-1.5 ${theme.textMuted} hover:text-emerald-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer shrink-0`}
                             title="Зробити коренем дерева"
                           >
-                            <GitFork className="w-3.5 h-3.5" />
+                            <User className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => onOpenKinshipWith(p.id)}
-                            className={`p-1.5 ${theme.textMuted} hover:text-cyan-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
-                            title="Розрахувати спорідненість"
-                          >
-                            <Compass className="w-3.5 h-3.5" />
-                          </button>
-                          <button
+                            type="button"
                             onClick={() => setReportPersonId(p.id)}
-                            className={`p-1.5 ${theme.textMuted} hover:text-sky-400 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+                            className={`p-1.5 ${theme.textMuted} hover:text-sky-400 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer shrink-0`}
                             title="Згенерувати короткий звіт (PDF / TXT)"
                           >
                             <FileText className="w-3.5 h-3.5" />
                           </button>
-                          {canEdit && !isMasked && (
-                            <>
-                              <button
-                                onClick={() => onEditPerson(p.id)}
-                                className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
-                                title="Редагувати"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setPersonToDeleteAncestors(rawP)}
-                                className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
-                                title="Видалити предків особи"
-                              >
-                                <GitFork className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPersonToDelete(rawP);
-                                }}
-                                className={`p-1.5 ${theme.textMuted} hover:text-rose-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
-                                title="Видалити"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!canEdit) {
+                                openAuthModal('Редагування особи');
+                                return;
+                              }
+                              onEditPerson(p.id);
+                            }}
+                            className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer shrink-0`}
+                            title="Редагувати анкету"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!canEdit) {
+                                openAuthModal('Видалення особи');
+                                return;
+                              }
+                              setPersonToDelete(rawP);
+                            }}
+                            className={`p-1.5 ${theme.textMuted} hover:text-rose-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer shrink-0`}
+                            title="Видалити особу з бази"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1647,25 +1811,35 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     >
                       <FileText className="w-3.5 h-3.5" />
                     </button>
-                    {canEdit && !isMasked && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setPersonToDeleteAncestors(rawP)}
-                          className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer`}
-                          title="Видалити предків особи"
-                        >
-                          <GitFork className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => onEditPerson(p.id)}
-                          className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer`}
-                          title="Редагувати"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!canEdit) {
+                          openAuthModal('Видалення предків');
+                          return;
+                        }
+                        setPersonToDeleteAncestors(rawP);
+                      }}
+                      className="p-1.5 rounded-lg border border-amber-500/30 hover:border-amber-500 hover:bg-amber-500/15 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer flex items-center gap-1"
+                      title="Видалити всіх предків цієї особи з родинного дерева"
+                    >
+                      <GitFork className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-bold">Предки</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!canEdit) {
+                          openAuthModal('Редагування особи');
+                          return;
+                        }
+                        onEditPerson(p.id);
+                      }}
+                      className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded cursor-pointer transition-colors`}
+                      title="Редагувати"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               </div>
