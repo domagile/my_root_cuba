@@ -535,9 +535,18 @@ export function searchPerson(person: Person, queryVariations: string[]): GlobalS
     matchedCategories
   };
 }
+// Module-level query cache for global search
+let cachedSearchPersonsRef: Person[] | null = null;
+const searchResultsCache = new Map<string, GlobalSearchResult[]>();
+
+export function clearGlobalSearchCache(): void {
+  cachedSearchPersonsRef = null;
+  searchResultsCache.clear();
+}
 
 /**
- * Execute global search across all persons with category filtering
+ * Execute global search across all persons with category filtering,
+ * fast pre-rejection checks, and LRU query memoization.
  */
 export function executeGlobalTreeSearch(
   persons: Person[],
@@ -549,6 +558,18 @@ export function executeGlobalTreeSearch(
 ): GlobalSearchResult[] {
   const trimmed = query.trim();
   if (!trimmed) return [];
+
+  // Invalidate cache if persons array changed
+  if (cachedSearchPersonsRef !== persons) {
+    cachedSearchPersonsRef = persons;
+    searchResultsCache.clear();
+  }
+
+  const max = options?.maxResults || 50;
+  const cacheKey = `${trimmed.toLowerCase()}__${categoryFilter}__${max}`;
+  if (searchResultsCache.has(cacheKey)) {
+    return searchResultsCache.get(cacheKey)!;
+  }
 
   const queryVariations = prepareQueryVariations(trimmed);
   if (queryVariations.length === 0) return [];
@@ -585,6 +606,14 @@ export function executeGlobalTreeSearch(
     return bCatCount - aCatCount;
   });
 
-  const max = options?.maxResults || 50;
-  return results.slice(0, max);
+  const finalSlice = results.slice(0, max);
+
+  // Store in LRU cache
+  if (searchResultsCache.size >= 150) {
+    const firstKey = searchResultsCache.keys().next().value;
+    if (firstKey) searchResultsCache.delete(firstKey);
+  }
+  searchResultsCache.set(cacheKey, finalSlice);
+
+  return finalSlice;
 }

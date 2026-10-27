@@ -15,7 +15,8 @@ import {
   getLevenshteinSimilarity,
   areSurnamesPhoneticallyRelated,
   normalizeBilingualCyrillic,
-  areSurnamesBilingualEquivalent
+  areSurnamesBilingualEquivalent,
+  extractUkrainianSurnameRoot
 } from './ukrainianPhonetics';
 import { extractYear } from './treeAudit';
 import { saveIgnoredDuplicatePairsToCloud } from '../lib/firebase';
@@ -683,23 +684,42 @@ function patronymicNormalize(p: string): string {
   return s;
 }
 
+// Module-level memoization cache for duplicate detection
+let cachedPersonsRef: Person[] | null = null;
+let cachedDuplicatePairs: DuplicatePair[] | null = null;
+
+export function clearDuplicateDetectorCache(): void {
+  cachedPersonsRef = null;
+  cachedDuplicatePairs = null;
+}
+
 /**
  * Finds all potential duplicate pairs in the tree using multi-dimensional phonetic,
  * chronological, and genealogical similarity evaluation.
+ * Optimized with Multi-Key Phonetic & Genealogical Candidate Blocking (Bucketing)
+ * reducing complexity from O(N^2) to O(N * K) with memoization caching.
  */
 export function detectDuplicatePersons(persons: Person[], filterIgnored = false): DuplicatePair[] {
-  const duplicatePairs: DuplicatePair[] = [];
-  const n = persons.length;
-  if (n < 2) return [];
+  if (cachedPersonsRef === persons && cachedDuplicatePairs !== null) {
+    if (filterIgnored) {
+      const ignoredSet = getIgnoredDuplicatePairKeys();
+      return cachedDuplicatePairs.filter((p) => !isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet));
+    }
+    return cachedDuplicatePairs;
+  }
 
-  const ignoredSet = filterIgnored ? getIgnoredDuplicatePairKeys() : undefined;
+  const n = persons.length;
+  if (n < 2) {
+    cachedPersonsRef = persons;
+    cachedDuplicatePairs = [];
+    return [];
+  }
 
   const personsMap = new Map<string, Person>();
   for (const p of persons) {
     personsMap.set(p.id, p);
   }
 
-  // Pre-extract search metadata once per person to avoid repeated regex & year parsing inside the O(N^2) loop
   interface FastPersonMeta {
     person: Person;
     gender: string | null;
@@ -707,6 +727,11 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
     deathYear: number | null;
     surnameClean: string;
     givenClean: string;
+    surnameRoot: string;
+    maidenRoot: string;
+    canonicalGiven: string;
+    fatherId: string | null;
+    motherId: string | null;
     hasMaiden: boolean;
   }
 
@@ -718,6 +743,17 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
     const given = (p.name?.given || p.firstName || '').trim().toLowerCase();
     const bY = extractYear(p.birthDate) || extractYear(p.birthYear) || null;
     const dY = extractYear(p.deathDate) || extractYear(p.deathYear) || null;
+    const surRoot = sur ? extractUkrainianSurnameRoot(sur) : '';
+    const maidenRoot = maiden && maiden !== sur ? extractUkrainianSurnameRoot(maiden) : '';
+
+    let canonicalGiven = given;
+    for (const [canonical, variants] of Object.entries(UKRAINIAN_NAME_VARIANTS)) {
+      if (variants.includes(given)) {
+        canonicalGiven = canonical;
+        break;
+      }
+    }
+
     metaList[i] = {
       person: p,
       gender: p.gender || null,
@@ -725,43 +761,121 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
       deathYear: dY,
       surnameClean: sur,
       givenClean: given,
+      surnameRoot: surRoot,
+      maidenRoot: maidenRoot,
+      canonicalGiven,
+      fatherId: p.fatherId || null,
+      motherId: p.motherId || null,
       hasMaiden: Boolean(maiden && maiden !== sur)
     };
   }
 
-  for (let i = 0; i < n; i++) {
-    const mA = metaList[i];
-    const pA = mA.person;
+  const duplicatePairs: DuplicatePair[] = [];
 
-    for (let j = i + 1; j < n; j++) {
-      const mB = metaList[j];
+  // For small trees (<= 60 persons), standard pairwise check is negligible (< 1800 pairs).
+  // For larger trees, candidate blocking generates pairs only between individuals sharing
+  // phonetic roots, parent connections, or given name + decade/patronymic keys.
+  if (n <= 60) {
+    for (let i = 0; i < n; i++) {
+      const mA = metaList[i];
+      const pA = mA.person;
+      if ((pA as any).isDeleted) continue;
+
+      for (let j = i + 1; j < n; j++) {
+        const mB = metaList[j];
+        const pB = mB.person;
+        if ((pB as any).isDeleted) continue;
+
+        if (mA.gender && mB.gender && mA.gender !== mB.gender) continue;
+        if (mA.birthYear !== null && mB.birthYear !== null && Math.abs(mA.birthYear - mB.birthYear) > 12) continue;
+        if (mA.deathYear !== null && mB.deathYear !== null && Math.abs(mA.deathYear - mB.deathYear) > 15) continue;
+
+        const comp = comparePersonPair(pA, pB, personsMap);
+        if (comp && comp.confidence >= 48) {
+          duplicatePairs.push({
+            id: `dup_${pA.id}_${pB.id}`,
+            personA: pA,
+            personB: pB,
+            confidence: comp.confidence,
+            confidenceLevel: comp.confidenceLevel,
+            reasons: comp.reasons,
+            breakdown: comp.breakdown,
+            criteria: comp.criteria
+          });
+        }
+      }
+    }
+  } else {
+    const blocks = new Map<string, number[]>();
+    const addToBlock = (key: string, idx: number) => {
+      if (!key) return;
+      let list = blocks.get(key);
+      if (!list) {
+        list = [];
+        blocks.set(key, list);
+      }
+      list.push(idx);
+    };
+
+    for (let i = 0; i < n; i++) {
+      const m = metaList[i];
+      if ((m.person as any).isDeleted) continue;
+
+      if (m.surnameRoot.length >= 2) {
+        addToBlock(`sr_${m.surnameRoot}`, i);
+      }
+      if (m.maidenRoot.length >= 2) {
+        addToBlock(`sr_${m.maidenRoot}`, i);
+      }
+      if (m.surnameClean.length >= 2) {
+        addToBlock(`s2_${m.surnameClean.slice(0, 2)}_${m.gender || 'any'}`, i);
+      }
+      if (m.canonicalGiven && m.birthYear !== null) {
+        const decade = Math.floor(m.birthYear / 10) * 10;
+        addToBlock(`gd_${m.canonicalGiven}_${decade}`, i);
+      }
+      const pPatron = (m.person.name?.patronymic || m.person.patronymic || '').trim().toLowerCase();
+      if (m.canonicalGiven && pPatron) {
+        addToBlock(`gp_${m.canonicalGiven}_${patronymicNormalize(pPatron)}`, i);
+      }
+      if (m.fatherId) {
+        addToBlock(`fid_${m.fatherId}`, i);
+      }
+      if (m.motherId) {
+        addToBlock(`mid_${m.motherId}`, i);
+      }
+    }
+
+    const candidatePairs = new Set<string>();
+    for (const group of blocks.values()) {
+      const glen = group.length;
+      if (glen > 1 && glen <= 300) {
+        for (let a = 0; a < glen; a++) {
+          const idxA = group[a];
+          for (let b = a + 1; b < glen; b++) {
+            const idxB = group[b];
+            const low = idxA < idxB ? idxA : idxB;
+            const high = idxA < idxB ? idxB : idxA;
+            candidatePairs.add(`${low}_${high}`);
+          }
+        }
+      }
+    }
+
+    for (const pairKey of candidatePairs) {
+      const sep = pairKey.indexOf('_');
+      const idxA = Number(pairKey.slice(0, sep));
+      const idxB = Number(pairKey.slice(sep + 1));
+      const mA = metaList[idxA];
+      const mB = metaList[idxB];
+      const pA = mA.person;
       const pB = mB.person;
 
-      if ((pA as any).isDeleted || (pB as any).isDeleted) {
-        continue;
-      }
+      if ((pA as any).isDeleted || (pB as any).isDeleted) continue;
+      if (mA.gender && mB.gender && mA.gender !== mB.gender) continue;
+      if (mA.birthYear !== null && mB.birthYear !== null && Math.abs(mA.birthYear - mB.birthYear) > 12) continue;
+      if (mA.deathYear !== null && mB.deathYear !== null && Math.abs(mA.deathYear - mB.deathYear) > 15) continue;
 
-      if (filterIgnored && ignoredSet && isDuplicatePairIgnored(pA.id, pB.id, ignoredSet)) {
-        continue;
-      }
-
-      // 1. Fast gender check (if both genders specified and distinct, cannot be duplicates)
-      if (mA.gender && mB.gender && mA.gender !== mB.gender) {
-        continue;
-      }
-
-      // 2. Fast birth year generation guard (if both known and > 12 years apart, cannot be duplicates)
-      if (mA.birthYear !== null && mB.birthYear !== null && Math.abs(mA.birthYear - mB.birthYear) > 12) {
-        continue;
-      }
-
-      // 3. Fast death year guard (if both known and > 15 years apart, cannot be duplicates)
-      if (mA.deathYear !== null && mB.deathYear !== null && Math.abs(mA.deathYear - mB.deathYear) > 15) {
-        continue;
-      }
-
-      // 4. Fast given name quick rejection: if both given names exist, have >= 3 chars, and first letter differs
-      // and neither is an obvious cross-alphabet or known variant
       if (
         mA.givenClean &&
         mB.givenClean &&
@@ -774,7 +888,6 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
           (mA.givenClean[0] === 'а' && mB.givenClean[0] === 'о') ||
           (mA.givenClean[0] === 'г' && mB.givenClean[0] === 'ґ'))
       ) {
-        // Distinct first letter of given name: check if neither is parent/cross-referenced before deep check
         if (!pA.fatherId && !pB.fatherId && !pA.motherId && !pB.motherId) {
           continue;
         }
@@ -796,8 +909,16 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
     }
   }
 
-  // Sort descending by confidence
-  return duplicatePairs.sort((a, b) => b.confidence - a.confidence);
+  duplicatePairs.sort((a, b) => b.confidence - a.confidence);
+
+  cachedPersonsRef = persons;
+  cachedDuplicatePairs = duplicatePairs;
+
+  if (filterIgnored) {
+    const ignoredSet = getIgnoredDuplicatePairKeys();
+    return duplicatePairs.filter((p) => !isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet));
+  }
+  return duplicatePairs;
 }
 
 export const RODOVID_IGNORED_DUPLICATE_PAIRS_KEY = 'rodovid_ignored_duplicate_pairs';

@@ -165,13 +165,28 @@ function detectAncestryCycles(personsMap: Map<string, Person>): TreeConflict[] {
   return conflicts;
 }
 
+// Memoization cache for tree health audit
+let cachedAuditPersons: Person[] | null = null;
+let cachedAuditFamilies: Record<string, Family> | null = null;
+let cachedAuditReport: TreeHealthReport | null = null;
+
+export function clearTreeAuditCache(): void {
+  cachedAuditPersons = null;
+  cachedAuditFamilies = null;
+  cachedAuditReport = null;
+}
+
 /**
- * Main Audit Engine
+ * Main Audit Engine with memoization
  */
 export function runTreeDataHealthAudit(
   persons: Person[],
   families: Record<string, Family> = {}
 ): TreeHealthReport {
+  if (cachedAuditPersons === persons && cachedAuditFamilies === families && cachedAuditReport !== null) {
+    return cachedAuditReport;
+  }
+
   const conflicts: TreeConflict[] = [];
   const personsMap = new Map<string, Person>();
   const currentYear = new Date().getFullYear();
@@ -633,7 +648,7 @@ export function runTreeDataHealthAudit(
   const penalty = critical * 15 + warning * 4 + gap * 1;
   const healthScore = Math.max(0, Math.min(100, 100 - penalty));
 
-  return {
+  const report: TreeHealthReport = {
     conflicts: finalConflicts,
     stats: {
       total: finalConflicts.length,
@@ -650,6 +665,12 @@ export function runTreeDataHealthAudit(
       data_gaps: finalConflicts.filter(c => c.type === 'data_gaps').length
     }
   };
+
+  cachedAuditPersons = persons;
+  cachedAuditFamilies = families;
+  cachedAuditReport = report;
+
+  return report;
 }
 
 /**

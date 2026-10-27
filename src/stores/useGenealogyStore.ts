@@ -28,6 +28,19 @@ import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/
 import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord, getPersonAncestorsIds } from '../rodovid/utils/mergeDatabase';
 import { purgeUnknownPlaceholderPersons, cleanDatabaseFromUnknownPersons, isUnknownPlaceholderPerson } from '../rodovid/utils/unknownPersonCleaner';
 import { persistLocalData, idbGet } from '../utils/indexedDbStorage';
+import { clearDuplicateDetectorCache } from '../utils/duplicateDetector';
+import { clearTreeAuditCache } from '../utils/treeAudit';
+import { clearKinshipCache } from '../rodovid/utils/relationship';
+import { clearGlobalSearchCache } from '../utils/globalTreeSearch';
+
+export function invalidateAllTreeCaches(): void {
+  try {
+    clearDuplicateDetectorCache();
+    clearTreeAuditCache();
+    clearKinshipCache();
+    clearGlobalSearchCache();
+  } catch {}
+}
 
 export function notifySyncChange(
   arg1?: (() => void) | EntitySyncType,
@@ -765,6 +778,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     savePersonDoc(updatedTarget).catch(() => {});
     notifySyncChange('persons', updatedTarget.id, () => savePersonDoc(updatedTarget));
 
+    invalidateAllTreeCaches();
     set({
       persons: remainingPersons,
       families: nextFamilies
@@ -857,6 +871,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         }
       });
 
+      invalidateAllTreeCaches();
       return {
         persons: deduplicated,
         trashPersons: nextTrash,
@@ -1113,6 +1128,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         }
       });
 
+      invalidateAllTreeCaches();
       return {
         persons: incomingPersons,
         families: incomingFamilies,
@@ -1189,6 +1205,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       }
     });
 
+    invalidateAllTreeCaches();
     set({
       persons: mergedPersons,
       families: mergedFamilies,
