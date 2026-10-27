@@ -229,32 +229,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
           onOpenGlobalModal={() => setShowGlobalSearchModal(true)}
         />
 
-        {/* Direct Upload Button (Manual Mode or Pending Changes) */}
-        {syncMode === 'manual' && (
-          <button
-            id="header-direct-upload-btn"
-            onClick={handleHeaderPush}
-            disabled={isManualPushing || isSyncingActive}
-            className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs shadow-xs transition-all cursor-pointer ${
-              hasUnsavedChanges
-                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 ring-2 ring-amber-400/40 animate-pulse'
-                : 'bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 hover:bg-black/10 text-[#B88E3E] dark:text-amber-400'
-            }`}
-            title={
-              hasUnsavedChanges
-                ? `Розумне вивантаження: записати лише ${unsavedChangesCount} нових/змінених значень у Firestore`
-                : 'Всі дані актуалізовані у Firestore. Немає нових змін'
-            }
-          >
-            <Upload className={`w-3.5 h-3.5 ${isManualPushing ? 'animate-bounce' : ''}`} />
-            <span>Вивантажити</span>
-            {hasUnsavedChanges && (
-              <span className="px-1.5 py-0.5 bg-slate-950 text-amber-400 rounded-full text-[10px] font-mono leading-none">
-                {unsavedChangesCount}
-              </span>
-            )}
-          </button>
-        )}
 
         {/* Quick Cloud Sync Status Flame Icon Button */}
         <div className="relative flex items-center">
@@ -654,24 +628,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
             )}
           </div>
 
-          {/* Pending Requests Badge for Admin */}
-          {(isAdmin || currentUser?.role === 'admin') && pendingRequestsCount > 0 && (
-            <a
-              href={getTabUrl('requests')}
-              onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-                e.preventDefault();
-                setActiveTab('requests');
-              }}
-              className="flex items-center gap-1 px-2 py-1 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-colors animate-pulse shrink-0 cursor-pointer"
-              title={`Є нові вхідні заявки на доступ (${pendingRequestsCount}). Натисніть для перегляду (Ctrl+клік для нової вкладки)`}
-            >
-              <Bell className="w-3.5 h-3.5 text-amber-500" />
-              <span className="text-[10px] font-mono px-1 py-0.2 rounded-full bg-amber-500 text-white leading-tight">
-                {pendingRequestsCount}
-              </span>
-            </a>
-          )}
+
 
           {/* Add Person Button - Icon Only */}
           <button

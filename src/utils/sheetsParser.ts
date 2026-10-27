@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import * as XLSX from 'xlsx';
 import { SheetDataset, ExtractedMetricRecord, ExtractedGodparent, ExtractedPersonMeta } from '../types/sheetsAnalysis';
 import { Person } from '../types';
 
@@ -185,9 +184,10 @@ export function extractGodparentsFromText(text: string, sheetName: string, rowIn
 }
 
 /**
- * Reads an uploaded Excel / CSV workbook buffer and extracts all sheets
+ * Reads an uploaded Excel / CSV workbook buffer and extracts all sheets (dynamically loads xlsx)
  */
-export function parseWorkbookMultiSheets(binaryOrBuffer: any): SheetDataset[] {
+export async function parseWorkbookMultiSheets(binaryOrBuffer: any): Promise<SheetDataset[]> {
+  const XLSX = await import('xlsx');
   const workbook = XLSX.read(binaryOrBuffer, { type: 'binary' });
   const datasets: SheetDataset[] = [];
 

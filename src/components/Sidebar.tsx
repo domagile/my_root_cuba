@@ -15,14 +15,11 @@ import {
   BarChart3,
   FileText, 
   CalendarDays, 
-  CheckSquare, 
-  Bookmark, 
   Lightbulb, 
   Settings, 
   ShieldCheck, 
   ShieldAlert,
   Sparkles, 
-  FlaskConical,
   X,
   ChevronLeft,
   Lock,
@@ -55,19 +52,7 @@ export const Sidebar: React.FC = () => {
   
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
-  const accessRequests = useAuthStore((s) => s.accessRequests);
   const isWhitelisted = isUserWhitelisted(currentUser, whitelist);
-
-  const isAdmin = Boolean(
-    currentUser &&
-    currentUser.isAuthenticated &&
-    (currentUser.role === 'admin' ||
-      whitelist.some(
-        (w) => w.email.toLowerCase() === currentUser.email?.toLowerCase() && w.role === 'admin' && w.status === 'active'
-      ))
-  );
-
-  const pendingRequestsCount = accessRequests.filter((r) => r.status === 'pending').length;
 
   const theme = getThemeConfig(themePalette);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -87,19 +72,10 @@ export const Sidebar: React.FC = () => {
   ];
 
   const researchItems: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [
-    ...(isAdmin ? [{
-      id: 'requests' as NavigationTab,
-      label: `Запити на доступ${pendingRequestsCount > 0 ? ` (${pendingRequestsCount})` : ''}`,
-      icon: ShieldCheck
-    }] : []),
     { id: 'ai-analysis', label: 'Слідчий AI аналіз', icon: Sparkles },
-    { id: 'documents', label: 'Речові докази', icon: FileText },
     { id: 'research', label: 'Детективні розкопки', icon: Compass },
     { id: 'matrix', label: 'Літопис подій', icon: CalendarDays },
-    { id: 'notes', label: 'Чернетки & Завдання', icon: CheckSquare },
-    { id: 'findings', label: 'Зачіпки', icon: Bookmark },
-    { id: 'hypotheses', label: 'Підозри & Гіпотези', icon: Lightbulb },
-    { id: 'experiment', label: 'Нишпорка (HTR)', icon: FlaskConical }
+    { id: 'hypotheses', label: 'Підозри & Гіпотези', icon: Lightbulb }
   ];
 
   const handleRodovidClick = (item: { id: ViewMode; label: string; isPublic?: boolean }) => {
@@ -323,15 +299,10 @@ export const Sidebar: React.FC = () => {
                   handleNavTabClick({ id: 'settings', label: 'Налаштування' });
                 }}
                 className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-[#B88E3E]/20 text-[#B88E3E]' : theme.sidebarHover} cursor-pointer flex items-center gap-1.5 relative`}
-                title={isAdmin && pendingRequestsCount > 0 ? `Налаштування (Є ${pendingRequestsCount} нових заявок; Ctrl+клік для нової вкладки)` : 'Налаштування (Ctrl+клік для нової вкладки)'}
+                title="Налаштування (Ctrl+клік для нової вкладки)"
               >
                 <Settings className="w-3.5 h-3.5" />
                 {!isCollapsed && <span className="text-[11px]">Налаштування</span>}
-                {isAdmin && pendingRequestsCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-mono text-[9px] font-bold leading-none animate-pulse">
-                    {pendingRequestsCount}
-                  </span>
-                )}
               </a>
               {!isCollapsed && (
                 <a

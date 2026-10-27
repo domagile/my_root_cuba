@@ -17,8 +17,12 @@ import {
   DocumentSnapshot,
   QueryDocumentSnapshot,
   Firestore,
-  getDocFromServer
+  getDocFromServer,
+  disableNetwork,
+  enableNetwork,
+  setLogLevel
 } from 'firebase/firestore';
+import { useCloudSyncStore, isQuotaExceededToday, trackAtomicSync, markQuotaExceededToday } from '../stores/useCloudSyncStore';
 import {
   getAuth,
   initializeAuth,
@@ -95,6 +99,16 @@ export function getDbInstance(): Firestore | null {
     } catch {
       cachedDb = dbId ? getFirestore(app, dbId) : getFirestore(app);
     }
+
+    try {
+      setLogLevel('silent');
+    } catch {}
+
+    // If quota was already marked as exceeded today, disable network immediately
+    // so Firestore SDK does not attempt background WebSocket connections that fail with resource-exhausted
+    if (cachedDb && typeof window !== 'undefined' && isQuotaExceededToday()) {
+      disableNetwork(cachedDb).catch(() => {});
+    }
   } catch (e) {
     console.warn('Firebase Firestore initialization warning:', e);
   }
@@ -131,19 +145,57 @@ export function getFirebaseAuth(): Auth | null {
 // Lazy/safe export for db instance
 export const db = getDbInstance();
 
-// Test connection on boot according to skill guidelines
+// Robust detection for any Firestore quota metric or resource-exhausted error
+export function isFirestoreQuotaError(error: unknown): boolean {
+  if (!error) return false;
+  const errMsg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const errCode = String((error as any)?.code || '').toLowerCase();
+
+  return (
+    errCode.includes('resource-exhausted') ||
+    errCode.includes('resource_exhausted') ||
+    errMsg.includes('resource-exhausted') ||
+    errMsg.includes('resource_exhausted') ||
+    errMsg.includes('quota limit exceeded') ||
+    errMsg.includes('quota exceeded') ||
+    (errMsg.includes('quota') && (errMsg.includes('exceeded') || errMsg.includes('limit') || errMsg.includes('units per project')))
+  );
+}
+
+export function isCloudWriteBlocked(allowManualDirectWrite: boolean = false): boolean {
+  if (typeof window === 'undefined') return false;
+  const store = useCloudSyncStore.getState();
+  if (isQuotaExceededToday() || store.isQuotaExceeded) {
+    return true;
+  }
+  // In manual sync mode, NEVER perform individual automatic/background cloud writes!
+  // Cloud writes must ONLY happen when the user explicitly triggers a manual sync batch.
+  if (!allowManualDirectWrite && !store.isManualPushing && store.syncMode === 'manual') {
+    return true;
+  }
+  return false;
+}
+
 export async function testConnection(force: boolean = false): Promise<boolean> {
   if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
     return false;
   }
-  if (!force && useCloudSyncStore.getState().isQuotaExceeded) {
+  // In manual mode, do not perform automatic background server pings unless explicitly requested
+  if (!force && useCloudSyncStore.getState().syncMode === 'manual') {
+    return false;
+  }
+  if (!force && isCloudWriteBlocked()) {
     return false;
   }
   try {
     const firestore = getDbInstance();
     if (firestore) {
+      if (force) {
+        await enableNetwork(firestore).catch(() => {});
+      }
       await getDocFromServer(doc(firestore, 'test', 'connection'));
       useCloudSyncStore.getState().setQuotaExceeded(false);
+      markQuotaExceededToday(false);
       return true;
     }
   } catch (error) {
@@ -154,12 +206,13 @@ export async function testConnection(force: boolean = false): Promise<boolean> {
       errMsg.includes('unavailable')
     ) {
       // Gracefully silent: Firestore operates in local/offline cache mode
-    } else if (
-      errMsg.toLowerCase().includes('quota exceeded') ||
-      errMsg.toLowerCase().includes('resource-exhausted') ||
-      (error as any)?.code === 'resource-exhausted'
-    ) {
+    } else if (isFirestoreQuotaError(error)) {
       useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
     } else {
       console.warn('Firestore connection check notice:', errMsg);
     }
@@ -169,9 +222,17 @@ export async function testConnection(force: boolean = false): Promise<boolean> {
 }
 
 if (typeof window !== 'undefined') {
-  setTimeout(() => {
-    testConnection().catch(() => {});
-  }, 1000);
+  window.addEventListener('rodovid_quota_exceeded_changed', (e: any) => {
+    const isExceeded = e?.detail?.isQuotaExceeded;
+    const firestore = getDbInstance();
+    if (firestore) {
+      if (isExceeded) {
+        disableNetwork(firestore).catch(() => {});
+      } else {
+        enableNetwork(firestore).catch(() => {});
+      }
+    }
+  });
 }
 
 // Error handling helper conforming to Firestore guidelines
@@ -224,15 +285,16 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     }
   };
 
-  const isQuotaExceeded =
-    errMsg.toLowerCase().includes('quota exceeded') ||
-    errMsg.toLowerCase().includes('resource-exhausted') ||
-    errMsg.toLowerCase().includes('resource_exhausted') ||
-    (error as any)?.code === 'resource-exhausted';
+  const isQuotaExceeded = isFirestoreQuotaError(error);
 
   if (isQuotaExceeded) {
     useCloudSyncStore.getState().setQuotaExceeded(true);
-    console.warn('Firestore Quota Notice: Free daily write quota reached. Switched to offline/local storage mode.');
+    markQuotaExceededToday(true);
+    const firestore = getDbInstance();
+    if (firestore) {
+      disableNetwork(firestore).catch(() => {});
+    }
+    console.warn('Firestore Quota Notice: Daily write quota reached. Switched to offline/local storage mode.');
     return errInfo;
   }
 
@@ -246,6 +308,65 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   } else {
     console.warn('Firestore Notice: ', JSON.stringify(errInfo));
     return errInfo;
+  }
+}
+
+/**
+ * Safe snapshot listener wrapper to:
+ * 1. Abort if quota exceeded today or store marked as quota exceeded
+ * 2. Immediately unsubscribe on quota / resource-exhausted error
+ * 3. Cut off Firebase SDK internal backoff retry loop
+ * 4. Put Firestore into offline mode
+ */
+export function safeSnapshotListener(
+  queryOrDocRef: any,
+  onNext: (snapshot: any) => void,
+  path: string,
+  operationType: OperationType = OperationType.LIST
+): () => void {
+  if (isCloudWriteBlocked()) {
+    return () => {};
+  }
+
+  let unsub: (() => void) | null = null;
+  let isCancelled = false;
+
+  try {
+    unsub = onSnapshot(
+      queryOrDocRef,
+      (snapshot) => {
+        if (!isCancelled) {
+          onNext(snapshot);
+        }
+      },
+      (error: any) => {
+        if (isFirestoreQuotaError(error)) {
+          isCancelled = true;
+          try {
+            if (unsub) unsub();
+          } catch {}
+          useCloudSyncStore.getState().setQuotaExceeded(true);
+          markQuotaExceededToday(true);
+          const firestore = getDbInstance();
+          if (firestore) {
+            disableNetwork(firestore).catch(() => {});
+          }
+        }
+        handleFirestoreError(error, operationType, path);
+      }
+    );
+
+    return () => {
+      isCancelled = true;
+      if (unsub) {
+        try {
+          unsub();
+        } catch {}
+      }
+    };
+  } catch (err) {
+    console.warn(`Could not setup snapshot listener for ${path}:`, err);
+    return () => {};
   }
 }
 
@@ -312,8 +433,6 @@ export function subscribeToFirebaseAuth(callback: (user: FirebaseUser | null) =>
   }
 }
 
-import { trackAtomicSync, useCloudSyncStore } from '../stores/useCloudSyncStore';
-
 // Subcollection path helpers
 export const getProjectPath = (projectId: string = DEFAULT_PROJECT_ID) => `projects/${projectId}`;
 export const getSubcollectionPath = (subcollection: string, projectId: string = DEFAULT_PROJECT_ID) => 
@@ -329,7 +448,7 @@ export async function saveEntityDoc(
   data: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return false;
   }
   return trackAtomicSync(async () => {
@@ -354,8 +473,16 @@ export async function saveEntityDoc(
       await setDoc(docRef, cleanData, { merge: true });
       return true;
     } catch (err) {
+      if (isFirestoreQuotaError(err)) {
+        useCloudSyncStore.getState().setQuotaExceeded(true);
+        markQuotaExceededToday(true);
+        const firestore = getDbInstance();
+        if (firestore) {
+          disableNetwork(firestore).catch(() => {});
+        }
+      }
       handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/${subcollection}/${itemId}`);
-      throw err;
+      return false;
     }
   }).catch(() => false);
 }
@@ -368,7 +495,7 @@ export async function deleteEntityDoc(
   itemId: string,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return false;
   }
   return trackAtomicSync(async () => {
@@ -379,8 +506,16 @@ export async function deleteEntityDoc(
       await deleteDoc(docRef);
       return true;
     } catch (err) {
+      if (isFirestoreQuotaError(err)) {
+        useCloudSyncStore.getState().setQuotaExceeded(true);
+        markQuotaExceededToday(true);
+        const firestore = getDbInstance();
+        if (firestore) {
+          disableNetwork(firestore).catch(() => {});
+        }
+      }
       handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/${subcollection}/${itemId}`);
-      throw err;
+      return false;
     }
   }).catch(() => false);
 }
@@ -400,7 +535,7 @@ export async function savePersonDeltaDoc(
   delta: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return false;
   }
   return trackAtomicSync(async () => {
@@ -423,8 +558,16 @@ export async function savePersonDeltaDoc(
       await setDoc(docRef, cleanDelta, { merge: true });
       return true;
     } catch (err) {
+      if (isFirestoreQuotaError(err)) {
+        useCloudSyncStore.getState().setQuotaExceeded(true);
+        markQuotaExceededToday(true);
+        const firestore = getDbInstance();
+        if (firestore) {
+          disableNetwork(firestore).catch(() => {});
+        }
+      }
       handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/persons/${personId}`);
-      throw err;
+      return false;
     }
   }).catch(() => false);
 }
@@ -616,15 +759,14 @@ export function subscribeToWhitelistCloud(
     const db = getDbInstance();
     if (!db) return () => {};
     const colRef = collection(db, 'projects', projectId, 'whitelist');
-    return onSnapshot(
+    return safeSnapshotListener(
       colRef,
       (snapshot) => {
-        const list = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
+        const list = snapshot.docs.map((d: any) => ({ ...d.data(), id: d.id }));
         onUpdate(list);
       },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/whitelist`);
-      }
+      `projects/${projectId}/whitelist`,
+      OperationType.LIST
     );
   } catch {
     return () => {};
@@ -633,7 +775,7 @@ export function subscribeToWhitelistCloud(
 
 // Access Requests Helpers (both in project and top-level)
 export async function saveAccessRequestToCloud(req: any, projectId: string = DEFAULT_PROJECT_ID): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return false;
   }
   try {
@@ -655,6 +797,14 @@ export async function saveAccessRequestToCloud(req: any, projectId: string = DEF
     
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/accessRequests/${req.id}`);
     return false;
   }
@@ -701,15 +851,14 @@ export function subscribeToAccessRequestsCloud(
     const db = getDbInstance();
     if (!db) return () => {};
     const colRef = collection(db, 'projects', projectId, 'accessRequests');
-    return onSnapshot(
+    return safeSnapshotListener(
       colRef,
       (snapshot) => {
-        const list = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
+        const list = snapshot.docs.map((d: any) => ({ ...d.data(), id: d.id }));
         onUpdate(list);
       },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, `projects/${projectId}/accessRequests`);
-      }
+      `projects/${projectId}/accessRequests`,
+      OperationType.LIST
     );
   } catch {
     return () => {};
@@ -721,7 +870,7 @@ export async function saveWhitelistEntryToCloud(
   entry: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return false;
   }
   try {
@@ -738,6 +887,14 @@ export async function saveWhitelistEntryToCloud(
     } catch {}
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/whitelist/${entry.id}`);
     return false;
   }
@@ -747,7 +904,7 @@ export async function deleteWhitelistEntryFromCloud(
   entryId: string,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return false;
   }
   try {
@@ -761,6 +918,14 @@ export async function deleteWhitelistEntryFromCloud(
     } catch {}
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/whitelist/${entryId}`);
     return false;
   }
@@ -770,7 +935,7 @@ export async function deleteAccessRequestFromCloud(
   requestId: string,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return false;
   }
   try {
@@ -784,6 +949,14 @@ export async function deleteAccessRequestFromCloud(
     } catch {}
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/accessRequests/${requestId}`);
     return false;
   }
@@ -793,7 +966,7 @@ export async function saveAccessConfigToCloud(
   config: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return false;
   }
   try {
@@ -805,6 +978,14 @@ export async function saveAccessConfigToCloud(
     await setDoc(docRef, cleanData, { merge: true });
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/accessConfig/global`);
     return false;
   }
@@ -818,16 +999,15 @@ export function subscribeToAccessConfigCloud(
     const db = getDbInstance();
     if (!db) return () => {};
     const docRef = doc(db, 'projects', projectId, 'accessConfig', 'global');
-    return onSnapshot(
+    return safeSnapshotListener(
       docRef,
       (snapshot) => {
         if (snapshot.exists()) {
           onUpdate(snapshot.data());
         }
       },
-      (err) => {
-        handleFirestoreError(err, OperationType.GET, `projects/${projectId}/accessConfig/global`);
-      }
+      `projects/${projectId}/accessConfig/global`,
+      OperationType.GET
     );
   } catch {
     return () => {};
@@ -839,7 +1019,7 @@ export async function saveIgnoredDuplicatePairsToCloud(
   keys: string[],
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) return false;
+  if (isCloudWriteBlocked() || useCloudSyncStore.getState().syncMode === 'manual') return false;
   try {
     const db = getDbInstance();
     if (!db) return false;
@@ -847,6 +1027,14 @@ export async function saveIgnoredDuplicatePairsToCloud(
     await setDoc(docRef, { keys: Array.from(new Set(keys)), updatedAt: new Date().toISOString() }, { merge: true });
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/ignoredDuplicates`);
     return false;
   }
@@ -860,7 +1048,7 @@ export function subscribeToIgnoredDuplicatePairsCloud(
     const db = getDbInstance();
     if (!db) return () => {};
     const docRef = doc(db, 'projects', projectId, 'systemSettings', 'ignoredDuplicates');
-    return onSnapshot(
+    return safeSnapshotListener(
       docRef,
       (snapshot) => {
         if (snapshot.exists()) {
@@ -870,9 +1058,8 @@ export function subscribeToIgnoredDuplicatePairsCloud(
           }
         }
       },
-      (err) => {
-        handleFirestoreError(err, OperationType.GET, `projects/${projectId}/systemSettings/ignoredDuplicates`);
-      }
+      `projects/${projectId}/systemSettings/ignoredDuplicates`,
+      OperationType.GET
     );
   } catch {
     return () => {};
@@ -884,7 +1071,7 @@ export async function saveDeletedTombstonesToCloud(
   ids: string[],
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) return false;
+  if (isCloudWriteBlocked() || useCloudSyncStore.getState().syncMode === 'manual') return false;
   try {
     const db = getDbInstance();
     if (!db) return false;
@@ -892,6 +1079,14 @@ export async function saveDeletedTombstonesToCloud(
     await setDoc(docRef, { ids: Array.from(new Set(ids)), updatedAt: new Date().toISOString() }, { merge: true });
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/deletedTombstones`);
     return false;
   }
@@ -905,7 +1100,7 @@ export function subscribeToDeletedTombstonesCloud(
     const db = getDbInstance();
     if (!db) return () => {};
     const docRef = doc(db, 'projects', projectId, 'systemSettings', 'deletedTombstones');
-    return onSnapshot(
+    return safeSnapshotListener(
       docRef,
       (snapshot) => {
         if (snapshot.exists()) {
@@ -915,9 +1110,8 @@ export function subscribeToDeletedTombstonesCloud(
           }
         }
       },
-      (err) => {
-        handleFirestoreError(err, OperationType.GET, `projects/${projectId}/systemSettings/deletedTombstones`);
-      }
+      `projects/${projectId}/systemSettings/deletedTombstones`,
+      OperationType.GET
     );
   } catch {
     return () => {};
@@ -929,7 +1123,7 @@ export async function saveMergedPersonsToCloud(
   mapping: Record<string, string>,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) return false;
+  if (isCloudWriteBlocked() || useCloudSyncStore.getState().syncMode === 'manual') return false;
   try {
     const db = getDbInstance();
     if (!db) return false;
@@ -937,6 +1131,14 @@ export async function saveMergedPersonsToCloud(
     await setDoc(docRef, { mapping: mapping || {}, updatedAt: new Date().toISOString() }, { merge: true });
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/mergedPersons`);
     return false;
   }
@@ -950,7 +1152,7 @@ export function subscribeToMergedPersonsCloud(
     const db = getDbInstance();
     if (!db) return () => {};
     const docRef = doc(db, 'projects', projectId, 'systemSettings', 'mergedPersons');
-    return onSnapshot(
+    return safeSnapshotListener(
       docRef,
       (snapshot) => {
         if (snapshot.exists()) {
@@ -960,9 +1162,8 @@ export function subscribeToMergedPersonsCloud(
           }
         }
       },
-      (err) => {
-        handleFirestoreError(err, OperationType.GET, `projects/${projectId}/systemSettings/mergedPersons`);
-      }
+      `projects/${projectId}/systemSettings/mergedPersons`,
+      OperationType.GET
     );
   } catch {
     return () => {};
@@ -970,22 +1171,27 @@ export function subscribeToMergedPersonsCloud(
 }
 
 /**
- * Batch write items into a subcollection in chunks of 450 items
- * (Firestore limits batch writes to max 500 ops per batch)
+ * Batch write items into a subcollection in chunks of max 400 items
+ * (Firestore limits batch writes to max 500 ops per batch; 400 provides a safe buffer).
  */
 export async function batchSaveEntities(
   subcollection: string,
   items: any[],
-  projectId: string = DEFAULT_PROJECT_ID
+  projectId: string = DEFAULT_PROJECT_ID,
+  allowManualDirectWrite: boolean = false,
+  onProgress?: (saved: number, total: number) => void
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked(allowManualDirectWrite)) {
     return false;
   }
   try {
     const db = getDbInstance();
     if (!db || !items || items.length === 0) return false;
 
-    const CHUNK_SIZE = 450;
+    const CHUNK_SIZE = 400;
+    let savedCount = 0;
+    const total = items.length;
+
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
       const chunk = items.slice(i, i + CHUNK_SIZE);
       const batch = writeBatch(db);
@@ -1010,9 +1216,74 @@ export async function batchSaveEntities(
       });
 
       await batch.commit();
+      savedCount += chunk.length;
+      if (onProgress) {
+        onProgress(Math.min(savedCount, total), total);
+      }
     }
     return true;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/${subcollection}`);
+    return false;
+  }
+}
+
+/**
+ * Batch delete items from a subcollection in chunks of max 400 items
+ */
+export async function batchDeleteEntities(
+  subcollection: string,
+  ids: string[],
+  projectId: string = DEFAULT_PROJECT_ID,
+  allowManualDirectWrite: boolean = false,
+  onProgress?: (deleted: number, total: number) => void
+): Promise<boolean> {
+  if (isCloudWriteBlocked(allowManualDirectWrite)) {
+    return false;
+  }
+  try {
+    const db = getDbInstance();
+    if (!db || !ids || ids.length === 0) return false;
+
+    const CHUNK_SIZE = 400;
+    let deletedCount = 0;
+    const total = ids.length;
+
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+
+      chunk.forEach((id) => {
+        if (id && typeof id === 'string') {
+          const docRef = doc(db, 'projects', projectId, subcollection, id);
+          batch.delete(docRef);
+        }
+      });
+
+      await batch.commit();
+      deletedCount += chunk.length;
+      if (onProgress) {
+        onProgress(Math.min(deletedCount, total), total);
+      }
+    }
+    return true;
+  } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/${subcollection}`);
     return false;
   }
@@ -1034,11 +1305,11 @@ export function subscribeToSubcollection<T = any>(
     const colRef = collection(db, 'projects', projectId, subcollection);
     const q = query(colRef, limit(limitCount));
 
-    return onSnapshot(
+    return safeSnapshotListener(
       q,
       (snapshot) => {
         try {
-          const list = snapshot.docs.map((d) => {
+          const list = snapshot.docs.map((d: any) => {
             const row: any = { ...d.data(), id: d.id };
             if (subcollection === 'persons') {
               if (row.deathYear === null) delete row.deathYear;
@@ -1056,9 +1327,8 @@ export function subscribeToSubcollection<T = any>(
           console.warn(`Error handling snapshot for ${subcollection}:`, e);
         }
       },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `projects/${projectId}/${subcollection}`);
-      }
+      `projects/${projectId}/${subcollection}`,
+      OperationType.LIST
     );
   } catch (err) {
     console.warn(`Failed to subscribe to ${subcollection}:`, err);
@@ -1087,6 +1357,14 @@ export function subscribeToProjectData(
   }) => void,
   projectId: string = DEFAULT_PROJECT_ID
 ) {
+  // Guard: In manual sync mode or when daily quota is exceeded, do NOT spawn 13 real-time listeners!
+  if (
+    useCloudSyncStore.getState().syncMode === 'manual' ||
+    isQuotaExceededToday() ||
+    useCloudSyncStore.getState().isQuotaExceeded
+  ) {
+    return () => {};
+  }
   const unsubscribers: (() => void)[] = [];
 
   const subcollections = [
@@ -1150,7 +1428,7 @@ export async function saveProjectDataToCloud(
   },
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked(true)) {
     return false;
   }
   try {
@@ -1160,40 +1438,40 @@ export async function saveProjectDataToCloud(
     const promises: Promise<boolean>[] = [];
 
     if (Array.isArray(data.persons) && data.persons.length > 0) {
-      promises.push(batchSaveEntities('persons', data.persons, projectId));
+      promises.push(batchSaveEntities('persons', data.persons, projectId, true));
     }
     if (Array.isArray(data.families) && data.families.length > 0) {
-      promises.push(batchSaveEntities('families', data.families, projectId));
+      promises.push(batchSaveEntities('families', data.families, projectId, true));
     }
     if (Array.isArray(data.events) && data.events.length > 0) {
-      promises.push(batchSaveEntities('events', data.events, projectId));
+      promises.push(batchSaveEntities('events', data.events, projectId, true));
     }
     if (Array.isArray(data.sources) && data.sources.length > 0) {
-      promises.push(batchSaveEntities('sources', data.sources, projectId));
+      promises.push(batchSaveEntities('sources', data.sources, projectId, true));
     }
     if (Array.isArray(data.places) && data.places.length > 0) {
-      promises.push(batchSaveEntities('places', data.places, projectId));
+      promises.push(batchSaveEntities('places', data.places, projectId, true));
     }
     if (Array.isArray(data.metricRecords) && data.metricRecords.length > 0) {
-      promises.push(batchSaveEntities('metricRecords', data.metricRecords, projectId));
+      promises.push(batchSaveEntities('metricRecords', data.metricRecords, projectId, true));
     }
     if (Array.isArray(data.documents) && data.documents.length > 0) {
-      promises.push(batchSaveEntities('documents', data.documents, projectId));
+      promises.push(batchSaveEntities('documents', data.documents, projectId, true));
     }
     if (Array.isArray(data.tasks) && data.tasks.length > 0) {
-      promises.push(batchSaveEntities('tasks', data.tasks, projectId));
+      promises.push(batchSaveEntities('tasks', data.tasks, projectId, true));
     }
     if (Array.isArray(data.findings) && data.findings.length > 0) {
-      promises.push(batchSaveEntities('findings', data.findings, projectId));
+      promises.push(batchSaveEntities('findings', data.findings, projectId, true));
     }
     if (Array.isArray(data.hypotheses) && data.hypotheses.length > 0) {
-      promises.push(batchSaveEntities('hypotheses', data.hypotheses, projectId));
+      promises.push(batchSaveEntities('hypotheses', data.hypotheses, projectId, true));
     }
     if (Array.isArray(data.requests) && data.requests.length > 0) {
-      promises.push(batchSaveEntities('requests', data.requests, projectId));
+      promises.push(batchSaveEntities('requests', data.requests, projectId, true));
     }
     if (Array.isArray(data.matrixEntries) && data.matrixEntries.length > 0) {
-      promises.push(batchSaveEntities('matrixEntries', data.matrixEntries, projectId));
+      promises.push(batchSaveEntities('matrixEntries', data.matrixEntries, projectId, true));
     }
 
     // Save metadata document
@@ -1210,12 +1488,26 @@ export async function saveProjectDataToCloud(
           hypothesesCount: data.hypotheses?.length || 0
         }),
         { merge: true }
-      ).then(() => true).catch(() => false)
+      ).then(() => true).catch((err) => {
+        if (isFirestoreQuotaError(err)) {
+          useCloudSyncStore.getState().setQuotaExceeded(true);
+          markQuotaExceededToday(true);
+        }
+        return false;
+      })
     );
 
     const results = await Promise.all(promises);
     return results.every(Boolean);
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}`);
     return false;
   }
@@ -1332,6 +1624,39 @@ export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_P
       }
     } catch {}
 
+    // Legacy Monolithic Document One-Time Migration Check:
+    // If subcollections are currently empty (e.g. 0 persons and 0 families), check if there is an old monolithic document
+    // at `genealogyProjects/{projectId}` or `genealogyProjects/defaultProject`. If found, load it and migrate to subcollections.
+    const totalLoaded = (resultData.persons?.length || 0) + (resultData.families?.length || 0);
+    if (totalLoaded === 0) {
+      try {
+        const legacyDocRef = doc(db, 'genealogyProjects', projectId || DEFAULT_PROJECT_ID);
+        const legacySnap = await getDoc(legacyDocRef);
+        if (legacySnap.exists()) {
+          const legacyData = legacySnap.data();
+          if (legacyData) {
+            console.log('Found legacy monolithic document, migrating to subcollections...');
+            if (Array.isArray(legacyData.persons) && legacyData.persons.length > 0) resultData.persons = legacyData.persons;
+            if (Array.isArray(legacyData.families) && legacyData.families.length > 0) resultData.families = legacyData.families;
+            if (Array.isArray(legacyData.events) && legacyData.events.length > 0) resultData.events = legacyData.events;
+            if (Array.isArray(legacyData.sources) && legacyData.sources.length > 0) resultData.sources = legacyData.sources;
+            if (Array.isArray(legacyData.places) && legacyData.places.length > 0) resultData.places = legacyData.places;
+            if (Array.isArray(legacyData.metricRecords) && legacyData.metricRecords.length > 0) resultData.metricRecords = legacyData.metricRecords;
+            if (Array.isArray(legacyData.documents) && legacyData.documents.length > 0) resultData.documents = legacyData.documents;
+            if (Array.isArray(legacyData.hypotheses) && legacyData.hypotheses.length > 0) resultData.hypotheses = legacyData.hypotheses;
+            if (Array.isArray(legacyData.matrixEntries) && legacyData.matrixEntries.length > 0) resultData.matrixEntries = legacyData.matrixEntries;
+
+            // Trigger background migration into subcollections
+            saveProjectDataToCloud(resultData, projectId || DEFAULT_PROJECT_ID).catch((migErr) => {
+              console.warn('Background migration to subcollections notice:', migErr);
+            });
+          }
+        }
+      } catch (legacyErr) {
+        console.warn('Legacy migration check notice:', legacyErr);
+      }
+    }
+
     return {
       success: true,
       data: resultData
@@ -1393,7 +1718,7 @@ export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promis
   shareUrl: string;
   error?: string;
 }> {
-  if (useCloudSyncStore.getState().isQuotaExceeded) {
+  if (isCloudWriteBlocked()) {
     return {
       success: false,
       shareId: treeData.id,
@@ -1446,12 +1771,20 @@ export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promis
       shareUrl
     };
   } catch (err: any) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const firestore = getDbInstance();
+      if (firestore) {
+        disableNetwork(firestore).catch(() => {});
+      }
+    }
     handleFirestoreError(err, OperationType.WRITE, `sharedTrees/${treeData.id}`);
     return {
       success: false,
       shareId: treeData.id,
       shareUrl: '',
-      error: err?.message || 'Помилка публікації дерева в хмару'
+      error: isFirestoreQuotaError(err) ? 'Добовий ліміт запису до хмари вичерпано' : (err?.message || 'Помилка публікації дерева в хмару')
     };
   }
 }
@@ -1503,7 +1836,7 @@ export function subscribeToSharedTreeCloud(
   }
 
   const docRef = doc(db, 'sharedTrees', shareId);
-  return onSnapshot(
+  return safeSnapshotListener(
     docRef,
     (snap) => {
       if (snap.exists()) {
@@ -1512,10 +1845,8 @@ export function subscribeToSharedTreeCloud(
         callback(null);
       }
     },
-    (err) => {
-      handleFirestoreError(err, OperationType.GET, `sharedTrees/${shareId}`);
-      callback(null);
-    }
+    `sharedTrees/${shareId}`,
+    OperationType.GET
   );
 }
 

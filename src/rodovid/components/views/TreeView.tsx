@@ -2667,30 +2667,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
               className="hidden"
             />
 
-            {/* GEDCOM Import Button */}
-            <button
-              type="button"
-              onClick={() => gedcomFileInputRef.current?.click()}
-              className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238] hover:border-amber-500/50 shrink-0"
-              title="Імпортувати файл GEDCOM (.ged) або JSON"
-            >
-              <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="hidden sm:inline">Імпорт GEDCOM</span>
-              <span className="sm:hidden">Імпорт</span>
-            </button>
-
-            {/* Import History Modal Button */}
-            <button
-              type="button"
-              onClick={() => setShowImportHistoryModal(true)}
-              className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238] hover:border-sky-500/50 shrink-0"
-              title="Історія імпорту, звіт про доданих осіб та розв'язані конфлікти"
-            >
-              <History className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <span className="hidden sm:inline">Історія</span>
-            </button>
-
-            {/* Export Menu (Direct SVG / GEDCOM / Print) */}
+            {/* Combined Import / Export Menu */}
             <div className="relative shrink-0" ref={exportMenuRef}>
               <button
                 type="button"
@@ -2700,17 +2677,56 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     ? 'bg-emerald-600 text-white border-emerald-500'
                     : 'bg-[#15181b] text-slate-300 hover:text-white hover:bg-slate-800 border-[#2d3238] hover:border-emerald-500/50'
                 }`}
-                title="Меню експорту родоводу (SVG, GEDCOM, друк)"
+                title="Імпорт та експорт родоводу (GEDCOM, SVG, друк)"
               >
-                <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="hidden sm:inline">Експорт</span>
+                <ArrowDownUp className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="hidden sm:inline">Імпорт / Експорт</span>
+                <span className="sm:hidden">Дані</span>
                 <ChevronDown className={`w-3 h-3 transition-transform ${isExportOpen ? 'rotate-180' : ''}`} />
               </button>
 
               {isExportOpen && (
-                <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-1.5 w-60 bg-[#1a1d21] border border-[#323840] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-[#2d3238] mb-1">
-                    Формати експорту
+                <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-1.5 w-64 bg-[#1a1d21] border border-[#323840] rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  {/* Section 1: Import */}
+                  <div className="px-3 py-1 text-[10px] font-bold text-amber-400/90 uppercase tracking-wider flex items-center justify-between">
+                    <span>Імпорт даних</span>
+                    <Upload className="w-3 h-3 text-amber-400/80" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportOpen(false);
+                      gedcomFileInputRef.current?.click();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-200 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-white">Імпорт GEDCOM (.ged / .json)</div>
+                      <div className="text-[10px] text-slate-400">Завантажити з MyHeritage, FamilySearch тощо</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExportOpen(false);
+                      setShowImportHistoryModal(true);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left text-slate-300 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <History className="w-4 h-4 text-sky-400 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-slate-200">Історія та конфлікти імпорту</div>
+                      <div className="text-[10px] text-slate-400">Переглянути історію доданих осіб</div>
+                    </div>
+                  </button>
+
+                  {/* Section 2: Export */}
+                  <div className="px-3 py-1 text-[10px] font-bold text-emerald-400/90 uppercase tracking-wider border-t border-[#2d3238] mt-1.5 pt-2 mb-1 flex items-center justify-between">
+                    <span>Експорт даних</span>
+                    <Download className="w-3 h-3 text-emerald-400/80" />
                   </div>
 
                   <button
@@ -4007,6 +4023,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                           alt={firstName}
                           className="w-7 h-7 rounded-full object-cover border border-[#47515c] shadow-xs"
                           loading="lazy"
+                          decoding="async"
                         />
                       ) : (
                         <div
@@ -4173,6 +4190,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                             alt={firstName}
                             className="w-12 h-12 rounded-full object-cover border-2 border-[#47515c] shadow-md"
                             loading="lazy"
+                            decoding="async"
                           />
                         ) : (
                           <div

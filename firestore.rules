@@ -164,6 +164,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Legacy monolithic collection (for seamless one-time migration to subcollections)
+    match /genealogyProjects/{docId} {
+      allow read, write: if true;
+    }
+
     // Default deny catch-all
     match /{document=**} {
       allow read, write: if false;

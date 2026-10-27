@@ -19,12 +19,20 @@ import {
   Plus,
   X,
   User,
-  Check
+  Check,
+  Globe
 } from 'lucide-react';
 import { ResearchNote, NoteColor, ChecklistItem } from '../../types';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { getThemeConfig } from '../../utils/theme';
+import {
+  renderContentWithClickableLinks,
+  extractAllLinksFromNote,
+  NoteLinksBar,
+  getHref,
+  formatUrlDisplay
+} from './linkHelper';
 
 export const NOTE_COLORS: { id: NoteColor; label: string; swatch: string }[] = [
   { id: 'default', label: 'За замовчуванням', swatch: 'bg-neutral-200 dark:bg-neutral-700 border border-neutral-400/40' },
@@ -133,29 +141,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, onOpenEdit, onTagClick
   const activeItems = checklistItems.filter((item) => !item.isCompleted);
   const completedItems = checklistItems.filter((item) => item.isCompleted);
 
-  // Helper to render text with auto-links
-  const renderTextWithLinks = (text: string) => {
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const parts = text.split(urlRegex);
-    return parts.map((part, index) => {
-      if (part.match(urlRegex)) {
-        return (
-          <a
-            key={index}
-            href={part}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="text-amber-600 dark:text-amber-400 underline hover:opacity-80 inline-flex items-center gap-0.5 break-all font-medium"
-          >
-            <span>{part}</span>
-            <ExternalLink className="w-2.5 h-2.5 inline shrink-0" />
-          </a>
-        );
-      }
-      return part;
-    });
-  };
+  // Extract all links for direct one-click access
+  const allLinks = extractAllLinksFromNote(note);
 
   return (
     <div
@@ -188,14 +175,14 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, onOpenEdit, onTagClick
           <h3 className="font-bold text-sm leading-snug pr-7 line-clamp-2">{note.title}</h3>
         )}
 
-        {/* Text Content */}
+        {/* Text Content with Clickable Links */}
         {!note.isChecklist && note.content && (
           <div className="text-xs opacity-90 leading-relaxed whitespace-pre-wrap line-clamp-8">
-            {renderTextWithLinks(note.content)}
+            {renderContentWithClickableLinks(note.content)}
           </div>
         )}
 
-        {/* Checklist Content */}
+        {/* Checklist Content with Clickable Links in Items */}
         {note.isChecklist && (
           <div className="space-y-1.5 text-xs">
             {/* Active / Uncompleted Items */}
@@ -209,7 +196,9 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, onOpenEdit, onTagClick
                 className="flex items-start gap-2 py-0.5 hover:opacity-80 transition-opacity"
               >
                 <Square className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5" />
-                <span className="leading-snug break-words line-clamp-2">{item.text}</span>
+                <span className="leading-snug break-words line-clamp-2">
+                  {renderContentWithClickableLinks(item.text)}
+                </span>
               </div>
             ))}
 
@@ -242,13 +231,22 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, onOpenEdit, onTagClick
                         className="flex items-start gap-2 py-0.5 opacity-60 line-through"
                       >
                         <CheckSquare className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                        <span className="leading-snug break-words line-clamp-2">{item.text}</span>
+                        <span className="leading-snug break-words line-clamp-2">
+                          {renderContentWithClickableLinks(item.text)}
+                        </span>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Interactive Clickable Links Bar */}
+        {allLinks.length > 0 && (
+          <div className="pt-1">
+            <NoteLinksBar links={allLinks} />
           </div>
         )}
 

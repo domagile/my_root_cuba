@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react';
-import * as XLSX from 'xlsx';
 import { 
   FileText, 
   Plus, 
@@ -196,7 +195,7 @@ export const DocumentsView: React.FC = () => {
   }, [filteredDocuments, safePage, pageSize]);
 
   // Handle Export Excel
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     const dataToExport = filteredDocuments.map((doc, idx) => ({
       '№': idx + 1,
       'Назва речового доказу': doc.title,
@@ -217,6 +216,7 @@ export const DocumentsView: React.FC = () => {
       'Нотатки': doc.notes || ''
     }));
 
+    const XLSX = await import('xlsx');
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Речові докази');

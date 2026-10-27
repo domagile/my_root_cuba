@@ -35,7 +35,6 @@ import {
   Activity,
   Award
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { useGenealogy } from '../context/GenealogyContext';
 import { ImportedMetricRow, RecordType } from '../types';
 import { findBestPersonMatch, areSurnamesPhoneticallyRelated } from '../utils/ukrainianPhonetics';
@@ -65,6 +64,7 @@ export const InvestigativeAiView: React.FC = () => {
     addPerson, 
     addHypothesis, 
     addMetricRecord, 
+    batchAddMetricRecords,
     addDocument, 
     metricRecords, 
     documents 
@@ -108,12 +108,13 @@ export const InvestigativeAiView: React.FC = () => {
     });
   };
 
-  // Parse Excel file logic
+  // Parse Excel file logic (dynamically imports xlsx only on demand)
   const processExcelFile = (file: File) => {
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const bstr = evt.target?.result;
+        const XLSX = await import('xlsx');
         const workbook = XLSX.read(bstr, { type: 'binary' });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
@@ -326,28 +327,28 @@ export const InvestigativeAiView: React.FC = () => {
   const batchImportExcelToMetrics = () => {
     if (importedRows.length === 0) return;
 
-    importedRows.forEach((row) => {
-      addMetricRecord({
-        title: `${row.type || 'Метрика'}: ${row.personName || 'Запис'}`,
-        archive: row.archiveRef || 'Державний Архів',
-        fund: 'Ф. 1011',
-        inventory: 'Оп. 1',
-        caseNumber: 'Спр. ' + (Math.floor(Math.random() * 300) + 1),
-        year: parseInt(String(row.year)) || 1890,
-        recordType: 'birth',
-        status: 'raw',
-        notes: `Імпортовано з Excel. Селище: ${row.churchOrPlace || '—'}. Родичі: ${row.relatives || '—'}. ${row.notes || ''}`,
-        indexedPersons: [
-          {
-            personName: row.personName || '—',
-            role: 'subject',
-            details: row.relatives
-          }
-        ]
-      });
-    });
+    const newRecords = importedRows.map((row, idx) => ({
+      id: `m-excel-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      title: `${row.type || 'Метрика'}: ${row.personName || 'Запис'}`,
+      archive: row.archiveRef || 'Державний Архів',
+      fund: 'Ф. 1011',
+      inventory: 'Оп. 1',
+      caseNumber: 'Спр. ' + (Math.floor(Math.random() * 300) + 1),
+      year: parseInt(String(row.year)) || 1890,
+      recordType: 'birth' as const,
+      status: 'raw' as const,
+      notes: `Імпортовано з Excel. Селище: ${row.churchOrPlace || '—'}. Родичі: ${row.relatives || '—'}. ${row.notes || ''}`,
+      indexedPersons: [
+        {
+          personName: row.personName || '—',
+          role: 'subject',
+          details: row.relatives
+        }
+      ]
+    }));
 
-    alert(`Успішно імпортовано ${importedRows.length} записів у хмарну базу метричних книг!`);
+    batchAddMetricRecords(newRecords);
+    alert(`Успішно імпортовано ${importedRows.length} записів у базу метричних книг пакетним записом!`);
   };
 
   // Save specific result item based on chosen target format

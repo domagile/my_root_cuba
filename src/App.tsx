@@ -9,33 +9,39 @@ import { useAuthStore } from './stores/useAuthStore';
 import { useSharedTreeStore } from './stores/useSharedTreeStore';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
-import { FamilyTreeView } from './components/Tree/FamilyTreeView';
-import { RodovidView } from './rodovid/RodovidView';
-import { PersonDetailModal } from './components/Tree/PersonDetailModal';
-import { AddPersonModal } from './components/Tree/AddPersonModal';
-import { RelationManagerModal } from './components/Tree/RelationManagerModal';
 import { AuthModal } from './components/AuthModal';
 import { Person } from './types';
-import { 
-  ResearchView, 
-  RequestsView, 
-  YearMatrixView, 
-  TasksView, 
-  FindingsView, 
-  HypothesesView 
-} from './components/OtherViews';
-import { DocumentsView } from './components/DocumentsView';
-import { SettingsView } from './components/SettingsView';
-import { InvestigativeAiView } from './components/InvestigativeAiView';
-import { PersonsListView } from './components/PersonsListView';
-import { TimelineView } from './components/TimelineView';
-import { ExperimentView } from './components/ExperimentView';
 import { SharedPinScreen } from './components/SharedPinScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from './components/ContactAuthorModal';
 import { getThemeConfig } from './utils/theme';
 import { isUserWhitelisted } from './rodovid/utils/privacy';
 import { RefreshCw, AlertCircle, ArrowLeft, Lock, Mail } from 'lucide-react';
+
+// Lazy-loaded secondary tabs & heavy views to optimize initial load & runtime memory
+const RodovidView = React.lazy(() => import('./rodovid/RodovidView').then(m => ({ default: m.RodovidView })));
+const SettingsView = React.lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
+const InvestigativeAiView = React.lazy(() => import('./components/InvestigativeAiView').then(m => ({ default: m.InvestigativeAiView })));
+const PersonsListView = React.lazy(() => import('./components/PersonsListView').then(m => ({ default: m.PersonsListView })));
+const TimelineView = React.lazy(() => import('./components/TimelineView').then(m => ({ default: m.TimelineView })));
+
+const ResearchView = React.lazy(() => import('./components/OtherViews').then(m => ({ default: m.ResearchView })));
+const YearMatrixView = React.lazy(() => import('./components/OtherViews').then(m => ({ default: m.YearMatrixView })));
+const HypothesesView = React.lazy(() => import('./components/OtherViews').then(m => ({ default: m.HypothesesView })));
+
+// Lazy-loaded modals
+const PersonDetailModal = React.lazy(() => import('./components/Tree/PersonDetailModal').then(m => ({ default: m.PersonDetailModal })));
+const AddPersonModal = React.lazy(() => import('./components/Tree/AddPersonModal').then(m => ({ default: m.AddPersonModal })));
+const RelationManagerModal = React.lazy(() => import('./components/Tree/RelationManagerModal').then(m => ({ default: m.RelationManagerModal })));
+
+const ViewLoadingFallback = () => (
+  <div className="flex-1 flex items-center justify-center p-8">
+    <div className="flex items-center gap-2.5 text-xs text-neutral-400 font-medium animate-pulse">
+      <RefreshCw className="w-4 h-4 animate-spin text-[#B88E3E]" />
+      <span>Завантаження...</span>
+    </div>
+  </div>
+);
 
 function AppContent() {
   const activeTab = useUIStore((s) => s.activeTab);
@@ -255,68 +261,66 @@ function AppContent() {
 
         {/* Tab Router */}
         <main className="flex-1 flex flex-col h-full min-h-0 relative overflow-x-auto overflow-y-hidden">
-          {activeTab === 'tree' && <RodovidView />}
-
-          {activeTab === 'research' && (isWhitelisted ? <ResearchView /> : renderRestrictedGuard('Детективні розкопки'))}
-          {activeTab === 'ai-analysis' && (isWhitelisted ? <InvestigativeAiView /> : renderRestrictedGuard('Слідчий AI аналіз'))}
-          {activeTab === 'documents' && (isWhitelisted ? <DocumentsView /> : renderRestrictedGuard('Речові докази'))}
-          {activeTab === 'requests' && (isWhitelisted ? <RequestsView /> : renderRestrictedGuard('Запити на доступ'))}
-          {activeTab === 'matrix' && (isWhitelisted ? <YearMatrixView /> : renderRestrictedGuard('Літопис подій'))}
-          {(activeTab === 'notes' || activeTab === 'tasks') && (isWhitelisted ? <TasksView /> : renderRestrictedGuard('Чернетки & Завдання'))}
-          {activeTab === 'findings' && (isWhitelisted ? <FindingsView /> : renderRestrictedGuard('Зачіпки'))}
-          {activeTab === 'hypotheses' && (isWhitelisted ? <HypothesesView /> : renderRestrictedGuard('Підозри & Гіпотези'))}
-          {activeTab === 'settings' && (isWhitelisted ? <SettingsView /> : renderRestrictedGuard('Налаштування'))}
-          {activeTab === 'persons' && (isWhitelisted ? (
-            <PersonsListView
-              onInspectPerson={(id) => setInspectPersonId(id)}
-              onEditPerson={handleEditPerson}
-              onOpenAddPerson={handleOpenAddModal}
-            />
-          ) : renderRestrictedGuard('Список осіб'))}
-          {activeTab === 'timeline' && (
-            <TimelineView
-              onInspectPerson={(id) => setInspectPersonId(id)}
-            />
-          )}
-          {activeTab === 'experiment' && (isWhitelisted ? <ExperimentView /> : renderRestrictedGuard('Експеримент'))}
+          <React.Suspense fallback={<ViewLoadingFallback />}>
+            {activeTab === 'tree' && <RodovidView />}
+            {activeTab === 'research' && (isWhitelisted ? <ResearchView /> : renderRestrictedGuard('Детективні розкопки'))}
+            {activeTab === 'ai-analysis' && (isWhitelisted ? <InvestigativeAiView /> : renderRestrictedGuard('Слідчий AI аналіз'))}
+            {activeTab === 'matrix' && (isWhitelisted ? <YearMatrixView /> : renderRestrictedGuard('Літопис подій'))}
+            {activeTab === 'hypotheses' && (isWhitelisted ? <HypothesesView /> : renderRestrictedGuard('Підозри & Гіпотези'))}
+            {activeTab === 'settings' && (isWhitelisted ? <SettingsView /> : renderRestrictedGuard('Налаштування'))}
+            {activeTab === 'persons' && (isWhitelisted ? (
+              <PersonsListView
+                onInspectPerson={(id) => setInspectPersonId(id)}
+                onEditPerson={handleEditPerson}
+                onOpenAddPerson={handleOpenAddModal}
+              />
+            ) : renderRestrictedGuard('Список осіб'))}
+            {activeTab === 'timeline' && (
+              <TimelineView
+                onInspectPerson={(id) => setInspectPersonId(id)}
+              />
+            )}
+          </React.Suspense>
         </main>
       </div>
 
-      {/* Inspect Person Profile Modal */}
-      {inspectPersonId && activeTab !== 'tree' && (
-        <PersonDetailModal
-          personId={inspectPersonId}
-          onClose={() => setInspectPersonId(null)}
-          onEdit={handleEditPerson}
-          onOpenAddRelation={handleOpenAddModalWithRelation}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {/* Inspect Person Profile Modal */}
+        {inspectPersonId && activeTab !== 'tree' && (
+          <PersonDetailModal
+            personId={inspectPersonId}
+            onClose={() => setInspectPersonId(null)}
+            onEdit={handleEditPerson}
+            onOpenAddRelation={handleOpenAddModalWithRelation}
+          />
+        )}
 
-      {/* Relation Manager Modal (Add relative to tree) */}
-      {relationManagerPerson && (
-        <RelationManagerModal
-          targetPerson={relationManagerPerson}
-          onClose={() => setRelationManagerPerson(null)}
-          onOpenAddModalWithRelation={(type, targetId) => {
-            setRelationManagerPerson(null);
-            handleOpenAddModalWithRelation(type, targetId);
-          }}
-        />
-      )}
+        {/* Relation Manager Modal (Add relative to tree) */}
+        {relationManagerPerson && (
+          <RelationManagerModal
+            targetPerson={relationManagerPerson}
+            onClose={() => setRelationManagerPerson(null)}
+            onOpenAddModalWithRelation={(type, targetId) => {
+              setRelationManagerPerson(null);
+              handleOpenAddModalWithRelation(type, targetId);
+            }}
+          />
+        )}
 
-      {/* Create / Edit Person Modal */}
-      {showAddModal && (
-        <AddPersonModal
-          initialPersonToEdit={personToEdit}
-          initialRelation={addRelation}
-          onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
-          onClose={() => {
-            setShowAddModal(false);
-            setPersonToEdit(null);
-            setAddRelation(null);
-          }}
-        />
-      )}
+        {/* Create / Edit Person Modal */}
+        {showAddModal && (
+          <AddPersonModal
+            initialPersonToEdit={personToEdit}
+            initialRelation={addRelation}
+            onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
+            onClose={() => {
+              setShowAddModal(false);
+              setPersonToEdit(null);
+              setAddRelation(null);
+            }}
+          />
+        )}
+      </React.Suspense>
 
       {/* Whitelist Auth Modal */}
       <AuthModal

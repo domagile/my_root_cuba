@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { 
   Calendar, 
   Clock, 
@@ -510,8 +511,19 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
     }
   };
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: filteredEvents.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => (viewMode === 'table' ? 48 : 150),
+    overscan: 10
+  });
+
   return (
-    <div className={`flex-1 p-4 md:p-6 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-4 transition-colors duration-300 relative`}>
+    <div
+      ref={scrollContainerRef}
+      className={`flex-1 p-4 md:p-6 ${theme.appBg} overflow-y-auto overflow-x-auto space-y-4 transition-colors duration-300 relative custom-scrollbar`}
+    >
       {/* 1. TOP HEADER & METRICS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-2 border-b border-[#2A2A2A]">
         <div>
@@ -820,15 +832,25 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
           </button>
         </div>
       ) : viewMode === 'timeline' ? (
-        /* MODE 1: VERTICAL CHRONOLOGICAL TIMELINE */
+        /* MODE 1: VERTICAL CHRONOLOGICAL TIMELINE (VIRTUALIZED) */
         <div className="relative pl-6 md:pl-10 space-y-6 before:absolute before:left-3 md:before:left-5 before:top-3 before:bottom-3 before:w-0.5 before:bg-gradient-to-b before:from-[#B88E3E] before:via-[#333333] before:to-transparent">
-          {filteredEvents.map((ev) => {
+          {virtualizer.getVirtualItems().length > 0 && virtualizer.getVirtualItems()[0].start > 0 && (
+            <div style={{ height: `${virtualizer.getVirtualItems()[0].start}px` }} />
+          )}
+          {virtualizer.getVirtualItems().map((virtualItem) => {
+            const ev = filteredEvents[virtualItem.index];
+            if (!ev) return null;
             const badge = getEventBadge(ev.type);
             const Icon = badge.icon;
             const isTargetPerson = activeSelectedPerson && ev.personId === activeSelectedPerson.id;
 
             return (
-              <div key={ev.id} className="relative group">
+              <div
+                key={ev.id}
+                data-index={virtualItem.index}
+                ref={virtualizer.measureElement}
+                className="relative group"
+              >
                 {/* Node marker on central line */}
                 <div
                   className={`absolute -left-6 md:-left-10 top-3.5 w-6 h-6 rounded-full border-2 grid place-items-center z-10 transition-transform group-hover:scale-110 shadow-md ${
@@ -974,27 +996,50 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
               </div>
             );
           })}
+          {virtualizer.getVirtualItems().length > 0 && (
+            <div
+              style={{
+                height: `${Math.max(
+                  0,
+                  virtualizer.getTotalSize() -
+                    virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end
+                )}px`
+              }}
+            />
+          )}
         </div>
       ) : viewMode === 'table' ? (
-        /* MODE 2: CHRONICLE TABLE */
+        /* MODE 2: CHRONICLE TABLE (VIRTUALIZED) */
         <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl overflow-hidden shadow-md">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[650px] text-left text-xs">
-              <thead className="bg-[#121212] text-[#8C8C8C] uppercase font-bold text-[10px] tracking-wider border-b border-[#2A2A2A]">
+            <table className="w-full min-w-[650px] text-left text-xs border-separate border-spacing-0">
+              <thead className="bg-[#121212] text-[#8C8C8C] uppercase font-bold text-[10px] tracking-wider border-b border-[#2A2A2A] sticky top-0 z-10">
                 <tr>
-                  <th className="px-4 py-3">Рік / Дата</th>
-                  <th className="px-4 py-3">Тип події</th>
-                  <th className="px-4 py-3">Назва & Опис</th>
-                  <th className="px-4 py-3">Особа</th>
-                  <th className="px-4 py-3">Локація / Архів</th>
-                  <th className="px-4 py-3 text-right">Дії</th>
+                  <th className="px-4 py-3 bg-[#121212]">Рік / Дата</th>
+                  <th className="px-4 py-3 bg-[#121212]">Тип події</th>
+                  <th className="px-4 py-3 bg-[#121212]">Назва & Опис</th>
+                  <th className="px-4 py-3 bg-[#121212]">Особа</th>
+                  <th className="px-4 py-3 bg-[#121212]">Локація / Архів</th>
+                  <th className="px-4 py-3 text-right bg-[#121212]">Дії</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#262626] text-neutral-200">
-                {filteredEvents.map((ev) => {
+                {virtualizer.getVirtualItems().length > 0 && virtualizer.getVirtualItems()[0].start > 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ height: `${virtualizer.getVirtualItems()[0].start}px` }} />
+                  </tr>
+                )}
+                {virtualizer.getVirtualItems().map((virtualItem) => {
+                  const ev = filteredEvents[virtualItem.index];
+                  if (!ev) return null;
                   const badge = getEventBadge(ev.type);
                   return (
-                    <tr key={ev.id} className="hover:bg-[#222222] transition-colors">
+                    <tr
+                      key={ev.id}
+                      data-index={virtualItem.index}
+                      ref={virtualizer.measureElement}
+                      className="hover:bg-[#222222] transition-colors"
+                    >
                       <td className="px-4 py-3 font-mono font-bold text-[#B88E3E] whitespace-nowrap">
                         {ev.fullDate || `${ev.year} р.`}
                       </td>
@@ -1049,6 +1094,20 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ onInspectPerson }) =
                     </tr>
                   );
                 })}
+                {virtualizer.getVirtualItems().length > 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      style={{
+                        height: `${Math.max(
+                          0,
+                          virtualizer.getTotalSize() -
+                            virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end
+                        )}px`
+                      }}
+                    />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

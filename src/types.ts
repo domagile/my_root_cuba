@@ -23,16 +23,10 @@ export type NavigationTab =
   | 'conflicts'
   | 'research'
   | 'ai-analysis'
-  | 'documents'
-  | 'requests'
   | 'matrix'
-  | 'notes'
-  | 'tasks'
-  | 'findings'
   | 'hypotheses'
   | 'settings'
-  | 'timeline'
-  | 'experiment';
+  | 'timeline';
 
 export type Gender = 'male' | 'female' | 'other' | 'M' | 'F' | 'U';
 

@@ -135,6 +135,8 @@ export const getInitialPersonId = (): string | null => {
   return null;
 };
 
+const VALID_NAV_TABS = ['tree', 'persons', 'conflicts', 'research', 'ai-analysis', 'matrix', 'hypotheses', 'settings', 'timeline'];
+
 const getInitialNav = (): { activeTab: string; rodovidView: ViewMode } => {
   if (typeof window !== 'undefined') {
     try {
@@ -148,7 +150,7 @@ const getInitialNav = (): { activeTab: string; rodovidView: ViewMode } => {
       if (view && RODOVID_VIEWS.includes(view)) {
         return { activeTab: 'tree', rodovidView: view };
       }
-      if (tab) {
+      if (tab && VALID_NAV_TABS.includes(tab)) {
         return { activeTab: tab, rodovidView: 'tree' };
       }
     } catch {}

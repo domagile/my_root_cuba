@@ -166,6 +166,11 @@ export const useCloudSyncStore = create<CloudSyncState>((set) => ({
   setQuotaExceeded: (isQuotaExceeded) => {
     markQuotaExceededToday(isQuotaExceeded);
     set({ isQuotaExceeded, status: isQuotaExceeded ? 'offline' : 'synced' });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('rodovid_quota_exceeded_changed', { detail: { isQuotaExceeded } })
+      );
+    }
   },
 
   setStatus: (status, error = null) =>

@@ -71,10 +71,10 @@ export const SheetsAnalyzerTab: React.FC<SheetsAnalyzerTabProps> = ({
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const bstr = evt.target?.result;
-        const parsedSheets = parseWorkbookMultiSheets(bstr);
+        const parsedSheets = await parseWorkbookMultiSheets(bstr);
         if (parsedSheets.length === 0) {
           alert('Файл порожній або не містить валідних таблиць.');
           return;
@@ -110,7 +110,7 @@ export const SheetsAnalyzerTab: React.FC<SheetsAnalyzerTabProps> = ({
       }
 
       const arrayBuffer = await response.arrayBuffer();
-      const parsedSheets = parseWorkbookMultiSheets(arrayBuffer);
+      const parsedSheets = await parseWorkbookMultiSheets(arrayBuffer);
       
       if (parsedSheets.length === 0) {
         throw new Error('Таблиця не містить аркушів з даними.');

@@ -33,6 +33,7 @@ import {
   deleteEventDoc,
   deleteSourceDoc,
   deletePlaceDoc,
+  batchDeleteEntities,
   subscribeToIgnoredDuplicatePairsCloud,
   subscribeToDeletedTombstonesCloud,
   subscribeToMergedPersonsCloud,
@@ -53,7 +54,7 @@ import {
   getIgnoredDuplicatePairKeys
 } from '../utils/duplicateDetector';
 import { useResearchStore, INITIAL_METRICS, INITIAL_DOCUMENTS, INITIAL_TASKS, INITIAL_FINDINGS, INITIAL_HYPOTHESES, INITIAL_REQUESTS, INITIAL_MATRIX } from '../stores/useResearchStore';
-import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode, countDirtyItems } from '../stores/useCloudSyncStore';
+import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode, countDirtyItems, isQuotaExceededToday } from '../stores/useCloudSyncStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { getSavedUserTreeState, resolveInitialPersonId } from '../utils/userTreeState';
@@ -156,6 +157,7 @@ export interface GenealogyContextType {
   updateMetricRecord: (record: any, data?: any) => void;
   deleteMetricRecord: (id: string) => void;
   batchSetMetricRecords: (records: MetricRecord[]) => void;
+  batchAddMetricRecords: (records: MetricRecord[]) => void;
 
   // Documents
   documents: GenealogyDocument[];
@@ -280,6 +282,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const updateMetricRecord = useResearchStore((s) => s.updateMetricRecord);
   const deleteMetricRecord = useResearchStore((s) => s.deleteMetricRecord);
   const batchSetMetricRecords = useResearchStore((s) => s.batchSetMetricRecords);
+  const batchAddMetricRecords = useResearchStore((s) => s.batchAddMetricRecords);
 
   const documents = useResearchStore((s) => s.documents);
   const setDocuments = useResearchStore((s) => s.setDocuments);
@@ -376,6 +379,11 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Realtime Cloud Settings Listener (Tombstones, Ignored Duplicates, Merged Persons)
   // Ensures cross-session and cross-device consistency so deleted persons and resolved duplicates never reappear
   useEffect(() => {
+    const syncState = useCloudSyncStore.getState();
+    if (syncState.syncMode === 'manual' || syncState.isQuotaExceeded || isQuotaExceededToday()) {
+      return;
+    }
+
     const unsubTombstones = subscribeToDeletedTombstonesCloud((cloudTombstones) => {
       if (Array.isArray(cloudTombstones) && cloudTombstones.length > 0) {
         addTombstoneIds(cloudTombstones);
@@ -422,6 +430,11 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Firestore Sync Listener
   useEffect(() => {
+    const syncState = useCloudSyncStore.getState();
+    if (syncState.syncMode === 'manual' || syncState.isQuotaExceeded || isQuotaExceededToday()) {
+      return;
+    }
+
     const unsubscribe = subscribeToProjectData((cloudData) => {
       if (!cloudData) return;
 
@@ -736,21 +749,21 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           ? Object.values(places || {}).filter((pl) => tracker.places.includes(pl.id))
           : [];
 
-        // Handle deleted items
+        // Batch delete removed items (atomic batches of max 400 operations)
         if (tracker.deletedPersons.length > 0) {
-          await Promise.allSettled(tracker.deletedPersons.map((id) => deletePersonDoc(id)));
+          await batchDeleteEntities('persons', tracker.deletedPersons, undefined, true);
         }
         if (tracker.deletedFamilies.length > 0) {
-          await Promise.allSettled(tracker.deletedFamilies.map((id) => deleteFamilyDoc(id)));
+          await batchDeleteEntities('families', tracker.deletedFamilies, undefined, true);
         }
         if (tracker.deletedEvents.length > 0) {
-          await Promise.allSettled(tracker.deletedEvents.map((id) => deleteEventDoc(id)));
+          await batchDeleteEntities('events', tracker.deletedEvents, undefined, true);
         }
         if (tracker.deletedSources.length > 0) {
-          await Promise.allSettled(tracker.deletedSources.map((id) => deleteSourceDoc(id)));
+          await batchDeleteEntities('sources', tracker.deletedSources, undefined, true);
         }
         if (tracker.deletedPlaces.length > 0) {
-          await Promise.allSettled(tracker.deletedPlaces.map((id) => deletePlaceDoc(id)));
+          await batchDeleteEntities('places', tracker.deletedPlaces, undefined, true);
         }
 
         // Incremental Person Delta Writes: Push only changed fields for specific updated persons
@@ -1090,6 +1103,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       updateMetricRecord,
       deleteMetricRecord,
       batchSetMetricRecords,
+      batchAddMetricRecords,
       documents,
       addDocument,
       updateDocument,
@@ -1191,6 +1205,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       updateMetricRecord,
       deleteMetricRecord,
       batchSetMetricRecords,
+      batchAddMetricRecords,
       documents,
       addDocument,
       updateDocument,

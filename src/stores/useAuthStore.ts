@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { isQuotaExceededToday } from './useCloudSyncStore';
 import { AuthUser, UserRole, WhitelistEntry, AccessRequest, AccessControlConfig } from '../types';
 import { sendAdminAccessNotification, formatAccessRequestEmail, EmailDispatchResult } from '../services/notificationService';
 import {
@@ -690,8 +691,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   initCloudAuthSync: () => {
+    const isExceeded = typeof window !== 'undefined' && isQuotaExceededToday();
+
     // 1. Subscribe to Cloud Whitelist
-    const unsubWhitelist = subscribeToWhitelistCloud((cloudList) => {
+    const unsubWhitelist = isExceeded ? () => {} : subscribeToWhitelistCloud((cloudList) => {
       if (cloudList && Array.isArray(cloudList)) {
         set((state) => {
           const map = new Map<string, WhitelistEntry>();
@@ -706,8 +709,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             if (item?.email && !isDemoEmail(item.email)) {
               map.set(item.email.toLowerCase(), item);
             } else if (item?.email && isDemoEmail(item.email)) {
-              if (item.id) deleteWhitelistEntryFromCloud(item.id).catch(() => {});
-              deleteWhitelistEntryFromCloud(item.email).catch(() => {});
+              if (!isExceeded) {
+                if (item.id) deleteWhitelistEntryFromCloud(item.id).catch(() => {});
+                deleteWhitelistEntryFromCloud(item.email).catch(() => {});
+              }
             }
           }
           // Master admins guarantee
@@ -730,7 +735,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
 
     // 2. Subscribe to Cloud Access Requests
-    const unsubRequests = subscribeToAccessRequestsCloud((cloudReqs) => {
+    const unsubRequests = isExceeded ? () => {} : subscribeToAccessRequestsCloud((cloudReqs) => {
       if (cloudReqs && Array.isArray(cloudReqs)) {
         set((state) => {
           const map = new Map<string, AccessRequest>();
@@ -743,7 +748,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             if (item?.id && item.id !== 'req-1' && !isDemoEmail(item.email)) {
               map.set(item.id, item);
             } else if (item?.id && (item.id === 'req-1' || isDemoEmail(item.email))) {
-              deleteAccessRequestFromCloud(item.id).catch(() => {});
+              if (!isExceeded) {
+                deleteAccessRequestFromCloud(item.id).catch(() => {});
+              }
             }
           }
           const merged = Array.from(map.values())
@@ -760,7 +767,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
 
     // 3. Subscribe to Cloud Access Config
-    const unsubConfig = subscribeToAccessConfigCloud((cloudConfig) => {
+    const unsubConfig = isExceeded ? () => {} : subscribeToAccessConfigCloud((cloudConfig) => {
       if (cloudConfig) {
         set({ accessConfig: cloudConfig });
         try {

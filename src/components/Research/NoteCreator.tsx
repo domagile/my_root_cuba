@@ -13,13 +13,16 @@ import {
   Tag,
   Plus,
   X,
-  Check
+  Check,
+  Globe,
+  ExternalLink
 } from 'lucide-react';
 import { NoteColor, ChecklistItem } from '../../types';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { getThemeConfig } from '../../utils/theme';
 import { NOTE_COLORS, getNoteColorClasses } from './NoteCard';
+import { getHref, extractAllLinksFromNote, NoteLinksBar } from './linkHelper';
 
 const POPULAR_RESEARCH_TAGS = [
   'гіпотеза',
@@ -55,6 +58,8 @@ export const NoteCreator: React.FC = () => {
   const [newTagInput, setNewTagInput] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [showImageInput, setShowImageInput] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [showLinkInput, setShowLinkInput] = useState(false);
   const [showTagInput, setShowTagInput] = useState(false);
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 
@@ -70,15 +75,16 @@ export const NoteCreator: React.FC = () => {
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [title, content, checklistItems, color, isPinned, tags, imageUrl, isChecklist, isExpanded]);
+  }, [title, content, checklistItems, color, isPinned, tags, imageUrl, linkUrl, isChecklist, isExpanded]);
 
   const handleCloseAndSave = () => {
     const hasText = content.trim().length > 0;
     const hasTitle = title.trim().length > 0;
     const hasItems = checklistItems.some((item) => item.text.trim().length > 0);
     const hasImage = imageUrl.trim().length > 0;
+    const hasLink = linkUrl.trim().length > 0;
 
-    if (hasTitle || hasText || hasItems || hasImage) {
+    if (hasTitle || hasText || hasItems || hasImage || hasLink) {
       addNote({
         title: title.trim(),
         content: content.trim(),
@@ -87,7 +93,8 @@ export const NoteCreator: React.FC = () => {
         color,
         isPinned,
         tags,
-        imageUrl: imageUrl.trim() || undefined
+        imageUrl: imageUrl.trim() || undefined,
+        linkUrl: linkUrl.trim() || undefined
       });
     }
 
@@ -108,6 +115,8 @@ export const NoteCreator: React.FC = () => {
     setNewTagInput('');
     setImageUrl('');
     setShowImageInput(false);
+    setLinkUrl('');
+    setShowLinkInput(false);
     setShowTagInput(false);
     setIsColorPickerOpen(false);
   };
@@ -149,6 +158,19 @@ export const NoteCreator: React.FC = () => {
   const handleRemoveTag = (tagToRemove: string) => {
     setTags((prev) => prev.filter((t) => t !== tagToRemove));
   };
+
+  const detectedLinks = isExpanded
+    ? extractAllLinksFromNote({
+        id: '',
+        title,
+        content,
+        isChecklist,
+        checklistItems,
+        linkUrl,
+        createdAt: '',
+        updatedAt: ''
+      })
+    : [];
 
   const colorClasses = isExpanded
     ? getNoteColorClasses(color, isDark)
@@ -310,6 +332,13 @@ export const NoteCreator: React.FC = () => {
             </div>
           )}
 
+          {/* Real-time interactive clickable links bar */}
+          {detectedLinks.length > 0 && (
+            <div className="pt-0.5">
+              <NoteLinksBar links={detectedLinks} label="Розпізнані посилання:" />
+            </div>
+          )}
+
           {/* Optional Image URL Input */}
           {showImageInput && (
             <div className="p-2.5 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-1.5 text-xs">
@@ -336,6 +365,48 @@ export const NoteCreator: React.FC = () => {
                 placeholder="https://example.com/scan.jpg"
                 className="w-full px-2.5 py-1.5 rounded-lg bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 focus:outline-none focus:border-amber-500 text-xs"
               />
+            </div>
+          )}
+
+          {/* Optional Link URL Input */}
+          {showLinkInput && (
+            <div className="p-2.5 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-[11px] flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>Посилання на сайт, архів або документ (URL):</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLinkInput(false);
+                    setLinkUrl('');
+                  }}
+                  className="text-neutral-400 hover:text-rose-500 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="ra.ee/dgs/..., familysearch.org або https://..."
+                  className="flex-1 px-2.5 py-1.5 rounded-lg bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 focus:outline-none focus:border-amber-500 text-xs"
+                />
+                {linkUrl && (
+                  <a
+                    href={getHref(linkUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
+                  >
+                    <span>Відкрити</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
             </div>
           )}
 
@@ -494,6 +565,20 @@ export const NoteCreator: React.FC = () => {
                 title="Прикріпити зображення"
               >
                 <ImageIcon className="w-4 h-4" />
+              </button>
+
+              {/* Link button */}
+              <button
+                type="button"
+                onClick={() => setShowLinkInput(!showLinkInput)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  showLinkInput || linkUrl
+                    ? 'text-amber-500 bg-amber-500/10'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'
+                }`}
+                title="Прикріпити посилання (URL)"
+              >
+                <Globe className="w-4 h-4" />
               </button>
             </div>
 

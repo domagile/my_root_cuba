@@ -19,13 +19,24 @@ import {
   Check,
   Plus,
   ExternalLink,
-  Clock
+  Clock,
+  Globe,
+  Eye,
+  Edit3
 } from 'lucide-react';
 import { ResearchNote, NoteColor, ChecklistItem } from '../../types';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { getThemeConfig } from '../../utils/theme';
 import { NOTE_COLORS, getNoteColorClasses } from './NoteCard';
+import {
+  renderContentWithClickableLinks,
+  extractAllLinksFromNote,
+  NoteLinksBar,
+  getHref,
+  formatUrlDisplay,
+  hasLink
+} from './linkHelper';
 
 interface NoteEditModalProps {
   note: ResearchNote | null;
@@ -59,6 +70,9 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
   const [newTagInput, setNewTagInput] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [showImageInput, setShowImageInput] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
   const [showTagInput, setShowTagInput] = useState(false);
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 
@@ -77,10 +91,20 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
       setTags(note.tags ? [...note.tags] : []);
       setImageUrl(note.imageUrl || '');
       setShowImageInput(!!note.imageUrl);
+      setLinkUrl(note.linkUrl || '');
+      setShowLinkInput(!!note.linkUrl);
+      setViewMode('edit');
     }
   }, [note]);
 
   if (!note) return null;
+
+  const activeExtractedLinks = extractAllLinksFromNote({
+    ...note,
+    linkUrl,
+    content,
+    checklistItems
+  });
 
   const handleSaveAndClose = () => {
     updateNote(note.id, {
@@ -92,7 +116,8 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
       isPinned,
       isArchived,
       tags,
-      imageUrl: imageUrl.trim() || undefined
+      imageUrl: imageUrl.trim() || undefined,
+      linkUrl: linkUrl.trim() || undefined
     });
     onClose();
   };
@@ -179,16 +204,77 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
           </div>
         </div>
 
+        {/* Active Clickable Links Bar (Auto-extracted) */}
+        {activeExtractedLinks.length > 0 && (
+          <NoteLinksBar links={activeExtractedLinks} className="shadow-xs" />
+        )}
+
         {/* Modal Content */}
         <div className="space-y-3 flex-1 min-h-[140px]">
+          {/* Mode Switcher for Text Notes */}
+          {!isChecklist && (
+            <div className="flex items-center justify-between pb-1 border-b border-black/5 dark:border-white/5">
+              <span className="text-[11px] font-semibold opacity-70">Вміст нотатки:</span>
+              <div className="flex items-center gap-1 bg-black/5 dark:bg-white/5 p-0.5 rounded-lg text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('edit')}
+                  className={`px-2 py-0.5 rounded-md font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                    viewMode === 'edit'
+                      ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                      : 'opacity-70 hover:opacity-100'
+                  }`}
+                  title="Редагувати текст"
+                >
+                  <Edit3 className="w-3 h-3" />
+                  <span>Редагувати</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('preview')}
+                  className={`px-2 py-0.5 rounded-md font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                    viewMode === 'preview'
+                      ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                      : 'opacity-70 hover:opacity-100'
+                  }`}
+                  title="Перегляд з активними лінками"
+                >
+                  <Eye className="w-3 h-3" />
+                  <span>Перегляд лінків</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {!isChecklist ? (
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Текст нотатки або розслідування..."
-              rows={8}
-              className="w-full bg-transparent text-sm focus:outline-none resize-none leading-relaxed placeholder:opacity-60"
-            />
+            viewMode === 'edit' ? (
+              <div className="space-y-2">
+                <textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Текст нотатки або розслідування (можна вставляти посилання, наприклад ra.ee/dgs/...)..."
+                  rows={8}
+                  className="w-full bg-transparent text-sm focus:outline-none resize-none leading-relaxed placeholder:opacity-60"
+                />
+                {activeExtractedLinks.length > 0 && (
+                  <div className="pt-1">
+                    <NoteLinksBar
+                      links={activeExtractedLinks}
+                      label="Швидкий перехід:"
+                      className="bg-amber-500/15"
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="w-full text-sm leading-relaxed whitespace-pre-wrap min-h-[160px] p-3 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 select-text">
+                {content ? (
+                  renderContentWithClickableLinks(content, { stopClickPropagation: false })
+                ) : (
+                  <span className="opacity-50 italic">Немає тексту нотатки</span>
+                )}
+              </div>
+            )
           ) : (
             <div className="space-y-2 text-sm">
               {checklistItems.map((item) => (
@@ -204,19 +290,27 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
                       <Square className="w-4 h-4 text-neutral-400" />
                     )}
                   </button>
-                  <input
-                    type="text"
-                    value={item.text}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setChecklistItems((prev) =>
-                        prev.map((i) => (i.id === item.id ? { ...i, text: val } : i))
-                      );
-                    }}
-                    className={`w-full bg-transparent focus:outline-none ${
-                      item.isCompleted ? 'line-through opacity-60' : ''
-                    }`}
-                  />
+                  <div className="flex-1 min-w-0">
+                    <input
+                      type="text"
+                      value={item.text}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setChecklistItems((prev) =>
+                          prev.map((i) => (i.id === item.id ? { ...i, text: val } : i))
+                        );
+                      }}
+                      className={`w-full bg-transparent focus:outline-none ${
+                        item.isCompleted ? 'line-through opacity-60' : ''
+                      }`}
+                    />
+                    {/* Render active clickable link preview under item if URL detected */}
+                    {item.text && hasLink(item.text) && (
+                      <div className="text-[11px] pt-0.5 opacity-90">
+                        {renderContentWithClickableLinks(item.text, { stopClickPropagation: false })}
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => handleRemoveChecklistItem(item.id)}
@@ -251,6 +345,48 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
                   >
                     Додати
                   </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Attached Link URL Input / Preview Section */}
+          {showLinkInput && (
+            <div className="p-3 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <Globe className="w-4 h-4" />
+                  <span>Посилання на сайт, архів або джерело (URL):</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLinkInput(false);
+                    setLinkUrl('');
+                  }}
+                  className="text-neutral-400 hover:text-rose-500 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="ra.ee/dgs/..., familysearch.org або https://..."
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 focus:outline-none focus:border-amber-500 text-xs"
+                />
+                {linkUrl && (
+                  <a
+                    href={getHref(linkUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
+                  >
+                    <span>Відкрити</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
                 )}
               </div>
             </div>
@@ -440,6 +576,20 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
               title="Додати зображення"
             >
               <ImageIcon className="w-4 h-4" />
+            </button>
+
+            {/* Link Button */}
+            <button
+              type="button"
+              onClick={() => setShowLinkInput(!showLinkInput)}
+              className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                showLinkInput || linkUrl
+                  ? 'text-amber-500 bg-amber-500/10'
+                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'
+              }`}
+              title="Додати посилання (URL)"
+            >
+              <Globe className="w-4 h-4" />
             </button>
 
             {/* Duplicate Button */}

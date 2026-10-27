@@ -14,9 +14,11 @@ import {
   savePlaceDoc,
   deletePlaceDoc,
   saveDeletedTombstonesToCloud,
-  saveMergedPersonsToCloud
+  saveMergedPersonsToCloud,
+  batchSaveEntities,
+  batchDeleteEntities
 } from '../lib/firebase';
-import { useCloudSyncStore, EntitySyncType } from './useCloudSyncStore';
+import { useCloudSyncStore, EntitySyncType, isQuotaExceededToday } from './useCloudSyncStore';
 import { computePersonDelta } from '../utils/personDelta';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
@@ -91,7 +93,10 @@ export function addTombstoneIds(ids: string[]): void {
     ids.forEach((id) => current.add(id));
     const list = Array.from(current);
     localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(list));
-    saveDeletedTombstonesToCloud(list).catch(() => {});
+    const syncState = useCloudSyncStore.getState();
+    if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
+      saveDeletedTombstonesToCloud(list).catch(() => {});
+    }
   } catch {}
 }
 
@@ -101,7 +106,10 @@ export function removeTombstoneId(id: string): void {
     current.delete(id);
     const list = Array.from(current);
     localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(list));
-    saveDeletedTombstonesToCloud(list).catch(() => {});
+    const syncState = useCloudSyncStore.getState();
+    if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
+      saveDeletedTombstonesToCloud(list).catch(() => {});
+    }
   } catch {}
 }
 
@@ -645,7 +653,10 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      restored.forEach((r) => notifySyncChange('persons', r.id, () => savePersonDoc(r)));
+      restored.forEach((r) => useCloudSyncStore.getState().markDirty('persons', r.id));
+      if (useCloudSyncStore.getState().syncMode === 'auto') {
+        batchSaveEntities('persons', restored).catch(() => {});
+      }
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -665,12 +676,14 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   permanentlyDeletePersons: (ids) =>
     set((state) => {
       addTombstoneIds(ids);
-      ids.forEach((id) => deletePersonDoc(id).catch(() => {}));
       const nextTrash = state.trashPersons.filter((p) => !ids.includes(p.id));
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
       } catch {}
-      ids.forEach((id) => notifySyncDelete('persons', id, () => deletePersonDoc(id)));
+      ids.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
+      if (useCloudSyncStore.getState().syncMode === 'auto') {
+        batchDeleteEntities('persons', ids).catch(() => {});
+      }
       return { trashPersons: nextTrash };
     }),
 
@@ -678,11 +691,13 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const ids = state.trashPersons.map((p) => p.id);
       addTombstoneIds(ids);
-      ids.forEach((id) => deletePersonDoc(id).catch(() => {}));
       try {
         localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify([]));
       } catch {}
-      ids.forEach((id) => notifySyncDelete('persons', id, () => deletePersonDoc(id)));
+      ids.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
+      if (useCloudSyncStore.getState().syncMode === 'auto') {
+        batchDeleteEntities('persons', ids).catch(() => {});
+      }
       return { trashPersons: [] };
     }),
 
@@ -722,11 +737,11 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     // 1. Immediately record in tombstones (both local and cloud)
     addTombstoneIds(ancestorIdsList);
 
-    // 2. Immediately delete each ancestor doc from Firestore in background
-    ancestorIdsList.forEach((id) => {
-      deletePersonDoc(id).catch(() => {});
-      notifySyncDelete('persons', id, () => deletePersonDoc(id));
-    });
+    // 2. Mark and batch delete ancestors from Firestore
+    ancestorIdsList.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
+    if (useCloudSyncStore.getState().syncMode === 'auto') {
+      batchDeleteEntities('persons', ancestorIdsList).catch(() => {});
+    }
 
     // 3. Sever parents on target person
     const updatedTarget: Person = {
@@ -743,12 +758,13 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
     // 5. Clean up families
     const nextFamilies: Record<string, Family> = {};
+    const deletedFamilyIds: string[] = [];
     Object.entries(state.families).forEach(([fId, fam]) => {
       const isHusbandAncestor = fam.husbandId && ancestorIdsSet.has(fam.husbandId);
       const isWifeAncestor = fam.wifeId && ancestorIdsSet.has(fam.wifeId);
       if (isHusbandAncestor && isWifeAncestor) {
-        deleteFamilyDoc(fId).catch(() => {});
-        notifySyncDelete('families', fId, () => deleteFamilyDoc(fId));
+        deletedFamilyIds.push(fId);
+        useCloudSyncStore.getState().markDeleted('families', fId);
         return;
       }
       nextFamilies[fId] = {
@@ -759,6 +775,10 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         childrenIds: (fam.childrenIds || []).filter((cId) => !ancestorIdsSet.has(cId))
       };
     });
+
+    if (deletedFamilyIds.length > 0 && useCloudSyncStore.getState().syncMode === 'auto') {
+      batchDeleteEntities('families', deletedFamilyIds).catch(() => {});
+    }
 
     try {
       localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(remainingPersons));
@@ -823,7 +843,10 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
           mergedMap[id] = payload.masterPerson?.id || 'merged';
         });
         localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(mergedMap));
-        saveMergedPersonsToCloud(mergedMap).catch(() => {});
+        const syncState = useCloudSyncStore.getState();
+        if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
+          saveMergedPersonsToCloud(mergedMap).catch(() => {});
+        }
       } catch {}
 
       try {
@@ -1112,10 +1135,10 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       if (deletedPreviousPersons.length > 0) {
         const delIds = deletedPreviousPersons.map((p) => p.id);
         addTombstoneIds(delIds);
-        delIds.forEach((id) => {
-          deletePersonDoc(id).catch(() => {});
-          notifySyncDelete('persons', id, () => deletePersonDoc(id));
-        });
+        delIds.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
+        if (useCloudSyncStore.getState().syncMode === 'auto') {
+          batchDeleteEntities('persons', delIds).catch(() => {});
+        }
       }
 
       try {
@@ -1129,8 +1152,17 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
       // Synchronize to Firestore docs only if in auto mode; in manual mode marks unsaved changes for manual push
       notifySyncChange(() => {
-        incomingPersons.forEach((p) => savePersonDoc(p));
-        Object.values(incomingFamilies).forEach((f) => saveFamilyDoc(f));
+        batchSaveEntities('persons', incomingPersons).catch(() => {});
+        batchSaveEntities('families', Object.values(incomingFamilies)).catch(() => {});
+        if (Object.keys(incomingSources).length > 0) {
+          batchSaveEntities('sources', Object.values(incomingSources)).catch(() => {});
+        }
+        if (Object.keys(incomingEvents).length > 0) {
+          batchSaveEntities('events', Object.values(incomingEvents)).catch(() => {});
+        }
+        if (Object.keys(incomingPlaces).length > 0) {
+          batchSaveEntities('places', Object.values(incomingPlaces)).catch(() => {});
+        }
       });
 
       return {
@@ -1198,8 +1230,17 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
     // Synchronize merged/new persons and families to Firestore docs only if in auto mode; in manual mode marks unsaved changes
     notifySyncChange(() => {
-      mergedPersons.forEach((p) => savePersonDoc(p));
-      Object.values(mergedFamilies).forEach((f) => saveFamilyDoc(f));
+      batchSaveEntities('persons', mergedPersons).catch(() => {});
+      batchSaveEntities('families', Object.values(mergedFamilies)).catch(() => {});
+      if (Object.keys(mergedSources).length > 0) {
+        batchSaveEntities('sources', Object.values(mergedSources)).catch(() => {});
+      }
+      if (Object.keys(mergedEvents).length > 0) {
+        batchSaveEntities('events', Object.values(mergedEvents)).catch(() => {});
+      }
+      if (Object.keys(mergedPlaces).length > 0) {
+        batchSaveEntities('places', Object.values(mergedPlaces)).catch(() => {});
+      }
     });
 
     set({

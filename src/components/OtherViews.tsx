@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import * as XLSX from 'xlsx';
 import { 
   Compass, 
   FileText, 

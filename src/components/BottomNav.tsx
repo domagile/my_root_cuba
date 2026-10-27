@@ -25,7 +25,7 @@ export const BottomNav: React.FC = () => {
     { id: 'persons', label: 'Особи', icon: Users },
     { id: 'ai-analysis', label: 'AI Слідчий', icon: Sparkles },
     { id: 'timeline', label: 'Хроніка', icon: Clock },
-    { id: 'documents', label: 'Докази', icon: FileText }
+    { id: 'research', label: 'Розкопки', icon: Compass }
   ];
 
   return (

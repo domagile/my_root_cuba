@@ -23,7 +23,9 @@ import {
   saveRequestDoc,
   deleteRequestDoc,
   saveMatrixEntryDoc,
-  deleteMatrixEntryDoc
+  deleteMatrixEntryDoc,
+  batchSaveEntities,
+  batchDeleteEntities
 } from '../lib/firebase';
 import { isDemoResearchItem } from '../utils/demoPurge';
 
@@ -53,6 +55,7 @@ export interface ResearchDataState {
   updateMetricRecord: (record: any, data?: any) => void;
   deleteMetricRecord: (id: string) => void;
   batchSetMetricRecords: (records: MetricRecord[]) => void;
+  batchAddMetricRecords: (records: MetricRecord[]) => void;
 
   // Documents
   setDocuments: (docs: GenealogyDocument[] | ((prev: GenealogyDocument[]) => GenealogyDocument[])) => void;
@@ -261,6 +264,17 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(records));
       } catch {}
       return { metricRecords: records };
+    }),
+
+  batchAddMetricRecords: (records) =>
+    set((state) => {
+      if (!records || records.length === 0) return state;
+      const next = [...state.metricRecords, ...records];
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
+      } catch {}
+      batchSaveEntities('metricRecords', records).catch(() => {});
+      return { metricRecords: next };
     }),
 
   setDocuments: (updater) =>
