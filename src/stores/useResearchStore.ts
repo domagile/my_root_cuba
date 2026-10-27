@@ -28,6 +28,7 @@ import {
   batchDeleteEntities
 } from '../lib/firebase';
 import { isDemoResearchItem } from '../utils/demoPurge';
+import { persistLocalData, idbGet } from '../utils/indexedDbStorage';
 
 const STORAGE_KEY = 'genealogy_workstation_data_v2';
 
@@ -99,9 +100,10 @@ export interface ResearchDataState {
 
   // Purge Demo Data
   purgeDemoResearchData: () => void;
+  hydrateFromIndexedDB: () => Promise<void>;
 }
 
-export const useResearchStore = create<ResearchDataState>((set) => ({
+export const useResearchStore = create<ResearchDataState>((set, get) => ({
   metricRecords: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_metrics`);
@@ -212,9 +214,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   setMetricRecords: (updater) =>
     set((state) => {
       const next = typeof updater === 'function' ? updater(state.metricRecords) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_metrics`, next);
       return { metricRecords: next };
     }),
 
@@ -222,9 +222,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const newRec = typeof record === 'string' ? { id: `m-${Date.now()}`, title: record, ...(data || {}) } : record;
       const next = [...state.metricRecords, newRec];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_metrics`, next);
       saveMetricRecordDoc(newRec);
       return { metricRecords: next };
     }),
@@ -241,9 +239,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         }
         return m;
       });
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_metrics`, next);
       if (updatedRec) saveMetricRecordDoc(updatedRec);
       return { metricRecords: next };
     }),
@@ -251,18 +247,14 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   deleteMetricRecord: (id) =>
     set((state) => {
       const next = state.metricRecords.filter((m) => m.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_metrics`, next);
       deleteMetricRecordDoc(id);
       return { metricRecords: next };
     }),
 
   batchSetMetricRecords: (records) =>
     set(() => {
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(records));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_metrics`, records);
       return { metricRecords: records };
     }),
 
@@ -270,9 +262,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       if (!records || records.length === 0) return state;
       const next = [...state.metricRecords, ...records];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_metrics`, next);
       batchSaveEntities('metricRecords', records).catch(() => {});
       return { metricRecords: next };
     }),
@@ -280,9 +270,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   setDocuments: (updater) =>
     set((state) => {
       const next = typeof updater === 'function' ? updater(state.documents) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_documents`, next);
       return { documents: next };
     }),
 
@@ -290,9 +278,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const newDoc = typeof docItem === 'string' ? { id: `doc-${Date.now()}`, title: docItem, ...(data || {}) } : docItem;
       const next = [...state.documents, newDoc];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_documents`, next);
       saveDocumentDoc(newDoc);
       return { documents: next };
     }),
@@ -309,9 +295,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         }
         return d;
       });
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_documents`, next);
       if (updatedDoc) saveDocumentDoc(updatedDoc);
       return { documents: next };
     }),
@@ -319,9 +303,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   deleteDocument: (id) =>
     set((state) => {
       const next = state.documents.filter((d) => d.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_documents`, next);
       deleteDocumentDoc(id);
       return { documents: next };
     }),
@@ -329,9 +311,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   setTasks: (updater) =>
     set((state) => {
       const next = typeof updater === 'function' ? updater(state.tasks) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_tasks`, next);
       return { tasks: next };
     }),
 
@@ -339,9 +319,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const newTask = typeof taskItem === 'string' ? { id: `t-${Date.now()}`, title: taskItem, ...(data || {}) } : taskItem;
       const next = [...state.tasks, newTask];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_tasks`, next);
       saveTaskDoc(newTask);
       return { tasks: next };
     }),
@@ -358,9 +336,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         }
         return t;
       });
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_tasks`, next);
       if (updatedTask) saveTaskDoc(updatedTask);
       return { tasks: next };
     }),
@@ -368,9 +344,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   deleteTask: (id) =>
     set((state) => {
       const next = state.tasks.filter((t) => t.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_tasks`, next);
       deleteTaskDoc(id);
       return { tasks: next };
     }),
@@ -378,9 +352,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   setFindings: (updater) =>
     set((state) => {
       const next = typeof updater === 'function' ? updater(state.findings) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_findings`, next);
       return { findings: next };
     }),
 
@@ -388,9 +360,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const newF = typeof findingItem === 'string' ? { id: `f-${Date.now()}`, title: findingItem, ...(data || {}) } : findingItem;
       const next = [...state.findings, newF];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_findings`, next);
       saveFindingDoc(newF);
       return { findings: next };
     }),
@@ -407,19 +377,15 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         }
         return f;
       });
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_findings`, next);
       if (updatedF) saveFindingDoc(updatedF);
       return { findings: next };
     }),
 
   deleteFinding: (id) =>
     set((state) => {
-      const next = state.findings.filter((f) => f.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(next));
-      } catch {}
+      const next = state.findings.filter((m) => m.id !== id);
+      persistLocalData(`${STORAGE_KEY}_findings`, next);
       deleteFindingDoc(id);
       return { findings: next };
     }),
@@ -427,9 +393,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   setHypotheses: (updater) =>
     set((state) => {
       const next = typeof updater === 'function' ? updater(state.hypotheses) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_hypotheses`, next);
       return { hypotheses: next };
     }),
 
@@ -437,9 +401,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const newH = typeof hypoItem === 'string' ? { id: `h-${Date.now()}`, title: hypoItem, ...(data || {}) } : hypoItem;
       const next = [...state.hypotheses, newH];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_hypotheses`, next);
       saveHypothesisDoc(newH);
       return { hypotheses: next };
     }),
@@ -456,9 +418,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         }
         return h;
       });
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_hypotheses`, next);
       if (updatedH) saveHypothesisDoc(updatedH);
       return { hypotheses: next };
     }),
@@ -466,9 +426,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   deleteHypothesis: (id) =>
     set((state) => {
       const next = state.hypotheses.filter((h) => h.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_hypotheses`, next);
       deleteHypothesisDoc(id);
       return { hypotheses: next };
     }),
@@ -476,9 +434,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   setRequests: (updater) =>
     set((state) => {
       const next = typeof updater === 'function' ? updater(state.requests) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_requests`, next);
       return { requests: next };
     }),
 
@@ -486,9 +442,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const newR = typeof reqItem === 'string' ? { id: `req-${Date.now()}`, requestSubject: reqItem, ...(data || {}) } : reqItem;
       const next = [...state.requests, newR];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_requests`, next);
       saveRequestDoc(newR);
       return { requests: next };
     }),
@@ -505,9 +459,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         }
         return r;
       });
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_requests`, next);
       if (updatedR) saveRequestDoc(updatedR);
       return { requests: next };
     }),
@@ -515,9 +467,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   deleteRequest: (id) =>
     set((state) => {
       const next = state.requests.filter((r) => r.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_requests`, next);
       deleteRequestDoc(id);
       return { requests: next };
     }),
@@ -525,9 +475,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   setMatrixEntries: (updater) =>
     set((state) => {
       const next = typeof updater === 'function' ? updater(state.matrixEntries) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_matrix`, next);
       return { matrixEntries: next };
     }),
 
@@ -535,9 +483,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
     set((state) => {
       const newE = typeof entryItem === 'string' ? { id: `mx-${Date.now()}`, village: entryItem, ...(data || {}) } : entryItem;
       const next = [...state.matrixEntries, newE];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_matrix`, next);
       saveMatrixEntryDoc(newE);
       return { matrixEntries: next };
     }),
@@ -554,9 +500,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         }
         return e;
       });
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_matrix`, next);
       if (updatedE) saveMatrixEntryDoc(updatedE);
       return { matrixEntries: next };
     }),
@@ -564,9 +508,7 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
   deleteMatrixEntry: (id) =>
     set((state) => {
       const next = state.matrixEntries.filter((e) => e.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_matrix`, next);
       deleteMatrixEntryDoc(id);
       return { matrixEntries: next };
     }),
@@ -591,15 +533,13 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
       const cleanRequests = state.requests.filter((r) => !isDemoResearchItem(r));
       const cleanMatrix = state.matrixEntries.filter((e) => !isDemoResearchItem(e));
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_metrics`, JSON.stringify(cleanMetrics));
-        localStorage.setItem(`${STORAGE_KEY}_documents`, JSON.stringify(cleanDocs));
-        localStorage.setItem(`${STORAGE_KEY}_tasks`, JSON.stringify(cleanTasks));
-        localStorage.setItem(`${STORAGE_KEY}_findings`, JSON.stringify(cleanFindings));
-        localStorage.setItem(`${STORAGE_KEY}_hypotheses`, JSON.stringify(cleanHypotheses));
-        localStorage.setItem(`${STORAGE_KEY}_requests`, JSON.stringify(cleanRequests));
-        localStorage.setItem(`${STORAGE_KEY}_matrix`, JSON.stringify(cleanMatrix));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_metrics`, cleanMetrics);
+      persistLocalData(`${STORAGE_KEY}_documents`, cleanDocs);
+      persistLocalData(`${STORAGE_KEY}_tasks`, cleanTasks);
+      persistLocalData(`${STORAGE_KEY}_findings`, cleanFindings);
+      persistLocalData(`${STORAGE_KEY}_hypotheses`, cleanHypotheses);
+      persistLocalData(`${STORAGE_KEY}_requests`, cleanRequests);
+      persistLocalData(`${STORAGE_KEY}_matrix`, cleanMatrix);
 
       return {
         metricRecords: cleanMetrics,
@@ -611,5 +551,29 @@ export const useResearchStore = create<ResearchDataState>((set) => ({
         matrixEntries: cleanMatrix,
         rangeAnalyses: []
       };
-    })
+    }),
+
+  hydrateFromIndexedDB: async () => {
+    try {
+      const [m, d, t, f, h, r, mx] = await Promise.all([
+        idbGet<MetricRecord[]>(`${STORAGE_KEY}_metrics`),
+        idbGet<GenealogyDocument[]>(`${STORAGE_KEY}_documents`),
+        idbGet<GenealogyTask[]>(`${STORAGE_KEY}_tasks`),
+        idbGet<GenealogyFinding[]>(`${STORAGE_KEY}_findings`),
+        idbGet<GenealogyHypothesis[]>(`${STORAGE_KEY}_hypotheses`),
+        idbGet<ArchiveRequest[]>(`${STORAGE_KEY}_requests`),
+        idbGet<YearMatrixEntry[]>(`${STORAGE_KEY}_matrix`)
+      ]);
+      const state = get();
+      const updates: Partial<ResearchDataState> = {};
+      if (Array.isArray(m) && m.length > state.metricRecords.length) updates.metricRecords = m;
+      if (Array.isArray(d) && d.length > state.documents.length) updates.documents = d;
+      if (Array.isArray(t) && t.length > state.tasks.length) updates.tasks = t;
+      if (Array.isArray(f) && f.length > state.findings.length) updates.findings = f;
+      if (Array.isArray(h) && h.length > state.hypotheses.length) updates.hypotheses = h;
+      if (Array.isArray(r) && r.length > state.requests.length) updates.requests = r;
+      if (Array.isArray(mx) && mx.length > state.matrixEntries.length) updates.matrixEntries = mx;
+      if (Object.keys(updates).length > 0) set(updates);
+    } catch {}
+  }
 }));

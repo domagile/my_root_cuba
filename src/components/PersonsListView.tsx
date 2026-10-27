@@ -34,7 +34,7 @@ import {
 import { useGenealogy } from '../context/GenealogyContext';
 import { Person } from '../types';
 import { getThemeConfig } from '../utils/theme';
-import { findRelationshipPath, getSummaryRelationTitle } from './Tree/RelationshipPathModal';
+import { findRelationshipPath, getSummaryRelationTitle, findAllRelationshipPathsFromSource } from './Tree/RelationshipPathModal';
 import { getTreeHashtagsWithCounts } from '../utils/tagUtils';
 import { isPersonMale, isPersonFemale } from '../utils/genderUtils';
 import { isPersonHypothesis, isPersonConfirmed } from '../utils/researchStatusUtils';
@@ -183,26 +183,10 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     return { all: persons.length, confirmed, hypothesis, trash: trashPersons.length };
   }, [persons, trashPersons]);
 
-  // Compute key relationship map relative to central person
+  // Compute key relationship map relative to central person (instant O(V+E) single-pass BFS)
   const relationshipMap = useMemo(() => {
-    const map = new Map<string, string>();
-    if (!centralPerson) return map;
-
-    persons.forEach((p) => {
-      if (p.id === centralPerson.id) {
-        map.set(p.id, 'Центральна особа 👑');
-      } else {
-        const path = findRelationshipPath(p.id, centralPerson.id, persons);
-        if (path) {
-          const title = getSummaryRelationTitle(path);
-          map.set(p.id, title);
-        } else {
-          map.set(p.id, 'Далекий родич / без прямого зв’язку');
-        }
-      }
-    });
-
-    return map;
+    if (!centralPerson) return new Map<string, string>();
+    return findAllRelationshipPathsFromSource(centralPerson.id, persons);
   }, [persons, centralPerson]);
 
   // Source list depending on tab

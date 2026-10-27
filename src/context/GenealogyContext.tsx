@@ -61,6 +61,7 @@ import { getSavedUserTreeState, resolveInitialPersonId } from '../utils/userTree
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent, isDemoResearchItem, purgeDemoStorage } from '../utils/demoPurge';
 import { saveSnapshot } from '../utils/persistentBackup';
+import { autoMigrateLocalStorageToIDB } from '../utils/indexedDbStorage';
 
 export { useUIStore } from '../stores/useUIStore';
 export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore';
@@ -374,6 +375,16 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       useGenealogyStore.getState().purgeUnknownPersons();
     } catch {}
+  }, []);
+
+  // Variant 3: Auto-migrate historical localStorage into unlimited IndexedDB and hydrate stores
+  useEffect(() => {
+    autoMigrateLocalStorageToIDB()
+      .then(() => Promise.all([
+        useGenealogyStore.getState().hydrateFromIndexedDB(),
+        useResearchStore.getState().hydrateFromIndexedDB()
+      ]))
+      .catch(() => {});
   }, []);
 
   // Realtime Cloud Settings Listener (Tombstones, Ignored Duplicates, Merged Persons)

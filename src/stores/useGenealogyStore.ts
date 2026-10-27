@@ -27,6 +27,7 @@ import { useAuthStore } from './useAuthStore';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
 import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord, getPersonAncestorsIds } from '../rodovid/utils/mergeDatabase';
 import { purgeUnknownPlaceholderPersons, cleanDatabaseFromUnknownPersons, isUnknownPlaceholderPerson } from '../rodovid/utils/unknownPersonCleaner';
+import { persistLocalData, idbGet } from '../utils/indexedDbStorage';
 
 export function notifySyncChange(
   arg1?: (() => void) | EntitySyncType,
@@ -272,6 +273,7 @@ export interface GenealogyDataState {
   exportGedcomData: () => void;
   purgeDemoDataFromTree: () => void;
   purgeUnknownPersons: () => { deletedCount: number; deletedIds: string[] };
+  hydrateFromIndexedDB: () => Promise<void>;
 }
 
 export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
@@ -457,12 +459,10 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         });
       }
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(cleanedPersons));
-        if (deletedIds.length > 0) {
-          localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(cleanedFamilies));
-        }
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, cleanedPersons);
+      if (deletedIds.length > 0) {
+        persistLocalData(`${STORAGE_KEY}_families`, cleanedFamilies);
+      }
 
       return {
         persons: cleanedPersons,
@@ -501,9 +501,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const next = exists
         ? state.persons.map((p) => (p.id === normalized.id ? normalized : p))
         : [...state.persons, normalized];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, next);
       notifySyncChange('persons', normalized.id, () => savePersonDoc(normalized));
       return { persons: next };
     }),
@@ -515,9 +513,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const delta = computePersonDelta(prevPerson, normalized);
 
       const next = state.persons.map((p) => (p.id === person.id ? normalized : p));
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, next);
 
       // Maintain local state tracking dirty objects and push only changed fields (delta)
       const syncStore = useCloudSyncStore.getState();
@@ -556,9 +552,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         }
       });
       const next = state.persons.map((p) => normalizedMap.get(p.id) || p);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, next);
       return { persons: next };
     }),
 
@@ -584,11 +578,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         };
       });
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
+      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
+      persistLocalData(`${STORAGE_KEY}_families`, nextFamilies);
       notifySyncDelete('persons', id, () => deletePersonDoc(id));
 
       return { persons: nextPersons, trashPersons: nextTrash, families: nextFamilies };
@@ -596,8 +588,6 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   deletePersons: (ids) =>
     set((state) => {
-      addTombstoneIds(ids);
-      ids.forEach((id) => deletePersonDoc(id).catch(() => {}));
       const targets = state.persons.filter((p) => ids.includes(p.id));
       const nextTrash = [
         ...state.trashPersons,
@@ -605,11 +595,12 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       ];
       const nextPersons = state.persons.filter((p) => !ids.includes(p.id));
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
-      } catch {}
-      ids.forEach((id) => notifySyncDelete('persons', id, () => deletePersonDoc(id)));
+      persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
+      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
+      ids.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
+      if (useCloudSyncStore.getState().syncMode === 'auto') {
+        batchDeleteEntities('persons', ids).catch(() => {});
+      }
 
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
@@ -629,10 +620,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const normalizedRestored = normalizePerson(restored);
       const nextPersons = [...state.persons, normalizedRestored];
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
+      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
       notifySyncChange('persons', normalizedRestored.id, () => savePersonDoc(normalizedRestored));
 
       return { persons: nextPersons, trashPersons: nextTrash };
@@ -649,10 +638,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const nextTrash = state.trashPersons.filter((p) => !ids.includes(p.id));
       const nextPersons = [...state.persons, ...restored];
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
+      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
       restored.forEach((r) => useCloudSyncStore.getState().markDirty('persons', r.id));
       if (useCloudSyncStore.getState().syncMode === 'auto') {
         batchSaveEntities('persons', restored).catch(() => {});
@@ -666,9 +653,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       addTombstoneIds([id]);
       deletePersonDoc(id).catch(() => {});
       const nextTrash = state.trashPersons.filter((p) => p.id !== id);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
       notifySyncDelete('persons', id, () => deletePersonDoc(id));
       return { trashPersons: nextTrash };
     }),
@@ -677,9 +662,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       addTombstoneIds(ids);
       const nextTrash = state.trashPersons.filter((p) => !ids.includes(p.id));
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
       ids.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
       if (useCloudSyncStore.getState().syncMode === 'auto') {
         batchDeleteEntities('persons', ids).catch(() => {});
@@ -691,9 +674,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const ids = state.trashPersons.map((p) => p.id);
       addTombstoneIds(ids);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify([]));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_trashPersons`, []);
       ids.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
       if (useCloudSyncStore.getState().syncMode === 'auto') {
         batchDeleteEntities('persons', ids).catch(() => {});
@@ -722,9 +703,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       if (target.fatherId || target.motherId || target.parentFamilyId) {
         const updatedTarget = { ...target, fatherId: undefined, motherId: undefined, parentFamilyId: undefined };
         const next = state.persons.map((p) => (p.id === target.id ? updatedTarget : p));
-        try {
-          localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(next));
-        } catch {}
+        persistLocalData(`${STORAGE_KEY}_persons`, next);
         savePersonDoc(updatedTarget).catch(() => {});
         set({ persons: next });
       }
@@ -780,10 +759,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       batchDeleteEntities('families', deletedFamilyIds).catch(() => {});
     }
 
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(remainingPersons));
-      localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
-    } catch {}
+    persistLocalData(`${STORAGE_KEY}_persons`, remainingPersons);
+    persistLocalData(`${STORAGE_KEY}_families`, nextFamilies);
 
     savePersonDoc(updatedTarget).catch(() => {});
     notifySyncChange('persons', updatedTarget.id, () => savePersonDoc(updatedTarget));
@@ -849,11 +826,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         }
       } catch {}
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(deduplicated));
-        localStorage.setItem(`${STORAGE_KEY}_trashPersons`, JSON.stringify(nextTrash));
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(payload.updatedFamilies));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, deduplicated);
+      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
+      persistLocalData(`${STORAGE_KEY}_families`, payload.updatedFamilies);
 
       // Fire synchronization: register deleted docs in dirtyTracker & delete from Firestore
       deletedIds.forEach((id) => {
@@ -894,10 +869,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   setFamilies: (updater) =>
     set((state) => {
       const nextFamilies = typeof updater === 'function' ? updater(state.families) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
-      } catch {}
-
+      persistLocalData(`${STORAGE_KEY}_families`, nextFamilies);
       return { families: nextFamilies };
     }),
 
@@ -958,10 +930,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         return updated;
       });
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(nextPersons));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_families`, nextFamilies);
+      persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
       notifySyncChange('families', family.id, () => saveFamilyDoc(family));
 
       return { families: nextFamilies, persons: nextPersons };
@@ -971,9 +941,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const nextFamilies = { ...state.families };
       delete nextFamilies[id];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(nextFamilies));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_families`, nextFamilies);
       notifySyncDelete('families', id, () => deleteFamilyDoc(id));
       return { families: nextFamilies };
     }),
@@ -982,18 +950,14 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   setSources: (updater) =>
     set((state) => {
       const nextSources = typeof updater === 'function' ? updater(state.sources) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_sources`, nextSources);
       return { sources: nextSources };
     }),
 
   saveSource: (source) =>
     set((state) => {
       const nextSources = { ...state.sources, [source.id]: source };
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_sources`, nextSources);
       notifySyncChange('sources', source.id, () => saveSourceDoc(source));
       return { sources: nextSources };
     }),
@@ -1002,9 +966,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const nextSources = { ...state.sources };
       delete nextSources[id];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(nextSources));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_sources`, nextSources);
       notifySyncDelete('sources', id, () => deleteSourceDoc(id));
       return { sources: nextSources };
     }),
@@ -1013,18 +975,14 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   setEvents: (updater) =>
     set((state) => {
       const nextEvents = typeof updater === 'function' ? updater(state.events) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_events`, nextEvents);
       return { events: nextEvents };
     }),
 
   saveEvent: (event) =>
     set((state) => {
       const nextEvents = { ...state.events, [event.id]: event };
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_events`, nextEvents);
       notifySyncChange('events', event.id, () => saveEventDoc(event));
       return { events: nextEvents };
     }),
@@ -1033,9 +991,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const nextEvents = { ...state.events };
       delete nextEvents[id];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(nextEvents));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_events`, nextEvents);
       notifySyncDelete('events', id, () => deleteEventDoc(id));
       return { events: nextEvents };
     }),
@@ -1043,9 +999,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   setPlaces: (updater) =>
     set((state) => {
       const nextPlaces = typeof updater === 'function' ? updater(state.places) : updater;
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_places`, nextPlaces);
       return { places: nextPlaces };
     }),
 
@@ -1054,9 +1008,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const key = place.id || place.placeName.trim();
       const updatedPlace = { ...place, id: key, updatedAt: new Date().toISOString() };
       const nextPlaces = { ...state.places, [key]: updatedPlace };
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_places`, nextPlaces);
       notifySyncChange('places', updatedPlace.id, () => savePlaceDoc(updatedPlace));
       return { places: nextPlaces };
     }),
@@ -1065,9 +1017,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     set((state) => {
       const nextPlaces = { ...state.places };
       delete nextPlaces[idOrName];
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(nextPlaces));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_places`, nextPlaces);
       notifySyncDelete('places', idOrName, () => deletePlaceDoc(idOrName));
       return { places: nextPlaces };
     }),
@@ -1141,14 +1091,12 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         }
       }
 
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(incomingPersons));
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(incomingFamilies));
-        localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(incomingSources));
-        localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(incomingEvents));
-        localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(incomingPlaces));
-        localStorage.setItem(`${STORAGE_KEY}_importHistory`, JSON.stringify(updatedHistory));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, incomingPersons);
+      persistLocalData(`${STORAGE_KEY}_families`, incomingFamilies);
+      persistLocalData(`${STORAGE_KEY}_sources`, incomingSources);
+      persistLocalData(`${STORAGE_KEY}_events`, incomingEvents);
+      persistLocalData(`${STORAGE_KEY}_places`, incomingPlaces);
+      persistLocalData(`${STORAGE_KEY}_importHistory`, updatedHistory);
 
       // Synchronize to Firestore docs only if in auto mode; in manual mode marks unsaved changes for manual push
       notifySyncChange(() => {
@@ -1219,14 +1167,12 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
     const updatedHistory = [newSession, ...(get().importHistory || [])].slice(0, 50);
 
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(mergedPersons));
-      localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(mergedFamilies));
-      localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(mergedSources));
-      localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(mergedEvents));
-      localStorage.setItem(`${STORAGE_KEY}_places`, JSON.stringify(mergedPlaces));
-      localStorage.setItem(`${STORAGE_KEY}_importHistory`, JSON.stringify(updatedHistory));
-    } catch {}
+    persistLocalData(`${STORAGE_KEY}_persons`, mergedPersons);
+    persistLocalData(`${STORAGE_KEY}_families`, mergedFamilies);
+    persistLocalData(`${STORAGE_KEY}_sources`, mergedSources);
+    persistLocalData(`${STORAGE_KEY}_events`, mergedEvents);
+    persistLocalData(`${STORAGE_KEY}_places`, mergedPlaces);
+    persistLocalData(`${STORAGE_KEY}_importHistory`, updatedHistory);
 
     // Synchronize merged/new persons and families to Firestore docs only if in auto mode; in manual mode marks unsaved changes
     notifySyncChange(() => {
@@ -1270,17 +1216,13 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   addImportHistorySession: (session: ImportHistorySession) =>
     set((state) => {
       const updated = [session, ...(state.importHistory || [])].slice(0, 50);
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_importHistory`, JSON.stringify(updated));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_importHistory`, updated);
       return { importHistory: updated };
     }),
 
   clearImportHistory: () =>
     set(() => {
-      try {
-        localStorage.removeItem(`${STORAGE_KEY}_importHistory`);
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_importHistory`, []);
       return { importHistory: [] };
     }),
 
@@ -1343,12 +1285,10 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
           cleanEvents[k] = v;
         }
       }
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(cleanPersons));
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(cleanFamilies));
-        localStorage.setItem(`${STORAGE_KEY}_sources`, JSON.stringify(cleanSources));
-        localStorage.setItem(`${STORAGE_KEY}_events`, JSON.stringify(cleanEvents));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, cleanPersons);
+      persistLocalData(`${STORAGE_KEY}_families`, cleanFamilies);
+      persistLocalData(`${STORAGE_KEY}_sources`, cleanSources);
+      persistLocalData(`${STORAGE_KEY}_events`, cleanEvents);
       return {
         persons: cleanPersons,
         families: cleanFamilies,
@@ -1366,12 +1306,53 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         deletePersonDoc(id).catch(() => {});
         notifySyncDelete('persons', id, () => deletePersonDoc(id));
       });
-      try {
-        localStorage.setItem(`${STORAGE_KEY}_persons`, JSON.stringify(cleanedPersons));
-        localStorage.setItem(`${STORAGE_KEY}_families`, JSON.stringify(cleanedFamilies));
-      } catch {}
+      persistLocalData(`${STORAGE_KEY}_persons`, cleanedPersons);
+      persistLocalData(`${STORAGE_KEY}_families`, cleanedFamilies);
       set({ persons: cleanedPersons, families: cleanedFamilies });
     }
     return { deletedCount: deletedIds.length, deletedIds };
+  },
+
+  hydrateFromIndexedDB: async () => {
+    try {
+      const [idbPersons, idbFamilies, idbSources, idbEvents, idbPlaces, idbTrash, idbHistory] = await Promise.all([
+        idbGet<Person[]>(`${STORAGE_KEY}_persons`),
+        idbGet<Record<string, Family>>(`${STORAGE_KEY}_families`),
+        idbGet<Record<string, Source>>(`${STORAGE_KEY}_sources`),
+        idbGet<Record<string, LifeEvent>>(`${STORAGE_KEY}_events`),
+        idbGet<Record<string, PlaceDossier>>(`${STORAGE_KEY}_places`),
+        idbGet<Person[]>(`${STORAGE_KEY}_trashPersons`),
+        idbGet<ImportHistorySession[]>(`${STORAGE_KEY}_importHistory`)
+      ]);
+
+      const state = get();
+      const updates: Partial<GenealogyDataState> = {};
+
+      if (Array.isArray(idbPersons) && idbPersons.length > state.persons.length) {
+        updates.persons = idbPersons.map(normalizePerson);
+      }
+      if (idbFamilies && Object.keys(idbFamilies).length > Object.keys(state.families).length) {
+        updates.families = idbFamilies;
+      }
+      if (idbSources && Object.keys(idbSources).length > Object.keys(state.sources).length) {
+        updates.sources = idbSources;
+      }
+      if (idbEvents && Object.keys(idbEvents).length > Object.keys(state.events).length) {
+        updates.events = idbEvents;
+      }
+      if (idbPlaces && Object.keys(idbPlaces).length > Object.keys(state.places).length) {
+        updates.places = idbPlaces;
+      }
+      if (Array.isArray(idbTrash) && idbTrash.length > state.trashPersons.length) {
+        updates.trashPersons = idbTrash;
+      }
+      if (Array.isArray(idbHistory) && idbHistory.length > (state.importHistory || []).length) {
+        updates.importHistory = idbHistory;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        set(updates);
+      }
+    } catch {}
   }
 }));

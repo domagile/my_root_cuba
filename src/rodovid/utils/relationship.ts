@@ -102,10 +102,26 @@ interface AdjacencyEdge {
   label: string;
 }
 
+// Module-level graph and calculation cache
+let cachedDbInstance: GenealogyDatabase | null = null;
+let cachedGraphInstance: Map<string, AdjacencyEdge[]> | null = null;
+let cachedKinshipResults = new Map<string, KinshipCalculationResult>();
+
+export function clearKinshipCache() {
+  cachedDbInstance = null;
+  cachedGraphInstance = null;
+  cachedKinshipResults.clear();
+}
+
 /**
- * Builds bidirectional adjacency graph across all persons in GenealogyDatabase
+ * Builds bidirectional adjacency graph across all persons in GenealogyDatabase.
+ * Optimized to linear O(Persons + Families) complexity with memoization.
  */
 function buildKinshipGraph(db: GenealogyDatabase): Map<string, AdjacencyEdge[]> {
+  if (cachedDbInstance === db && cachedGraphInstance) {
+    return cachedGraphInstance;
+  }
+
   const adj = new Map<string, AdjacencyEdge[]>();
   const persons = db.persons || {};
   const families = db.families || {};
@@ -114,14 +130,64 @@ function buildKinshipGraph(db: GenealogyDatabase): Map<string, AdjacencyEdge[]> 
     adj.set(pId, []);
   }
 
+  // 1. Process Families in single O(F) pass
+  for (const fam of Object.values(families)) {
+    const hId = fam.husbandId;
+    const wId = fam.wifeId;
+    const hPerson = hId ? persons[hId] : undefined;
+    const wPerson = wId ? persons[wId] : undefined;
+
+    // Link spouses
+    if (hId && wId && hPerson && wPerson) {
+      const hList = adj.get(hId);
+      const wList = adj.get(wId);
+      if (hList && !hList.some((e) => e.to === wId)) {
+        hList.push({ to: wId, dir: 'spouse', label: 'Дружина' });
+      }
+      if (wList && !wList.some((e) => e.to === hId)) {
+        wList.push({ to: hId, dir: 'spouse', label: 'Чоловік' });
+      }
+    }
+
+    // Link parents to children
+    const childrenIds = fam.childrenIds || (Array.isArray(fam.children) ? fam.children.map((c: any) => c.personId) : []);
+    if (childrenIds && childrenIds.length > 0) {
+      for (const cId of childrenIds) {
+        const cPerson = persons[cId];
+        if (!cPerson) continue;
+        const cIsMale = cPerson.gender === 'male' || cPerson.gender === 'M';
+        const cList = adj.get(cId);
+
+        if (hId && hPerson) {
+          if (cList && !cList.some((e) => e.to === hId)) {
+            cList.push({ to: hId, dir: 'up', label: 'Батько' });
+          }
+          const hList = adj.get(hId);
+          if (hList && !hList.some((e) => e.to === cId)) {
+            hList.push({ to: cId, dir: 'down', label: cIsMale ? 'Син' : 'Донька' });
+          }
+        }
+
+        if (wId && wPerson) {
+          if (cList && !cList.some((e) => e.to === wId)) {
+            cList.push({ to: wId, dir: 'up', label: 'Мати' });
+          }
+          const wList = adj.get(wId);
+          if (wList && !wList.some((e) => e.to === cId)) {
+            wList.push({ to: cId, dir: 'down', label: cIsMale ? 'Син' : 'Донька' });
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Process direct person links in single O(P) pass
   for (const [pId, p] of Object.entries(persons)) {
     const list = adj.get(pId)!;
     const isMale = p.gender === 'male' || p.gender === 'M';
 
-    // 1. Parents
-    const fId = p.fatherId || (p.parentFamilyId && families[p.parentFamilyId]?.husbandId);
-    const mId = p.motherId || (p.parentFamilyId && families[p.parentFamilyId]?.wifeId);
-
+    // Direct parents
+    const fId = p.fatherId;
     if (fId && persons[fId] && !list.some((e) => e.to === fId)) {
       list.push({ to: fId, dir: 'up', label: 'Батько' });
       const parentList = adj.get(fId);
@@ -130,6 +196,7 @@ function buildKinshipGraph(db: GenealogyDatabase): Map<string, AdjacencyEdge[]> 
       }
     }
 
+    const mId = p.motherId;
     if (mId && persons[mId] && !list.some((e) => e.to === mId)) {
       list.push({ to: mId, dir: 'up', label: 'Мати' });
       const parentList = adj.get(mId);
@@ -138,27 +205,7 @@ function buildKinshipGraph(db: GenealogyDatabase): Map<string, AdjacencyEdge[]> 
       }
     }
 
-    // Additional check in family children
-    for (const fam of Object.values(families)) {
-      if (fam.childrenIds && fam.childrenIds.includes(pId)) {
-        if (fam.husbandId && persons[fam.husbandId] && !list.some((e) => e.to === fam.husbandId)) {
-          list.push({ to: fam.husbandId, dir: 'up', label: 'Батько' });
-          const pl = adj.get(fam.husbandId);
-          if (pl && !pl.some((e) => e.to === pId)) {
-            pl.push({ to: pId, dir: 'down', label: isMale ? 'Син' : 'Донька' });
-          }
-        }
-        if (fam.wifeId && persons[fam.wifeId] && !list.some((e) => e.to === fam.wifeId)) {
-          list.push({ to: fam.wifeId, dir: 'up', label: 'Мати' });
-          const pl = adj.get(fam.wifeId);
-          if (pl && !pl.some((e) => e.to === pId)) {
-            pl.push({ to: pId, dir: 'down', label: isMale ? 'Син' : 'Донька' });
-          }
-        }
-      }
-    }
-
-    // 2. Children directly listed on person
+    // Direct children
     if (p.childrenIds) {
       for (const cId of p.childrenIds) {
         if (persons[cId] && !list.some((e) => e.to === cId)) {
@@ -173,34 +220,25 @@ function buildKinshipGraph(db: GenealogyDatabase): Map<string, AdjacencyEdge[]> 
       }
     }
 
-    // 3. Spouses
-    const spouses = new Set<string>(p.spouseIds || []);
-    if (p.spouseFamilyIds) {
-      for (const fId of p.spouseFamilyIds) {
-        const fam = families[fId];
-        if (fam) {
-          if (fam.husbandId && fam.husbandId !== pId) spouses.add(fam.husbandId);
-          if (fam.wifeId && fam.wifeId !== pId) spouses.add(fam.wifeId);
-        }
-      }
-    }
-    for (const fam of Object.values(families)) {
-      if (fam.husbandId === pId && fam.wifeId && fam.wifeId !== pId) spouses.add(fam.wifeId);
-      if (fam.wifeId === pId && fam.husbandId && fam.husbandId !== pId) spouses.add(fam.husbandId);
-    }
-    for (const sId of spouses) {
-      if (persons[sId] && !list.some((e) => e.to === sId)) {
-        const sPerson = persons[sId];
-        const sIsMale = sPerson.gender === 'male' || sPerson.gender === 'M';
-        list.push({ to: sId, dir: 'spouse', label: sIsMale ? 'Чоловік' : 'Дружина' });
-        const sl = adj.get(sId);
-        if (sl && !sl.some((e) => e.to === pId)) {
-          sl.push({ to: pId, dir: 'spouse', label: isMale ? 'Чоловік' : 'Дружина' });
+    // Direct spouses
+    if (p.spouseIds) {
+      for (const sId of p.spouseIds) {
+        if (persons[sId] && !list.some((e) => e.to === sId)) {
+          const sPerson = persons[sId];
+          const sIsMale = sPerson.gender === 'male' || sPerson.gender === 'M';
+          list.push({ to: sId, dir: 'spouse', label: sIsMale ? 'Чоловік' : 'Дружина' });
+          const sl = adj.get(sId);
+          if (sl && !sl.some((e) => e.to === pId)) {
+            sl.push({ to: pId, dir: 'spouse', label: isMale ? 'Чоловік' : 'Дружина' });
+          }
         }
       }
     }
   }
 
+  cachedDbInstance = db;
+  cachedGraphInstance = adj;
+  cachedKinshipResults.clear();
   return adj;
 }
 
@@ -262,10 +300,16 @@ export function calculateKinship(
     };
   }
 
+  // Fast Cache Lookup
+  const cacheKey = `${p1Id}:${p2Id}`;
+  if (cachedDbInstance === db && cachedKinshipResults.has(cacheKey)) {
+    return cachedKinshipResults.get(cacheKey)!;
+  }
+
   const p2IsMale = p2.gender === 'male' || p2.gender === 'M';
   const adj = buildKinshipGraph(db);
 
-  // Shortest path via BFS
+  // Shortest path via BFS with O(1) queue pointer
   interface BFSQueueItem {
     id: string;
     path: KinshipPathStep[];
@@ -279,16 +323,18 @@ export function calculateKinship(
   ];
   const visited = new Set<string>([p1Id]);
   let foundPath: KinshipPathStep[] | null = null;
+  let head = 0;
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
+  while (head < queue.length) {
+    const current = queue[head++];
     if (current.id === p2Id) {
       foundPath = current.path;
       break;
     }
 
     const edges = adj.get(current.id) || [];
-    for (const edge of edges) {
+    for (let i = 0; i < edges.length; i++) {
+      const edge = edges[i];
       if (!visited.has(edge.to)) {
         visited.add(edge.to);
         const prevStep = current.path[current.path.length - 1];
@@ -508,7 +554,7 @@ export function calculateKinship(
 
   const description = `${getFullName(p2)} є ${relationshipName.toLowerCase()} для ${getFullName(p1)}. Ланцюжок складається з ${totalHops} ${totalHops === 1 ? 'кроку' : 'кроків'} (${genNote}).`;
 
-  return {
+  const result: KinshipCalculationResult = {
     relationship: relationshipName,
     relationshipName,
     degree: totalHops,
@@ -522,6 +568,12 @@ export function calculateKinship(
     lineageType,
     generationalDistance
   };
+
+  if (cachedKinshipResults.size > 2000) {
+    cachedKinshipResults.clear();
+  }
+  cachedKinshipResults.set(cacheKey, result);
+  return result;
 }
 
 /**

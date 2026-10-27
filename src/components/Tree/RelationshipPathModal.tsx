@@ -17,6 +17,104 @@ export interface RelationshipPath {
   pathIds: string[];
 }
 
+interface AdjacencyNeighbor {
+  toId: string;
+  type: RelationshipStep['relationType'];
+  desc: string;
+}
+
+// Module-level graph cache to avoid rebuilding adjacency list on every call
+let cachedPersonsRef: Person[] | null = null;
+let cachedAdjacency: Map<string, AdjacencyNeighbor[]> = new Map();
+let cachedPersonMap: Map<string, Person> = new Map();
+
+function getOrBuildAdjacency(persons: Person[]): {
+  personMap: Map<string, Person>;
+  adj: Map<string, AdjacencyNeighbor[]>;
+} {
+  if (cachedPersonsRef === persons && cachedAdjacency.size > 0) {
+    return { personMap: cachedPersonMap, adj: cachedAdjacency };
+  }
+
+  const personMap = new Map<string, Person>();
+  const adj = new Map<string, AdjacencyNeighbor[]>();
+  const childrenMap = new Map<string, string[]>();
+
+  // 1. Index persons and populate childrenMap
+  for (let i = 0; i < persons.length; i++) {
+    const p = persons[i];
+    personMap.set(p.id, p);
+    adj.set(p.id, []);
+
+    if (p.fatherId) {
+      let list = childrenMap.get(p.fatherId);
+      if (!list) {
+        list = [];
+        childrenMap.set(p.fatherId, list);
+      }
+      list.push(p.id);
+    }
+    if (p.motherId) {
+      let list = childrenMap.get(p.motherId);
+      if (!list) {
+        list = [];
+        childrenMap.set(p.motherId, list);
+      }
+      list.push(p.id);
+    }
+  }
+
+  // 2. Build adjacency edges without quadratic scans
+  for (let i = 0; i < persons.length; i++) {
+    const p = persons[i];
+    const neighbors = adj.get(p.id)!;
+    const seen = new Set<string>();
+
+    if (p.fatherId && personMap.has(p.fatherId)) {
+      neighbors.push({ toId: p.fatherId, type: 'parent', desc: 'Батько' });
+      seen.add(p.fatherId);
+    }
+    if (p.motherId && personMap.has(p.motherId)) {
+      neighbors.push({ toId: p.motherId, type: 'parent', desc: 'Мати' });
+      seen.add(p.motherId);
+    }
+    if (Array.isArray(p.spouseIds)) {
+      for (const sId of p.spouseIds) {
+        if (!seen.has(sId) && personMap.has(sId)) {
+          neighbors.push({ toId: sId, type: 'spouse', desc: 'Подружжя' });
+          seen.add(sId);
+        }
+      }
+    }
+    if (Array.isArray(p.childrenIds)) {
+      for (const cId of p.childrenIds) {
+        if (!seen.has(cId) && personMap.has(cId)) {
+          neighbors.push({ toId: cId, type: 'child', desc: 'Дитина' });
+          seen.add(cId);
+        }
+      }
+    }
+
+    const implicitChildren = childrenMap.get(p.id);
+    if (implicitChildren) {
+      for (const cId of implicitChildren) {
+        if (!seen.has(cId) && personMap.has(cId)) {
+          neighbors.push({ toId: cId, type: 'child', desc: 'Дитина' });
+          seen.add(cId);
+        }
+      }
+    }
+  }
+
+  cachedPersonsRef = persons;
+  cachedPersonMap = personMap;
+  cachedAdjacency = adj;
+  return { personMap, adj };
+}
+
+/**
+ * Shortest kinship path between two persons using BFS with O(1) queue pointer
+ */
 export function findRelationshipPath(
   startId: string,
   endId: string,
@@ -26,74 +124,116 @@ export function findRelationshipPath(
     return { steps: [], pathIds: [startId] };
   }
 
-  const personMap = new Map<string, Person>();
-  persons.forEach((p) => personMap.set(p.id, p));
+  const { personMap, adj } = getOrBuildAdjacency(persons);
+  if (!personMap.has(startId) || !personMap.has(endId)) return null;
 
-  // BFS search for shortest kinship path
-  const queue: { currentId: string; path: RelationshipStep[]; visited: Set<string> }[] = [
-    { currentId: startId, path: [], visited: new Set([startId]) }
-  ];
+  // Track parent pointer to reconstruct path with minimal memory
+  const parentMap = new Map<string, { fromId: string; step: RelationshipStep }>();
+  const visited = new Set<string>([startId]);
+  const queue: string[] = [startId];
+  let head = 0;
+  let found = false;
 
-  while (queue.length > 0) {
-    const { currentId, path, visited } = queue.shift()!;
+  while (head < queue.length) {
+    const currentId = queue[head++];
     if (currentId === endId) {
-      return {
-        steps: path,
-        pathIds: [startId, ...path.map((s) => s.toId)]
-      };
+      found = true;
+      break;
     }
 
-    const current = personMap.get(currentId);
-    if (!current) continue;
-
-    // Neighbors: parents, children, spouses
-    const neighbors: { toId: string; type: RelationshipStep['relationType']; desc: string }[] = [];
-
-    if (current.fatherId) {
-      neighbors.push({ toId: current.fatherId, type: 'parent', desc: 'Батько' });
-    }
-    if (current.motherId) {
-      neighbors.push({ toId: current.motherId, type: 'parent', desc: 'Мати' });
-    }
-    if (Array.isArray(current.spouseIds)) {
-      current.spouseIds.forEach((sId) => {
-        neighbors.push({ toId: sId, type: 'spouse', desc: 'Подружжя' });
-      });
-    }
-    if (Array.isArray(current.childrenIds)) {
-      current.childrenIds.forEach((cId) => {
-        neighbors.push({ toId: cId, type: 'child', desc: 'Дитина' });
-      });
-    }
-    // Also look for children pointing back to current
-    persons.forEach((p) => {
-      if ((p.fatherId === currentId || p.motherId === currentId) && !neighbors.some((n) => n.toId === p.id)) {
-        neighbors.push({ toId: p.id, type: 'child', desc: 'Дитина' });
-      }
-    });
-
-    for (const neighbor of neighbors) {
+    const neighbors = adj.get(currentId) || [];
+    for (let i = 0; i < neighbors.length; i++) {
+      const neighbor = neighbors[i];
       if (!visited.has(neighbor.toId)) {
-        const nextVisited = new Set(visited);
-        nextVisited.add(neighbor.toId);
-        queue.push({
-          currentId: neighbor.toId,
-          path: [
-            ...path,
-            {
-              fromId: currentId,
-              toId: neighbor.toId,
-              relationType: neighbor.type,
-              description: neighbor.desc
-            }
-          ],
-          visited: nextVisited
+        visited.add(neighbor.toId);
+        parentMap.set(neighbor.toId, {
+          fromId: currentId,
+          step: {
+            fromId: currentId,
+            toId: neighbor.toId,
+            relationType: neighbor.type,
+            description: neighbor.desc
+          }
         });
+        queue.push(neighbor.toId);
       }
     }
   }
 
-  return null;
+  if (!found) return null;
+
+  // Reconstruct path backwards
+  const steps: RelationshipStep[] = [];
+  const pathIds: string[] = [endId];
+  let curr = endId;
+
+  while (curr !== startId) {
+    const info = parentMap.get(curr);
+    if (!info) break;
+    steps.unshift(info.step);
+    pathIds.unshift(info.fromId);
+    curr = info.fromId;
+  }
+
+  return { steps, pathIds };
+}
+
+/**
+ * Computes relationship titles from a single central person to ALL persons in ONE BFS traversal (O(V + E)).
+ * Replaces N separate BFS calls with a single lightning-fast traversal.
+ */
+export function findAllRelationshipPathsFromSource(
+  centralId: string,
+  persons: Person[]
+): Map<string, string> {
+  const result = new Map<string, string>();
+  if (!centralId || persons.length === 0) return result;
+
+  const { personMap, adj } = getOrBuildAdjacency(persons);
+  if (!personMap.has(centralId)) return result;
+
+  result.set(centralId, 'Центральна особа 👑');
+
+  // BFS with depth / steps tracker
+  const queue: { id: string; steps: RelationshipStep[] }[] = [{ id: centralId, steps: [] }];
+  const visited = new Set<string>([centralId]);
+  let head = 0;
+
+  while (head < queue.length) {
+    const { id: currentId, steps } = queue[head++];
+    const neighbors = adj.get(currentId) || [];
+
+    for (let i = 0; i < neighbors.length; i++) {
+      const neighbor = neighbors[i];
+      if (!visited.has(neighbor.toId)) {
+        visited.add(neighbor.toId);
+        const nextSteps: RelationshipStep[] = [
+          ...steps,
+          {
+            fromId: currentId,
+            toId: neighbor.toId,
+            relationType: neighbor.type,
+            description: neighbor.desc
+          }
+        ];
+
+        const title = getSummaryRelationTitle({ steps: nextSteps, pathIds: [] });
+        result.set(neighbor.toId, title);
+
+        queue.push({ id: neighbor.toId, steps: nextSteps });
+      }
+    }
+  }
+
+  // Set default label for unreachable persons
+  for (let i = 0; i < persons.length; i++) {
+    const pId = persons[i].id;
+    if (!result.has(pId)) {
+      result.set(pId, 'Далекий родич / без прямого зв’язку');
+    }
+  }
+
+  return result;
 }
 
 export function getSummaryRelationTitle(path: RelationshipPath): string {
