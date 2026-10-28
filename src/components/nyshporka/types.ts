@@ -27,6 +27,8 @@ export interface DecodedFrame {
   size: [number, number];
   boxes: [number, number, number, number][];
   polys?: number[][][];
+  aiNotes?: string;
+  aiSummary?: string;
 }
 
 export interface ArchivalCase {

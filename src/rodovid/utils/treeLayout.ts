@@ -6,6 +6,7 @@
 import { GenealogyDatabase, Person } from '../types/genealogy';
 import { normalizeUkrainianSurnameGender, formatClanName, areSurnamesEquivalent } from '../../utils/ukrainianPhonetics';
 import { applyBridgeJumpsToLinks, LineCrossingCutout } from './treeLineBridges';
+import { SpatialTreeIndex } from './treeSpatialIndex';
 
 export interface TreeNodeLayout {
   id: string;
@@ -74,6 +75,11 @@ export interface TreeLinkLayout {
   childPersonId?: string;
   marriageOrder?: number;
   marriageStatus?: string;
+  doublePathA?: string;
+  doublePathB?: string;
+  midX?: number;
+  midY?: number;
+  arrowPath?: string;
 }
 
 export interface TreeLayoutResult {
@@ -83,6 +89,15 @@ export interface TreeLayoutResult {
   height: number;
   cutouts?: LineCrossingCutout[];
   crossingCount?: number;
+  treeBounds?: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    width: number;
+    height: number;
+  };
+  spatialIndex?: SpatialTreeIndex;
 }
 
 export interface FanChartSector {
@@ -530,6 +545,147 @@ export function comparePersonsByAge(pA?: Person | null, pB?: Person | null): num
   return nameA.localeCompare(nameB, 'uk');
 }
 
+// High-Performance Multi-Level LRU layout caches for instant tree & fan chart render & navigation
+const MAX_LAYOUT_CACHE_SIZE = 40;
+const treeLayoutCache = new Map<string, TreeLayoutResult>();
+const fanChartCache = new Map<string, FanChartSector[]>();
+
+export function clearFanChartCache(): void {
+  fanChartCache.clear();
+}
+
+export function clearTreeLayoutCache(): void {
+  treeLayoutCache.clear();
+  fanChartCache.clear();
+}
+
+function buildLayoutCacheKey(
+  database: GenealogyDatabase,
+  rootPersonId: string,
+  maxGenerations: number,
+  options?: TreeLayoutFilterOptions
+): string {
+  const pCount = Object.keys(database?.persons || {}).length;
+  const fCount = Object.keys(database?.families || {}).length;
+  const lastMod = (database as any)?.lastModified || (database as any)?.version || '';
+  
+  const cp = options?.collapsedParents && options.collapsedParents.size > 0 
+    ? Array.from(options.collapsedParents).sort().join(',') : '';
+  const cs = options?.collapsedSiblings && options.collapsedSiblings.size > 0 
+    ? Array.from(options.collapsedSiblings).sort().join(',') : '';
+  const cc = options?.collapsedChildren && options.collapsedChildren.size > 0 
+    ? Array.from(options.collapsedChildren).sort().join(',') : '';
+
+  return `${rootPersonId}_${maxGenerations}_${pCount}_${fCount}_${lastMod}_${options?.orientation || 'v'}_${options?.isCompact ? 1 : 0}_${options?.directAncestorsOnly ? 1 : 0}_${options?.showParents !== false ? 1 : 0}_${options?.showSiblings !== false ? 1 : 0}_${options?.showDescendants !== false ? 1 : 0}_${options?.enableLineBridges !== false ? 1 : 0}_${cp}_${cs}_${cc}`;
+}
+
+function putInTreeLayoutCache(key: string, result: TreeLayoutResult): void {
+  if (treeLayoutCache.size >= MAX_LAYOUT_CACHE_SIZE) {
+    const oldest = treeLayoutCache.keys().next().value;
+    if (oldest) treeLayoutCache.delete(oldest);
+  }
+  treeLayoutCache.set(key, result);
+}
+
+function putInFanChartCache(key: string, sectors: FanChartSector[]): void {
+  if (fanChartCache.size >= MAX_LAYOUT_CACHE_SIZE) {
+    const oldest = fanChartCache.keys().next().value;
+    if (oldest) fanChartCache.delete(oldest);
+  }
+  fanChartCache.set(key, sectors);
+}
+
+/**
+ * Pre-computes SVG geometry (normals, offsets, midpoints, arrow paths) once during layout
+ * so rendering loops never perform trigonometry or string formatting on animation / hover frames.
+ */
+export function precomputeLinkGeometry(link: TreeLinkLayout): TreeLinkLayout {
+  if (!link.path) {
+    link.path = `M ${link.sourceX} ${link.sourceY} L ${link.targetX} ${link.targetY}`;
+  }
+
+  if (link.type === 'marriage') {
+    const dx = link.targetX - link.sourceX;
+    const dy = link.targetY - link.sourceY;
+    const len = Math.hypot(dx, dy) || 1;
+    const offsetX = (-dy / len) * 2.2;
+    const offsetY = (dx / len) * 2.2;
+    link.doublePathA = `M ${link.sourceX + offsetX} ${link.sourceY + offsetY} L ${link.targetX + offsetX} ${link.targetY + offsetY}`;
+    link.doublePathB = `M ${link.sourceX - offsetX} ${link.sourceY - offsetY} L ${link.targetX - offsetX} ${link.targetY - offsetY}`;
+    link.midX = (link.sourceX + link.targetX) / 2;
+    link.midY = (link.sourceY + link.targetY) / 2;
+  }
+
+  if (link.arrow === 'down') {
+    link.arrowPath = `M ${link.targetX - 4.5} ${link.targetY - 7} L ${link.targetX} ${link.targetY - 0.5} L ${link.targetX + 4.5} ${link.targetY - 7}`;
+  } else if (link.arrow === 'right') {
+    link.arrowPath = `M ${link.targetX - 7} ${link.targetY - 4.5} L ${link.targetX - 0.5} ${link.targetY} L ${link.targetX - 7} ${link.targetY + 4.5}`;
+  }
+
+  return link;
+}
+
+/**
+ * Finalizes layout results by calculating aggregate bounds, precomputing geometry,
+ * and building the 2D Spatial Grid Index for zero-latency viewport queries.
+ */
+export function finalizeTreeLayoutResult(
+  nodes: TreeNodeLayout[],
+  links: TreeLinkLayout[],
+  width: number,
+  height: number,
+  cutouts?: LineCrossingCutout[],
+  crossingCount?: number
+): TreeLayoutResult {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const nw = n.width || 176;
+    const nh = n.height || 192;
+    if (n.x < minX) minX = n.x;
+    if (n.x + nw > maxX) maxX = n.x + nw;
+    if (n.y < minY) minY = n.y;
+    if (n.y + nh > maxY) maxY = n.y + nh;
+  }
+
+  if (minX === Infinity) {
+    minX = 0;
+    maxX = width || 1200;
+    minY = 0;
+    maxY = height || 800;
+  }
+
+  for (let i = 0; i < links.length; i++) {
+    precomputeLinkGeometry(links[i]);
+  }
+
+  const spatialIndex = new SpatialTreeIndex(320);
+  spatialIndex.insertNodes(nodes);
+  spatialIndex.insertLinks(links);
+
+  return {
+    nodes,
+    links,
+    width,
+    height,
+    cutouts,
+    crossingCount,
+    treeBounds: {
+      minX,
+      maxX,
+      minY,
+      maxY,
+      width: Math.max(0, maxX - minX),
+      height: Math.max(0, maxY - minY)
+    },
+    spatialIndex
+  };
+}
+
 /**
  * Build classic pedigree / family tree layout with orthogonal links, grouped spouses & siblings
  */
@@ -539,6 +695,12 @@ export function calculateClassicFamilyTreeLayout(
   maxGenerations: number = 0,
   options?: TreeLayoutFilterOptions
 ): TreeLayoutResult {
+  const cacheKey = buildLayoutCacheKey(database, rootPersonId, maxGenerations, options);
+  const cached = treeLayoutCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   if (options?.orientation === 'horizontal') {
     return calculateHorizontalFamilyTreeLayout(database, rootPersonId, maxGenerations, options);
   }
@@ -2174,14 +2336,17 @@ export function calculateClassicFamilyTreeLayout(
     enableBridges: options?.enableLineBridges ?? true
   });
 
-  return {
+  const result: TreeLayoutResult = finalizeTreeLayoutResult(
     nodes,
-    links: bridgeResult.links,
-    width: finalMaxX,
-    height: finalMaxY,
-    cutouts: bridgeResult.cutouts,
-    crossingCount: bridgeResult.crossingCount
-  };
+    bridgeResult.links,
+    finalMaxX,
+    finalMaxY,
+    bridgeResult.cutouts,
+    bridgeResult.crossingCount
+  );
+
+  putInTreeLayoutCache(cacheKey, result);
+  return result;
 }
 
 /**
@@ -2194,6 +2359,15 @@ export function calculateHorizontalFamilyTreeLayout(
   maxGenerations: number = 0,
   options?: TreeLayoutFilterOptions
 ): TreeLayoutResult {
+  const cacheKey = buildLayoutCacheKey(database, rootPersonId, maxGenerations, {
+    ...options,
+    orientation: 'horizontal'
+  });
+  const cached = treeLayoutCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const nodes: TreeNodeLayout[] = [];
   const links: TreeLinkLayout[] = [];
 
@@ -3632,14 +3806,17 @@ export function calculateHorizontalFamilyTreeLayout(
     enableBridges: options?.enableLineBridges ?? true
   });
 
-  return {
+  const result: TreeLayoutResult = finalizeTreeLayoutResult(
     nodes,
-    links: bridgeResult.links,
-    width: finalMaxX,
-    height: finalMaxY,
-    cutouts: bridgeResult.cutouts,
-    crossingCount: bridgeResult.crossingCount
-  };
+    bridgeResult.links,
+    finalMaxX,
+    finalMaxY,
+    bridgeResult.cutouts,
+    bridgeResult.crossingCount
+  );
+
+  putInTreeLayoutCache(cacheKey, result);
+  return result;
 }
 
 /**
@@ -3901,6 +4078,15 @@ export function calculateFanChart(
     if (colorModeOrCustomInner.customRingWidth !== undefined) {
       customRingWidth = colorModeOrCustomInner.customRingWidth;
     }
+  }
+
+  const pCount = Object.keys(database?.persons || {}).length;
+  const fCount = Object.keys(database?.families || {}).length;
+  const lastMod = (database as any)?.lastModified || (database as any)?.version || '';
+  const fanCacheKey = `fan_${rootPersonId}_${generations}_${pCount}_${fCount}_${lastMod}_${colorMode}_${customInnerRadius || 0}_${customRingWidth || 0}_${Boolean(options?.includeDescendantsAndSpouses)}`;
+  const cachedSectors = fanChartCache.get(fanCacheKey);
+  if (cachedSectors) {
+    return cachedSectors;
   }
 
   if (options?.colorMode) {
@@ -4206,5 +4392,6 @@ export function calculateFanChart(
     }
   }
 
+  putInFanChartCache(fanCacheKey, sectors);
   return sectors;
 }

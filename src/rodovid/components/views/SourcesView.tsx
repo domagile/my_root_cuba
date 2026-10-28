@@ -21,7 +21,8 @@ import {
   Link as LinkIcon,
   ChevronDown,
   ChevronRight,
-  FileText
+  FileText,
+  Sparkles
 } from 'lucide-react';
 import { GenealogyDatabase, Source } from '../../types/genealogy';
 import { useUIStore } from '../../../stores/useUIStore';
@@ -307,6 +308,17 @@ export const SourcesView: React.FC<SourcesViewProps> = ({
           >
             <Plus className="w-4 h-4" />
             <span>Додати джерело</span>
+          </button>
+
+          {/* Direct link to AI Scan Reader */}
+          <button
+            type="button"
+            onClick={() => useUIStore.getState().setActiveTab('nyshporka')}
+            className="px-3.5 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-800 dark:text-amber-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+            title="Відкрити спеціалізований палеографічний модуль для читання сканів архіву"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            <span>ШІ-читання сканів</span>
           </button>
         </div>
       </div>

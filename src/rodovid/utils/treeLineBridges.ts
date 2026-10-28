@@ -94,7 +94,8 @@ export function applyBridgeJumpsToLinks(
   }
 ): ProcessedTreeLinksResult {
   const enableBridges = options?.enableBridges ?? true;
-  if (!enableBridges || !links || links.length < 2 || links.length > 250) {
+  // Scalable threshold: spatial bucket indexing allows fast intersection checks up to 1500 links
+  if (!enableBridges || !links || links.length < 2 || links.length > 1500) {
     return {
       links: links || [],
       cutouts: [],
@@ -166,12 +167,32 @@ export function applyBridgeJumpsToLinks(
 
   // Margin to exclude T-junction connections and card terminals (5px)
   const TERMINAL_MARGIN = 5.0;
+  const SPATIAL_BUCKET_SIZE = 100.0;
 
   if (orientation === 'vertical') {
+    // Spatial indexing: Map X-bucket index -> array of horizontal segments spanning that X coordinate
+    const hBuckets = new Map<number, Segment[]>();
+    horizontalSegments.forEach((hSeg) => {
+      const startB = Math.floor(hSeg.minX / SPATIAL_BUCKET_SIZE);
+      const endB = Math.floor(hSeg.maxX / SPATIAL_BUCKET_SIZE);
+      for (let b = startB; b <= endB; b++) {
+        let list = hBuckets.get(b);
+        if (!list) {
+          list = [];
+          hBuckets.set(b, list);
+        }
+        list.push(hSeg);
+      }
+    });
+
     // In vertical mode: Vertical drop/stem lines jump OVER horizontal bus/marriage lines
     verticalSegments.forEach((vSeg) => {
-      horizontalSegments.forEach((hSeg) => {
-        const crossX = vSeg.x;
+      const vBucket = Math.floor(vSeg.x / SPATIAL_BUCKET_SIZE);
+      const candidates = hBuckets.get(vBucket);
+      if (!candidates || candidates.length === 0) return;
+
+      const crossX = vSeg.x;
+      candidates.forEach((hSeg) => {
         if (crossX <= hSeg.minX + TERMINAL_MARGIN || crossX >= hSeg.maxX - TERMINAL_MARGIN) return;
 
         const crossY = hSeg.y;
@@ -198,13 +219,32 @@ export function applyBridgeJumpsToLinks(
       });
     });
   } else {
+    // Spatial indexing: Map Y-bucket index -> array of vertical segments spanning that Y coordinate
+    const vBuckets = new Map<number, Segment[]>();
+    verticalSegments.forEach((vSeg) => {
+      const startB = Math.floor(vSeg.minY / SPATIAL_BUCKET_SIZE);
+      const endB = Math.floor(vSeg.maxY / SPATIAL_BUCKET_SIZE);
+      for (let b = startB; b <= endB; b++) {
+        let list = vBuckets.get(b);
+        if (!list) {
+          list = [];
+          vBuckets.set(b, list);
+        }
+        list.push(vSeg);
+      }
+    });
+
     // In horizontal mode: Horizontal drop/stem lines jump OVER vertical bus lines
     horizontalSegments.forEach((hSeg) => {
-      verticalSegments.forEach((vSeg) => {
+      const hBucket = Math.floor(hSeg.y / SPATIAL_BUCKET_SIZE);
+      const candidates = vBuckets.get(hBucket);
+      if (!candidates || candidates.length === 0) return;
+
+      const crossY = hSeg.y;
+      candidates.forEach((vSeg) => {
         const crossX = vSeg.x;
         if (crossX <= hSeg.minX + TERMINAL_MARGIN || crossX >= hSeg.maxX - TERMINAL_MARGIN) return;
 
-        const crossY = hSeg.y;
         if (crossY <= vSeg.minY + TERMINAL_MARGIN || crossY >= vSeg.maxY - TERMINAL_MARGIN) return;
 
         if (hSeg.linkId === vSeg.linkId) return;

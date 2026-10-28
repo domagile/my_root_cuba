@@ -9,11 +9,9 @@ import { useAuthStore } from './stores/useAuthStore';
 import { useSharedTreeStore } from './stores/useSharedTreeStore';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
-import { AuthModal } from './components/AuthModal';
 import { Person } from './types';
-import { SharedPinScreen } from './components/SharedPinScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from './components/ContactAuthorModal';
+import { AUTHOR_CONTACT_EMAIL } from './constants/contact';
 import { getThemeConfig } from './utils/theme';
 import { isUserWhitelisted } from './rodovid/utils/privacy';
 import { RefreshCw, AlertCircle, ArrowLeft, Lock, Mail } from 'lucide-react';
@@ -28,11 +26,15 @@ const TimelineView = React.lazy(() => import('./components/TimelineView').then(m
 const ResearchView = React.lazy(() => import('./components/OtherViews').then(m => ({ default: m.ResearchView })));
 const YearMatrixView = React.lazy(() => import('./components/OtherViews').then(m => ({ default: m.YearMatrixView })));
 const HypothesesView = React.lazy(() => import('./components/OtherViews').then(m => ({ default: m.HypothesesView })));
+const ExperimentView = React.lazy(() => import('./components/ExperimentView').then(m => ({ default: m.ExperimentView })));
 
 // Lazy-loaded modals
 const PersonDetailModal = React.lazy(() => import('./components/Tree/PersonDetailModal').then(m => ({ default: m.PersonDetailModal })));
 const AddPersonModal = React.lazy(() => import('./components/Tree/AddPersonModal').then(m => ({ default: m.AddPersonModal })));
 const RelationManagerModal = React.lazy(() => import('./components/Tree/RelationManagerModal').then(m => ({ default: m.RelationManagerModal })));
+const AuthModal = React.lazy(() => import('./components/AuthModal').then(m => ({ default: m.AuthModal })));
+const ContactAuthorModal = React.lazy(() => import('./components/ContactAuthorModal').then(m => ({ default: m.ContactAuthorModal })));
+const SharedPinScreen = React.lazy(() => import('./components/SharedPinScreen').then(m => ({ default: m.SharedPinScreen })));
 
 const ViewLoadingFallback = () => (
   <div className="flex-1 flex items-center justify-center p-8">
@@ -158,7 +160,11 @@ function AppContent() {
     }
 
     if (pinRequired && !pinVerified) {
-      return <SharedPinScreen />;
+      return (
+        <React.Suspense fallback={<ViewLoadingFallback />}>
+          <SharedPinScreen />
+        </React.Suspense>
+      );
     }
 
     return (
@@ -280,6 +286,7 @@ function AppContent() {
                 onInspectPerson={(id) => setInspectPersonId(id)}
               />
             )}
+            {activeTab === 'nyshporka' && <ExperimentView />}
           </React.Suspense>
         </main>
       </div>
@@ -322,20 +329,24 @@ function AppContent() {
         )}
       </React.Suspense>
 
-      {/* Whitelist Auth Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={closeAuthModal}
-        targetFeatureName={authModalFeature}
-      />
+      <React.Suspense fallback={null}>
+        {/* Whitelist Auth Modal */}
+        {isAuthModalOpen && (
+          <AuthModal
+            isOpen={isAuthModalOpen}
+            onClose={closeAuthModal}
+            targetFeatureName={authModalFeature}
+          />
+        )}
 
-      {/* Contact Author Modal (domagile@gmail.com) */}
-      {showContactModal && (
-        <ContactAuthorModal
-          isOpen={showContactModal}
-          onClose={() => setShowContactModal(false)}
-        />
-      )}
+        {/* Contact Author Modal (domagile@gmail.com) */}
+        {showContactModal && (
+          <ContactAuthorModal
+            isOpen={showContactModal}
+            onClose={() => setShowContactModal(false)}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 }

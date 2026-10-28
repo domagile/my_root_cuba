@@ -103,6 +103,10 @@ import { SmartHistoricalDateInput } from './SmartHistoricalDateInput';
 import { PlaceHierarchyAutocompleteInput } from './PlaceHierarchyAutocompleteInput';
 import { SourceMetricLinker } from './SourceMetricLinker';
 import { FamilyQuickAddModal } from './FamilyQuickAddModal';
+import { BioNotesSection } from './sections/BioNotesSection';
+import { EventsSection } from './sections/EventsSection';
+import { PhotosSection } from './sections/PhotosSection';
+import { CustomFieldsSection } from './sections/CustomFieldsSection';
 import {
   savePersonDraft,
   loadPersonDraft,
@@ -644,23 +648,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [lifeEvents, setLifeEvents] = useState<PersonLifeEventItem[]>(
     (effectivePerson?.events as PersonLifeEventItem[]) || []
   );
-  const [showAddEventForm, setShowAddEventForm] = useState(false);
-  const [newEvent, setNewEvent] = useState<PersonLifeEventItem>({
-    type: 'baptism',
-    title: '',
-    date: '',
-    place: '',
-    description: '',
-    source: ''
-  });
 
   // 7. Photos
   const [avatarUrl, setAvatarUrl] = useState(
     effectivePerson?.avatarUrl || effectivePerson?.avatar || effectivePerson?.photoUrl || ''
   );
   const [photosList, setPhotosList] = useState<string[]>(effectivePerson?.photos || []);
-  const [newPhotoUrlInput, setNewPhotoUrlInput] = useState('');
-  const [showPhotoUrlInput, setShowPhotoUrlInput] = useState(false);
 
   // 8. Custom Fields
   const parseInitialCustomFields = (): CustomFieldItem[] => {
@@ -678,10 +671,6 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   };
 
   const [customFields, setCustomFields] = useState<CustomFieldItem[]>(parseInitialCustomFields);
-  const [showAddCustomField, setShowAddCustomField] = useState(false);
-  const [newFieldLabel, setNewFieldLabel] = useState('');
-  const [newFieldType, setNewFieldType] = useState<string>('text');
-  const [newFieldValue, setNewFieldValue] = useState('');
 
   // Duplicate check and Merge by ID state
   const [dismissedDuplicateIds, setDismissedDuplicateIds] = useState<string[]>([]);
@@ -1302,10 +1291,6 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     return lifeEventsValidation.some((v) => v.isFuture);
   }, [lifeEventsValidation]);
 
-  const newEventValidation = useMemo(() => {
-    return validateLifeEventDate(newEvent.date, birthDate, deathDate, isLiving);
-  }, [newEvent.date, birthDate, deathDate, isLiving]);
-
   // Sync persistent accordion state when person changes or modal opens
   useEffect(() => {
     initPersonModalAccordion(effectivePerson?.id);
@@ -1347,25 +1332,6 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setIsMobileNavCollapsed(true);
     }
-  };
-
-  // Add Custom Field
-  const handleAddCustomField = () => {
-    if (!newFieldLabel.trim()) return;
-    const newField: CustomFieldItem = {
-      id: `cf-${Date.now()}`,
-      label: newFieldLabel.trim(),
-      type: newFieldType,
-      value: newFieldValue.trim()
-    };
-    setCustomFields((prev) => [...prev, newField]);
-    setNewFieldLabel('');
-    setNewFieldValue('');
-    setShowAddCustomField(false);
-  };
-
-  const handleRemoveCustomField = (id?: string) => {
-    setCustomFields((prev) => prev.filter((f) => f.id !== id));
   };
 
   // Add Godparent with Person Entity creation
@@ -1891,77 +1857,6 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       ...effectivePerson,
       witnessedPersonIds: updatedMyWitnessed.length > 0 ? updatedMyWitnessed : undefined
     });
-  };
-
-  // Add Life Event
-  const handleAddLifeEvent = () => {
-    if (!newEvent.title && !newEvent.type) return;
-    if (newEventValidation.isFuture) {
-      alert(`Неможливо додати подію: ${newEventValidation.message || 'дата події вказує на майбутній час'}.`);
-      return;
-    }
-    const item: PersonLifeEventItem = {
-      id: `evt-${Date.now()}`,
-      ...newEvent,
-      title: newEvent.title || getEventTypeName(newEvent.type)
-    };
-    setLifeEvents((prev) => [...prev, item]);
-    setNewEvent({
-      type: 'baptism',
-      title: '',
-      date: '',
-      place: '',
-      description: '',
-      source: ''
-    });
-    setShowAddEventForm(false);
-  };
-
-  const handleRemoveLifeEvent = (id?: string) => {
-    setLifeEvents((prev) => prev.filter((evt) => evt.id !== id));
-  };
-
-  const getEventTypeName = (type?: string) => {
-    switch (type) {
-      case 'birth':
-        return 'Народження';
-      case 'baptism':
-        return 'Хрещення';
-      case 'marriage':
-        return 'Шлюб';
-      case 'revision':
-        return 'Ревізька казка / Перепис';
-      case 'confession':
-        return 'Сповідний розпис';
-      case 'residence':
-        return 'Проживання / Переїзд';
-      case 'military':
-        return 'Військова служба';
-      case 'education':
-        return 'Освіта';
-      case 'award':
-        return 'Нагорода / Відзнака';
-      case 'emigration':
-        return 'Еміграція / Переселення';
-      case 'death':
-        return 'Смерть';
-      case 'burial':
-        return 'Поховання';
-      default:
-        return 'Подія';
-    }
-  };
-
-  // Add photo via URL
-  const handleAddPhotoUrl = () => {
-    if (!newPhotoUrlInput.trim()) return;
-    const url = newPhotoUrlInput.trim();
-    if (!avatarUrl) {
-      setAvatarUrl(url);
-    }
-    setPhotosList((prev) => Array.from(new Set([...prev, url])));
-    setNewPhotoUrlInput('');
-    setShowPhotoUrlInput(false);
   };
 
   // Save Person Core Logic
@@ -5070,859 +4965,66 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             </div>
 
             {/* SECTION 5: Біографія і нотатки */}
-            <div id="sec-bio-notes" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
-              <button
-                type="button"
-                onClick={() => toggleSectionAccordion('bio-notes')}
-                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections['bio-notes'] ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
-                    <BookOpen className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Біографія, нотатки та коментарі</h3>
-                    <p className={`text-xs ${theme.textMuted}`}>Життєпис предка, дослідницькі нотатки та джерела</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {!openSections['bio-notes'] && (
-                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
-                      {bio ? 'Є життєпис' : (notes ? 'Є нотатки' : 'Порожньо')}
-                    </span>
-                  )}
-                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections['bio-notes'] ? 'rotate-180 text-[#B88E3E]' : ''}`} />
-                </div>
-              </button>
-
-              {openSections['bio-notes'] && (
-                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
-                  <div className="space-y-4 text-xs">
-                {/* Large Textarea for Biography */}
-                <div className="space-y-1.5">
-                  <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
-                    <BookOpen className="w-3.5 h-3.5 text-[#B88E3E]" />
-                    <span>Життєпис / Біографія особи</span>
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={bio}
-                    onChange={(e) => setBio(e.target.value)}
-                    placeholder="Введіть життєпис, родинні спогади, відомості про діяльність та життя особи..."
-                    className={`w-full p-3 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E] leading-relaxed`}
-                    readOnly={isReadOnly}
-                  />
-                </div>
-
-                {/* Dedicated Researcher Notes & Comments (Requested feature) */}
-                <div className="space-y-2 pt-2 border-t border-black/5 dark:border-white/5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                      <span>Текстові нотатки та коментарі дослідника</span>
-                    </label>
-                    <span className="text-[10px] text-neutral-400">дрібні факти, сумніви, робочі гіпотези</span>
-                  </div>
-
-                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                    Поле для фіксації додаткових дрібних фактів, сумнівів щодо спорідненості чи дат, розбіжностей у джерелах (метрики, сповідні розписи, ревізії) або планів на архівний пошук.
-                  </p>
-
-                  <textarea
-                    rows={4}
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Зафіксуйте додаткові дрібні факти або сумніви щодо особи (наприклад: 'У ревізії 1858 р. вказаний вік 34 роки, а в метриці 1826 р. — розбіжність у 2 роки; перевірити метрику сусіднього приходу')..."
-                    className={`w-full p-3 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 leading-relaxed font-sans`}
-                    readOnly={isReadOnly}
-                  />
-
-                  {!isReadOnly && (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                      <span className="text-[10px] text-neutral-400 font-medium">Швидкі позначки:</span>
-                      {[
-                        { label: '❓ Потребує перевірки в архівах', prefix: '[Потребує перевірки]: ' },
-                        { label: '⚠️ Розбіжність у датах / віці', prefix: '[Розбіжність у датах]: ' },
-                        { label: '🔍 Робоча гіпотеза', prefix: '[Гіпотеза]: ' },
-                        { label: '📜 Запис у метриці', prefix: '[Метричний запис]: ' },
-                        { label: '💬 Родинний переказ', prefix: '[Переказ]: ' }
-                      ].map((chip, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => {
-                            setNotes((prev) => (prev && prev.trim() ? `${prev.trim()}\n${chip.prefix}` : chip.prefix));
-                          }}
-                          className="px-2 py-1 rounded-lg text-[10px] font-medium bg-black/5 dark:bg-white/5 hover:bg-amber-500/10 hover:text-amber-700 dark:hover:text-amber-300 text-neutral-600 dark:text-neutral-400 border border-black/5 dark:border-white/5 transition-all cursor-pointer"
-                        >
-                          {chip.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Status & Occupation row */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Стан / Соціальний статус
-                    </label>
-                    <input
-                      type="text"
-                      value={estate}
-                      onChange={(e) => setEstate(e.target.value)}
-                      placeholder="Селянин, дворянин, міщанин, козак, шляхтич..."
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Професія / Посада / Заняття
-                    </label>
-                    <input
-                      type="text"
-                      value={occupation}
-                      onChange={(e) => setOccupation(e.target.value)}
-                      placeholder="Художник, коваль, вчитель, писар..."
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
-                </div>
-
-                {/* Confession & Military */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Конфесія / Віросповідання
-                    </label>
-                    <input
-                      type="text"
-                      value={confession}
-                      onChange={(e) => setConfession(e.target.value)}
-                      placeholder="Православна, Греко-Католицька, Римо-Католицька..."
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
-                      Військове звання / Служба
-                    </label>
-                    <input
-                      type="text"
-                      value={militaryRank}
-                      onChange={(e) => setMilitaryRank(e.target.value)}
-                      placeholder="Рядовий, унтер-офіцер, сотник, ветеран..."
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
-                </div>
-
-                {/* Tags & Hashtags */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
-                      <Tag className="w-3.5 h-3.5 text-[#B88E3E]" />
-                      <span>Хештеги та мітки {currentTagsList.length > 0 && `(${currentTagsList.length})`}</span>
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-neutral-400">розділяйте комою або #</span>
-                      {currentTagsList.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={handleClearAllTags}
-                          className="text-[10px] text-rose-500 hover:text-rose-600 hover:underline cursor-pointer font-medium"
-                        >
-                          Очистити всі
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {currentTagsList.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5">
-                      {currentTagsList.map((tag) => (
-                        <span
-                          key={tag}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#B88E3E]/15 text-[#B88E3E] border border-[#B88E3E]/30"
-                        >
-                          <Hash className="w-3 h-3 text-[#B88E3E]/70" />
-                          <span>{tag}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveTag(tag)}
-                            className="p-0.5 hover:bg-[#B88E3E]/25 rounded-md cursor-pointer transition-colors text-[#B88E3E]"
-                            title={`Видалити хештег #${tag}`}
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  <input
-                    type="text"
-                    value={tagsStr}
-                    onChange={(e) => setTagsStr(e.target.value)}
-                    placeholder="#козак, #ветеран, #полтавщина, #дворянин, #хлібороб"
-                    className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                  />
-                  {popularHashtags.length > 0 && (
-                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                      <span className="text-[10px] text-neutral-400 flex items-center gap-0.5 font-medium">
-                        <Hash className="w-3 h-3 text-[#B88E3E]" /> Популярні в дереві:
-                      </span>
-                      {popularHashtags.map((h) => {
-                        const isSelected = currentTagsList.some((t) => t.toLowerCase() === h.tag.toLowerCase());
-                        return (
-                          <button
-                            key={h.tag}
-                            type="button"
-                            onClick={() => handleAddHashtagSuggestion(h.tag)}
-                            disabled={isSelected}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer ${
-                              isSelected
-                                ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 opacity-60 cursor-default'
-                                : 'bg-neutral-100 dark:bg-neutral-800 hover:bg-[#B88E3E]/20 text-neutral-600 dark:text-neutral-300 hover:text-[#B88E3E] border-neutral-200 dark:border-neutral-700'
-                            }`}
-                          >
-                            #{h.tag} {h.count > 1 && <span className="opacity-60 text-[9px]">({h.count})</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Archive Notes & Cloud Storage Actions (Matching Screenshot 3) */}
-                <div className="p-4 rounded-xl border border-black/10 dark:border-white/10 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <h4 className="font-bold text-neutral-800 dark:text-neutral-200 text-xs">
-                        Інші згадки та матеріали
-                      </h4>
-                      <p className="text-[11px] text-neutral-500">
-                        Зображення, аудіо, PDF, DJVU, документи Word, Excel, RTF, CSV, TXT, Markdown, XML. Файли зберігаються у папці активного проєкту в хмарному сховищі.
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => alert('Хмарне сховище GitHub налаштовано та готове до автоматичної синхронізації.')}
-                        className="px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-black/5 text-xs font-semibold cursor-pointer"
-                      >
-                        Підключити сховище
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => alert('Оберіть файл на Google Диску')}
-                        className="px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-black/5 text-xs font-semibold cursor-pointer"
-                      >
-                        Обрати з Google Drive
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const url = prompt('Введіть посилання на документ або файл:');
-                          if (url) {
-                            setNotes((prev) => `${prev ? prev + '\n' : ''}Матеріал: ${url}`);
-                          }
-                        }}
-                        className="px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-black/5 text-xs font-semibold cursor-pointer"
-                      >
-                        Зовнішнє посилання
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1 pt-1">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px]">
-                      Архівні шифри, витяги та примітки:
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      placeholder="ДАХО Ф. 40, оп. 1, спр. 12, арк. 15 зв. Запис № 42 про народження..."
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    />
-                  </div>
-                </div>
-              </div>
-                </div>
-              )}
-            </div>
+            <BioNotesSection
+              isOpen={Boolean(openSections['bio-notes'])}
+              onToggle={() => toggleSectionAccordion('bio-notes')}
+              bio={bio}
+              onChangeBio={setBio}
+              notes={notes}
+              onChangeNotes={setNotes}
+              estate={estate}
+              onChangeEstate={setEstate}
+              occupation={occupation}
+              onChangeOccupation={setOccupation}
+              confession={confession}
+              onChangeConfession={setConfession}
+              militaryRank={militaryRank}
+              onChangeMilitaryRank={setMilitaryRank}
+              tagsStr={tagsStr}
+              onChangeTagsStr={setTagsStr}
+              currentTagsList={currentTagsList}
+              onRemoveTag={handleRemoveTag}
+              onClearAllTags={handleClearAllTags}
+              popularHashtags={popularHashtags}
+              onAddHashtagSuggestion={handleAddHashtagSuggestion}
+              isReadOnly={isReadOnly}
+              theme={theme}
+            />
 
             {/* SECTION 6: Події та факти */}
-            <div id="sec-events" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
-              <button
-                type="button"
-                onClick={() => toggleSectionAccordion('events')}
-                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections.events ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
-                    <Calendar className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Події та факти</h3>
-                    <p className={`text-xs ${theme.textMuted}`}>Додаткові життєві події, переписи, ревізії, служба</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {hasFutureLifeEvents && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-600 dark:text-rose-400 text-[10px] font-bold border border-rose-500/30 animate-pulse">
-                      <AlertTriangle className="w-3 h-3" />
-                      <span>Майбутня дата</span>
-                    </span>
-                  )}
-                  {!openSections.events && (
-                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
-                      {lifeEvents.length > 0 ? `${lifeEvents.length} подій` : '0 подій'}
-                    </span>
-                  )}
-                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.events ? 'rotate-180 text-[#B88E3E]' : ''}`} />
-                </div>
-              </button>
-
-              {openSections.events && (
-                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
-                  <div className="space-y-3.5 text-xs">
-                <div className="p-4 rounded-xl border border-black/10 dark:border-white/10 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <h4 className="font-bold text-neutral-800 dark:text-neutral-200 text-xs">
-                        Інші життєві події та факти
-                      </h4>
-                      <p className="text-[11px] text-neutral-500">
-                        Хрещення, переписи, ревізії, сповідні розписи, військова служба, освіта, поховання та інші події. Для однієї особи можна додати декілька подій одного типу.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowAddEventForm(!showAddEventForm)}
-                      className="px-3 py-1.5 rounded-xl bg-[#B88E3E]/15 hover:bg-[#B88E3E]/25 text-[#B88E3E] font-bold text-xs flex items-center gap-1.5 border border-[#B88E3E]/30 shrink-0 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{showAddEventForm ? 'Скасувати' : '+ Додати подію'}</span>
-                    </button>
-                  </div>
-
-                  {showAddEventForm && (
-                    <div className="p-3.5 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-3 animate-in fade-in duration-150">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <div>
-                          <label className="font-bold block text-[11px] text-neutral-600 dark:text-neutral-400 mb-1">
-                            Тип події:
-                          </label>
-                          <select
-                            value={newEvent.type}
-                            onChange={(e) => setNewEvent({ ...newEvent, type: e.target.value as any })}
-                            className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
-                          >
-                            <option value="baptism">Хрещення</option>
-                            <option value="revision">Ревізька казка / Перепис</option>
-                            <option value="confession">Сповідний розпис</option>
-                            <option value="marriage">Шлюб / Вінчання</option>
-                            <option value="military">Військова служба / Призов</option>
-                            <option value="education">Освіта / Навчання</option>
-                            <option value="award">Нагорода / Відзнака</option>
-                            <option value="residence">Зміна місця проживання</option>
-                            <option value="emigration">Еміграція / Переселення</option>
-                            <option value="death">Смерть</option>
-                            <option value="burial">Поховання</option>
-                            <option value="other">Інша подія</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="font-bold block text-[11px] text-neutral-600 dark:text-neutral-400 mb-1">
-                            Назва або заголовок:
-                          </label>
-                          <input
-                            type="text"
-                            value={newEvent.title || ''}
-                            onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
-                            placeholder="напр. Ревізія 1858 року"
-                            className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <div>
-                          <label className="font-bold block text-[11px] text-neutral-600 dark:text-neutral-400 mb-1">
-                            Дата або рік:
-                          </label>
-                          <input
-                            type="text"
-                            value={newEvent.date || ''}
-                            onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
-                            placeholder="1858 або 15.04.1858"
-                            className={`w-full p-2 rounded-lg border text-xs transition-colors ${
-                              newEventValidation.isFuture
-                                ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100 ring-1 ring-rose-500'
-                                : `${theme.inputBg} ${theme.inputBorder} ${theme.inputText}`
-                            }`}
-                          />
-                          {newEventValidation.message && (
-                            <div className={`flex items-start gap-1 mt-1 text-[11px] font-semibold ${
-                              newEventValidation.isFuture ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
-                            }`}>
-                              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                              <span>{newEventValidation.message}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <label className="font-bold block text-[11px] text-neutral-600 dark:text-neutral-400 mb-1">
-                            Місце події:
-                          </label>
-                          <input
-                            type="text"
-                            value={newEvent.place || ''}
-                            onChange={(e) => setNewEvent({ ...newEvent, place: e.target.value })}
-                            placeholder="с. Моринці, Київська губернія"
-                            className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="font-bold block text-[11px] text-neutral-600 dark:text-neutral-400 mb-1">
-                          Опис, витяг та джерело:
-                        </label>
-                        <textarea
-                          rows={2}
-                          value={newEvent.description || ''}
-                          onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
-                          placeholder="Деталі запису, склад сім'ї, джерело..."
-                          className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
-                        />
-                      </div>
-
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowAddEventForm(false)}
-                          className="px-3 py-1.5 text-xs text-neutral-500 hover:text-neutral-700"
-                        >
-                          Скасувати
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleAddLifeEvent}
-                          className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#B88E3E] text-white hover:bg-[#a07a32] cursor-pointer"
-                        >
-                          Зберегти подію
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {lifeEvents.length > 0 ? (
-                    <div className="space-y-2">
-                      {lifeEvents.map((evt, idx) => {
-                        const evtValidation = lifeEventsValidation[idx] || validateLifeEventDate(evt.date, birthDate, deathDate, isLiving);
-                        const isInvalid = evtValidation.isFuture;
-                        const hasWarning = !isInvalid && Boolean(evtValidation.isBeforeBirth || evtValidation.isAfterDeath);
-
-                        return (
-                          <div
-                            key={evt.id || idx}
-                            className={`p-3 rounded-xl border flex items-start justify-between gap-3 text-xs transition-all ${
-                              isInvalid
-                                ? 'bg-rose-50/70 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800'
-                                : hasWarning
-                                ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300/60 dark:border-amber-800/40'
-                                : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5'
-                            }`}
-                          >
-                            <div className="space-y-0.5">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="px-2 py-0.5 rounded-md bg-[#B88E3E]/15 text-[#B88E3E] font-bold text-[10px]">
-                                  {getEventTypeName(evt.type)}
-                                </span>
-                                <span className="font-bold text-neutral-800 dark:text-neutral-200">{evt.title}</span>
-                                {evt.date && (
-                                  <span className={`font-medium ${isInvalid ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-neutral-500'}`}>
-                                    ({evt.date})
-                                  </span>
-                                )}
-                                {isInvalid && (
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1">
-                                    <AlertTriangle className="w-3 h-3" />
-                                    <span>У майбутньому</span>
-                                  </span>
-                                )}
-                                {hasWarning && (
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                                    <AlertTriangle className="w-3 h-3" />
-                                    <span>{evtValidation.message}</span>
-                                  </span>
-                                )}
-                              </div>
-                              {evt.place && <div className="text-neutral-500 text-[11px]">📍 {evt.place}</div>}
-                              {evt.description && <div className="text-neutral-600 dark:text-neutral-400 text-[11px] mt-1">{evt.description}</div>}
-                              {isInvalid && evtValidation.message && (
-                                <div className="text-rose-600 dark:text-rose-400 text-[11px] font-semibold mt-1">
-                                  ⚠️ {evtValidation.message}
-                                </div>
-                              )}
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveLifeEvent(evt.id)}
-                              className="text-neutral-400 hover:text-rose-500 p-1 cursor-pointer shrink-0"
-                              title="Видалити подію"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-neutral-400 italic">Додаткових подій поки немає.</p>
-                  )}
-                </div>
-              </div>
-                </div>
-              )}
-            </div>
+            <EventsSection
+              isOpen={Boolean(openSections.events)}
+              onToggle={() => toggleSectionAccordion('events')}
+              lifeEvents={lifeEvents}
+              onChangeLifeEvents={setLifeEvents}
+              birthDate={birthDate}
+              deathDate={deathDate}
+              isLiving={isLiving}
+              hasFutureLifeEvents={hasFutureLifeEvents}
+              isReadOnly={isReadOnly}
+              theme={theme}
+            />
 
             {/* SECTION 7: Фотографії */}
-            <div id="sec-photos" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
-              <button
-                type="button"
-                onClick={() => toggleSectionAccordion('photos')}
-                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections.photos ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
-                    <Camera className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Фотографії</h3>
-                    <p className={`text-xs ${theme.textMuted}`}>Світлини особи, вибір головного зображення та аватар</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {!openSections.photos && (
-                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
-                      {photosList.length > 0 ? `${photosList.length} фото` : (avatarUrl ? 'Є аватар' : 'Без фото')}
-                    </span>
-                  )}
-                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections.photos ? 'rotate-180 text-[#B88E3E]' : ''}`} />
-                </div>
-              </button>
-
-              {openSections.photos && (
-                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
-                  <div className="space-y-4 text-xs">
-                <div className="p-4 rounded-xl border border-black/10 dark:border-white/10 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <h4 className="font-bold text-neutral-800 dark:text-neutral-200 text-xs">
-                        Фотографії особи
-                      </h4>
-                      <p className="text-[11px] text-neutral-500">
-                        Зображення зберігаються у Google Drive / GitHub / хмарному сховищі; у картці залишаються посилання та метадані.
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => alert('Сховище GitHub активовано')}
-                        className="px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-black/5 text-xs font-semibold cursor-pointer"
-                      >
-                        Підключити сховище
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => alert('Оберіть фото з Google Диска')}
-                        className="px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-black/5 text-xs font-semibold cursor-pointer"
-                      >
-                        Обрати з Google Drive
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowPhotoUrlInput(!showPhotoUrlInput)}
-                        className="px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-black/5 text-xs font-semibold cursor-pointer"
-                      >
-                        Зовнішнє посилання
-                      </button>
-                    </div>
-                  </div>
-
-                  {showPhotoUrlInput && (
-                    <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 flex gap-2 animate-in fade-in duration-150">
-                      <input
-                        type="url"
-                        value={newPhotoUrlInput}
-                        onChange={(e) => setNewPhotoUrlInput(e.target.value)}
-                        placeholder="https://images.unsplash.com/... або пряме посилання на фото"
-                        className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddPhotoUrl}
-                        className="px-3 py-2 rounded-lg bg-[#B88E3E] text-white font-bold text-xs shrink-0 cursor-pointer"
-                      >
-                        Додати фото
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Photo Gallery Grid */}
-                  {photosList.length > 0 ? (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-2">
-                      {photosList.map((photo, idx) => {
-                        const isMainAvatar = avatarUrl === photo;
-                        return (
-                          <div
-                            key={idx}
-                            className={`relative rounded-xl overflow-hidden border-2 aspect-square group shadow-xs ${
-                              isMainAvatar ? 'border-[#B88E3E] ring-2 ring-[#B88E3E]/30' : 'border-neutral-200 dark:border-neutral-700'
-                            }`}
-                          >
-                            <img src={photo} alt="Person" className="w-full h-full object-cover" />
-                            {isMainAvatar && (
-                              <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-[#B88E3E] text-white text-[9px] font-bold">
-                                Головне
-                              </div>
-                            )}
-                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                              {!isMainAvatar && (
-                                <button
-                                  type="button"
-                                  onClick={() => setAvatarUrl(photo)}
-                                  className="p-1 rounded-md bg-emerald-600 text-white text-[10px] hover:bg-emerald-700 cursor-pointer"
-                                  title="Зробити аватаром"
-                                >
-                                  <Check className="w-3 h-3" />
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPhotosList((prev) => prev.filter((p) => p !== photo));
-                                  if (avatarUrl === photo) setAvatarUrl('');
-                                }}
-                                className="p-1 rounded-md bg-rose-600 text-white text-[10px] hover:bg-rose-700 cursor-pointer"
-                                title="Видалити"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="p-6 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 text-center text-neutral-400 text-xs">
-                      Файлів поки немає. Скористайтеся кнопками вище для завантаження світлин.
-                    </div>
-                  )}
-                </div>
-              </div>
-                </div>
-              )}
-            </div>
+            <PhotosSection
+              isOpen={Boolean(openSections.photos)}
+              onToggle={() => toggleSectionAccordion('photos')}
+              photosList={photosList}
+              onChangePhotosList={setPhotosList}
+              avatarUrl={avatarUrl}
+              onChangeAvatarUrl={setAvatarUrl}
+              isReadOnly={isReadOnly}
+              theme={theme}
+            />
 
             {/* SECTION 8: Власні поля */}
-            <div id="sec-custom-fields" className={`rounded-2xl border ${theme.borderSubtle} bg-white dark:bg-slate-900 shadow-xs overflow-hidden transition-all`}>
-              <button
-                type="button"
-                onClick={() => toggleSectionAccordion('custom-fields')}
-                className="w-full p-4 flex items-center justify-between text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer select-none"
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${openSections['custom-fields'] ? 'bg-[#B88E3E] text-white' : 'bg-black/5 dark:bg-white/5 text-neutral-500'}`}>
-                    <Layers className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Власні поля</h3>
-                    <p className={`text-xs ${theme.textMuted}`}>Користувацькі атрибути та архівні параметри</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {!openSections['custom-fields'] && (
-                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium hidden sm:inline-block">
-                      {customFields.length > 0 ? `${customFields.length} полів` : '0 полів'}
-                    </span>
-                  )}
-                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${openSections['custom-fields'] ? 'rotate-180 text-[#B88E3E]' : ''}`} />
-                </div>
-              </button>
-
-              {openSections['custom-fields'] && (
-                <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
-                  <div className="space-y-3.5 text-xs">
-                {/* Notice banner */}
-                <div className="p-3.5 rounded-xl border border-black/10 dark:border-white/10 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <h4 className="font-bold text-neutral-800 dark:text-neutral-200 text-xs">
-                        Користувацькі атрибути та параметри
-                      </h4>
-                      <p className="text-[11px] text-neutral-500">
-                        Створюйте власні поля довільних типів (номер ревізької душі, назва маєтку, земельний наділ тощо).
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowAddCustomField(!showAddCustomField)}
-                      className="px-3.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 font-bold text-xs flex items-center gap-1.5 border border-emerald-500/30 shrink-0 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{showAddCustomField ? 'Скасувати додавання' : '+ Додати власне поле'}</span>
-                    </button>
-                  </div>
-
-                  {/* Add Custom Field Form (Matching Screenshot 4) */}
-                  {showAddCustomField && (
-                    <div className="p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-3 animate-in fade-in duration-150">
-                      <p className="text-[11px] text-neutral-500 italic">
-                        Нове поле буде доступне в усіх записах цього розділу.
-                      </p>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                            Назва поля
-                          </label>
-                          <input
-                            type="text"
-                            value={newFieldLabel}
-                            onChange={(e) => setNewFieldLabel(e.target.value)}
-                            placeholder="Наприклад: Назва маєтку"
-                            className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                            autoFocus
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                            Тип поля
-                          </label>
-                          <select
-                            value={newFieldType}
-                            onChange={(e) => setNewFieldType(e.target.value)}
-                            className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                          >
-                            <option value="text">Короткий текст</option>
-                            <option value="longtext">Довгий текст</option>
-                            <option value="number">Число</option>
-                            <option value="year">Рік</option>
-                            <option value="date">Дата</option>
-                            <option value="time">Час</option>
-                            <option value="approx_date">Приблизна дата або період</option>
-                            <option value="place">Місце</option>
-                            <option value="list">Список</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="font-bold text-neutral-700 dark:text-neutral-300 text-[11px] uppercase tracking-wide">
-                          Значення поля
-                        </label>
-                        {newFieldType === 'longtext' ? (
-                          <textarea
-                            rows={2}
-                            value={newFieldValue}
-                            onChange={(e) => setNewFieldValue(e.target.value)}
-                            placeholder="Введіть значення..."
-                            className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
-                          />
-                        ) : (
-                          <input
-                            type={newFieldType === 'number' ? 'number' : 'text'}
-                            value={newFieldValue}
-                            onChange={(e) => setNewFieldValue(e.target.value)}
-                            placeholder="Введіть значення поля..."
-                            className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
-                          />
-                        )}
-                      </div>
-
-                      <div className="flex justify-end gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setShowAddCustomField(false)}
-                          className="px-3 py-1.5 text-xs text-neutral-500 hover:text-neutral-700"
-                        >
-                          Скасувати
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleAddCustomField}
-                          className="px-4 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-                        >
-                          Зберегти власне поле
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* List of Custom Fields */}
-                  {customFields.length > 0 ? (
-                    <div className="space-y-2 pt-1">
-                      {customFields.map((field) => (
-                        <div
-                          key={field.id}
-                          className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 flex items-center justify-between gap-3 text-xs"
-                        >
-                          <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                            <span className="font-bold text-neutral-700 dark:text-neutral-300 shrink-0">
-                              {field.label}:
-                            </span>
-                            <input
-                              type="text"
-                              value={field.value}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setCustomFields((prev) =>
-                                  prev.map((f) => (f.id === field.id ? { ...f, value: val } : f))
-                                );
-                              }}
-                              className={`flex-1 p-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs`}
-                            />
-                            {field.type && (
-                              <span className="text-[10px] text-neutral-400 px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/5 shrink-0">
-                                {field.type}
-                              </span>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveCustomField(field.id)}
-                            className="text-neutral-400 hover:text-rose-500 p-1 cursor-pointer shrink-0"
-                            title="Видалити поле"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-neutral-400 italic">Власних полів ще немає.</p>
-                  )}
-                </div>
-              </div>
-                </div>
-              )}
-            </div>
+            <CustomFieldsSection
+              isOpen={Boolean(openSections['custom-fields'])}
+              onToggle={() => toggleSectionAccordion('custom-fields')}
+              customFields={customFields}
+              onChange={setCustomFields}
+              theme={theme}
+            />
 
           </div>
         </div>

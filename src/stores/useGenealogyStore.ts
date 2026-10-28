@@ -32,6 +32,7 @@ import { clearDuplicateDetectorCache } from '../utils/duplicateDetector';
 import { clearTreeAuditCache } from '../utils/treeAudit';
 import { clearKinshipCache } from '../rodovid/utils/relationship';
 import { clearGlobalSearchCache } from '../utils/globalTreeSearch';
+import { clearTreeLayoutCache } from '../rodovid/utils/treeLayout';
 
 export function invalidateAllTreeCaches(): void {
   try {
@@ -39,6 +40,7 @@ export function invalidateAllTreeCaches(): void {
     clearTreeAuditCache();
     clearKinshipCache();
     clearGlobalSearchCache();
+    clearTreeLayoutCache();
   } catch {}
 }
 

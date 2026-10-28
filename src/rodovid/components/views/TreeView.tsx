@@ -63,11 +63,12 @@ import { DuplicatePair } from '../../../types';
 import { TreeIcon, FanIcon } from '../../../components/common/GenealogyIcons';
 import { downloadGedcom, parseGedcom } from '../../utils/gedcom';
 import { useGenealogyStore } from '../../../stores/useGenealogyStore';
-import { GedcomMergeModal } from '../modals/GedcomMergeModal';
-import { SmartMergeModal } from '../modals/SmartMergeModal';
 import { detectDuplicatePersons, ignoreDuplicatePair } from '../../../utils/duplicateDetector';
-import { ImportHistoryModal } from '../modals/ImportHistoryModal';
-import { MergeResult } from '../../utils/mergeDatabase';
+import type { MergeResult } from '../../utils/mergeDatabase';
+
+const GedcomMergeModal = React.lazy(() => import('../modals/GedcomMergeModal').then(m => ({ default: m.GedcomMergeModal })));
+const SmartMergeModal = React.lazy(() => import('../modals/SmartMergeModal').then(m => ({ default: m.SmartMergeModal })));
+const ImportHistoryModal = React.lazy(() => import('../modals/ImportHistoryModal').then(m => ({ default: m.ImportHistoryModal })));
 import {
   calculateClassicFamilyTreeLayout,
   calculateAncestorsLayout,
@@ -88,7 +89,8 @@ import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../stores
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, getPrivacyLifespan, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
-import { PersonReportModal } from '../../../components/common/PersonReportModal';
+const PersonReportModal = React.lazy(() => import('../../../components/common/PersonReportModal').then(m => ({ default: m.PersonReportModal })));
+import { TreeContextMenu } from './tree/TreeContextMenu';
 import {
   normalizeUkrainianSurnameGender,
   formatClanName,
@@ -1128,8 +1130,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
     containerDimensions.height
   ]);
 
-  // Culled Nodes: Only render nodes that intersect visible viewport
+  // Culled Nodes: Only render nodes that intersect visible viewport using 2D Spatial Grid Index
   const visibleNodes = useMemo(() => {
+    if (layout.spatialIndex) {
+      return layout.spatialIndex.queryVisibleNodes(visibleBounds);
+    }
     if (layout.nodes.length < 25) return layout.nodes;
     return layout.nodes.filter((node) => {
       const nodeRight = node.x + (node.width || CLASSIC_CARD_WIDTH);
@@ -1141,10 +1146,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
         node.y <= visibleBounds.maxY
       );
     });
-  }, [layout.nodes, visibleBounds]);
+  }, [layout, visibleBounds]);
 
-  // Culled Links: Only render paths intersecting visible viewport
+  // Culled Links: Only render paths intersecting visible viewport using 2D Spatial Grid Index
   const visibleLinks = useMemo(() => {
+    if (layout.spatialIndex) {
+      return layout.spatialIndex.queryVisibleLinks(visibleBounds);
+    }
     if (layout.links.length < 25) return layout.links;
     return layout.links.filter((link) => {
       const minX = Math.min(link.sourceX, link.targetX) - 30;
@@ -1158,7 +1166,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
         minY <= visibleBounds.maxY
       );
     });
-  }, [layout.links, visibleBounds]);
+  }, [layout, visibleBounds]);
 
   // Adaptive Level of Detail (LOD) - 60 FPS optimization for large trees (250-1000+ persons)
   const isLargeTree = layout.nodes.length > 70;
@@ -1172,8 +1180,21 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const theme = getThemeConfig(themePalette);
   const isDark = theme.category === 'dark';
 
-  // Tree Bounding Box: dynamically wraps the actual nodes with comfortable padding
+  // Tree Bounding Box: uses precomputed layout.treeBounds or dynamically calculates with padding
   const treeBounds = useMemo(() => {
+    const padX = 60;
+    const padY = 50;
+    if (layout.treeBounds) {
+      const tb = layout.treeBounds;
+      return {
+        minX: tb.minX - padX,
+        maxX: tb.maxX + padX,
+        minY: tb.minY - padY,
+        maxY: tb.maxY + padY,
+        width: Math.max(tb.width + padX * 2, 200),
+        height: Math.max(tb.height + padY * 2, 150)
+      };
+    }
     if (!layout.nodes.length) {
       return { minX: 0, maxX: 1200, minY: 0, maxY: 800, width: 1200, height: 800 };
     }
@@ -1184,8 +1205,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
       minY = Math.min(minY, n.y);
       maxY = Math.max(maxY, n.y + (n.height || CLASSIC_CARD_HEIGHT));
     });
-    const padX = 60;
-    const padY = 50;
     const width = Math.max(maxX - minX + padX * 2, 200);
     const height = Math.max(maxY - minY + padY * 2, 150);
     return {
@@ -1196,7 +1215,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
       width,
       height
     };
-  }, [layout.nodes]);
+  }, [layout]);
 
   // Center tree on container dimensions and tree bounding box
   const centerTree = useCallback(() => {
@@ -3039,16 +3058,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 )
               );
 
-              // Marriage double-line calculation with exact perpendicular offset
-              const dx = link.targetX - link.sourceX;
-              const dy = link.targetY - link.sourceY;
-              const len = Math.hypot(dx, dy) || 1;
-              const offsetX = (-dy / len) * 2.2;
-              const offsetY = (dx / len) * 2.2;
-              const doublePathA = `M ${link.sourceX + offsetX} ${link.sourceY + offsetY} L ${link.targetX + offsetX} ${link.targetY + offsetY}`;
-              const doublePathB = `M ${link.sourceX - offsetX} ${link.sourceY - offsetY} L ${link.targetX - offsetX} ${link.targetY - offsetY}`;
-              const midX = (link.sourceX + link.targetX) / 2;
-              const midY = (link.sourceY + link.targetY) / 2;
+              // Marriage double-line precomputed paths & midpoints (zero-allocation render)
+              const doublePathA = link.doublePathA || `M ${link.sourceX} ${link.sourceY} L ${link.targetX} ${link.targetY}`;
+              const doublePathB = link.doublePathB || `M ${link.sourceX} ${link.sourceY} L ${link.targetX} ${link.targetY}`;
+              const midX = link.midX ?? ((link.sourceX + link.targetX) / 2);
+              const midY = link.midY ?? ((link.sourceY + link.targetY) / 2);
 
               // Marriage stroke color (warm romantic burgundy/rose gold, or golden bloodline)
               const marriageColor = (isLinkFocused || isLinkInBloodline)
@@ -3169,10 +3183,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
-                      {/* Matching arrowhead pointing to child */}
+                      {/* Matching arrowhead pointing to child (precomputed arrow path) */}
                       {link.arrow === 'down' && (
                         <path
-                          d={`M ${link.targetX - 4.5} ${link.targetY - 7} L ${link.targetX} ${link.targetY - 0.5} L ${link.targetX + 4.5} ${link.targetY - 7}`}
+                          d={link.arrowPath || `M ${link.targetX - 4.5} ${link.targetY - 7} L ${link.targetX} ${link.targetY - 0.5} L ${link.targetX + 4.5} ${link.targetY - 7}`}
                           fill="none"
                           stroke={descentColor}
                           strokeWidth={descentStrokeWidth}
@@ -3182,7 +3196,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
                       )}
                       {link.arrow === 'right' && (
                         <path
-                          d={`M ${link.targetX - 7} ${link.targetY - 4.5} L ${link.targetX - 0.5} ${link.targetY} L ${link.targetX - 7} ${link.targetY + 4.5}`}
+                          d={link.arrowPath || `M ${link.targetX - 7} ${link.targetY - 4.5} L ${link.targetX - 0.5} ${link.targetY} L ${link.targetX - 7} ${link.targetY + 4.5}`}
                           fill="none"
                           stroke={descentColor}
                           strokeWidth={descentStrokeWidth}
@@ -5145,235 +5159,120 @@ export const TreeView: React.FC<TreeViewProps> = ({
         )}
       </div>
 
-      {/* Person Report Modal (PDF / TXT generator) */}
-      {reportPersonId && (
-        <PersonReportModal
-          personId={reportPersonId}
-          database={database}
-          onClose={() => setReportPersonId(null)}
-          onSelectPerson={(id) => {
-            onSelectPerson(id);
-            setReportPersonId(null);
-          }}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {/* Person Report Modal (PDF / TXT generator) */}
+        {reportPersonId && (
+          <PersonReportModal
+            personId={reportPersonId}
+            database={database}
+            onClose={() => setReportPersonId(null)}
+            onSelectPerson={(id) => {
+              onSelectPerson(id);
+              setReportPersonId(null);
+            }}
+          />
+        )}
 
-      {/* Import History Modal */}
-      {showImportHistoryModal && (
-        <ImportHistoryModal
-          isOpen={showImportHistoryModal}
-          onClose={() => setShowImportHistoryModal(false)}
-          onSelectPerson={(id) => {
-            onSelectPerson(id);
-            setShowImportHistoryModal(false);
-          }}
-        />
-      )}
+        {/* Import History Modal */}
+        {showImportHistoryModal && (
+          <ImportHistoryModal
+            isOpen={showImportHistoryModal}
+            onClose={() => setShowImportHistoryModal(false)}
+            onSelectPerson={(id) => {
+              onSelectPerson(id);
+              setShowImportHistoryModal(false);
+            }}
+          />
+        )}
 
-      {/* Smart Merge Modal */}
-      {pendingMerge && (
-        <GedcomMergeModal
-          currentDatabase={database}
-          incomingDatabase={pendingMerge.incomingDb}
-          fileName={pendingMerge.fileName}
-          onClose={() => setPendingMerge(null)}
-          onApplyMerge={(result: MergeResult) => {
-            useGenealogyStore.getState().mergeGenealogyDatabase(pendingMerge.incomingDb, result, {
-              fileName: pendingMerge.fileName
-            });
-            const conflictMsg = result.conflictsResolvedCount > 0 ? `, вирішено ${result.conflictsResolvedCount} розбіжностей` : '';
-            setImportNotification({
-              message: `Успішно об'єднано: ${result.matchedCount} збігів доповнено даними${conflictMsg}, додано ${result.newPersonsCount} нових родичів!`
-            });
-            setPendingMerge(null);
-            setTimeout(() => {
-              centerTree();
-            }, 250);
-          }}
-          onApplyReplace={(incomingDb) => {
-            if (onImportDatabase) {
-              onImportDatabase(incomingDb);
-            } else {
-              useGenealogyStore.getState().loadGenealogyDatabase(incomingDb, {
+        {/* Smart Merge Modal */}
+        {pendingMerge && (
+          <GedcomMergeModal
+            currentDatabase={database}
+            incomingDatabase={pendingMerge.incomingDb}
+            fileName={pendingMerge.fileName}
+            onClose={() => setPendingMerge(null)}
+            onApplyMerge={(result: MergeResult) => {
+              useGenealogyStore.getState().mergeGenealogyDatabase(pendingMerge.incomingDb, result, {
                 fileName: pendingMerge.fileName
               });
-            }
-            if (incomingDb.rootPersonId) {
-              onChangeRoot(incomingDb.rootPersonId);
-            }
-            setImportNotification({
-              message: `Успішно замінено дерево: завантажено ${Object.keys(incomingDb.persons || {}).length} осіб.`
-            });
-            setPendingMerge(null);
-            setTimeout(() => {
-              centerTree();
-            }, 250);
-          }}
-        />
-      )}
+              const conflictMsg = result.conflictsResolvedCount > 0 ? `, вирішено ${result.conflictsResolvedCount} розбіжностей` : '';
+              setImportNotification({
+                message: `Успішно об'єднано: ${result.matchedCount} збігів доповнено даними${conflictMsg}, додано ${result.newPersonsCount} нових родичів!`
+              });
+              setPendingMerge(null);
+              setTimeout(() => {
+                centerTree();
+              }, 250);
+            }}
+            onApplyReplace={(incomingDb) => {
+              if (onImportDatabase) {
+                onImportDatabase(incomingDb);
+              } else {
+                useGenealogyStore.getState().loadGenealogyDatabase(incomingDb, {
+                  fileName: pendingMerge.fileName
+                });
+              }
+              if (incomingDb.rootPersonId) {
+                onChangeRoot(incomingDb.rootPersonId);
+              }
+              setImportNotification({
+                message: `Успішно замінено дерево: завантажено ${Object.keys(incomingDb.persons || {}).length} осіб.`
+              });
+              setPendingMerge(null);
+              setTimeout(() => {
+                centerTree();
+              }, 250);
+            }}
+          />
+        )}
 
-      {/* Interactive Smart Merge Modal */}
-      {activeMergePair && (
-        <SmartMergeModal
-          pair={activeMergePair}
-          allPersons={Object.values(database.persons || {}) as Person[]}
-          allFamilies={database.families || {}}
-          isOpen={Boolean(activeMergePair)}
-          onClose={() => setActiveMergePair(null)}
-          onMergeComplete={(updatedPersons, updatedFamilies, masterName, extra) => {
-            ignoreDuplicatePair(activeMergePair.personA.id, activeMergePair.personB.id);
-            if (extra?.deletedPersonId && extra?.masterPerson?.id) {
-              ignoreDuplicatePair(extra.deletedPersonId, extra.masterPerson.id);
-            }
-            mergePersons({
-              updatedPersons,
-              updatedFamilies,
-              masterPerson: extra?.masterPerson,
-              deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : []
-            });
-            setActiveMergePair(null);
-            setImportNotification({
-              message: `Особи успішно об'єднані в профіль «${masterName}».`
-            });
-          }}
-          onMarkNotDuplicate={(pair) => {
-            ignoreDuplicatePair(pair.personA.id, pair.personB.id);
-            setActiveMergePair(null);
-            setImportNotification({
-              message: `Пару позначено як «Не дублікат» і приховано зі списку.`
-            });
-          }}
-        />
-      )}
+        {/* Interactive Smart Merge Modal */}
+        {activeMergePair && (
+          <SmartMergeModal
+            pair={activeMergePair}
+            allPersons={Object.values(database.persons || {}) as Person[]}
+            allFamilies={database.families || {}}
+            isOpen={Boolean(activeMergePair)}
+            onClose={() => setActiveMergePair(null)}
+            onMergeComplete={(updatedPersons, updatedFamilies, masterName, extra) => {
+              ignoreDuplicatePair(activeMergePair.personA.id, activeMergePair.personB.id);
+              if (extra?.deletedPersonId && extra?.masterPerson?.id) {
+                ignoreDuplicatePair(extra.deletedPersonId, extra.masterPerson.id);
+              }
+              mergePersons({
+                updatedPersons,
+                updatedFamilies,
+                masterPerson: extra?.masterPerson,
+                deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : []
+              });
+              setActiveMergePair(null);
+              setImportNotification({
+                message: `Особи успішно об'єднані в профіль «${masterName}».`
+              });
+            }}
+            onMarkNotDuplicate={(pair) => {
+              ignoreDuplicatePair(pair.personA.id, pair.personB.id);
+              setActiveMergePair(null);
+              setImportNotification({
+                message: `Пару позначено як «Не дублікат» і приховано зі списку.`
+              });
+            }}
+          />
+        )}
+      </React.Suspense>
 
       {/* Right-click Context Menu for Person Node in Tree */}
-      {contextMenu && database.persons[contextMenu.personId] && (() => {
-        const p = database.persons[contextMenu.personId];
-        const isMale = p.gender === 'male' || (p as any).sex === 'M';
-        const isFemale = p.gender === 'female' || (p as any).sex === 'F';
-        const name = `${p.lastName || ''} ${p.firstName || ''}`.trim() || 'Особа';
-        const personUrl = getPersonUrl(p.id);
-
-        return (
-          <div
-            className="fixed inset-0 z-50 pointer-events-auto"
-            onClick={() => setContextMenu(null)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setContextMenu(null);
-            }}
-          >
-            <div
-              style={{
-                position: 'fixed',
-                left: `${Math.max(10, Math.min(contextMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 250))}px`,
-                top: `${Math.max(10, Math.min(contextMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 320))}px`
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-64 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden py-1.5 z-50 text-sm animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10 dark:ring-white/10"
-            >
-              <div className="px-3.5 py-2.5 border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-850">
-                <div className="flex items-center gap-1.5 font-bold text-neutral-900 dark:text-neutral-100 truncate text-xs">
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${isMale ? 'bg-sky-500' : isFemale ? 'bg-rose-500' : 'bg-slate-400'}`} />
-                  <span className="truncate">{name}</span>
-                </div>
-                <div className="text-[10px] text-neutral-500 font-mono mt-0.5">
-                  ID: {p.id}
-                </div>
-              </div>
-
-              <div className="py-1">
-                {/* 1. Open in new tab - prominent anchor */}
-                <a
-                  href={personUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setContextMenu(null)}
-                  className="flex items-center gap-2.5 px-3.5 py-2 text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/40 font-semibold transition-colors cursor-pointer group"
-                >
-                  <ExternalLink className="w-4 h-4 shrink-0 text-sky-500 group-hover:scale-110 transition-transform" />
-                  <span>Відкрити в новій вкладці</span>
-                </a>
-
-                {/* 2. Open inspector modal */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSelectPerson(p.id);
-                    setContextMenu(null);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
-                >
-                  <Eye className="w-4 h-4 shrink-0 text-amber-500" />
-                  <span>Переглянути анкету</span>
-                </button>
-
-                {/* 3. Edit person */}
-                {!isReadOnly && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onEditPerson) onEditPerson(p.id);
-                      else onSelectPerson(p.id);
-                      setContextMenu(null);
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
-                  >
-                    <Pencil className="w-4 h-4 shrink-0 text-blue-500" />
-                    <span>Редагувати картку</span>
-                  </button>
-                )}
-
-                {/* 4. Center tree on this person */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChangeRoot(p.id);
-                    setContextMenu(null);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
-                >
-                  <Target className="w-4 h-4 shrink-0 text-emerald-500" />
-                  <span>Зробити центром дерева</span>
-                </button>
-
-                {/* 5. Add relative */}
-                {!isReadOnly && onOpenRelationManager && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onOpenRelationManager(p.id);
-                      setContextMenu(null);
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left cursor-pointer"
-                  >
-                    <UserPlus className="w-4 h-4 shrink-0 text-emerald-500" />
-                    <span>Додати родича</span>
-                  </button>
-                )}
-
-                <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
-
-                {/* 6. Copy link */}
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const fullUrl = new URL(personUrl, window.location.origin).href;
-                      await navigator.clipboard.writeText(fullUrl);
-                    } catch {}
-                    setContextMenu(null);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-left text-xs cursor-pointer"
-                >
-                  <Copy className="w-3.5 h-3.5 shrink-0" />
-                  <span>Копіювати посилання</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      <TreeContextMenu
+        contextMenu={contextMenu}
+        person={contextMenu ? database.persons[contextMenu.personId] : null}
+        isReadOnly={isReadOnly}
+        onClose={() => setContextMenu(null)}
+        onSelectPerson={onSelectPerson}
+        onEditPerson={onEditPerson}
+        onChangeRoot={onChangeRoot}
+        onOpenRelationManager={onOpenRelationManager}
+      />
     </div>
   );
 };

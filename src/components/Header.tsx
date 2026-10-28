@@ -8,11 +8,12 @@ import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { getTabUrl } from '../stores/useUIStore';
 import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
-import { ShareTreeModal } from '../rodovid/components/modals/ShareTreeModal';
-import { GedcomModal } from '../rodovid/components/modals/GedcomModal';
 import { HeaderSearchBar } from './HeaderSearchBar';
-import { GlobalSearchModal } from './GlobalSearchModal';
 import { testConnection } from '../lib/firebase';
+
+const ShareTreeModal = React.lazy(() => import('../rodovid/components/modals/ShareTreeModal').then(m => ({ default: m.ShareTreeModal })));
+const GedcomModal = React.lazy(() => import('../rodovid/components/modals/GedcomModal').then(m => ({ default: m.GedcomModal })));
+const GlobalSearchModal = React.lazy(() => import('./GlobalSearchModal').then(m => ({ default: m.GlobalSearchModal })));
 
 interface HeaderProps {
   onOpenAddPerson: () => void;
@@ -772,35 +773,37 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
         </div>
       )}
 
-      {showShareModal && (
-        <ShareTreeModal
-          isOpen={showShareModal}
-          onClose={() => setShowShareModal(false)}
-          database={getGenealogyDatabase()}
-          activePersonId={selectedPersonId || undefined}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {showShareModal && (
+          <ShareTreeModal
+            isOpen={showShareModal}
+            onClose={() => setShowShareModal(false)}
+            database={getGenealogyDatabase()}
+            activePersonId={selectedPersonId || undefined}
+          />
+        )}
 
-      {showGedcomModal && (
-        <GedcomModal
-          database={getGenealogyDatabase()}
-          initialTab={gedcomInitialTab}
-          onSelectPerson={onInspectPerson}
-          onClose={() => setShowGedcomModal(false)}
-          onImportDatabase={(newDb) => {
-            loadGenealogyDatabase(newDb);
-            setShowGedcomModal(false);
-          }}
-        />
-      )}
+        {showGedcomModal && (
+          <GedcomModal
+            database={getGenealogyDatabase()}
+            initialTab={gedcomInitialTab}
+            onSelectPerson={onInspectPerson}
+            onClose={() => setShowGedcomModal(false)}
+            onImportDatabase={(newDb) => {
+              loadGenealogyDatabase(newDb);
+              setShowGedcomModal(false);
+            }}
+          />
+        )}
 
-      {showGlobalSearchModal && (
-        <GlobalSearchModal
-          isOpen={showGlobalSearchModal}
-          onClose={() => setShowGlobalSearchModal(false)}
-          onInspectPerson={onInspectPerson}
-        />
-      )}
+        {showGlobalSearchModal && (
+          <GlobalSearchModal
+            isOpen={showGlobalSearchModal}
+            onClose={() => setShowGlobalSearchModal(false)}
+            onInspectPerson={onInspectPerson}
+          />
+        )}
+      </React.Suspense>
     </>
   );
 };

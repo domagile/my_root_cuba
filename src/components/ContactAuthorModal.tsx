@@ -7,7 +7,8 @@ import {
 import { useGenealogy } from '../context/GenealogyContext';
 import { getThemeConfig } from '../utils/theme';
 
-export const AUTHOR_CONTACT_EMAIL = 'domagile@gmail.com';
+import { AUTHOR_CONTACT_EMAIL } from '../constants/contact';
+export { AUTHOR_CONTACT_EMAIL };
 
 interface ContactAuthorModalProps {
   isOpen: boolean;

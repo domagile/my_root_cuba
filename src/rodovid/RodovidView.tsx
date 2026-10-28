@@ -7,32 +7,46 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { GenealogyDatabase, ViewMode, Person, Family, Source } from './types/genealogy';
 import { Header } from './components/layout/Header';
 import { TreeView } from './components/views/TreeView';
-import { FanChartView } from './components/views/FanChartView';
-import { PersonsListView } from './components/views/PersonsListView';
-import { FamiliesListView } from './components/views/FamiliesListView';
-import { EventsTimelineView } from './components/views/EventsTimelineView';
-import { PlacesMapView } from './components/views/PlacesMapView';
-import { SourcesView } from './components/views/SourcesView';
-import { KinshipCalculatorView } from './components/views/KinshipCalculatorView';
-import { StatisticsView } from './components/views/StatisticsView';
-import { ReportsView } from './components/views/ReportsView';
-import { ConflictsView } from './components/views/ConflictsView';
-import { PersonDetailModal } from './components/modals/PersonDetailModal';
-import { EditFamilyModal } from './components/modals/EditFamilyModal';
-import { EditSourceModal } from './components/modals/EditSourceModal';
-import { GedcomModal } from './components/modals/GedcomModal';
-import { ShareTreeModal } from './components/modals/ShareTreeModal';
-import { GlobalSearchModal } from '../components/GlobalSearchModal';
-import { RelationManagerModal } from '../components/Tree/RelationManagerModal';
-import { AddPersonModal } from '../components/Tree/AddPersonModal';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useUIStore } from '../stores/useUIStore';
 import { useAuthStore, isMasterAdminEmail } from '../stores/useAuthStore';
-import { AuthModal } from '../components/AuthModal';
-import { ContactAuthorModal, AUTHOR_CONTACT_EMAIL } from '../components/ContactAuthorModal';
+import { AUTHOR_CONTACT_EMAIL } from '../constants/contact';
 import { getThemeConfig } from '../utils/theme';
 import { findRootPersonId } from './utils/relationship';
-import { Globe, Shield, ArrowLeft, Download, Check, Sparkles, Mail } from 'lucide-react';
+import { Globe, Shield, ArrowLeft, Download, Check, Sparkles, Mail, RefreshCw } from 'lucide-react';
+
+// Lazy-loaded secondary views
+const FanChartView = React.lazy(() => import('./components/views/FanChartView').then(m => ({ default: m.FanChartView })));
+const PersonsListView = React.lazy(() => import('./components/views/PersonsListView').then(m => ({ default: m.PersonsListView })));
+const FamiliesListView = React.lazy(() => import('./components/views/FamiliesListView').then(m => ({ default: m.FamiliesListView })));
+const EventsTimelineView = React.lazy(() => import('./components/views/EventsTimelineView').then(m => ({ default: m.EventsTimelineView })));
+const PlacesMapView = React.lazy(() => import('./components/views/PlacesMapView').then(m => ({ default: m.PlacesMapView })));
+const SourcesView = React.lazy(() => import('./components/views/SourcesView').then(m => ({ default: m.SourcesView })));
+const KinshipCalculatorView = React.lazy(() => import('./components/views/KinshipCalculatorView').then(m => ({ default: m.KinshipCalculatorView })));
+const StatisticsView = React.lazy(() => import('./components/views/StatisticsView').then(m => ({ default: m.StatisticsView })));
+const ReportsView = React.lazy(() => import('./components/views/ReportsView').then(m => ({ default: m.ReportsView })));
+const ConflictsView = React.lazy(() => import('./components/views/ConflictsView').then(m => ({ default: m.ConflictsView })));
+
+// Lazy-loaded modals
+const PersonDetailModal = React.lazy(() => import('./components/modals/PersonDetailModal').then(m => ({ default: m.PersonDetailModal })));
+const EditFamilyModal = React.lazy(() => import('./components/modals/EditFamilyModal').then(m => ({ default: m.EditFamilyModal })));
+const EditSourceModal = React.lazy(() => import('./components/modals/EditSourceModal').then(m => ({ default: m.EditSourceModal })));
+const GedcomModal = React.lazy(() => import('./components/modals/GedcomModal').then(m => ({ default: m.GedcomModal })));
+const ShareTreeModal = React.lazy(() => import('./components/modals/ShareTreeModal').then(m => ({ default: m.ShareTreeModal })));
+const GlobalSearchModal = React.lazy(() => import('../components/GlobalSearchModal').then(m => ({ default: m.GlobalSearchModal })));
+const RelationManagerModal = React.lazy(() => import('../components/Tree/RelationManagerModal').then(m => ({ default: m.RelationManagerModal })));
+const AddPersonModal = React.lazy(() => import('../components/Tree/AddPersonModal').then(m => ({ default: m.AddPersonModal })));
+const AuthModal = React.lazy(() => import('../components/AuthModal').then(m => ({ default: m.AuthModal })));
+const ContactAuthorModal = React.lazy(() => import('../components/ContactAuthorModal').then(m => ({ default: m.ContactAuthorModal })));
+
+const ViewLoadingFallback = () => (
+  <div className="h-full w-full flex items-center justify-center p-8">
+    <div className="flex items-center gap-2.5 text-xs text-neutral-400 font-medium animate-pulse">
+      <RefreshCw className="w-4 h-4 animate-spin text-[#B88E3E]" />
+      <span>Завантаження розділу...</span>
+    </div>
+  </div>
+);
 
 interface RodovidViewProps {
   customDatabase?: GenealogyDatabase;
@@ -405,245 +419,249 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
           />
         )}
 
-        {currentView === 'fan' && (
-          <FanChartView
+        <React.Suspense fallback={<ViewLoadingFallback />}>
+          {currentView === 'fan' && (
+            <FanChartView
+              database={database}
+              activePersonId={activePersonId}
+              onSelectPerson={(id) => setInspectPersonId(id)}
+              onChangeRoot={(id) => setSelectedPersonId(id)}
+              onSwitchToTree={() => setCurrentView('tree')}
+              onImportDatabase={handleImportDatabase}
+            />
+          )}
+
+          {currentView === 'persons' && (
+            <div className="h-full w-full overflow-y-auto overflow-x-auto">
+              <PersonsListView
+                database={database}
+                isReadOnly={isReadOnly}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+                onEditPerson={(id) => setEditPersonTarget(id)}
+                onDeletePerson={handleDeletePerson}
+                onOpenAddPerson={() => setEditPersonTarget('NEW')}
+                onChangeRoot={(id) => {
+                  setSelectedPersonId(id);
+                  setCurrentView('tree');
+                }}
+                onOpenKinshipWith={handleOpenKinshipWith}
+                onUpdatePerson={updatePerson}
+              />
+            </div>
+          )}
+
+          {currentView === 'families' && (
+            <div className="h-full w-full overflow-y-auto overflow-x-auto">
+              <FamiliesListView
+                database={database}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+                onEditFamily={(id) => setEditFamilyTarget(id)}
+                onDeleteFamily={handleDeleteFamily}
+                onOpenAddFamily={() => setEditFamilyTarget('NEW')}
+                onChangeRoot={(id) => {
+                  setSelectedPersonId(id);
+                  setCurrentView('tree');
+                }}
+              />
+            </div>
+          )}
+
+          {currentView === 'timeline' && (
+            <div className="h-full w-full overflow-y-auto overflow-x-auto">
+              <EventsTimelineView
+                database={database}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+              />
+            </div>
+          )}
+
+          {(currentView === 'map' || currentView === 'places') && (
+            <div className="h-full w-full overflow-hidden">
+              <PlacesMapView
+                database={database}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+              />
+            </div>
+          )}
+
+          {currentView === 'sources' && (
+            <div className="h-full w-full overflow-y-auto overflow-x-auto">
+              <SourcesView
+                database={database}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+                onOpenAddSource={() => setEditSourceTarget('NEW')}
+                onEditSource={(id) => setEditSourceTarget(id)}
+                onDeleteSource={handleDeleteSource}
+              />
+            </div>
+          )}
+
+          {(currentView === 'calculator' || currentView === 'kinship') && (
+            <div className="h-full w-full overflow-y-auto overflow-x-auto">
+              <KinshipCalculatorView
+                database={database}
+                initialPersonAId={kinshipInitialAId || activePersonId}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+              />
+            </div>
+          )}
+
+          {(currentView === 'statistics' || currentView === 'stats') && (
+            <div className="h-full w-full overflow-y-auto overflow-x-auto">
+              <StatisticsView
+                database={database}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+              />
+            </div>
+          )}
+
+          {currentView === 'reports' && (
+            <div className="h-full w-full overflow-y-auto overflow-x-auto">
+              <ReportsView
+                database={database}
+                activePersonId={activePersonId}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+              />
+            </div>
+          )}
+
+          {(currentView === 'conflicts' || currentView === 'audit' || currentView === 'duplicates') && (
+            <div className="h-full w-full overflow-y-auto overflow-x-auto">
+              <ConflictsView
+                persons={persons}
+                families={families}
+                initialSubTab={currentView === 'duplicates' ? 'duplicates' : 'health'}
+                onUpdatePersons={(newPersons) => setPersons(newPersons)}
+                onUpdateFamilies={(newFamilies) => setFamilies(newFamilies)}
+                onSelectPerson={(id) => setInspectPersonId(id)}
+              />
+            </div>
+          )}
+        </React.Suspense>
+      </div>
+
+      {/* Modals */}
+      <React.Suspense fallback={null}>
+        {inspectPersonId && (
+          <PersonDetailModal
+            personId={inspectPersonId}
             database={database}
-            activePersonId={activePersonId}
+            isReadOnly={isReadOnly}
+            onClose={() => setInspectPersonId(null)}
             onSelectPerson={(id) => setInspectPersonId(id)}
-            onChangeRoot={(id) => setSelectedPersonId(id)}
-            onSwitchToTree={() => setCurrentView('tree')}
+            onEditPerson={(id) => {
+              setInspectPersonId(null);
+              setEditPersonTarget(id);
+            }}
+            onDeletePerson={handleDeletePerson}
+            onChangeRoot={(id) => {
+              setSelectedPersonId(id);
+              setCurrentView('tree');
+            }}
+            onOpenKinshipWith={handleOpenKinshipWith}
+            onOpenRelationManager={(id) => {
+              setInspectPersonId(null);
+              setRelationManagerPersonId(id);
+            }}
+            onAddRelation={(type, targetPersonId) => {
+              setInspectPersonId(null);
+              setAddRelation({ type, targetPersonId });
+            }}
+          />
+        )}
+
+        {editPersonTarget && (
+          <AddPersonModal
+            personId={editPersonTarget === 'NEW' ? null : editPersonTarget}
+            onClose={() => setEditPersonTarget(null)}
+            onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
+            onChangeRoot={(id) => {
+              setSelectedPersonId(id);
+              setCurrentView('tree');
+            }}
+            onOpenKinshipWith={handleOpenKinshipWith}
+            onDeletePerson={handleDeletePerson}
+            isReadOnly={isReadOnly}
+          />
+        )}
+
+        {editFamilyTarget && (
+          <EditFamilyModal
+            familyId={editFamilyTarget === 'NEW' ? null : editFamilyTarget}
+            database={database}
+            onClose={() => setEditFamilyTarget(null)}
+            onSave={handleSaveFamily}
+          />
+        )}
+
+        {editSourceTarget && (
+          <EditSourceModal
+            sourceId={editSourceTarget === 'NEW' ? null : editSourceTarget}
+            database={database}
+            onClose={() => setEditSourceTarget(null)}
+            onSave={handleSaveSource}
+            onDelete={handleDeleteSource}
+          />
+        )}
+
+        {isGedcomModalOpen && (
+          <GedcomModal
+            database={database}
+            onClose={() => setIsGedcomModalOpen(false)}
             onImportDatabase={handleImportDatabase}
           />
         )}
 
-        {currentView === 'persons' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-auto">
-            <PersonsListView
-              database={database}
-              isReadOnly={isReadOnly}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-              onEditPerson={(id) => setEditPersonTarget(id)}
-              onDeletePerson={handleDeletePerson}
-              onOpenAddPerson={() => setEditPersonTarget('NEW')}
-              onChangeRoot={(id) => {
-                setSelectedPersonId(id);
-                setCurrentView('tree');
-              }}
-              onOpenKinshipWith={handleOpenKinshipWith}
-              onUpdatePerson={updatePerson}
-            />
-          </div>
+        {relationManagerPersonId && (
+          <RelationManagerModal
+            targetPerson={persons.find((p) => p.id === relationManagerPersonId) || { id: relationManagerPersonId, firstName: 'Особа', lastName: '' } as any}
+            onClose={() => setRelationManagerPersonId(null)}
+            onOpenAddModalWithRelation={(type, targetId) => {
+              setRelationManagerPersonId(null);
+              setAddRelation({ type, targetPersonId: targetId });
+            }}
+          />
         )}
 
-        {currentView === 'families' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-auto">
-            <FamiliesListView
-              database={database}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-              onEditFamily={(id) => setEditFamilyTarget(id)}
-              onDeleteFamily={handleDeleteFamily}
-              onOpenAddFamily={() => setEditFamilyTarget('NEW')}
-              onChangeRoot={(id) => {
-                setSelectedPersonId(id);
-                setCurrentView('tree');
-              }}
-            />
-          </div>
+        {addRelation && (
+          <AddPersonModal
+            initialRelation={addRelation}
+            onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
+            onClose={() => setAddRelation(null)}
+          />
         )}
 
-        {currentView === 'timeline' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-auto">
-            <EventsTimelineView
-              database={database}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-            />
-          </div>
+        {isShareModalOpen && (
+          <ShareTreeModal
+            isOpen={isShareModalOpen}
+            onClose={() => setIsShareModalOpen(false)}
+            database={database}
+            activePersonId={activePersonId}
+          />
         )}
 
-        {(currentView === 'map' || currentView === 'places') && (
-          <div className="h-full w-full overflow-hidden">
-            <PlacesMapView
-              database={database}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-            />
-          </div>
+        {isAuthModalOpen && (
+          <AuthModal
+            isOpen={isAuthModalOpen}
+            onClose={() => setIsAuthModalOpen(false)}
+          />
         )}
 
-        {currentView === 'sources' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-auto">
-            <SourcesView
-              database={database}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-              onOpenAddSource={() => setEditSourceTarget('NEW')}
-              onEditSource={(id) => setEditSourceTarget(id)}
-              onDeleteSource={handleDeleteSource}
-            />
-          </div>
+        {isGlobalSearchModalOpen && (
+          <GlobalSearchModal
+            isOpen={isGlobalSearchModalOpen}
+            onClose={() => setIsGlobalSearchModalOpen(false)}
+            onInspectPerson={(id) => setInspectPersonId(id)}
+          />
         )}
 
-        {(currentView === 'calculator' || currentView === 'kinship') && (
-          <div className="h-full w-full overflow-y-auto overflow-x-auto">
-            <KinshipCalculatorView
-              database={database}
-              initialPersonAId={kinshipInitialAId || activePersonId}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-            />
-          </div>
+        {showContactModal && (
+          <ContactAuthorModal
+            isOpen={showContactModal}
+            onClose={() => setShowContactModal(false)}
+          />
         )}
-
-        {(currentView === 'statistics' || currentView === 'stats') && (
-          <div className="h-full w-full overflow-y-auto overflow-x-auto">
-            <StatisticsView
-              database={database}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-            />
-          </div>
-        )}
-
-        {currentView === 'reports' && (
-          <div className="h-full w-full overflow-y-auto overflow-x-auto">
-            <ReportsView
-              database={database}
-              activePersonId={activePersonId}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-            />
-          </div>
-        )}
-
-        {(currentView === 'conflicts' || currentView === 'audit' || currentView === 'duplicates') && (
-          <div className="h-full w-full overflow-y-auto overflow-x-auto">
-            <ConflictsView
-              persons={persons}
-              families={families}
-              initialSubTab={currentView === 'duplicates' ? 'duplicates' : 'health'}
-              onUpdatePersons={(newPersons) => setPersons(newPersons)}
-              onUpdateFamilies={(newFamilies) => setFamilies(newFamilies)}
-              onSelectPerson={(id) => setInspectPersonId(id)}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Modals */}
-      {inspectPersonId && (
-        <PersonDetailModal
-          personId={inspectPersonId}
-          database={database}
-          isReadOnly={isReadOnly}
-          onClose={() => setInspectPersonId(null)}
-          onSelectPerson={(id) => setInspectPersonId(id)}
-          onEditPerson={(id) => {
-            setInspectPersonId(null);
-            setEditPersonTarget(id);
-          }}
-          onDeletePerson={handleDeletePerson}
-          onChangeRoot={(id) => {
-            setSelectedPersonId(id);
-            setCurrentView('tree');
-          }}
-          onOpenKinshipWith={handleOpenKinshipWith}
-          onOpenRelationManager={(id) => {
-            setInspectPersonId(null);
-            setRelationManagerPersonId(id);
-          }}
-          onAddRelation={(type, targetPersonId) => {
-            setInspectPersonId(null);
-            setAddRelation({ type, targetPersonId });
-          }}
-        />
-      )}
-
-      {editPersonTarget && (
-        <AddPersonModal
-          personId={editPersonTarget === 'NEW' ? null : editPersonTarget}
-          onClose={() => setEditPersonTarget(null)}
-          onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
-          onChangeRoot={(id) => {
-            setSelectedPersonId(id);
-            setCurrentView('tree');
-          }}
-          onOpenKinshipWith={handleOpenKinshipWith}
-          onDeletePerson={handleDeletePerson}
-          isReadOnly={isReadOnly}
-        />
-      )}
-
-      {editFamilyTarget && (
-        <EditFamilyModal
-          familyId={editFamilyTarget === 'NEW' ? null : editFamilyTarget}
-          database={database}
-          onClose={() => setEditFamilyTarget(null)}
-          onSave={handleSaveFamily}
-        />
-      )}
-
-      {editSourceTarget && (
-        <EditSourceModal
-          sourceId={editSourceTarget === 'NEW' ? null : editSourceTarget}
-          database={database}
-          onClose={() => setEditSourceTarget(null)}
-          onSave={handleSaveSource}
-          onDelete={handleDeleteSource}
-        />
-      )}
-
-      {isGedcomModalOpen && (
-        <GedcomModal
-          database={database}
-          onClose={() => setIsGedcomModalOpen(false)}
-          onImportDatabase={handleImportDatabase}
-        />
-      )}
-
-      {relationManagerPersonId && (
-        <RelationManagerModal
-          targetPerson={persons.find((p) => p.id === relationManagerPersonId) || { id: relationManagerPersonId, firstName: 'Особа', lastName: '' } as any}
-          onClose={() => setRelationManagerPersonId(null)}
-          onOpenAddModalWithRelation={(type, targetId) => {
-            setRelationManagerPersonId(null);
-            setAddRelation({ type, targetPersonId: targetId });
-          }}
-        />
-      )}
-
-      {addRelation && (
-        <AddPersonModal
-          initialRelation={addRelation}
-          onSaveAndOpenProfile={(id) => setInspectPersonId(id)}
-          onClose={() => setAddRelation(null)}
-        />
-      )}
-
-      {isShareModalOpen && (
-        <ShareTreeModal
-          isOpen={isShareModalOpen}
-          onClose={() => setIsShareModalOpen(false)}
-          database={database}
-          activePersonId={activePersonId}
-        />
-      )}
-
-      {isAuthModalOpen && (
-        <AuthModal
-          isOpen={isAuthModalOpen}
-          onClose={() => setIsAuthModalOpen(false)}
-        />
-      )}
-
-      {isGlobalSearchModalOpen && (
-        <GlobalSearchModal
-          isOpen={isGlobalSearchModalOpen}
-          onClose={() => setIsGlobalSearchModalOpen(false)}
-          onInspectPerson={(id) => setInspectPersonId(id)}
-        />
-      )}
-
-      {showContactModal && (
-        <ContactAuthorModal
-          isOpen={showContactModal}
-          onClose={() => setShowContactModal(false)}
-        />
-      )}
+      </React.Suspense>
     </div>
   );
 };

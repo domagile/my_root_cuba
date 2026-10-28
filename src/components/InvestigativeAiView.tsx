@@ -36,6 +36,7 @@ import {
   Award
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
+import { useUIStore } from '../stores/useUIStore';
 import { ImportedMetricRow, RecordType } from '../types';
 import { findBestPersonMatch, areSurnamesPhoneticallyRelated } from '../utils/ukrainianPhonetics';
 
@@ -70,6 +71,7 @@ export const InvestigativeAiView: React.FC = () => {
     documents 
   } = useGenealogy();
 
+  const setActiveTab = useUIStore((s) => s.setActiveTab);
   const [scanMode, setScanMode] = useState<'ocr' | 'excel'>('ocr');
   
   // Excel states
@@ -472,8 +474,46 @@ export const InvestigativeAiView: React.FC = () => {
               <FileSpreadsheet className="w-4 h-4" />
               <span>Імпорт Excel / CSV</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('nyshporka')}
+              className="px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40"
+              title="Перейти до спеціалізованого ШІ-читання скоропису з ШІ-нотатками"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>ШІ-читання (Нишпорка)</span>
+            </button>
           </div>
         </div>
+      </div>
+
+      {/* Banner leading directly to Nyshporka HTR Reading Lab */}
+      <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border border-amber-500/30 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+            <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
+          </div>
+          <div>
+            <div className="font-bold text-xs text-neutral-100 flex items-center gap-2">
+              <span>Спеціалізоване ШІ-читання архівного скоропису (Нишпорка HTR)</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-bold uppercase tracking-wider">
+                ШІ-нотатки
+              </span>
+            </div>
+            <div className="text-[11px] text-neutral-400 mt-0.5">
+              Палеографічний аналіз сканів XVIII–XIX ст., автоматичні ШІ-нотатки, висновки по кожному аркушу та прив'язка до родоводу.
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setActiveTab('nyshporka')}
+          className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shrink-0 cursor-pointer transition-all shadow-sm flex items-center justify-center gap-1.5"
+        >
+          <span>Відкрити «ШІ-читання»</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* 2. MAIN INPUT CARD */}

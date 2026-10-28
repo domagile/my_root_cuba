@@ -26,7 +26,8 @@ export type NavigationTab =
   | 'matrix'
   | 'hypotheses'
   | 'settings'
-  | 'timeline';
+  | 'timeline'
+  | 'nyshporka';
 
 export type Gender = 'male' | 'female' | 'other' | 'M' | 'F' | 'U';
 

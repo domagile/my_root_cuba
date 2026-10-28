@@ -28,7 +28,8 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { TreeIcon, FanIcon, TreeOfLifeEmblem } from './common/GenealogyIcons';
-import { EmblemManagerModal } from './common/EmblemManagerModal';
+
+const EmblemManagerModal = React.lazy(() => import('./common/EmblemManagerModal').then(m => ({ default: m.EmblemManagerModal })));
 import { useUIStore, getTabUrl } from '../stores/useUIStore';
 import { useGenealogyStore } from '../stores/useGenealogyStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -58,13 +59,14 @@ export const Sidebar: React.FC = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isEmblemModalOpen, setIsEmblemModalOpen] = useState(false);
 
-  const rodovidItems: { id: ViewMode; label: string; icon: React.FC<{ className?: string }>; isPublic?: boolean }[] = [
+  const rodovidItems: { id: ViewMode | 'nyshporka'; label: string; icon: React.FC<{ className?: string }>; isPublic?: boolean }[] = [
     { id: 'tree', label: 'Дерево', icon: TreeIcon, isPublic: true },
     { id: 'fan', label: 'Віяло (Кругове)', icon: FanIcon, isPublic: true },
     { id: 'persons', label: `Особи (${personsCount})`, icon: Users },
     { id: 'timeline', label: 'Хроніка', icon: Calendar },
     { id: 'places', label: 'Місця', icon: MapPin },
     { id: 'sources', label: 'Архів джерел', icon: BookOpen },
+    { id: 'nyshporka', label: 'ШІ-читання (Нишпорка)', icon: Sparkles, isPublic: true },
     { id: 'kinship', label: 'Спорідненість', icon: Compass },
     { id: 'stats', label: 'Статистика', icon: BarChart3 },
     { id: 'reports', label: 'Звіти', icon: FileText },
@@ -72,24 +74,30 @@ export const Sidebar: React.FC = () => {
   ];
 
   const researchItems: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [
+    { id: 'nyshporka', label: 'ШІ-читання скоропису', icon: Sparkles },
     { id: 'ai-analysis', label: 'Слідчий AI аналіз', icon: Sparkles },
     { id: 'research', label: 'Детективні розкопки', icon: Compass },
     { id: 'matrix', label: 'Літопис подій', icon: CalendarDays },
     { id: 'hypotheses', label: 'Підозри & Гіпотези', icon: Lightbulb }
   ];
 
-  const handleRodovidClick = (item: { id: ViewMode; label: string; isPublic?: boolean }) => {
+  const handleRodovidClick = (item: { id: ViewMode | 'nyshporka'; label: string; isPublic?: boolean }) => {
+    if (item.id === 'nyshporka') {
+      setActiveTab('nyshporka');
+      setMobileMenuOpen(false);
+      return;
+    }
     if (!item.isPublic && !isWhitelisted) {
       openAuthModal(item.label);
       return;
     }
     setActiveTab('tree');
-    setRodovidView(item.id);
+    setRodovidView(item.id as ViewMode);
     setMobileMenuOpen(false);
   };
 
   const handleNavTabClick = (item: { id: NavigationTab; label: string }) => {
-    if (!isWhitelisted) {
+    if (item.id !== 'nyshporka' && !isWhitelisted) {
       openAuthModal(item.label);
       return;
     }
@@ -175,7 +183,7 @@ export const Sidebar: React.FC = () => {
             )}
             {(isWhitelisted ? rodovidItems : rodovidItems.filter((i) => i.isPublic)).map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === 'tree' && rodovidView === item.id;
+              const isActive = item.id === 'nyshporka' ? activeTab === 'nyshporka' : (activeTab === 'tree' && rodovidView === item.id);
               const itemUrl = getTabUrl(item.id, undefined, currentUser);
               return (
                 <div key={`rodovid-${item.id}`} className="relative group/nav flex items-center">
@@ -329,10 +337,14 @@ export const Sidebar: React.FC = () => {
         </div>
 
         {/* Emblem Manager Modal for user uploaded image */}
-        <EmblemManagerModal 
-          isOpen={isEmblemModalOpen} 
-          onClose={() => setIsEmblemModalOpen(false)} 
-        />
+        {isEmblemModalOpen && (
+          <React.Suspense fallback={null}>
+            <EmblemManagerModal 
+              isOpen={isEmblemModalOpen} 
+              onClose={() => setIsEmblemModalOpen(false)} 
+            />
+          </React.Suspense>
+        )}
       </aside>
     </>
   );

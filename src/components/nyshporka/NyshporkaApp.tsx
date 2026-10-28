@@ -23,10 +23,11 @@ import { NyshporkaProfile } from './NyshporkaProfile';
 
 interface NyshporkaAppProps {
   theme: any;
+  initialTab?: NyshporkaTab;
 }
 
-export const NyshporkaApp: React.FC<NyshporkaAppProps> = ({ theme }) => {
-  const [activeTab, setActiveTab] = useState<NyshporkaTab>('dashboard');
+export const NyshporkaApp: React.FC<NyshporkaAppProps> = ({ theme, initialTab = 'reading' }) => {
+  const [activeTab, setActiveTab] = useState<NyshporkaTab>(initialTab);
   const [activeViewerFrame, setActiveViewerFrame] = useState<string>('0001');
   const [activeViewerLine, setActiveViewerLine] = useState<number | null>(null);
 
