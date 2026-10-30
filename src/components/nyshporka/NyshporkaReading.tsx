@@ -21,6 +21,7 @@ import {
   Info
 } from 'lucide-react';
 import { useGenealogyStore } from '../../stores/useGenealogyStore';
+import { persistLocalData, idbGet } from '../../utils/indexedDbStorage';
 
 interface NyshporkaReadingProps {
   theme: any;
@@ -80,6 +81,21 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
     return initial;
   });
 
+  // Hydrate scanNotes from IndexedDB if available
+  useEffect(() => {
+    let isMounted = true;
+    idbGet<Record<string, ScanAiNoteState>>('nyshporka_reading_scan_ai_notes_v1').then((saved) => {
+      if (isMounted && saved && typeof saved === 'object') {
+        setScanNotes(prev => ({ ...prev, ...saved }));
+      }
+    }).catch((err) => {
+      console.warn('Failed to load scan notes from IndexedDB:', err);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const [copiedNote, setCopiedNote] = useState<boolean>(false);
   const [savedNoteFeedback, setSavedNoteFeedback] = useState<boolean>(false);
   const [selectedPersonToAttach, setSelectedPersonToAttach] = useState<string>('');
@@ -123,7 +139,7 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
     model: 'gemini-3.8-flash'
   };
 
-  // Helper to persist scan notes to localStorage
+  // Helper to persist scan notes to IndexedDB and mirrored storage
   const updateScanNoteState = (scanId: string, newNoteData: Partial<ScanAiNoteState>) => {
     setScanNotes(prev => {
       const updatedItem: ScanAiNoteState = {
@@ -135,11 +151,7 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
         ...newNoteData
       };
       const updatedAll = { ...prev, [scanId]: updatedItem };
-      try {
-        localStorage.setItem('nyshporka_reading_scan_ai_notes_v1', JSON.stringify(updatedAll));
-      } catch (err) {
-        console.warn('Failed to save scan notes to localStorage:', err);
-      }
+      persistLocalData('nyshporka_reading_scan_ai_notes_v1', updatedAll);
       return updatedAll;
     });
   };

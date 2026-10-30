@@ -52,8 +52,7 @@ export const Sidebar: React.FC = () => {
   const personsCount = useGenealogyStore((s) => s.persons.length);
   
   const currentUser = useAuthStore((s) => s.currentUser);
-  const whitelist = useAuthStore((s) => s.whitelist);
-  const isWhitelisted = isUserWhitelisted(currentUser, whitelist);
+  const isWhitelisted = useAuthStore((s) => isUserWhitelisted(s.currentUser, s.whitelist));
 
   const theme = getThemeConfig(themePalette);
   const [isCollapsed, setIsCollapsed] = useState(false);

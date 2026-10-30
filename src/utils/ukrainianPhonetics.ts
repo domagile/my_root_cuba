@@ -346,6 +346,221 @@ export function areSurnamesBilingualEquivalent(surnameA: string | undefined | nu
 }
 
 /**
+ * High-coverage bidirectional canonical name clusters for cross-lingual (Ukrainian <-> Russian)
+ * genealogical matching, including historical, church, and diminutive variants.
+ */
+export const BILINGUAL_NAME_CLUSTERS: string[][] = [
+  ['микола', 'николай', 'миколай', 'ніколай', 'коля', 'никола', 'миколка'],
+  ['олексій', 'алексей', 'олекса', 'алексий', 'льоша', 'леша', 'олешко', 'алексейка'],
+  ['олександр', 'александр', 'саша', 'шура', 'олесь', 'сашко', 'саня'],
+  ['михайло', 'михаил', 'михалко', 'мишко', 'миша', 'михайлик'],
+  ['дмитро', 'дмитрий', 'димитрий', 'митька', 'діма', 'дима', 'дмитрій'],
+  ['іван', 'иван', 'івась', 'іванко', 'іоанн', 'ваня', 'ванька'],
+  ['петро', 'петр', 'пётр', 'петька', 'петрик'],
+  ['катерина', 'екатерина', 'катька', 'катя', 'катрусенька'],
+  ['ганна', 'анна', 'анісья', 'гапка', 'ганя', 'аня', 'анечка', 'анисия'],
+  ['олена', 'елена', 'альона', 'алена', 'ілона', 'лена'],
+  ['григорій', 'григорий', 'григір', 'гриць', 'грицько', 'гріша', 'гриша'],
+  ['володимир', 'владимир', 'володя', 'вова', 'володька'],
+  ['тетяна', 'татьяна', 'таня', 'танечка'],
+  ['надія', 'надежда', 'надя'],
+  ['любов', 'любовь', 'люба'],
+  ['євген', 'евгений', 'євгеній', 'женя', 'євгенка'],
+  ['євгенія', 'евгения'],
+  ['федір', 'федор', 'фёдор', 'теодозій', 'федько', 'федот'],
+  ['степан', 'стефан', 'степа', 'стьопа', 'степанка'],
+  ['павло', 'павел', 'паша', 'павлик'],
+  ['семен', 'симеон', 'семён', 'сеня', 'семенко'],
+  ['данило', 'даниил', 'даниїл', 'данько', 'даня'],
+  ['василь', 'василий', 'василько', 'вася'],
+  ['пилип', 'филипп', 'філіп', 'філіпп', 'пилик'],
+  ['йосип', 'осип', 'иосиф', 'іосиф', 'юзеф'],
+  ['ілля', 'илья', 'іллій', 'илия', 'іллюша'],
+  ['тимофій', 'тимофей', 'тиміш', 'тіма'],
+  ['гнат', 'игнатий', 'ігнатій', 'ігнат', 'игнат'],
+  ['юрій', 'георгий', 'георгій', 'юрко', 'єгор', 'егорий', 'єгорій'],
+  ['кирило', 'кирилл', 'кирил'],
+  ['матвій', 'матвей', 'матфей', 'мотя'],
+  ['андрій', 'андрей', 'андрійко', 'андрюша'],
+  ['сергій', 'сергей', 'сергійко', 'серьожа', 'серёжа'],
+  ['ольга', 'ольга', 'оля', 'олька'],
+  ['марія', 'мария', 'марійка', 'маруся', 'маша'],
+  ['варвара', 'варя', 'варка'],
+  ['параска', 'параскева', 'прасковья', 'парасковія', 'паня'],
+  ['уляна', 'ульяна', 'юліана', 'юліанія', 'улянка'],
+  ['горпина', 'агрипина', 'агриппина'],
+  ['оксана', 'ксенія', 'ксения', 'оксанка'],
+  ['пелагія', 'пелагея', 'палажка', 'палагна'],
+  ['євдокія', 'евдокия', 'явдоха', 'докія', 'дуня'],
+  ['домнікія', 'домникия', 'домаха', 'домна'],
+  ['христина', 'кристина', 'христя'],
+  ['наталія', 'наталья', 'наталка', 'наталя', 'наташа'],
+  ['анастасія', 'анастасия', 'настя', 'настуся'],
+  ['дарина', 'дарья', 'дарка', 'одарка', 'даша'],
+  ['софія', 'софия', 'соня', 'софійка'],
+  ['поліна', 'полина'],
+  ['валентин', 'валентина', 'валя'],
+  ['костянтин', 'константин', 'кость', 'костя'],
+  ['роман', 'романко', 'рома'],
+  ['віктор', 'виктор', 'вітя', 'витя'],
+  ['борис', 'боря'],
+  ['леонід', 'леонид', 'льонька', 'леня'],
+  ['антін', 'антон', 'антоній'],
+  ['лук\'ян', 'лукьян', 'лука', 'лукіян'],
+  ['макар', 'макарій', 'макарий'],
+  ['захар', 'захарій', 'захарий'],
+  ['прокіп', 'прокофий', 'прокопій', 'прокоп'],
+  ['кузьма', 'козьма', 'косма'],
+  ['тарас', 'тарасик'],
+  ['яків', 'яков', 'яша'],
+  ['марко', 'марк'],
+  ['лаврентій', 'лаврентий', 'лаврін'],
+  ['богдан', 'богданко', 'бодя'],
+  ['ярослав', 'ярик', 'славик'],
+  ['святослав', 'святик'],
+  ['віра', 'вера'],
+  ['людмила', 'люда', 'мила'],
+  ['світлана', 'светлана', 'свєта', 'света'],
+  ['зинаїда', 'зинаида', 'зіна', 'зина'],
+  ['єлизавета', 'елизавета', 'ліза', 'лиза'],
+  ['марина', 'маринка'],
+  ['ірина', 'ирина', 'ярина', 'іра', 'ира'],
+  ['галина', 'галя'],
+  ['артем', 'артём', 'артемий', 'артемій', 'тьома'],
+  ['максим', 'максимко', 'макс'],
+  ['денис', 'дионисий', 'діонісій'],
+  ['глеб', 'гліб'],
+  ['євстафій', 'евстафий', 'остап', 'остафій'],
+  ['клим', 'климент', 'климентий', 'климентій'],
+  ['трохим', 'трофим', 'трохимко'],
+  ['устим', 'иустин', 'іустин', 'юстин'],
+  ['гордій', 'гордей', 'гордієнко'],
+  ['архип', 'архипп', 'охип'],
+  ['корній', 'корнелий', 'корнилий', 'корнійко'],
+  ['фома', 'хома'],
+  ['лукерія', 'гликерия', 'гликерія', 'ликера']
+];
+
+// O(1) Fast lookup index for name clusters
+const nameToClusterMap = new Map<string, Set<string>>();
+BILINGUAL_NAME_CLUSTERS.forEach((cluster) => {
+  const set = new Set(cluster);
+  cluster.forEach((name) => {
+    nameToClusterMap.set(name, set);
+    // Also add archaic Cyrillic normalized variant
+    const norm = normalizeArchaicUkrainian(name);
+    if (norm) nameToClusterMap.set(norm, set);
+  });
+});
+
+/**
+ * Returns all bilingual equivalent name variants (Ukrainian <-> Russian)
+ */
+export function getBilingualNameEquivalents(name: string): string[] {
+  if (!name) return [];
+  const clean = name.trim().toLowerCase().replace(/[`'’ʼ]/g, '');
+  const cluster = nameToClusterMap.get(clean) || nameToClusterMap.get(normalizeArchaicUkrainian(clean));
+  if (cluster) {
+    return Array.from(cluster);
+  }
+  return [clean];
+}
+
+/**
+ * Checks if two first names are equivalent across Ukrainian and Russian:
+ * e.g. "Николай" ~ "Микола", "Алексей" ~ "Олексій", "Екатерина" ~ "Катерина"
+ */
+export function areNamesEquivalent(nameA: string, nameB: string): boolean {
+  if (!nameA || !nameB) return false;
+  const a = nameA.trim().toLowerCase().replace(/[`'’ʼ]/g, '');
+  const b = nameB.trim().toLowerCase().replace(/[`'’ʼ]/g, '');
+  if (a === b) return true;
+
+  // 1. Cluster dictionary lookup
+  const clusterA = nameToClusterMap.get(a) || nameToClusterMap.get(normalizeArchaicUkrainian(a));
+  if (clusterA && (clusterA.has(b) || clusterA.has(normalizeArchaicUkrainian(b)))) {
+    return true;
+  }
+
+  // 2. Bilingual phonetic normalized equivalence
+  const biA = normalizeBilingualCyrillic(a);
+  const biB = normalizeBilingualCyrillic(b);
+  if (biA && biB && biA === biB) return true;
+
+  // 3. High similarity for rare/unlisted names
+  if (biA.length >= 4 && biB.length >= 4) {
+    const sim = getLevenshteinSimilarity(biA, biB);
+    if (sim >= 0.82) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Checks if two patronymics are equivalent across Ukrainian and Russian:
+ * e.g. "Николаевна" ~ "Миколаївна", "Алексеевич" ~ "Олексійович", "Иванович" ~ "Іванович"
+ */
+export function arePatronymicsEquivalent(patronA: string, patronB: string): boolean {
+  if (!patronA || !patronB) return false;
+  const a = patronA.trim().toLowerCase().replace(/[`'’ʼ]/g, '');
+  const b = patronB.trim().toLowerCase().replace(/[`'’ʼ]/g, '');
+  if (a === b) return true;
+
+  // Pattern matching patronymic suffixes
+  const patronymicSuffixes = /(?:ович|евич|євич|овна|евна|євна|івна|ївна|ич|іч|ична|ічна)$/;
+  const stemA = a.replace(patronymicSuffixes, '');
+  const stemB = b.replace(patronymicSuffixes, '');
+
+  if (stemA.length >= 3 && stemB.length >= 3) {
+    if (stemA === stemB) return true;
+    if (areNamesEquivalent(stemA, stemB)) return true;
+
+    const biStemA = normalizeBilingualCyrillic(stemA);
+    const biStemB = normalizeBilingualCyrillic(stemB);
+    if (biStemA === biStemB) return true;
+    if (getLevenshteinSimilarity(biStemA, biStemB) >= 0.8) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Universal Slavic Token Equivalence (Names, Patronymics, Surnames, Roots)
+ * Returns true if two words match in either Ukrainian or Russian spelling.
+ */
+export function areSlavicTokensEquivalent(tokenA: string, tokenB: string): boolean {
+  if (!tokenA || !tokenB) return false;
+  const a = tokenA.trim().toLowerCase();
+  const b = tokenB.trim().toLowerCase();
+  if (a === b) return true;
+
+  // 1. Direct name equivalence (e.g. "Николай" ~ "Микола")
+  if (areNamesEquivalent(a, b)) return true;
+
+  // 2. Patronymic equivalence (e.g. "Николаевна" ~ "Миколаївна")
+  if (arePatronymicsEquivalent(a, b)) return true;
+
+  // 3. Surname bilingual equivalence (e.g. "Надточей" ~ "Надточій", "Пирковский" ~ "Пірковський")
+  if (areSurnamesBilingualEquivalent(a, b)) return true;
+
+  // 4. Ukrainian gender/canonical surname equivalence
+  if (areSurnamesEquivalent(a, b)) return true;
+
+  // 5. Bilingual Cyrillic normalization
+  const biA = normalizeBilingualCyrillic(a);
+  const biB = normalizeBilingualCyrillic(b);
+  if (biA && biB && biA === biB) return true;
+
+  // 6. Substring prefix on bilingual form (e.g. "надточ" in "надточій")
+  if (biA.length >= 4 && biB.length >= 4) {
+    if (biA.startsWith(biB) || biB.startsWith(biA)) return true;
+    if (getLevenshteinSimilarity(biA, biB) >= 0.82) return true;
+  }
+
+  return false;
+}
+
+/**
  * Normalizes Ukrainian settlement/location names by stripping administrative prefixes,
  * prepositions, parish/district tails, and grammatical locative declensions
  * (e.g. "м.Бердянськ", "у с. Чернечий Яр", "Чернечому Яру", "с. Базилівка (Полтавська губ.)", "смт. Опішня" -> clean standard name)

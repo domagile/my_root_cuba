@@ -687,8 +687,8 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   return (
     <div className="flex flex-col h-full bg-stone-50 dark:bg-[#14171c] text-neutral-900 dark:text-neutral-100 overflow-hidden">
         {/* Top Profile Header Bar */}
-        <div className="p-3.5 sm:p-5 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 shadow-xs">
-          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+        <div className="p-3.5 sm:p-5 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 shrink-0 shadow-xs">
+          <div className="flex items-start sm:items-center gap-3 min-w-0">
             <div
               className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 border-2 shadow-xs ${
                 isMale
@@ -708,7 +708,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                 <User className="w-6 h-6 stroke-[1.8]" />
               )}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                 <h2 className="font-extrabold text-base sm:text-lg text-neutral-900 dark:text-white leading-tight break-words">
                   {lastName} {hasMaiden && <span className="text-amber-600 dark:text-amber-400 font-semibold">({maidenName}) </span>}
@@ -761,7 +761,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
           </div>
 
           {/* Action Controls in Header */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-stone-100 dark:border-[#272c33]">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap shrink-0 pt-2 2xl:pt-0 border-t 2xl:border-t-0 border-stone-100 dark:border-[#272c33]">
             {/* Main Edit Person Icon / Button */}
             {!isReadOnly && (
               <button

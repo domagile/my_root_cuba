@@ -10,7 +10,7 @@ import { purgeUnknownPlaceholderPersons } from './unknownPersonCleaner';
 /**
  * Robust GEDCOM 5.5 / 5.5.1 / 7.0 Parser
  */
-export function parseGedcom(text: string): GenealogyDatabase {
+export function parseGedcom(text: string, onProgress?: (percent: number) => void): GenealogyDatabase {
   // Strip UTF-8 BOM if present
   const cleanText = text.replace(/^\uFEFF/, '');
   const lines = cleanText.split(/\r?\n/);
@@ -91,7 +91,11 @@ export function parseGedcom(text: string): GenealogyDatabase {
     }
   };
 
-  for (let i = 0; i < lines.length; i++) {
+  const totalLines = lines.length;
+  for (let i = 0; i < totalLines; i++) {
+    if (onProgress && i % 400 === 0 && totalLines > 0) {
+      onProgress(Math.min(99, Math.round((i / totalLines) * 100)));
+    }
     const rawLine = lines[i];
     const line = rawLine.trim();
     if (!line) continue;
@@ -285,6 +289,10 @@ export function parseGedcom(text: string): GenealogyDatabase {
   const candidatesWithRelations = personList.filter((p) => (p.childrenIds && p.childrenIds.length > 0) || p.fatherId || p.motherId);
   if (candidatesWithRelations.length > 0) {
     rootPersonId = candidatesWithRelations[0].id;
+  }
+
+  if (onProgress) {
+    onProgress(100);
   }
 
   return {

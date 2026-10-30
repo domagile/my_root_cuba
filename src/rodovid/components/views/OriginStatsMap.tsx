@@ -134,6 +134,74 @@ export const OriginStatsMap: React.FC<OriginStatsMapProps> = ({
     return Math.max(...activeList.map((x) => x.personCount), 1);
   }, [activeList, metricFilter]);
 
+  // Spatial Proximity Clustering for Settlements (Threshold: 26px in SVG 1000x620 viewBox)
+  const settlementClusters = useMemo(() => {
+    if (scope !== 'settlements') return [];
+    const validItems = activeList.filter((item): item is OriginPlaceItem => Boolean(item && item.id && item.coordinates));
+    const CLUSTER_DISTANCE = 26; // Distance threshold in SVG coordinate space
+    
+    interface ClusterType {
+      id: string;
+      coordinates: { x: number; y: number };
+      items: OriginPlaceItem[];
+      personCount: number;
+      totalRecords: number;
+      hasCradle: boolean;
+      isSelected: boolean;
+      isSingle: boolean;
+      primaryItem: OriginPlaceItem;
+    }
+
+    const clusters: ClusterType[] = [];
+    const visited = new Set<string>();
+
+    for (let i = 0; i < validItems.length; i++) {
+      const item = validItems[i];
+      if (visited.has(item.id)) continue;
+
+      const clusterItems: OriginPlaceItem[] = [item];
+      visited.add(item.id);
+
+      for (let j = i + 1; j < validItems.length; j++) {
+        const other = validItems[j];
+        if (visited.has(other.id)) continue;
+
+        const avgX = clusterItems.reduce((acc, it) => acc + it.coordinates.x, 0) / clusterItems.length;
+        const avgY = clusterItems.reduce((acc, it) => acc + it.coordinates.y, 0) / clusterItems.length;
+        const dist = Math.hypot(avgX - other.coordinates.x, avgY - other.coordinates.y);
+
+        if (dist <= CLUSTER_DISTANCE) {
+          clusterItems.push(other);
+          visited.add(other.id);
+        }
+      }
+
+      clusterItems.sort((a, b) => b.personCount - a.personCount);
+      const primary = clusterItems[0];
+      const hasCradle = clusterItems.some((it) => stats.primaryCradle?.id === it.id);
+      const isSelected = clusterItems.some((it) => selectedPlace?.id === it.id);
+      const totalPersons = clusterItems.reduce((acc, it) => acc + it.personCount, 0);
+      const totalRecs = clusterItems.reduce((acc, it) => acc + it.totalRecords, 0);
+
+      const centroidX = Math.round(clusterItems.reduce((acc, it) => acc + it.coordinates.x, 0) / clusterItems.length);
+      const centroidY = Math.round(clusterItems.reduce((acc, it) => acc + it.coordinates.y, 0) / clusterItems.length);
+
+      clusters.push({
+        id: clusterItems.length === 1 ? primary.id : `cluster-${clusterItems.map((c) => c.id).join('-')}`,
+        coordinates: { x: centroidX, y: centroidY },
+        items: clusterItems,
+        personCount: totalPersons,
+        totalRecords: totalRecs,
+        hasCradle,
+        isSelected,
+        isSingle: clusterItems.length === 1,
+        primaryItem: primary,
+      });
+    }
+
+    return clusters;
+  }, [scope, activeList, stats.primaryCradle, selectedPlace]);
+
   // Export Origin Stats as CSV / Text
   const handleExportCSV = () => {
     const headers = ['Назва', 'Тип', 'Регіон', 'Кількість осіб', 'Частка у роді (%)', 'Народжень', 'Шлюбів', 'Упокоєнь', 'Всього метрик', 'Роди'];
@@ -441,15 +509,27 @@ export const OriginStatsMap: React.FC<OriginStatsMapProps> = ({
             </div>
 
             {/* Map Legend */}
-            <div className="flex items-center gap-3 text-[11px]">
+            <div className="flex flex-wrap items-center gap-3 text-[11px]">
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
                 <span className={theme.textMuted}>Головне гніздо</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-md bg-emerald-500/80"></span>
-                <span className={theme.textMuted}>Осередки роду</span>
+                <span className={theme.textMuted}>Осередок роду</span>
               </div>
+              {scope === 'settlements' && (
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-purple-500/80 ring-2 ring-purple-400/40"></span>
+                  <span className={theme.textMuted}>Кластер точок</span>
+                </div>
+              )}
+              {scope === 'settlements' && settlementClusters.length < activeList.length && (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                  <Layers className="w-3 h-3 text-purple-400" />
+                  <span>{activeList.length} пунктів → {settlementClusters.length} кластерів (0 накладань)</span>
+                </span>
+              )}
             </div>
           </div>
 
@@ -546,23 +626,110 @@ export const OriginStatsMap: React.FC<OriginStatsMapProps> = ({
                 );
               })}
 
-              {/* Settlement Hotspots & Pins (when settlements have locations) */}
+              {/* Settlement Hotspots & Clustered Pins (Spatial Proximity Clustering) */}
               {scope === 'settlements' &&
-                activeList.filter((item): item is OriginPlaceItem => Boolean(item && item.id)).map((item) => {
-                  const isCradle = Boolean(stats.primaryCradle?.id && stats.primaryCradle.id === item.id);
-                  const isSelected = Boolean(selectedPlace?.id && selectedPlace.id === item.id);
-                  const radius = Math.min(8 + (item.personCount / (maxCount || 1)) * 14, 22);
+                settlementClusters.map((cluster) => {
+                  const isHovered = cluster.items.some((it) => hoveredPlaceId === it.id);
+
+                  if (cluster.isSingle) {
+                    const item = cluster.primaryItem;
+                    const isCradle = cluster.hasCradle;
+                    const isSelected = Boolean(selectedPlace?.id && selectedPlace.id === item.id);
+                    const radius = Math.min(8 + (item.personCount / (maxCount || 1)) * 14, 22);
+
+                    return (
+                      <g
+                        key={item.id}
+                        transform={`translate(${item.coordinates.x}, ${item.coordinates.y})`}
+                        className="cursor-pointer transition-transform duration-200 hover:scale-125"
+                        onClick={() => setSelectedPlaceId(item.id)}
+                        onMouseEnter={() => setHoveredPlaceId(item.id)}
+                        onMouseLeave={() => setHoveredPlaceId(null)}
+                      >
+                        {/* Pulsing ring for cradle */}
+                        {isCradle && (
+                          <circle
+                            r={radius + 8}
+                            fill="none"
+                            stroke="#f59e0b"
+                            strokeWidth="2"
+                            opacity="0.6"
+                            className="animate-ping"
+                          />
+                        )}
+
+                        {/* Hotspot Circle */}
+                        <circle
+                          r={radius}
+                          fill={isSelected ? '#f59e0b' : isCradle ? '#ea580c' : '#10b981'}
+                          stroke="#ffffff"
+                          strokeWidth="2"
+                          opacity={isSelected ? 1 : 0.85}
+                          className="shadow-md"
+                        />
+
+                        {/* Count inside pin */}
+                        <text
+                          x="0"
+                          y="3.5"
+                          textAnchor="middle"
+                          className="text-[9px] font-mono font-extrabold fill-white pointer-events-none"
+                        >
+                          {item.personCount}
+                        </text>
+
+                        {/* Settlement Name tooltip when selected or hovered */}
+                        {(isSelected || isHovered) && (
+                          <g transform={`translate(0, ${-radius - 8})`}>
+                            <rect
+                              x="-45"
+                              y="-16"
+                              width="90"
+                              height="18"
+                              rx="5"
+                              fill="#0f172a"
+                              stroke="#f59e0b"
+                              strokeWidth="1"
+                            />
+                            <text
+                              x="0"
+                              y="-4"
+                              textAnchor="middle"
+                              className="text-[9px] font-semibold fill-amber-300 pointer-events-none truncate"
+                            >
+                              {item.name.slice(0, 14)}
+                            </text>
+                          </g>
+                        )}
+                      </g>
+                    );
+                  }
+
+                  // Multi-Settlement Spatial Cluster
+                  const isCradle = cluster.hasCradle;
+                  const isSelected = cluster.isSelected;
+                  const radius = Math.min(13 + Math.min(cluster.items.length * 2, 8) + (cluster.personCount / (maxCount || 1)) * 6, 26);
 
                   return (
                     <g
-                      key={item.id}
-                      transform={`translate(${item.coordinates.x}, ${item.coordinates.y})`}
+                      key={cluster.id}
+                      transform={`translate(${cluster.coordinates.x}, ${cluster.coordinates.y})`}
                       className="cursor-pointer transition-transform duration-200 hover:scale-125"
-                      onClick={() => setSelectedPlaceId(item.id)}
-                      onMouseEnter={() => setHoveredPlaceId(item.id)}
+                      onClick={() => setSelectedPlaceId(cluster.primaryItem.id)}
+                      onMouseEnter={() => setHoveredPlaceId(cluster.primaryItem.id)}
                       onMouseLeave={() => setHoveredPlaceId(null)}
                     >
-                      {/* Pulsing ring for cradle */}
+                      {/* Cluster Proximity Outer Ring */}
+                      <circle
+                        r={radius + 5}
+                        fill="#8b5cf6"
+                        fillOpacity="0.2"
+                        stroke="#a78bfa"
+                        strokeWidth="1.5"
+                        strokeDasharray="3 2"
+                      />
+
+                      {/* Pulsing ring for cradle inside cluster */}
                       {isCradle && (
                         <circle
                           r={radius + 8}
@@ -574,46 +741,74 @@ export const OriginStatsMap: React.FC<OriginStatsMapProps> = ({
                         />
                       )}
 
-                      {/* Hotspot Circle */}
+                      {/* Main Cluster Circle */}
                       <circle
                         r={radius}
-                        fill={isSelected ? '#f59e0b' : isCradle ? '#ea580c' : '#10b981'}
+                        fill={isSelected ? '#f59e0b' : isCradle ? '#ea580c' : '#7c3aed'}
                         stroke="#ffffff"
                         strokeWidth="2"
-                        opacity={isSelected ? 1 : 0.85}
-                        className="shadow-md"
+                        opacity={isSelected ? 1 : 0.92}
+                        className="shadow-lg"
                       />
 
-                      {/* Count inside pin */}
+                      {/* Total Persons in Cluster */}
                       <text
                         x="0"
                         y="3.5"
                         textAnchor="middle"
-                        className="text-[9px] font-mono font-extrabold fill-white pointer-events-none"
+                        className="text-[10px] font-mono font-extrabold fill-white pointer-events-none"
                       >
-                        {item.personCount}
+                        {cluster.personCount}
                       </text>
 
-                      {/* Settlement Name tooltip when selected or hovered */}
-                      {(isSelected || hoveredPlaceId === item.id) && (
-                        <g transform={`translate(0, ${-radius - 8})`}>
+                      {/* Sub-badge: Number of Grouped Settlements */}
+                      <g transform={`translate(${Math.round(radius * 0.7)}, ${-Math.round(radius * 0.7)})`}>
+                        <circle
+                          r="7"
+                          fill="#3b82f6"
+                          stroke="#ffffff"
+                          strokeWidth="1.5"
+                        />
+                        <text
+                          x="0"
+                          y="2.5"
+                          textAnchor="middle"
+                          className="text-[7.5px] font-mono font-bold fill-white pointer-events-none"
+                        >
+                          {cluster.items.length}
+                        </text>
+                      </g>
+
+                      {/* Rich Cluster Tooltip */}
+                      {(isSelected || isHovered) && (
+                        <g transform={`translate(0, ${-radius - 12})`}>
                           <rect
-                            x="-45"
-                            y="-16"
-                            width="90"
-                            height="18"
-                            rx="5"
+                            x="-85"
+                            y="-30"
+                            width="170"
+                            height="30"
+                            rx="6"
                             fill="#0f172a"
-                            stroke="#f59e0b"
-                            strokeWidth="1"
+                            stroke="#a78bfa"
+                            strokeWidth="1.2"
+                            filter="drop-shadow(0 2px 6px rgba(0,0,0,0.4))"
                           />
                           <text
                             x="0"
-                            y="-4"
+                            y="-16"
                             textAnchor="middle"
-                            className="text-[9px] font-semibold fill-amber-300 pointer-events-none truncate"
+                            className="text-[9px] font-bold fill-purple-300 pointer-events-none"
                           >
-                            {item.name.slice(0, 14)}
+                            Кластер: {cluster.items.length} пунктів ({cluster.personCount} осіб)
+                          </text>
+                          <text
+                            x="0"
+                            y="-5"
+                            textAnchor="middle"
+                            className="text-[8px] fill-neutral-300 pointer-events-none truncate"
+                          >
+                            {cluster.items.slice(0, 3).map((it) => it.name).join(', ')}
+                            {cluster.items.length > 3 ? '...' : ''}
                           </text>
                         </g>
                       )}

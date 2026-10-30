@@ -27,7 +27,7 @@ import { useAuthStore } from './useAuthStore';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
 import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord, getPersonAncestorsIds } from '../rodovid/utils/mergeDatabase';
 import { purgeUnknownPlaceholderPersons, cleanDatabaseFromUnknownPersons, isUnknownPlaceholderPerson } from '../rodovid/utils/unknownPersonCleaner';
-import { persistLocalData, idbGet } from '../utils/indexedDbStorage';
+import { persistLocalData, idbGet, flushPendingLocalWrites } from '../utils/indexedDbStorage';
 import { clearDuplicateDetectorCache } from '../utils/duplicateDetector';
 import { clearTreeAuditCache } from '../utils/treeAudit';
 import { clearKinshipCache } from '../rodovid/utils/relationship';
@@ -81,6 +81,67 @@ export function notifySyncDelete(
   } catch {}
 }
 
+// Cloud Delta Batch Debouncer & Coalescer (Point 5 Optimization)
+const pendingCloudPersonDeltas = new Map<string, Partial<Person>>();
+let cloudDeltaDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const CLOUD_DELTA_DEBOUNCE_MS = 600;
+
+export function scheduleCloudPersonDelta(personId: string, delta: Partial<Person>) {
+  if (!personId || !delta || Object.keys(delta).length === 0) return;
+  const syncStore = useCloudSyncStore.getState();
+  syncStore.markPersonDirtyWithDelta(personId, delta);
+
+  if (syncStore.syncMode !== 'auto' || syncStore.isQuotaExceeded || isQuotaExceededToday()) {
+    return;
+  }
+
+  // Merge into coalesced delta
+  const existing = pendingCloudPersonDeltas.get(personId) || {};
+  pendingCloudPersonDeltas.set(personId, { ...existing, ...delta });
+
+  if (cloudDeltaDebounceTimer) {
+    clearTimeout(cloudDeltaDebounceTimer);
+  }
+
+  cloudDeltaDebounceTimer = setTimeout(async () => {
+    cloudDeltaDebounceTimer = null;
+    const entries = Array.from(pendingCloudPersonDeltas.entries());
+    pendingCloudPersonDeltas.clear();
+
+    for (const [id, coalescedDelta] of entries) {
+      if (Object.keys(coalescedDelta).length > 0) {
+        try {
+          const ok = await savePersonDeltaDoc(id, coalescedDelta);
+          if (ok) {
+            syncStore.clearPersonDirtyDelta(id);
+          }
+        } catch {}
+      }
+    }
+  }, CLOUD_DELTA_DEBOUNCE_MS);
+}
+
+export async function flushPendingCloudDeltas(): Promise<void> {
+  if (cloudDeltaDebounceTimer) {
+    clearTimeout(cloudDeltaDebounceTimer);
+    cloudDeltaDebounceTimer = null;
+  }
+  const entries = Array.from(pendingCloudPersonDeltas.entries());
+  pendingCloudPersonDeltas.clear();
+  const syncStore = useCloudSyncStore.getState();
+
+  for (const [id, delta] of entries) {
+    if (Object.keys(delta).length > 0) {
+      try {
+        const ok = await savePersonDeltaDoc(id, delta);
+        if (ok) {
+          syncStore.clearPersonDirtyDelta(id);
+        }
+      } catch {}
+    }
+  }
+}
+
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
 export const TOMBSTONE_STORAGE_KEY = 'genealogy_deleted_tombstone_ids_v1';
 
@@ -108,7 +169,7 @@ export function addTombstoneIds(ids: string[]): void {
     const current = getTombstoneIds();
     ids.forEach((id) => current.add(id));
     const list = Array.from(current);
-    localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(list));
+    persistLocalData(TOMBSTONE_STORAGE_KEY, list);
     const syncState = useCloudSyncStore.getState();
     if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
       saveDeletedTombstonesToCloud(list).catch(() => {});
@@ -121,7 +182,7 @@ export function removeTombstoneId(id: string): void {
     const current = getTombstoneIds();
     current.delete(id);
     const list = Array.from(current);
-    localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(list));
+    persistLocalData(TOMBSTONE_STORAGE_KEY, list);
     const syncState = useCloudSyncStore.getState();
     if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
       saveDeletedTombstonesToCloud(list).catch(() => {});
@@ -495,9 +556,9 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         saveUserTreeState(currentUser.email, { selectedPersonId });
       }
 
-      // Persist to localStorage so the focused person is preserved across reloads
+      // Persist so the focused person is preserved across reloads
       if (selectedPersonId) {
-        localStorage.setItem(`${STORAGE_KEY}_selectedPersonId`, selectedPersonId);
+        persistLocalData(`${STORAGE_KEY}_selectedPersonId`, selectedPersonId);
       }
     } catch {}
     set({ selectedPersonId });
@@ -530,17 +591,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const next = state.persons.map((p) => (p.id === person.id ? normalized : p));
       persistLocalData(`${STORAGE_KEY}_persons`, next);
 
-      // Maintain local state tracking dirty objects and push only changed fields (delta)
-      const syncStore = useCloudSyncStore.getState();
-      syncStore.markPersonDirtyWithDelta(normalized.id, delta);
-
-      if (syncStore.syncMode === 'auto') {
-        savePersonDeltaDoc(normalized.id, delta).then((ok) => {
-          if (ok) {
-            syncStore.clearPersonDirtyDelta(normalized.id);
-          }
-        });
-      }
+      // Debounced & coalesced delta cloud sync
+      scheduleCloudPersonDelta(normalized.id, delta);
 
       return { persons: next };
     }),
@@ -548,7 +600,6 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   updatePersons: (updatedPersons) =>
     set((state) => {
       const normalizedMap = new Map<string, Person>();
-      const syncStore = useCloudSyncStore.getState();
 
       updatedPersons.forEach((p) => {
         const norm = normalizePerson(p);
@@ -556,15 +607,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         const prevPerson = state.persons.find((existing) => existing.id === norm.id);
         const delta = computePersonDelta(prevPerson, norm);
 
-        syncStore.markPersonDirtyWithDelta(norm.id, delta);
-
-        if (syncStore.syncMode === 'auto') {
-          savePersonDeltaDoc(norm.id, delta).then((ok) => {
-            if (ok) {
-              syncStore.clearPersonDirtyDelta(norm.id);
-            }
-          });
-        }
+        // Debounced & coalesced delta cloud sync
+        scheduleCloudPersonDelta(norm.id, delta);
       });
       const next = state.persons.map((p) => normalizedMap.get(p.id) || p);
       persistLocalData(`${STORAGE_KEY}_persons`, next);
@@ -835,7 +879,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         deletedIds.forEach((id) => {
           mergedMap[id] = payload.masterPerson?.id || 'merged';
         });
-        localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(mergedMap));
+        persistLocalData('genealogy_merged_person_ids', mergedMap);
         const syncState = useCloudSyncStore.getState();
         if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
           saveMergedPersonsToCloud(mergedMap).catch(() => {});
@@ -1247,7 +1291,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   setGitConfig: (gitConfig) => {
     try {
-      localStorage.setItem(`${STORAGE_KEY}_gitConfig`, JSON.stringify(gitConfig));
+      persistLocalData(`${STORAGE_KEY}_gitConfig`, gitConfig);
     } catch {}
     set({ gitConfig });
   },
@@ -1255,6 +1299,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   setGoogleDriveEmail: (googleDriveEmail) => set({ googleDriveEmail }),
 
   exportGedcomData: () => {
+    flushPendingLocalWrites().catch(() => {});
     const { persons } = get();
     let ged = '0 HEAD\n1 SOUR RODOVID_APP\n1 GEDC\n2 VERS 5.5.1\n1 CHAR UTF-8\n';
     persons.forEach((p) => {
@@ -1334,39 +1379,63 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   hydrateFromIndexedDB: async () => {
     try {
-      const [idbPersons, idbFamilies, idbSources, idbEvents, idbPlaces, idbTrash, idbHistory] = await Promise.all([
+      const [
+        idbPersons,
+        idbFamilies,
+        idbSources,
+        idbEvents,
+        idbPlaces,
+        idbTrash,
+        idbHistory,
+        idbSelected,
+        idbTombstones
+      ] = await Promise.all([
         idbGet<Person[]>(`${STORAGE_KEY}_persons`),
         idbGet<Record<string, Family>>(`${STORAGE_KEY}_families`),
         idbGet<Record<string, Source>>(`${STORAGE_KEY}_sources`),
         idbGet<Record<string, LifeEvent>>(`${STORAGE_KEY}_events`),
         idbGet<Record<string, PlaceDossier>>(`${STORAGE_KEY}_places`),
         idbGet<Person[]>(`${STORAGE_KEY}_trashPersons`),
-        idbGet<ImportHistorySession[]>(`${STORAGE_KEY}_importHistory`)
+        idbGet<ImportHistorySession[]>(`${STORAGE_KEY}_importHistory`),
+        idbGet<string>(`${STORAGE_KEY}_selectedPersonId`),
+        idbGet<string[]>(TOMBSTONE_STORAGE_KEY)
       ]);
 
-      const state = get();
-      const updates: Partial<GenealogyDataState> = {};
-
-      if (Array.isArray(idbPersons) && idbPersons.length > state.persons.length) {
-        updates.persons = idbPersons.map(normalizePerson);
+      if (Array.isArray(idbTombstones) && idbTombstones.length > 0) {
+        addTombstoneIds(idbTombstones);
       }
-      if (idbFamilies && Object.keys(idbFamilies).length > Object.keys(state.families).length) {
+
+      const updates: Partial<GenealogyDataState> = {};
+      const tombstones = getTombstoneIds();
+
+      if (Array.isArray(idbPersons) && idbPersons.length > 0) {
+        const cleaned = idbPersons
+          .filter((p) => p && p.id && !tombstones.has(p.id) && !isDemoPerson(p))
+          .map(normalizePerson);
+        if (cleaned.length > 0) {
+          updates.persons = cleaned;
+        }
+      }
+      if (idbFamilies && typeof idbFamilies === 'object' && Object.keys(idbFamilies).length > 0) {
         updates.families = idbFamilies;
       }
-      if (idbSources && Object.keys(idbSources).length > Object.keys(state.sources).length) {
+      if (idbSources && typeof idbSources === 'object' && Object.keys(idbSources).length > 0) {
         updates.sources = idbSources;
       }
-      if (idbEvents && Object.keys(idbEvents).length > Object.keys(state.events).length) {
+      if (idbEvents && typeof idbEvents === 'object' && Object.keys(idbEvents).length > 0) {
         updates.events = idbEvents;
       }
-      if (idbPlaces && Object.keys(idbPlaces).length > Object.keys(state.places).length) {
+      if (idbPlaces && typeof idbPlaces === 'object' && Object.keys(idbPlaces).length > 0) {
         updates.places = idbPlaces;
       }
-      if (Array.isArray(idbTrash) && idbTrash.length > state.trashPersons.length) {
+      if (Array.isArray(idbTrash)) {
         updates.trashPersons = idbTrash;
       }
-      if (Array.isArray(idbHistory) && idbHistory.length > (state.importHistory || []).length) {
+      if (Array.isArray(idbHistory)) {
         updates.importHistory = idbHistory;
+      }
+      if (idbSelected && typeof idbSelected === 'string') {
+        updates.selectedPersonId = idbSelected;
       }
 
       if (Object.keys(updates).length > 0) {

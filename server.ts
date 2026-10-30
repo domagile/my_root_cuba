@@ -6,8 +6,26 @@ import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
+function getPortAndHost() {
+  const args = process.argv.slice(2);
+  let port = Number(process.env.PORT) || 3000;
+  let host = process.env.HOST || '0.0.0.0';
+
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === '--port' || args[i] === '-p') && args[i + 1]) {
+      const parsed = parseInt(args[i + 1], 10);
+      if (!isNaN(parsed)) port = parsed;
+      i++;
+    } else if ((args[i] === '--host' || args[i] === '-h') && args[i + 1]) {
+      host = args[i + 1];
+      i++;
+    }
+  }
+
+  return { port, host };
+}
+
 const app = express();
-const PORT = 3000;
 
 // Body parser with 50mb limit for high-resolution archival scans
 app.use(express.json({ limit: '50mb' }));
@@ -430,9 +448,16 @@ function generateLocalExtractionFallback(textContent: string = '', existingPerso
 
 // Vite middleware mounting & SPA server
 async function startServer() {
+  const { port, host } = getPortAndHost();
+
   if (process.env.NODE_ENV !== 'production') {
+    const isHmrDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        watch: isHmrDisabled ? null : {},
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -444,9 +469,27 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Rodovid Server] Application active on http://0.0.0.0:${PORT}`);
+  const server = app.listen(port, host, () => {
+    console.log(`[Rodovid Server] Application active on http://${host}:${port}`);
   });
+
+  server.on('error', (err: any) => {
+    console.error(`[Rodovid Server Error on ${host}:${port}]:`, err);
+  });
+
+  const handleShutdown = (signal: string) => {
+    console.log(`[Rodovid Server] Received ${signal}, closing server...`);
+    server.close(() => {
+      console.log('[Rodovid Server] Closed successfully.');
+      process.exit(0);
+    });
+    setTimeout(() => {
+      process.exit(0);
+    }, 2000).unref();
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
 startServer();

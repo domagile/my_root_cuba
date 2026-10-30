@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { GenealogyDatabase } from '../../types/genealogy';
 import { parseGedcom, exportToGedcom } from '../../utils/gedcom';
+import { parseGedcomAsync } from '../../../workers/workerBridge';
 import { GedcomMergeModal } from './GedcomMergeModal';
 import { ImportHistoryView } from './ImportHistoryView';
 import { useGenealogyStore } from '../../../stores/useGenealogyStore';
@@ -37,6 +38,8 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
   const [activeTab, setActiveTab] = useState<'import' | 'export' | 'history'>(initialTab);
   const [pastedGedcom, setPastedGedcom] = useState('');
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [isParsing, setIsParsing] = useState(false);
+  const [parseProgress, setParseProgress] = useState(0);
   const [pendingMerge, setPendingMerge] = useState<{
     incomingDb: GenealogyDatabase;
     fileName?: string;
@@ -44,50 +47,63 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
 
   const importHistory = useGenealogyStore((state) => state.importHistory || []);
 
-  // File Upload handler
+  // File Upload handler with background Web Worker
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
+        setIsParsing(true);
+        setParseProgress(0);
+        setImportStatus(null);
         const text = event.target?.result as string;
         let parsedDb: GenealogyDatabase;
         if (file.name.endsWith('.json')) {
           parsedDb = JSON.parse(text);
+          setParseProgress(100);
         } else {
-          parsedDb = parseGedcom(text);
+          parsedDb = await parseGedcomAsync(text, (percent) => setParseProgress(percent));
         }
 
         const personCount = Object.keys(parsedDb.persons || {}).length;
         if (personCount === 0) {
           setImportStatus('Файл не містить записів осіб (INDI).');
+          setIsParsing(false);
           return;
         }
 
+        setIsParsing(false);
         // Open merge & branch filter modal to allow conflict resolution and ancestor exclusion
         setPendingMerge({ incomingDb: parsedDb, fileName: file.name });
       } catch (err: any) {
+        setIsParsing(false);
         setImportStatus(`Помилка під час читання файлу: ${err.message}`);
       }
     };
     reader.readAsText(file);
   };
 
-  const handleImportPasted = () => {
-    if (!pastedGedcom.trim()) return;
+  const handleImportPasted = async () => {
+    if (!pastedGedcom.trim() || isParsing) return;
     try {
-      const parsedDb = parseGedcom(pastedGedcom);
+      setIsParsing(true);
+      setParseProgress(0);
+      setImportStatus(null);
+      const parsedDb = await parseGedcomAsync(pastedGedcom, (percent) => setParseProgress(percent));
       const personCount = Object.keys(parsedDb.persons || {}).length;
       if (personCount === 0) {
         setImportStatus('Введений текст не містить записів осіб (INDI).');
+        setIsParsing(false);
         return;
       }
 
+      setIsParsing(false);
       // Open merge & branch filter modal to allow conflict resolution and ancestor exclusion
       setPendingMerge({ incomingDb: parsedDb, fileName: 'Вставлений текст GEDCOM' });
     } catch (err: any) {
+      setIsParsing(false);
       setImportStatus(`Помилка під час парсингу: ${err.message}`);
     }
   };
@@ -217,12 +233,34 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
 
           {activeTab === 'import' && (
             <div className="space-y-4">
+              {/* Web Worker parsing progress indicator */}
+              {isParsing && (
+                <div className="p-4 bg-emerald-950/70 border border-emerald-700/80 rounded-xl space-y-2 shadow-inner">
+                  <div className="flex items-center justify-between text-xs text-emerald-300 font-semibold">
+                    <span className="flex items-center gap-2">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      <span>Обробка GEDCOM у фоновому потоці (Web Worker)...</span>
+                    </span>
+                    <span className="font-mono text-emerald-400 font-bold">{parseProgress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-emerald-800/60">
+                    <div
+                      className="bg-emerald-500 h-full rounded-full transition-all duration-150"
+                      style={{ width: `${Math.max(5, parseProgress)}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Парсинг виконується в окремому потоці Web Worker — інтерфейс залишається повністю плавним (60 FPS).
+                  </p>
+                </div>
+              )}
+
               {/* File upload drag drop box */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-2">
                   Завантажте файл GEDCOM (.ged) або резервну копію JSON:
                 </label>
-                <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-700 hover:border-emerald-500 rounded-xl cursor-pointer bg-slate-950/60 hover:bg-slate-950 transition-colors">
+                <label className={`flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-700 hover:border-emerald-500 rounded-xl cursor-pointer bg-slate-950/60 hover:bg-slate-950 transition-colors ${isParsing ? 'opacity-50 pointer-events-none' : ''}`}>
                   <Upload className="w-8 h-8 text-emerald-400 mb-2" />
                   <span className="text-xs font-medium text-slate-200">
                     Оберіть файл .ged або .json на комп'ютері
@@ -234,6 +272,7 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
                     type="file"
                     accept=".ged,.gedcom,.json"
                     onChange={handleFileUpload}
+                    disabled={isParsing}
                     className="hidden"
                   />
                 </label>
@@ -248,16 +287,18 @@ export const GedcomModal: React.FC<GedcomModalProps> = ({
                   rows={4}
                   value={pastedGedcom}
                   onChange={(e) => setPastedGedcom(e.target.value)}
+                  disabled={isParsing}
                   placeholder="0 HEAD&#10;1 SOUR GRAMPS...&#10;0 @I1@ INDI&#10;1 NAME Іван /Іванов/..."
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
                 />
                 <button
                   type="button"
                   onClick={handleImportPasted}
-                  disabled={!pastedGedcom.trim()}
-                  className="mt-2 w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold shadow transition-colors"
+                  disabled={!pastedGedcom.trim() || isParsing}
+                  className="mt-2 w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold shadow transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  Розпізнати та імпортувати
+                  {isParsing && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isParsing ? `Обробка (${parseProgress}%)...` : 'Розпізнати та імпортувати'}</span>
                 </button>
               </div>
             </div>

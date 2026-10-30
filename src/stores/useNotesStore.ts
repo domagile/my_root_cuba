@@ -2,8 +2,13 @@ import { create } from 'zustand';
 import { ResearchNote, NoteColor, ChecklistItem } from '../types';
 import { saveNoteDoc, deleteNoteDoc } from '../lib/firebase';
 import { isDemoNote } from '../utils/demoPurge';
+import { persistLocalData, idbGet } from '../utils/indexedDbStorage';
 
 const STORAGE_KEY = 'genealogy_research_notes_v1';
+
+function persistNotes(notes: ResearchNote[]): void {
+  persistLocalData(STORAGE_KEY, notes);
+}
 
 export const SAMPLE_NOTES: ResearchNote[] = [];
 
@@ -47,6 +52,7 @@ export interface NotesStoreState {
   batchSetNotes: (notes: ResearchNote[]) => void;
   purgeDemoNotes: () => void;
   resetToDefaultSampleNotes?: () => void;
+  hydrateFromIndexedDB: () => Promise<void>;
 }
 
 export const useNotesStore = create<NotesStoreState>((set, get) => ({
@@ -100,9 +106,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
 
     set((state) => {
       const next = [newNote, ...state.notes];
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       saveNoteDoc(newNote);
       return { notes: next };
     });
@@ -125,9 +129,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         return n;
       });
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       if (updatedItem) saveNoteDoc(updatedItem);
       return { notes: next };
     });
@@ -152,9 +154,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         if (updated) saveNoteDoc(updated);
       }
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       return { notes: next };
     });
   },
@@ -170,9 +170,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         return n;
       });
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       if (restored) saveNoteDoc(restored);
       return { notes: next };
     });
@@ -184,9 +182,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
       trashIds.forEach((id) => deleteNoteDoc(id));
 
       const next = state.notes.filter((n) => !n.isTrash);
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       return { notes: next };
     });
   },
@@ -202,9 +198,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         return n;
       });
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       if (updated) saveNoteDoc(updated);
       return { notes: next };
     });
@@ -227,9 +221,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         return n;
       });
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       if (updated) saveNoteDoc(updated);
       return { notes: next };
     });
@@ -272,9 +264,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         return n;
       });
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       if (updated) saveNoteDoc(updated);
       return { notes: next };
     });
@@ -298,9 +288,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         return n;
       });
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       if (updated) saveNoteDoc(updated);
       return { notes: next };
     });
@@ -320,9 +308,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         return n;
       });
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       if (updated) saveNoteDoc(updated);
       return { notes: next };
     });
@@ -340,9 +326,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
         return n;
       });
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      persistNotes(next);
       if (updated) saveNoteDoc(updated);
       return { notes: next };
     });
@@ -350,9 +334,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
 
   batchSetNotes: (notesList) => {
     set(() => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(notesList));
-      } catch {}
+      persistNotes(notesList);
       return { notes: notesList };
     });
   },
@@ -360,9 +342,7 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
   purgeDemoNotes: () => {
     set((state) => {
       const clean = state.notes.filter((n) => !isDemoNote(n));
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
-      } catch {}
+      persistNotes(clean);
       return { notes: clean };
     });
   },
@@ -370,10 +350,18 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
   resetToDefaultSampleNotes: () => {
     set((state) => {
       const clean = state.notes.filter((n) => !isDemoNote(n));
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
-      } catch {}
+      persistNotes(clean);
       return { notes: clean };
     });
+  },
+
+  hydrateFromIndexedDB: async () => {
+    try {
+      const idbNotes = await idbGet<ResearchNote[]>(STORAGE_KEY);
+      if (Array.isArray(idbNotes) && idbNotes.length > 0) {
+        const clean = idbNotes.filter((n) => !isDemoNote(n));
+        set({ notes: clean });
+      }
+    } catch {}
   }
 }));

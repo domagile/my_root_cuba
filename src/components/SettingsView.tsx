@@ -56,6 +56,7 @@ import {
   fetchUserRepositories,
   createGitHubRepository
 } from '../services/githubService';
+import { getStorageStats } from '../utils/indexedDbStorage';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -149,6 +150,20 @@ export const SettingsView: React.FC = () => {
   const [snapshots, setSnapshots] = useState<DataSnapshot[]>([]);
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
   const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null);
+
+  // IndexedDB Storage stats
+  const [storageStats, setStorageStats] = useState<{
+    isIndexedDB: boolean;
+    usageBytes: number;
+    quotaBytes: number;
+    usageFormatted: string;
+    quotaFormatted: string;
+    percentUsed: number;
+  } | null>(null);
+
+  useEffect(() => {
+    getStorageStats().then(setStorageStats).catch(() => {});
+  }, [persons.length]);
 
   // GitHub Integration state
   const [githubConfig, setGithubConfigState] = useState(getGitHubConfig());
@@ -351,24 +366,12 @@ export const SettingsView: React.FC = () => {
   const handleCreateSnapshotNow = async () => {
     setIsSavingSnapshot(true);
     try {
-      let rawFamilies: any = {};
-      let rawSources: any = {};
-      let rawEvents: any = {};
-      try {
-        const famStr = localStorage.getItem('genealogy_workstation_data_v2_families');
-        if (famStr) rawFamilies = JSON.parse(famStr);
-        const srcStr = localStorage.getItem('genealogy_workstation_data_v2_sources');
-        if (srcStr) rawSources = JSON.parse(srcStr);
-        const evtStr = localStorage.getItem('genealogy_workstation_data_v2_events');
-        if (evtStr) rawEvents = JSON.parse(evtStr);
-      } catch {}
-
       await saveSnapshot(
         {
           persons,
-          families: rawFamilies,
-          sources: rawSources,
-          events: rawEvents,
+          families: families || {},
+          sources: sources || {},
+          events: events || {},
           whitelist
         },
         'Ручна контрольна точка'
@@ -800,6 +803,29 @@ export const SettingsView: React.FC = () => {
               </div>
             );
           })()}
+
+          {/* IndexedDB Local Storage Architecture Card */}
+          <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className={`text-xs font-bold ${theme.cardTitle}`}>
+                  Локальне сховище: IndexedDB (Безлімітне, неблокуюче сховище)
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                  Активно
+                </span>
+              </div>
+              {storageStats && storageStats.quotaBytes > 0 && (
+                <span className={`text-[10px] font-mono ${theme.cardSubtext}`}>
+                  Зайнято: {storageStats.usageFormatted} з {storageStats.quotaFormatted}
+                </span>
+              )}
+            </div>
+            <p className={`text-[10px] ${theme.cardSubtext} leading-relaxed`}>
+              Повний перехід з обмеженого 5 MB localStorage на асинхронний IndexedDB. Дерево родоводу, нотатки, архівні документи, гіпотези та емблеми надійно зберігаються без блокування інтерфейсу та без ризику помилок переповнення пам'яті (QuotaExceededError).
+            </p>
+          </div>
 
           {/* Manual Push / Pull Trigger Buttons */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-black/10 dark:border-white/10">

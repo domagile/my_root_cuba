@@ -44,7 +44,8 @@ import {
   AlertTriangle,
   Eye,
   Pencil,
-  Crown
+  Crown,
+  Baby
 } from 'lucide-react';
 import { formatClanName, normalizeUkrainianSurnameGender } from '../../utils/ukrainianPhonetics';
 import {

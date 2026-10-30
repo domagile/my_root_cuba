@@ -6,6 +6,7 @@
 import { Person, AuthUser, WhitelistEntry } from '../types';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { findRootPersonId } from '../rodovid/utils/relationship';
+import { persistLocalData, idbDelete } from './indexedDbStorage';
 
 export interface UserTreeState {
   selectedPersonId: string;
@@ -63,7 +64,7 @@ export function saveUserTreeState(email: string, partial: Partial<UserTreeState>
       ...sanitizedPartial,
       updatedAt: new Date().toISOString()
     };
-    localStorage.setItem(`${USER_STATE_PREFIX}${clean}`, JSON.stringify(next));
+    persistLocalData(`${USER_STATE_PREFIX}${clean}`, next);
   } catch {}
 }
 
@@ -74,6 +75,7 @@ export function clearUserTreeState(email: string): void {
   if (!email) return;
   try {
     const clean = email.trim().toLowerCase();
+    idbDelete(`${USER_STATE_PREFIX}${clean}`).catch(() => {});
     localStorage.removeItem(`${USER_STATE_PREFIX}${clean}`);
   } catch {}
 }

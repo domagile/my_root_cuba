@@ -255,7 +255,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Введіть прізвище, ім'я, село, повіт, фах чи фразу з заміток..."
+              placeholder="Пошук укр./рос. (напр. Надточій / Надточей, Микола / Николай)..."
               className={`w-full pl-11 pr-10 py-3 ${theme.inputBg} border ${theme.inputBorder} rounded-2xl text-sm sm:text-base ${theme.inputText} placeholder-opacity-50 focus:outline-hidden focus:ring-2 focus:ring-[#B88E3E]/50 focus:border-[#B88E3E] transition-all shadow-inner`}
             />
             {query && (
@@ -574,8 +574,8 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
               <div>
                 <h3 className="font-bold text-sm sm:text-base">Почніть вводити для пошуку</h3>
                 <p className="text-xs opacity-70 mt-1 max-w-md mx-auto leading-relaxed">
-                  Пошук здійснюється одночасно за <strong>іменами</strong> (включно з дівочими та варіантами), 
-                  <strong> місцями подій</strong> (народження, шлюб, смерть, історичні парафії) та <strong>архівними замітками</strong> з автокорекцією помилок.
+                  Пошук підтримує <strong>українську та російську мови</strong> (автоматично розпізнає «Надточей» ↔ «Надточій», «Николай» ↔ «Микола», «Алексей» ↔ «Олексій»), 
+                  помилки розкладки клавіатури, місця та архівні замітки.
                 </p>
               </div>
 
@@ -585,7 +585,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                   Швидкі підказки для пошуку:
                 </p>
                 <div className="flex flex-wrap justify-center gap-2">
-                  {['Шевченко', 'Київ', 'Полтава', 'священник', 'козак', '1890', 'смерть'].map((sample) => (
+                  {['Надточей', 'Николай', 'Шевченко', 'Київ', 'Полтава', 'священник', 'козак', '1890'].map((sample) => (
                     <button
                       key={sample}
                       type="button"

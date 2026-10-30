@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Search,
   Filter,
@@ -51,7 +52,7 @@ import {
   getMetricSearchStatus, 
   getMetricStatusConfig 
 } from '../../../utils/researchStatusUtils';
-import { normalizeUkrainianSurnameGender, areSurnamesEquivalent, formatClanName } from '../../../utils/ukrainianPhonetics';
+import { normalizeUkrainianSurnameGender, areSurnamesEquivalent, areSurnamesBilingualEquivalent, areSlavicTokensEquivalent, formatClanName } from '../../../utils/ukrainianPhonetics';
 import { getPersonRodName } from '../../utils/treeLayout';
 import { detectDuplicatePersons } from '../../../utils/duplicateDetector';
 import { DuplicatePair } from '../../../types';
@@ -469,19 +470,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       const patron = (p.name?.patronymic || p.patronymic || '').toLowerCase();
       const nameParts = [sur, given, patron, maiden].filter(Boolean);
 
-      // Any-order token matching across name parts (e.g. "Ольга Михайлівна Болотна", "Болотна Ольга", "Ольга Болотна")
+      // Any-order token matching across name parts (e.g. "Ольга Михайлівна Болотна", "Болотна Ольга", "Ольга Болотна", "Николай" ~ "Микола")
       const allTokensMatchName =
         qTokens.length > 0 &&
         qTokens.every((token) =>
-          nameParts.some((np) => np.includes(token) || token.includes(np) || areSurnamesEquivalent(token, np))
+          nameParts.some((np) => np.includes(token) || token.includes(np) || areSlavicTokensEquivalent(token, np))
         );
 
       const matchesSurnameEquiv =
-        (sur && areSurnamesEquivalent(q, sur)) ||
-        (sur && areSurnamesEquivalent(qWithoutRod, sur)) ||
-        (maiden && areSurnamesEquivalent(q, maiden)) ||
-        (maiden && areSurnamesEquivalent(qWithoutRod, maiden)) ||
-        qTokens.some((token) => (sur && areSurnamesEquivalent(token, sur)) || (maiden && areSurnamesEquivalent(token, maiden)));
+        (sur && areSurnamesBilingualEquivalent(q, sur)) ||
+        (sur && areSurnamesBilingualEquivalent(qWithoutRod, sur)) ||
+        (maiden && areSurnamesBilingualEquivalent(q, maiden)) ||
+        (maiden && areSurnamesBilingualEquivalent(qWithoutRod, maiden)) ||
+        qTokens.some((token) => (sur && areSurnamesBilingualEquivalent(token, sur)) || (maiden && areSurnamesBilingualEquivalent(token, maiden)));
 
       const matchesClanText =
         clanFormatted.includes(q) ||
@@ -586,10 +587,43 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     });
   }, [personsList, sortBy, sortAsc]);
 
-  // Progressive slicing for 60 FPS DOM performance
-  const displayedPersons = useMemo(() => {
-    return sortedPersons.slice(0, displayLimit);
-  }, [sortedPersons, displayLimit]);
+  // Virtualizers for Table and Cards views
+  const rowVirtualizer = useVirtualizer({
+    count: sortedPersons.length,
+    getScrollElement: () => tableScrollRef.current,
+    estimateSize: () => 58,
+    overscan: 10,
+  });
+
+  const cardsContainerRef = useRef<HTMLDivElement>(null);
+  const [columns, setColumns] = useState(3);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window === 'undefined') return;
+      if (window.innerWidth >= 1024) setColumns(3);
+      else if (window.innerWidth >= 768) setColumns(2);
+      else setColumns(1);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const cardRows = useMemo(() => {
+    const rows: Person[][] = [];
+    for (let i = 0; i < sortedPersons.length; i += columns) {
+      rows.push(sortedPersons.slice(i, i + columns));
+    }
+    return rows;
+  }, [sortedPersons, columns]);
+
+  const cardVirtualizer = useVirtualizer({
+    count: cardRows.length,
+    getScrollElement: () => cardsContainerRef.current,
+    estimateSize: () => 230,
+    overscan: 4,
+  });
 
   const handleTagBadgeClick = (tag: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -607,7 +641,12 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
       <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 shadow-xs space-y-4`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className={`text-xl font-bold tracking-tight ${theme.textPrimary}`}>Особи бази даних</h1>
+            <div className="flex items-center gap-2">
+              <h1 className={`text-xl font-bold tracking-tight ${theme.textPrimary}`}>Особи бази даних</h1>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
+                Virtual Scroll 60 FPS
+              </span>
+            </div>
             <p className={`text-xs ${theme.textMuted} mt-0.5`}>
               Всього знайдено {sortedPersons.length} з {Object.keys(database.persons).length} записів
             </p>
@@ -992,7 +1031,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         </div>
       ) : viewMode === 'table' ? (
         <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl overflow-hidden shadow-xs`}>
-          <div className="overflow-x-auto max-h-[calc(100vh-240px)] [scrollbar-width:thin] [scrollbar-color:rgba(150,150,150,0.25)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-700 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-neutral-600 [&::-webkit-scrollbar-thumb]:rounded-full">
+          <div ref={tableScrollRef} onScroll={updateTableScrollInfo} className="overflow-x-auto max-h-[calc(100vh-240px)] [scrollbar-width:thin] [scrollbar-color:rgba(150,150,150,0.25)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-700 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-neutral-600 [&::-webkit-scrollbar-thumb]:rounded-full">
             <table className={`w-full text-left text-xs ${theme.textSecondary}`}>
               <thead className={`sticky top-0 z-10 ${theme.surfaceBg} ${theme.textMuted} font-semibold uppercase tracking-wider text-[10px]`}>
                 <tr>
@@ -1011,7 +1050,15 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 </tr>
               </thead>
               <tbody className={`divide-y ${theme.borderSubtle}`}>
-                {displayedPersons.map((rawP, pIdx) => {
+                {rowVirtualizer.getVirtualItems().length > 0 && rowVirtualizer.getVirtualItems()[0].start > 0 && (
+                  <tr>
+                    <td colSpan={10} style={{ height: `${rowVirtualizer.getVirtualItems()[0].start}px` }} />
+                  </tr>
+                )}
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const pIdx = virtualRow.index;
+                  const rawP = sortedPersons[pIdx];
+                  if (!rawP) return null;
                   const isLiving = isPersonLiving(rawP);
                   const isMasked = !isWhitelisted && isLiving;
                   const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
@@ -1021,7 +1068,9 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
 
                   return (
                     <tr
-                      key={`${p.id}_${pIdx}`}
+                      key={p.id}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
                       onClick={(e) => {
                         if (e.metaKey || e.ctrlKey || e.button === 1) {
                           openPersonInNewWindow(p.id);
@@ -1483,23 +1532,54 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     </tr>
                   );
                 })}
+                {rowVirtualizer.getVirtualItems().length > 0 && (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      style={{
+                        height: `${Math.max(
+                          0,
+                          rowVirtualizer.getTotalSize() -
+                            rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1].end
+                        )}px`
+                      }}
+                    />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {displayedPersons.map((rawP, pIdx) => {
-            const isLiving = isPersonLiving(rawP);
-            const isMasked = !isWhitelisted && isLiving;
-            const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
+        <div ref={cardsContainerRef} className="overflow-y-auto max-h-[calc(100vh-240px)] [scrollbar-width:thin] [scrollbar-color:rgba(150,150,150,0.25)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full pr-1">
+          <div style={{ height: `${cardVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
+            {cardVirtualizer.getVirtualItems().map((vRow) => {
+              const rowPersons = cardRows[vRow.index] || [];
+              return (
+                <div
+                  key={vRow.index}
+                  ref={cardVirtualizer.measureElement}
+                  data-index={vRow.index}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${vRow.start}px)`,
+                  }}
+                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-4"
+                >
+                  {rowPersons.map((rawP, pIdx) => {
+                    const isLiving = isPersonLiving(rawP);
+                    const isMasked = !isWhitelisted && isLiving;
+                    const p = isMasked ? getPrivacySafePerson(rawP, false) : rawP;
 
-            const isMale = isPersonMale(p, database);
-            const isFemale = isPersonFemale(p, database);
+                    const isMale = isPersonMale(p, database);
+                    const isFemale = isPersonFemale(p, database);
 
-            return (
-              <div
-                key={`${p.id}_${pIdx}`}
+                    return (
+                      <div
+                        key={p.id}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.button === 1) {
                     openPersonInNewWindow(p.id);
@@ -1842,37 +1922,26 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                     </button>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Progressive Loading Controls for fast rendering */}
-      {sortedPersons.length > displayLimit && (
-        <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-xl ${theme.cardBg} border ${theme.cardBorder} shadow-xs`}>
-          <div className={`text-xs ${theme.textMuted}`}>
-            Показано <span className="font-semibold text-emerald-500">{displayedPersons.length}</span> з{' '}
-            <span className="font-semibold">{sortedPersons.length}</span> знайдених осіб
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setDisplayLimit((prev) => prev + PAGE_SIZE)}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
-            >
-              <span>Показати ще (+{Math.min(PAGE_SIZE, sortedPersons.length - displayLimit)})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setDisplayLimit(sortedPersons.length)}
-              className={`px-3 py-2 rounded-xl border ${theme.borderSubtle} hover:${theme.textPrimary} text-xs font-medium transition-all ${theme.surfaceBg} ${theme.textSecondary} cursor-pointer`}
-            >
-              Показати всіх ({sortedPersons.length})
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Infinite Virtual Scrolling Footer */}
+      <div className={`flex items-center justify-between p-3 px-4 rounded-xl ${theme.cardBg} border ${theme.cardBorder} shadow-xs text-xs font-mono`}>
+        <span className={theme.textMuted}>
+          Всього знайдено: <strong className="text-emerald-500 font-bold">{sortedPersons.length}</strong> осіб
+        </span>
+        <span className="text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 font-semibold flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Віртуалізовано через @tanstack/react-virtual (60 FPS)</span>
+        </span>
+      </div>
 
       {/* Confirm Delete Person Modal */}
       {personToDelete && (

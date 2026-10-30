@@ -691,7 +691,8 @@ export function detectConflicts(
  */
 export function analyzeMerge(
   currentDb: GenealogyDatabase,
-  incomingDb: GenealogyDatabase
+  incomingDb: GenealogyDatabase,
+  onProgress?: (percent: number) => void
 ): MergeAnalysis {
   const existingPersons = Object.values(currentDb.persons || {}).filter((p) => !isUnknownPlaceholderPerson(p));
   const incomingPersons = Object.values(incomingDb.persons || {}).filter((p) => !isUnknownPlaceholderPerson(p));
@@ -701,9 +702,15 @@ export function analyzeMerge(
   const newPersons: Person[] = [];
 
   const usedTargetIds = new Set(existingPersons.map((p) => p.id));
+  const totalInc = incomingPersons.length;
+  let processedInc = 0;
 
   // Step 1: Match incoming persons with existing persons
   for (const inc of incomingPersons) {
+    processedInc++;
+    if (onProgress && processedInc % 25 === 0 && totalInc > 0) {
+      onProgress(Math.min(85, Math.round((processedInc / totalInc) * 85)));
+    }
     const match = findBestPersonMatch(inc, existingPersons);
 
     if (match) {
@@ -733,8 +740,14 @@ export function analyzeMerge(
   // Step 2: Detect field conflicts across all matched persons
   const conflicts: PersonConflictRecord[] = [];
   let totalConflictsCount = 0;
+  const totalMatches = matchedPersons.length;
+  let processedMatches = 0;
 
   for (const match of matchedPersons) {
+    processedMatches++;
+    if (onProgress && processedMatches % 25 === 0 && totalMatches > 0) {
+      onProgress(Math.min(99, 85 + Math.round((processedMatches / totalMatches) * 14)));
+    }
     const personConflicts = detectConflicts(
       match.existingPerson,
       match.incomingPerson,
@@ -753,6 +766,10 @@ export function analyzeMerge(
         conflicts: personConflicts
       });
     }
+  }
+
+  if (onProgress) {
+    onProgress(100);
   }
 
   return {

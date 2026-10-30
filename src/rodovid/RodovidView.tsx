@@ -154,15 +154,17 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
     if (customDatabase) return customDatabase;
 
     const personsMap: Record<string, Person> = {};
-    persons.forEach((p) => {
-      personsMap[p.id] = p;
-    });
+    for (const p of persons) {
+      if (p && p.id) {
+        personsMap[p.id] = p;
+      }
+    }
 
     return {
       metadata: {
         title: 'Родовід родини',
         description: 'Єдине сховище генеалогічних даних',
-        lastModified: new Date().toISOString(),
+        lastModified: '2026-01-01T00:00:00.000Z',
         author: 'Дослідник'
       },
       rootPersonId: customDatabase?.rootPersonId || findRootPersonId(personsMap),
@@ -170,7 +172,7 @@ export const RodovidView: React.FC<RodovidViewProps> = ({
       families: families || {},
       sources: sources || {},
       events: events || {},
-      lastModified: new Date().toISOString()
+      lastModified: '2026-01-01T00:00:00.000Z'
     };
   }, [customDatabase, persons, families, sources, events]);
 

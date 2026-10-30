@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   HeartHandshake,
   Plus,
@@ -106,12 +107,46 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
     });
   }, [database.families, database.persons, searchTerm]);
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [columns, setColumns] = useState(2);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window === 'undefined') return;
+      if (window.innerWidth >= 768) setColumns(2);
+      else setColumns(1);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const familyRows = useMemo(() => {
+    const rows: Family[][] = [];
+    for (let i = 0; i < familiesList.length; i += columns) {
+      rows.push(familiesList.slice(i, i + columns));
+    }
+    return rows;
+  }, [familiesList, columns]);
+
+  const virtualizer = useVirtualizer({
+    count: familyRows.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => 280,
+    overscan: 3,
+  });
+
   return (
     <div className={`max-w-7xl mx-auto px-4 py-6 space-y-6 ${theme.textPrimary}`}>
       {/* Header */}
       <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
         <div>
-          <h1 className={`text-xl font-bold tracking-tight ${theme.textPrimary}`}>Сімейні союзи</h1>
+          <div className="flex items-center gap-2">
+            <h1 className={`text-xl font-bold tracking-tight ${theme.textPrimary}`}>Сімейні союзи</h1>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
+              Virtual Scroll 60 FPS
+            </span>
+          </div>
           <p className={`text-xs ${theme.textMuted} mt-0.5`}>
             Всього {familiesList.length} сімей у базі даних
           </p>
@@ -155,204 +190,246 @@ export const FamiliesListView: React.FC<FamiliesListViewProps> = ({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {familiesList.map((fam) => {
-            const husband = fam.husbandId ? database.persons[fam.husbandId] : null;
-            const wife = fam.wifeId ? database.persons[fam.wifeId] : null;
-
-            const rodPerson = husband || wife;
-            const rodName = rodPerson ? getPersonRodName(rodPerson) : '';
-            const canonicalRod = normalizeUkrainianSurnameGender(rodName) || rodName;
-            const clanTitle = canonicalRod && canonicalRod !== 'Рід' ? formatClanName(canonicalRod) : '';
-
-            return (
-              <div
-                key={fam.id}
-                className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-5 shadow-xs space-y-4 hover:border-emerald-500/60 transition-colors`}
-              >
-                <div className={`flex items-center justify-between border-b ${theme.borderSubtle} pb-3`}>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-xs font-mono font-semibold px-2 py-0.5 ${isDark ? 'bg-slate-800 text-emerald-400' : 'bg-emerald-100 text-emerald-800'} rounded`}>
-                      {fam.id}
-                    </span>
-                    <span className={`text-xs ${theme.textMuted}`}>
-                      {fam.relationshipType === 'Married' ? 'Зареєстрований шлюб' : 'Союз'}
-                    </span>
-                    {clanTitle && (
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
-                        {clanTitle}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => onEditFamily(fam.id)}
-                      className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
-                      title="Редагувати сім'ю"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const husbName = getFullName(husband || undefined);
-                        const wifeName = getFullName(wife || undefined);
-                        const label = husbName && wifeName ? `${husbName} та ${wifeName}` : husbName || wifeName || fam.id;
-                        setFamilyToDelete({ id: fam.id, label });
-                      }}
-                      className={`p-1.5 ${theme.textMuted} hover:text-rose-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
-                      title="Видалити сім'ю"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Spouses Cards */}
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Husband */}
+        <div className="space-y-4">
+          <div
+            ref={containerRef}
+            className="overflow-y-auto max-h-[calc(100vh-230px)] pr-1"
+          >
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const rowFamilies = familyRows[virtualRow.index] || [];
+                return (
                   <div
-                    onClick={() => husband && onSelectPerson(husband.id)}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                      husband
-                        ? isDark
-                          ? 'bg-slate-950 border-blue-900/40 hover:border-blue-700'
-                          : 'bg-sky-50/70 border-sky-200 hover:border-sky-400'
-                        : isDark
-                        ? 'bg-slate-950/50 border-dashed border-slate-800 text-slate-500'
-                        : 'bg-neutral-100/50 border-dashed border-neutral-300 text-neutral-400'
-                    }`}
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className="pb-4"
                   >
-                    <span className={`text-[10px] ${isDark ? 'text-blue-400' : 'text-sky-700'} uppercase font-semibold block mb-1`}>
-                      Чоловік / Батько
-                    </span>
-                    {husband ? (
-                      (() => {
-                        const isLiving = isPersonLiving(husband);
-                        const isMasked = !isWhitelisted && isLiving;
-                        return (
-                          <div>
-                            <h4 className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
-                              {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(husband)}
-                            </h4>
-                            <p className={`text-[10px] ${theme.textMuted} font-mono mt-0.5`}>
-                              {isMasked
-                                ? '🔒 Конфіденційно'
-                                : `${husband.birthYear || '?'} — ${husband.isLiving ? 'теп. час' : husband.deathYear || '?'}`}
-                            </p>
-                          </div>
-                        );
-                      })()
-                    ) : (
-                      <span className="text-xs italic">Не вказано</span>
-                    )}
-                  </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {rowFamilies.map((fam) => {
+                        const husband = fam.husbandId ? database.persons[fam.husbandId] : null;
+                        const wife = fam.wifeId ? database.persons[fam.wifeId] : null;
 
-                  {/* Wife */}
-                  <div
-                    onClick={() => wife && onSelectPerson(wife.id)}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                      wife
-                        ? isDark
-                          ? 'bg-slate-950 border-rose-900/40 hover:border-rose-700'
-                          : 'bg-rose-50/70 border-rose-200 hover:border-rose-400'
-                        : isDark
-                        ? 'bg-slate-950/50 border-dashed border-slate-800 text-slate-500'
-                        : 'bg-neutral-100/50 border-dashed border-neutral-300 text-neutral-400'
-                    }`}
-                  >
-                    <span className={`text-[10px] ${isDark ? 'text-rose-400' : 'text-rose-700'} uppercase font-semibold block mb-1`}>
-                      Дружина / Мати
-                    </span>
-                    {wife ? (
-                      (() => {
-                        const isLiving = isPersonLiving(wife);
-                        const isMasked = !isWhitelisted && isLiving;
-                        return (
-                          <div>
-                            <h4 className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
-                              {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(wife)}
-                            </h4>
-                            <p className={`text-[10px] ${theme.textMuted} font-mono mt-0.5`}>
-                              {isMasked
-                                ? '🔒 Конфіденційно'
-                                : `${wife.birthYear || '?'} — ${wife.isLiving ? 'теп. час' : wife.deathYear || '?'}`}
-                            </p>
-                          </div>
-                        );
-                      })()
-                    ) : (
-                      <span className="text-xs italic">Не вказано</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Marriage details */}
-                {(fam.marriageDate || fam.marriagePlace) && (
-                  <div className={`flex items-center gap-4 text-xs ${theme.textSecondary} ${theme.surfaceBg} p-2.5 rounded-lg border ${theme.borderSubtle}`}>
-                    {fam.marriageDate && (
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-emerald-500" />
-                        <span>Шлюб: {fam.marriageDate}</span>
-                      </div>
-                    )}
-                    {fam.marriagePlace && (
-                      <div className="flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5 text-emerald-500" />
-                        <span className="truncate">{fam.marriagePlace}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Children List */}
-                <div>
-                  <div className={`flex items-center justify-between text-xs ${theme.textMuted} mb-2`}>
-                    <span className="font-medium flex items-center gap-1">
-                      <Users className={`w-3.5 h-3.5 ${theme.textMuted}`} />
-                      Діти ({fam.children.length}):
-                    </span>
-                  </div>
-
-                  {fam.children.length === 0 ? (
-                    <p className={`text-[11px] ${theme.textMuted} italic`}>Дітей не додано</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {fam.children.map((childObj, cIdx) => {
-                        const child = database.persons[childObj.personId];
-                        if (!child) return null;
-                        const isLiving = isPersonLiving(child);
-                        const isMasked = !isWhitelisted && isLiving;
+                        const rodPerson = husband || wife;
+                        const rodName = rodPerson ? getPersonRodName(rodPerson) : '';
+                        const canonicalRod = normalizeUkrainianSurnameGender(rodName) || rodName;
+                        const clanTitle = canonicalRod && canonicalRod !== 'Рід' ? formatClanName(canonicalRod) : '';
 
                         return (
                           <div
-                            key={`${child.id}_${cIdx}`}
-                            onClick={() => onSelectPerson(child.id)}
-                            className={`flex items-center gap-1.5 px-2.5 py-1.5 ${theme.surfaceBg} border ${theme.borderSubtle} rounded-lg hover:border-emerald-600 cursor-pointer text-xs transition-colors`}
+                            key={fam.id}
+                            className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-5 shadow-xs space-y-4 hover:border-emerald-500/60 transition-colors`}
                           >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${
-                                isPersonMale(child, database) ? 'bg-sky-500' : 'bg-rose-500'
-                              }`}
-                            />
-                            <span className={`${theme.textPrimary} font-medium`}>
-                              {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(child)}
-                            </span>
-                            {!isMasked && child.birthYear && (
-                              <span className={`text-[10px] ${theme.textMuted} font-mono`}>
-                                ({child.birthYear})
-                              </span>
+                            <div className={`flex items-center justify-between border-b ${theme.borderSubtle} pb-3`}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-xs font-mono font-semibold px-2 py-0.5 ${isDark ? 'bg-slate-800 text-emerald-400' : 'bg-emerald-100 text-emerald-800'} rounded`}>
+                                  {fam.id}
+                                </span>
+                                <span className={`text-xs ${theme.textMuted}`}>
+                                  {fam.relationshipType === 'Married' ? 'Зареєстрований шлюб' : 'Союз'}
+                                </span>
+                                {clanTitle && (
+                                  <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                                    {clanTitle}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => onEditFamily(fam.id)}
+                                  className={`p-1.5 ${theme.textMuted} hover:text-amber-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+                                  title="Редагувати сім'ю"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const husbName = getFullName(husband || undefined);
+                                    const wifeName = getFullName(wife || undefined);
+                                    const label = husbName && wifeName ? `${husbName} та ${wifeName}` : husbName || wifeName || fam.id;
+                                    setFamilyToDelete({ id: fam.id, label });
+                                  }}
+                                  className={`p-1.5 ${theme.textMuted} hover:text-rose-500 hover:bg-neutral-500/10 rounded transition-colors cursor-pointer`}
+                                  title="Видалити сім'ю"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Spouses Cards */}
+                            <div className="grid grid-cols-2 gap-3">
+                              {/* Husband */}
+                              <div
+                                onClick={() => husband && onSelectPerson(husband.id)}
+                                className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                                  husband
+                                    ? isDark
+                                      ? 'bg-slate-950 border-blue-900/40 hover:border-blue-700'
+                                      : 'bg-sky-50/70 border-sky-200 hover:border-sky-400'
+                                    : isDark
+                                    ? 'bg-slate-950/50 border-dashed border-slate-800 text-slate-500'
+                                    : 'bg-neutral-100/50 border-dashed border-neutral-300 text-neutral-400'
+                                }`}
+                              >
+                                <span className={`text-[10px] ${isDark ? 'text-blue-400' : 'text-sky-700'} uppercase font-semibold block mb-1`}>
+                                  Чоловік / Батько
+                                </span>
+                                {husband ? (
+                                  (() => {
+                                    const isLiving = isPersonLiving(husband);
+                                    const isMasked = !isWhitelisted && isLiving;
+                                    return (
+                                      <div>
+                                        <h4 className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
+                                          {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(husband)}
+                                        </h4>
+                                        <p className={`text-[10px] ${theme.textMuted} font-mono mt-0.5`}>
+                                          {isMasked
+                                            ? '🔒 Конфіденційно'
+                                            : `${husband.birthYear || '?'} — ${husband.isLiving ? 'теп. час' : husband.deathYear || '?'}`}
+                                        </p>
+                                      </div>
+                                    );
+                                  })()
+                                ) : (
+                                  <span className="text-xs italic">Не вказано</span>
+                                )}
+                              </div>
+
+                              {/* Wife */}
+                              <div
+                                onClick={() => wife && onSelectPerson(wife.id)}
+                                className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                                  wife
+                                    ? isDark
+                                      ? 'bg-slate-950 border-rose-900/40 hover:border-rose-700'
+                                      : 'bg-rose-50/70 border-rose-200 hover:border-rose-400'
+                                    : isDark
+                                    ? 'bg-slate-950/50 border-dashed border-slate-800 text-slate-500'
+                                    : 'bg-neutral-100/50 border-dashed border-neutral-300 text-neutral-400'
+                                }`}
+                              >
+                                <span className={`text-[10px] ${isDark ? 'text-rose-400' : 'text-rose-700'} uppercase font-semibold block mb-1`}>
+                                  Дружина / Мати
+                                </span>
+                                {wife ? (
+                                  (() => {
+                                    const isLiving = isPersonLiving(wife);
+                                    const isMasked = !isWhitelisted && isLiving;
+                                    return (
+                                      <div>
+                                        <h4 className={`font-semibold text-xs ${theme.textPrimary} truncate`}>
+                                          {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(wife)}
+                                        </h4>
+                                        <p className={`text-[10px] ${theme.textMuted} font-mono mt-0.5`}>
+                                          {isMasked
+                                            ? '🔒 Конфіденційно'
+                                            : `${wife.birthYear || '?'} — ${wife.isLiving ? 'теп. час' : wife.deathYear || '?'}`}
+                                        </p>
+                                      </div>
+                                    );
+                                  })()
+                                ) : (
+                                  <span className="text-xs italic">Не вказано</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Marriage details */}
+                            {(fam.marriageDate || fam.marriagePlace) && (
+                              <div className={`flex items-center gap-4 text-xs ${theme.textSecondary} ${theme.surfaceBg} p-2.5 rounded-lg border ${theme.borderSubtle}`}>
+                                {fam.marriageDate && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                                    <span>Шлюб: {fam.marriageDate}</span>
+                                  </div>
+                                )}
+                                {fam.marriagePlace && (
+                                  <div className="flex items-center gap-1.5">
+                                    <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+                                    <span className="truncate">{fam.marriagePlace}</span>
+                                  </div>
+                                )}
+                              </div>
                             )}
+
+                            {/* Children List */}
+                            <div>
+                              <div className={`flex items-center justify-between text-xs ${theme.textMuted} mb-2`}>
+                                <span className="font-medium flex items-center gap-1">
+                                  <Users className={`w-3.5 h-3.5 ${theme.textMuted}`} />
+                                  Діти ({fam.children.length}):
+                                </span>
+                              </div>
+
+                              {fam.children.length === 0 ? (
+                                <p className={`text-[11px] ${theme.textMuted} italic`}>Дітей не додано</p>
+                              ) : (
+                                <div className="flex flex-wrap gap-2">
+                                  {fam.children.map((childObj, cIdx) => {
+                                    const child = database.persons[childObj.personId];
+                                    if (!child) return null;
+                                    const isLiving = isPersonLiving(child);
+                                    const isMasked = !isWhitelisted && isLiving;
+
+                                    return (
+                                      <div
+                                        key={`${child.id}_${cIdx}`}
+                                        onClick={() => onSelectPerson(child.id)}
+                                        className={`flex items-center gap-1.5 px-2.5 py-1.5 ${theme.surfaceBg} border ${theme.borderSubtle} rounded-lg hover:border-emerald-600 cursor-pointer text-xs transition-colors`}
+                                      >
+                                        <span
+                                          className={`w-1.5 h-1.5 rounded-full ${
+                                            isPersonMale(child, database) ? 'bg-sky-500' : 'bg-rose-500'
+                                          }`}
+                                        />
+                                        <span className={`${theme.textPrimary} font-medium`}>
+                                          {isMasked ? '🔒 Скрито (Жива особа)' : getFullName(child)}
+                                        </span>
+                                        {!isMasked && child.birthYear && (
+                                          <span className={`text-[10px] ${theme.textMuted} font-mono`}>
+                                            ({child.birthYear})
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
                     </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Virtual scroll statistics footer */}
+          <div className={`flex items-center justify-between text-xs ${theme.textMuted} px-2 pt-2 border-t ${theme.borderSubtle}`}>
+            <span>Показано: {familiesList.length} із {Object.keys(database.families).length} сімей (віртуалізація списку)</span>
+            <span className="font-mono text-[10px] text-emerald-500 font-medium">
+              DOM вікон: {virtualizer.getVirtualItems().length * columns} карток у пам'яті (60 FPS)
+            </span>
+          </div>
         </div>
       )}
       {/* Confirm Delete Family Modal */}

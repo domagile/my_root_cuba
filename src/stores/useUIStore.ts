@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ThemePalette, AccessLockConfig, ViewMode, AuthUser } from '../types';
 import { encodeSessionToken } from '../utils/crossTabAuth';
+import { idbGet, idbSet, idbDelete } from '../utils/indexedDbStorage';
 import {
   ModalSection,
   ModalAccordionState,
@@ -217,6 +218,7 @@ export interface UIState {
   setAppEmblemVariant: (variant: number) => void;
   customEmblemImage: string | null;
   setCustomEmblemImage: (dataUrl: string | null) => void;
+  hydrateEmblemFromIndexedDB: () => Promise<void>;
   treeFocusKinshipPersonId: string | null;
   setTreeFocusKinshipPersonId: (id: string | null) => void;
   treeFocusKinshipPair: KinshipFocusPair | null;
@@ -239,12 +241,27 @@ export const useUIStore = create<UIState>((set, get) => ({
   setCustomEmblemImage: (dataUrl: string | null) => {
     try {
       if (dataUrl) {
-        localStorage.setItem('genealogy_custom_emblem_image', dataUrl);
+        idbSet('genealogy_custom_emblem_image', dataUrl);
+        // Only mirror to localStorage if small (< 500KB)
+        if (dataUrl.length < 500 * 1024) {
+          localStorage.setItem('genealogy_custom_emblem_image', dataUrl);
+        } else {
+          localStorage.removeItem('genealogy_custom_emblem_image');
+        }
       } else {
+        idbDelete('genealogy_custom_emblem_image');
         localStorage.removeItem('genealogy_custom_emblem_image');
       }
     } catch {}
     set({ customEmblemImage: dataUrl });
+  },
+  hydrateEmblemFromIndexedDB: async () => {
+    try {
+      const saved = await idbGet<string>('genealogy_custom_emblem_image');
+      if (saved) {
+        set({ customEmblemImage: saved });
+      }
+    } catch {}
   },
   appEmblemVariant: typeof window !== 'undefined' ? (parseInt(localStorage.getItem('genealogy_app_emblem_variant') || '1', 10) || 1) : 1,
   setAppEmblemVariant: (variant: number) => {

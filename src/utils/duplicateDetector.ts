@@ -20,6 +20,7 @@ import {
 } from './ukrainianPhonetics';
 import { extractYear } from './treeAudit';
 import { saveIgnoredDuplicatePairsToCloud } from '../lib/firebase';
+import { persistLocalData } from './indexedDbStorage';
 
 export interface PersonDuplicateMatch {
   person: Person;
@@ -699,10 +700,16 @@ export function clearDuplicateDetectorCache(): void {
  * Optimized with Multi-Key Phonetic & Genealogical Candidate Blocking (Bucketing)
  * reducing complexity from O(N^2) to O(N * K) with memoization caching.
  */
-export function detectDuplicatePersons(persons: Person[], filterIgnored = false): DuplicatePair[] {
-  if (cachedPersonsRef === persons && cachedDuplicatePairs !== null) {
-    if (filterIgnored) {
-      const ignoredSet = getIgnoredDuplicatePairKeys();
+export function detectDuplicatePersons(
+  persons: Person[],
+  filterIgnored = false,
+  onProgress?: (percent: number) => void,
+  explicitIgnoredKeys?: string[]
+): DuplicatePair[] {
+  const ignoredSet = explicitIgnoredKeys ? new Set(explicitIgnoredKeys) : (filterIgnored ? getIgnoredDuplicatePairKeys() : undefined);
+
+  if (cachedPersonsRef === persons && cachedDuplicatePairs !== null && !explicitIgnoredKeys) {
+    if (filterIgnored && ignoredSet) {
       return cachedDuplicatePairs.filter((p) => !isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet));
     }
     return cachedDuplicatePairs;
@@ -712,6 +719,7 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
   if (n < 2) {
     cachedPersonsRef = persons;
     cachedDuplicatePairs = [];
+    if (onProgress) onProgress(100);
     return [];
   }
 
@@ -862,7 +870,14 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
       }
     }
 
+    const totalCandidates = candidatePairs.size;
+    let checkedCount = 0;
+
     for (const pairKey of candidatePairs) {
+      checkedCount++;
+      if (onProgress && checkedCount % 100 === 0 && totalCandidates > 0) {
+        onProgress(Math.min(99, Math.round((checkedCount / totalCandidates) * 100)));
+      }
       const sep = pairKey.indexOf('_');
       const idxA = Number(pairKey.slice(0, sep));
       const idxB = Number(pairKey.slice(sep + 1));
@@ -914,8 +929,11 @@ export function detectDuplicatePersons(persons: Person[], filterIgnored = false)
   cachedPersonsRef = persons;
   cachedDuplicatePairs = duplicatePairs;
 
-  if (filterIgnored) {
-    const ignoredSet = getIgnoredDuplicatePairKeys();
+  if (onProgress) {
+    onProgress(100);
+  }
+
+  if (filterIgnored && ignoredSet) {
     return duplicatePairs.filter((p) => !isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet));
   }
   return duplicatePairs;
@@ -938,6 +956,7 @@ export function getDuplicatePairKey(idA: string, idB: string): string {
 export function getIgnoredDuplicatePairKeys(): Set<string> {
   const set = new Set<string>();
   try {
+    if (typeof localStorage === 'undefined' || !localStorage.getItem) return set;
     const raw = localStorage.getItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY);
     if (raw) {
       const list = JSON.parse(raw);
@@ -999,7 +1018,7 @@ export function ignoreDuplicatePair(idA: string, idB: string): void {
     set.add(`${idA}:::${idB}`);
     set.add(`${idB}:::${idA}`);
     const list = Array.from(set);
-    localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(list));
+    persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, list);
     // Persist to Firestore cloud settings so it survives refresh and cross-device sessions
     saveIgnoredDuplicatePairsToCloud(list).catch(() => {});
     if (typeof window !== 'undefined') {
@@ -1025,7 +1044,7 @@ export function unignoreDuplicatePair(idA: string, idB: string): void {
     set.delete(`${idA}:::${idB}`);
     set.delete(`${idB}:::${idA}`);
     const list = Array.from(set);
-    localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(list));
+    persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, list);
     // Persist to Firestore cloud settings
     saveIgnoredDuplicatePairsToCloud(list).catch(() => {});
     if (typeof window !== 'undefined') {

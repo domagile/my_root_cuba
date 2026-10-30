@@ -229,7 +229,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
           }}
           onFocus={() => setIsOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Пошук..."
+          placeholder="Пошук (укр./рос., напр. Надточей)..."
           className={`w-full pl-7 sm:pl-9 pr-6 sm:pr-14 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-xl text-xs md:text-sm ${theme.inputText} placeholder-opacity-60 focus:outline-hidden focus:ring-2 focus:ring-[#B88E3E]/50 focus:border-[#B88E3E] transition-all shadow-xs`}
         />
 

@@ -62,8 +62,9 @@ import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent, isDemoResearchItem, purgeDemoStorage } from '../utils/demoPurge';
 import { saveSnapshot } from '../utils/persistentBackup';
 import { autoMigrateLocalStorageToIDB } from '../utils/indexedDbStorage';
-
-export { useUIStore } from '../stores/useUIStore';
+import { useNotesStore } from '../stores/useNotesStore';
+export { useUIStore };
+export { useNotesStore };
 export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore';
 export { useResearchStore } from '../stores/useResearchStore';
 export { useCloudSyncStore } from '../stores/useCloudSyncStore';
@@ -377,12 +378,14 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch {}
   }, []);
 
-  // Variant 3: Auto-migrate historical localStorage into unlimited IndexedDB and hydrate stores
+  // Auto-migrate historical localStorage into unlimited IndexedDB and hydrate all stores
   useEffect(() => {
     autoMigrateLocalStorageToIDB()
       .then(() => Promise.all([
         useGenealogyStore.getState().hydrateFromIndexedDB(),
-        useResearchStore.getState().hydrateFromIndexedDB()
+        useResearchStore.getState().hydrateFromIndexedDB(),
+        useNotesStore.getState().hydrateFromIndexedDB(),
+        useUIStore.getState().hydrateEmblemFromIndexedDB()
       ]))
       .catch(() => {});
   }, []);

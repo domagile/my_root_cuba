@@ -16,7 +16,13 @@ import {
   calculateLevenshteinDistance, 
   getLevenshteinSimilarity,
   extractUkrainianSurnameRoot,
-  areSurnamesEquivalent
+  areSurnamesEquivalent,
+  areNamesEquivalent,
+  arePatronymicsEquivalent,
+  areSurnamesBilingualEquivalent,
+  areSlavicTokensEquivalent,
+  normalizeBilingualCyrillic,
+  getBilingualNameEquivalents
 } from './ukrainianPhonetics';
 
 export type SearchCategory = 'all' | 'name' | 'place' | 'note';
@@ -98,7 +104,8 @@ export function convertKeyboardLayout(input: string): string {
 
 /**
  * Normalizes query string and produces possible alternative variations
- * (e.g. keyboard layout conversion, transliteration, archaic Cyrillic).
+ * (e.g. keyboard layout conversion, transliteration, archaic Cyrillic,
+ * and Ukrainian <-> Russian cross-lingual equivalents).
  */
 export function prepareQueryVariations(rawQuery: string): string[] {
   const trimmed = rawQuery.trim();
@@ -109,11 +116,17 @@ export function prepareQueryVariations(rawQuery: string): string[] {
   const standard = normalizeArchaicUkrainian(trimmed);
   if (standard) variations.add(standard);
 
+  // Bilingual Cyrillic normalized (e.g. ы->и, э->е, ё->е, ѣ/ѵ->і)
+  const bilingual = normalizeBilingualCyrillic(trimmed);
+  if (bilingual) variations.add(bilingual);
+
   // Check if keyboard layout might be English
   const layoutConverted = convertKeyboardLayout(trimmed);
   const layoutNorm = normalizeArchaicUkrainian(layoutConverted);
   if (layoutNorm && layoutNorm !== standard) {
     variations.add(layoutNorm);
+    const layoutBi = normalizeBilingualCyrillic(layoutConverted);
+    if (layoutBi) variations.add(layoutBi);
   }
 
   // Check Latin transliteration if contains ASCII letters
@@ -122,7 +135,64 @@ export function prepareQueryVariations(rawQuery: string): string[] {
     const translitNorm = normalizeArchaicUkrainian(translit);
     if (translitNorm && translitNorm !== standard) {
       variations.add(translitNorm);
+      const translitBi = normalizeBilingualCyrillic(translit);
+      if (translitBi) variations.add(translitBi);
     }
+  }
+
+  // Generate cross-lingual token variations (Ukrainian <-> Russian names & surnames)
+  // e.g. "Николай Надточей" -> generates "микола надточій", "николай надточій", "микола надточей"
+  const tokens = standard.split(/[\s,.\-–—()]+/).filter(Boolean);
+  if (tokens.length >= 1 && tokens.length <= 4) {
+    const tokenEquivs = tokens.map((token) => {
+      const equivalents = new Set<string>([token]);
+      // First name equivalents (e.g. Николай <-> Микола)
+      getBilingualNameEquivalents(token).forEach((eq) => equivalents.add(eq));
+      
+      // Russian <-> Ukrainian surname ending substitutions
+      // -ей <-> -ій (e.g. Надточей <-> Надточій)
+      if (token.endsWith('ей') && token.length > 4) {
+        equivalents.add(token.slice(0, -2) + 'ій');
+      } else if (token.endsWith('ій') && token.length > 4) {
+        equivalents.add(token.slice(0, -2) + 'ей');
+      }
+      // -ский <-> -ський, -ская <-> -ська
+      if (token.endsWith('ский') && token.length > 5) {
+        equivalents.add(token.slice(0, -4) + 'ський');
+      } else if (token.endsWith('ський') && token.length > 5) {
+        equivalents.add(token.slice(0, -5) + 'ский');
+      }
+      if (token.endsWith('ская') && token.length > 5) {
+        equivalents.add(token.slice(0, -4) + 'ська');
+      } else if (token.endsWith('ська') && token.length > 5) {
+        equivalents.add(token.slice(0, -4) + 'ская');
+      }
+      // -ович <-> -ович, -овна <-> -івна
+      if (token.endsWith('овна') && token.length > 5) {
+        equivalents.add(token.slice(0, -4) + 'івна');
+      } else if (token.endsWith('івна') && token.length > 5) {
+        equivalents.add(token.slice(0, -4) + 'овна');
+      }
+      // -евич <-> -євич, -евна <-> -ївна / -євна
+      if (token.endsWith('евна') && token.length > 5) {
+        equivalents.add(token.slice(0, -4) + 'ївна');
+        equivalents.add(token.slice(0, -4) + 'івна');
+      }
+
+      return Array.from(equivalents);
+    });
+
+    // Cartesian product for up to 3 tokens to generate bilingual full name variants
+    const generateCombinations = (index: number, current: string[]) => {
+      if (index === tokenEquivs.length) {
+        variations.add(current.join(' '));
+        return;
+      }
+      for (const eq of tokenEquivs[index].slice(0, 4)) {
+        generateCombinations(index + 1, [...current, eq]);
+      }
+    };
+    generateCombinations(0, []);
   }
 
   return Array.from(variations);
@@ -238,10 +308,12 @@ export function matchTokenFuzzy(
       let tokenFuzzyType: any = undefined;
 
       for (const tWord of targetWords) {
-        // Direct word equality or surname equivalence (e.g. "Пірковський" vs "Пірковська")
-        if (tWord === qToken || areSurnamesEquivalent(tWord, qToken)) {
+        // Direct word equality or Slavic bilingual equivalence (Names, Patronymics, Surnames: Ukrainian <-> Russian)
+        if (tWord === qToken || areSlavicTokensEquivalent(tWord, qToken)) {
           tokenMatched = true;
-          tokenBestScore = Math.max(tokenBestScore, 95);
+          tokenBestScore = Math.max(tokenBestScore, tWord === qToken ? 100 : 96);
+          tokenFuzzy = tWord !== qToken;
+          tokenFuzzyType = tWord === qToken ? 'exact' : 'phonetic';
           break;
         }
 

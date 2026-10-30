@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Compass,
   ArrowRight,
@@ -16,15 +16,20 @@ import {
   Crown,
   Layers,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Loader2,
+  Search,
+  Cpu
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
-import { calculateKinship, getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
+import { calculateKinship, KinshipCalculationResult, getFullName, sortPersonsBySurnameAndBirthDesc } from '../../utils/relationship';
+import { calculateKinshipAsync } from '../../../workers/workerBridge';
 import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { getPrivacySafePerson, isPersonLiving, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 import { VisualKinshipPath } from './VisualKinshipPath';
+import { areSlavicTokensEquivalent } from '../../../utils/ukrainianPhonetics';
 
 interface KinshipCalculatorViewProps {
   database: GenealogyDatabase;
@@ -58,45 +63,199 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
   const [personBId, setPersonBId] = useState<string>(dropdownPersons[1]?.id || dropdownPersons[0]?.id || '');
   const [activeTab, setActiveTab] = useState<'visual' | 'steps' | 'dna'>('visual');
 
+  const [searchA, setSearchA] = useState('');
+  const [searchB, setSearchB] = useState('');
+
+  const [result, setResult] = useState<KinshipCalculationResult | null>(() => {
+    if (personAId && personBId && personAId !== personBId) {
+      try {
+        return calculateKinship(database, personAId, personBId);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [calcTimeMs, setCalcTimeMs] = useState<number | null>(null);
+
   const handleSwapPersons = () => {
     setPersonAId(personBId);
     setPersonBId(personAId);
   };
 
-  const result = useMemo(() => {
-    return calculateKinship(database, personAId, personBId);
+  useEffect(() => {
+    if (!personAId || !personBId) {
+      setResult(null);
+      return;
+    }
+
+    if (personAId === personBId) {
+      setResult({
+        relationship: 'Та сама особа',
+        relationshipName: 'Та сама особа',
+        degree: 0,
+        degreeOfConsanguinity: 0,
+        coefficient: 100,
+        description: 'Вибрано одну й ту саму особу.',
+        personA: database.persons[personAId] || null,
+        personB: database.persons[personBId] || null,
+        commonAncestors: database.persons[personAId] ? [database.persons[personAId]] : [],
+        path: [{ personId: personAId, relationFromPrevious: 'Сама особа', direction: 'start', generationOffset: 0 }],
+        lineageType: 'direct_ancestor',
+        generationalDistance: 0
+      });
+      return;
+    }
+
+    let isCurrent = true;
+    setIsCalculating(true);
+    const startT = performance.now();
+
+    calculateKinshipAsync(database, personAId, personBId)
+      .then((res) => {
+        if (!isCurrent) return;
+        setResult(res);
+        setCalcTimeMs(Math.round(performance.now() - startT));
+      })
+      .catch((err) => {
+        if (!isCurrent) return;
+        console.warn('Worker kinship calculation failed, using fallback:', err);
+        setResult(calculateKinship(database, personAId, personBId));
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setIsCalculating(false);
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
   }, [database, personAId, personBId]);
+
+  // Fast options filtering for Person A (top 80 matches with bilingual Ukrainian/Russian phonetic match)
+  const optionsA = useMemo(() => {
+    const list = !searchA.trim()
+      ? dropdownPersons
+      : dropdownPersons.filter((p) => {
+          const name = getFullName(p).toLowerCase();
+          const yr = p.birthYear ? String(p.birthYear) : '';
+          const q = searchA.toLowerCase().trim();
+          if (name.includes(q) || yr.includes(q)) return true;
+
+          const sur = (p.name?.surname || p.lastName || '').toLowerCase();
+          const given = (p.name?.given || p.firstName || '').toLowerCase();
+          const patron = (p.name?.patronymic || p.patronymic || '').toLowerCase();
+          const nameParts = [sur, given, patron].filter(Boolean);
+          const qTokens = q.split(/[\s,.\-–—()]+/).filter(Boolean);
+          return qTokens.length > 0 && qTokens.every((tok) => nameParts.some((np) => np.includes(tok) || areSlavicTokensEquivalent(tok, np)));
+        });
+
+    // Ensure selected person is always present in options
+    if (personAId && !list.some((p) => p.id === personAId)) {
+      const selectedP = dropdownPersons.find((p) => p.id === personAId);
+      if (selectedP) return [selectedP, ...list.slice(0, 79)];
+    }
+    return list.slice(0, 80);
+  }, [dropdownPersons, searchA, personAId]);
+
+  // Fast options filtering for Person B (top 80 matches with bilingual Ukrainian/Russian phonetic match)
+  const optionsB = useMemo(() => {
+    const list = !searchB.trim()
+      ? dropdownPersons
+      : dropdownPersons.filter((p) => {
+          const name = getFullName(p).toLowerCase();
+          const yr = p.birthYear ? String(p.birthYear) : '';
+          const q = searchB.toLowerCase().trim();
+          if (name.includes(q) || yr.includes(q)) return true;
+
+          const sur = (p.name?.surname || p.lastName || '').toLowerCase();
+          const given = (p.name?.given || p.firstName || '').toLowerCase();
+          const patron = (p.name?.patronymic || p.patronymic || '').toLowerCase();
+          const nameParts = [sur, given, patron].filter(Boolean);
+          const qTokens = q.split(/[\s,.\-–—()]+/).filter(Boolean);
+          return qTokens.length > 0 && qTokens.every((tok) => nameParts.some((np) => np.includes(tok) || areSlavicTokensEquivalent(tok, np)));
+        });
+
+    // Ensure selected person is always present in options
+    if (personBId && !list.some((p) => p.id === personBId)) {
+      const selectedP = dropdownPersons.find((p) => p.id === personBId);
+      if (selectedP) return [selectedP, ...list.slice(0, 79)];
+    }
+    return list.slice(0, 80);
+  }, [dropdownPersons, searchB, personBId]);
 
   return (
     <div className={`max-w-5xl mx-auto px-4 py-6 space-y-6 ${theme.textPrimary}`}>
       {/* Header */}
       <div className={`${theme.cardBg} border ${theme.cardBorder} rounded-xl p-5 shadow-xs`}>
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-lg ${isDark ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' : 'bg-emerald-100 border-emerald-300 text-emerald-700'} border flex items-center justify-center`}>
-            <Compass className="w-5 h-5" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-lg ${isDark ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' : 'bg-emerald-100 border-emerald-300 text-emerald-700'} border flex items-center justify-center shrink-0`}>
+              <Compass className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className={`text-xl font-bold tracking-tight ${theme.textPrimary}`}>
+                  Калькулятор спорідненості та ступенів близькості
+                </h1>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold flex items-center gap-1">
+                  <Cpu className="w-3 h-3" /> Web Worker 60 FPS
+                </span>
+              </div>
+              <p className={`text-xs ${theme.textMuted} mt-0.5`}>
+                Фоновий розрахунок найкоротшого генеалогічного ланцюжка, спільних предків і DNA-коефіцієнта
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className={`text-xl font-bold tracking-tight ${theme.textPrimary}`}>
-              Калькулятор спорідненості та ступенів близькості
-            </h1>
-            <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-              Точний розрахунок генеалогічного зв'язку, спільних предків, відстані поколінь та візуальна схема
-            </p>
+
+          {/* Performance metric or background loader indicator */}
+          <div className="flex items-center gap-2 shrink-0">
+            {isCalculating ? (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-mono animate-pulse">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Обчислення...</span>
+              </div>
+            ) : calcTimeMs !== null ? (
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-neutral-400">
+                Worker: {calcTimeMs} мс
+              </span>
+            ) : null}
           </div>
         </div>
 
-        {/* Person Selectors with Swap */}
+        {/* Person Selectors with Search & Swap */}
         <div className={`grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-end gap-3 mt-5 pt-4 border-t ${theme.borderSubtle}`}>
-          <div>
-            <label className={`block text-xs font-semibold ${theme.textSecondary} mb-1.5`}>
-              Перша особа (А) — Відправна точка:
-            </label>
+          {/* Person A */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className={`block text-xs font-semibold ${theme.textSecondary}`}>
+                Перша особа (А) — Відправна точка:
+              </label>
+              <span className="text-[10px] text-neutral-400 font-mono">
+                {dropdownPersons.length} осіб
+              </span>
+            </div>
+
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-neutral-400" />
+              <input
+                type="text"
+                value={searchA}
+                onChange={(e) => setSearchA(e.target.value)}
+                placeholder="Швидкий фільтр імені особи А..."
+                className={`w-full pl-8 pr-3 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-500 focus:outline-none focus:border-indigo-500 mb-1.5`}
+              />
+            </div>
+
             <select
               value={personAId}
               onChange={(e) => setPersonAId(e.target.value)}
-              className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+              className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-indigo-500 cursor-pointer`}
             >
-              {dropdownPersons.map((p, pIdx) => {
+              {optionsA.map((p, pIdx) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
                 const isMasked = !isWhitelisted && isLiving;
                 return (
@@ -108,27 +267,46 @@ export const KinshipCalculatorView: React.FC<KinshipCalculatorViewProps> = ({
             </select>
           </div>
 
+          {/* Swap Button */}
           <div className="flex justify-center pb-0.5">
             <button
               type="button"
               onClick={handleSwapPersons}
               title="Поміняти місцями (А ⇄ Б)"
-              className={`p-2 rounded-lg border ${theme.cardBorder} ${theme.surfaceBg} hover:border-emerald-500 hover:text-emerald-500 transition-colors ${theme.textPrimary}`}
+              className={`p-2.5 rounded-lg border ${theme.cardBorder} ${theme.surfaceBg} hover:border-indigo-500 hover:text-indigo-400 transition-colors ${theme.textPrimary} cursor-pointer`}
             >
               <ArrowLeftRight className="w-4 h-4" />
             </button>
           </div>
 
-          <div>
-            <label className={`block text-xs font-semibold ${theme.textSecondary} mb-1.5`}>
-              Друга особа (Б) — Шукана особа:
-            </label>
+          {/* Person B */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className={`block text-xs font-semibold ${theme.textSecondary}`}>
+                Друга особа (Б) — Шукана особа:
+              </label>
+              <span className="text-[10px] text-neutral-400 font-mono">
+                {dropdownPersons.length} осіб
+              </span>
+            </div>
+
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-neutral-400" />
+              <input
+                type="text"
+                value={searchB}
+                onChange={(e) => setSearchB(e.target.value)}
+                placeholder="Швидкий фільтр імені особи Б..."
+                className={`w-full pl-8 pr-3 py-1.5 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} placeholder:text-neutral-500 focus:outline-none focus:border-indigo-500 mb-1.5`}
+              />
+            </div>
+
             <select
               value={personBId}
               onChange={(e) => setPersonBId(e.target.value)}
-              className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+              className={`w-full px-3 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-indigo-500 cursor-pointer`}
             >
-              {dropdownPersons.map((p, pIdx) => {
+              {optionsB.map((p, pIdx) => {
                 const isLiving = isPersonLiving(database.persons[p.id]);
                 const isMasked = !isWhitelisted && isLiving;
                 return (

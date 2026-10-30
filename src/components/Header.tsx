@@ -10,6 +10,8 @@ import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { HeaderSearchBar } from './HeaderSearchBar';
 import { testConnection } from '../lib/firebase';
+import { flushPendingLocalWrites } from '../utils/indexedDbStorage';
+import { flushPendingCloudDeltas } from '../stores/useGenealogyStore';
 
 const ShareTreeModal = React.lazy(() => import('../rodovid/components/modals/ShareTreeModal').then(m => ({ default: m.ShareTreeModal })));
 const GedcomModal = React.lazy(() => import('../rodovid/components/modals/GedcomModal').then(m => ({ default: m.GedcomModal })));
@@ -81,7 +83,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
   const [cloudActionMsg, setCloudActionMsg] = useState<{ text: string; isError?: boolean } | null>(null);
   const [toastNotice, setToastNotice] = useState<string | null>(null);
 
-  const importHistory = useGenealogyStore((s) => s.importHistory || []);
+  const importHistory = useGenealogyStore((s) => s.importHistory);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const mobileMoreRef = useRef<HTMLDivElement>(null);
@@ -142,6 +144,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
 
   const handleHeaderPush = async () => {
     setCloudActionMsg(null);
+    await flushPendingLocalWrites();
+    await flushPendingCloudDeltas();
     const res = await triggerUploadToCloud();
     setCloudActionMsg({ text: res.message, isError: !res.success });
     setTimeout(() => setCloudActionMsg(null), 4000);
@@ -158,6 +162,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
     setIsFullSyncing(true);
     setCloudActionMsg(null);
     try {
+      await flushPendingLocalWrites();
+      await flushPendingCloudDeltas();
       const pushRes = await triggerUploadToCloud();
       if (!pushRes.success) {
         setCloudActionMsg({ text: pushRes.message, isError: true });

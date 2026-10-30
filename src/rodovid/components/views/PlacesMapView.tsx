@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { 
   MapPin, 
   Search, 
@@ -223,6 +224,14 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
 
   const activePlaceObj = activePlaceName ? placeData[activePlaceName] : null;
 
+  const sidebarContainerRef = useRef<HTMLDivElement>(null);
+  const sidebarVirtualizer = useVirtualizer({
+    count: placeList.length,
+    getScrollElement: () => sidebarContainerRef.current,
+    estimateSize: () => 105,
+    overscan: 4,
+  });
+
   return (
     <div className={`flex-1 flex flex-col h-full overflow-hidden ${theme.textPrimary}`}>
       {/* Top Header Submode Switcher */}
@@ -400,119 +409,8 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {placeList.map((item) => {
-            const isSelected = activePlaceName === item.place;
-            const itemDossier = getPlaceDossier(item.place);
-            const hasHistory = !!(itemDossier?.historyText || itemDossier?.historicalName || itemDossier?.district || itemDossier?.parishChurch);
-            const sourcesCount = itemDossier?.sourceLinks?.length || 0;
-            const hasNotes = !!itemDossier?.notes;
-
-            return (
-              <div
-                key={item.place}
-                className={`w-full p-3 rounded-xl transition-all border ${
-                  isSelected
-                    ? isDark
-                      ? 'bg-amber-950/40 border-amber-500 text-white shadow-xs'
-                      : 'bg-amber-50 border-amber-500 text-neutral-900 shadow-xs'
-                    : `${theme.surfaceBg} ${theme.borderSubtle} hover:border-neutral-400 ${theme.textSecondary}`
-                }`}
-              >
-                <div 
-                  onClick={() => setSelectedPlace(item.place)}
-                  className="flex items-start justify-between gap-2 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <MapPin className={`w-4 h-4 shrink-0 ${isSelected ? 'text-amber-500' : theme.textMuted}`} />
-                    <span className="font-semibold text-xs truncate">{item.place}</span>
-                  </div>
-                  <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full shrink-0 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-neutral-200 text-neutral-700'}`}>
-                    {item.total}
-                  </span>
-                </div>
-
-                <div 
-                  onClick={() => setSelectedPlace(item.place)}
-                  className={`flex flex-wrap items-center gap-2.5 text-[11px] ${theme.textMuted} mt-2 pl-6 cursor-pointer`}
-                >
-                  {item.birthCount > 0 && (
-                    <span className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                      нар.: <strong className={theme.textPrimary}>{item.birthCount}</strong>
-                    </span>
-                  )}
-                  {item.marriageCount > 0 && (
-                    <span className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                      шлюб: <strong className={theme.textPrimary}>{item.marriageCount}</strong>
-                    </span>
-                  )}
-                  {item.deathCount > 0 && (
-                    <span className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-                      пом.: <strong className={theme.textPrimary}>{item.deathCount}</strong>
-                    </span>
-                  )}
-                </div>
-
-                {/* Dossier Indicator Badges */}
-                {(hasHistory || sourcesCount > 0 || hasNotes) && (
-                  <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-6 pt-1.5 border-t border-dashed border-neutral-200 dark:border-neutral-800/80">
-                    {hasHistory && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedPlace(item.place);
-                          setActiveDossierTab('history');
-                        }}
-                        title="Відкрити історію населеного пункту"
-                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60' : 'bg-amber-100 text-amber-900 border border-amber-300'} hover:opacity-80 transition-opacity cursor-pointer`}
-                      >
-                        <BookOpen className="w-3 h-3" />
-                        <span>Історія</span>
-                      </button>
-                    )}
-
-                    {sourcesCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedPlace(item.place);
-                          setActiveDossierTab('sources');
-                        }}
-                        title="Відкрити збережені метрики та архіви"
-                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60' : 'bg-emerald-100 text-emerald-900 border border-emerald-300'} hover:opacity-80 transition-opacity cursor-pointer`}
-                      >
-                        <ScrollText className="w-3 h-3" />
-                        <span>Метрики ({sourcesCount})</span>
-                      </button>
-                    )}
-
-                    {hasNotes && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedPlace(item.place);
-                          setActiveDossierTab('notes');
-                        }}
-                        title="Відкрити нотатки дослідника"
-                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-sky-950/60 text-sky-300 border border-sky-800/60' : 'bg-sky-100 text-sky-900 border border-sky-300'} hover:opacity-80 transition-opacity cursor-pointer`}
-                      >
-                        <FileText className="w-3 h-3" />
-                        <span>Нотатки</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {placeList.length === 0 && (
+        <div ref={sidebarContainerRef} className="flex-1 overflow-y-auto p-3">
+          {placeList.length === 0 ? (
             <div className={`p-8 text-center ${theme.textMuted} text-xs space-y-2`}>
               <MapPin className="w-8 h-8 mx-auto opacity-40 text-amber-500 mb-1" />
               <p className="font-medium">Локацій не знайдено</p>
@@ -522,7 +420,148 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
                   : 'Додайте місця народження, шлюбу чи подій у картках осіб'}
               </p>
             </div>
+          ) : (
+            <div
+              style={{
+                height: `${sidebarVirtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {sidebarVirtualizer.getVirtualItems().map((vItem) => {
+                const item = placeList[vItem.index];
+                if (!item) return null;
+
+                const isSelected = activePlaceName === item.place;
+                const itemDossier = getPlaceDossier(item.place);
+                const hasHistory = !!(itemDossier?.historyText || itemDossier?.historicalName || itemDossier?.district || itemDossier?.parishChurch);
+                const sourcesCount = itemDossier?.sourceLinks?.length || 0;
+                const hasNotes = !!itemDossier?.notes;
+
+                return (
+                  <div
+                    key={item.place}
+                    data-index={vItem.index}
+                    ref={sidebarVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${vItem.start}px)`,
+                    }}
+                    className="pb-2"
+                  >
+                    <div
+                      className={`w-full p-3 rounded-xl transition-all border ${
+                        isSelected
+                          ? isDark
+                            ? 'bg-amber-950/40 border-amber-500 text-white shadow-xs'
+                            : 'bg-amber-50 border-amber-500 text-neutral-900 shadow-xs'
+                          : `${theme.surfaceBg} ${theme.borderSubtle} hover:border-neutral-400 ${theme.textSecondary}`
+                      }`}
+                    >
+                      <div 
+                        onClick={() => setSelectedPlace(item.place)}
+                        className="flex items-start justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <MapPin className={`w-4 h-4 shrink-0 ${isSelected ? 'text-amber-500' : theme.textMuted}`} />
+                          <span className="font-semibold text-xs truncate">{item.place}</span>
+                        </div>
+                        <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full shrink-0 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-neutral-200 text-neutral-700'}`}>
+                          {item.total}
+                        </span>
+                      </div>
+
+                      <div 
+                        onClick={() => setSelectedPlace(item.place)}
+                        className={`flex flex-wrap items-center gap-2.5 text-[11px] ${theme.textMuted} mt-2 pl-6 cursor-pointer`}
+                      >
+                        {item.birthCount > 0 && (
+                          <span className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            нар.: <strong className={theme.textPrimary}>{item.birthCount}</strong>
+                          </span>
+                        )}
+                        {item.marriageCount > 0 && (
+                          <span className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                            шлюб: <strong className={theme.textPrimary}>{item.marriageCount}</strong>
+                          </span>
+                        )}
+                        {item.deathCount > 0 && (
+                          <span className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                            пом.: <strong className={theme.textPrimary}>{item.deathCount}</strong>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Dossier Indicator Badges */}
+                      {(hasHistory || sourcesCount > 0 || hasNotes) && (
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-6 pt-1.5 border-t border-dashed border-neutral-200 dark:border-neutral-800/80">
+                          {hasHistory && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPlace(item.place);
+                                setActiveDossierTab('history');
+                              }}
+                              title="Відкрити історію населеного пункту"
+                              className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60' : 'bg-amber-100 text-amber-900 border border-amber-300'} hover:opacity-80 transition-opacity cursor-pointer`}
+                            >
+                              <BookOpen className="w-3 h-3" />
+                              <span>Історія</span>
+                            </button>
+                          )}
+
+                          {sourcesCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPlace(item.place);
+                                setActiveDossierTab('sources');
+                              }}
+                              title="Відкрити збережені метрики та архіви"
+                              className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60' : 'bg-emerald-100 text-emerald-900 border border-emerald-300'} hover:opacity-80 transition-opacity cursor-pointer`}
+                            >
+                              <ScrollText className="w-3 h-3" />
+                              <span>Метрики ({sourcesCount})</span>
+                            </button>
+                          )}
+
+                          {hasNotes && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPlace(item.place);
+                                setActiveDossierTab('notes');
+                              }}
+                              title="Відкрити нотатки дослідника"
+                              className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${isDark ? 'bg-sky-950/60 text-sky-300 border border-sky-800/60' : 'bg-sky-100 text-sky-900 border border-sky-300'} hover:opacity-80 transition-opacity cursor-pointer`}
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>Нотатки</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
+        </div>
+
+        {/* Sidebar virtualization footer */}
+        <div className={`px-3 py-1.5 border-t ${theme.borderSubtle} text-[10px] font-mono text-neutral-400 flex items-center justify-between`}>
+          <span>Локацій: {placeList.length}</span>
+          <span className="text-amber-500 font-semibold">DOM: {sidebarVirtualizer.getVirtualItems().length} у пам'яті (60 FPS)</span>
         </div>
       </div>
       )}

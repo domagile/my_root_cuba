@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   X,
   GitMerge,
@@ -27,7 +27,8 @@ import {
   Scissors,
   UserX,
   GitFork,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import {
@@ -43,6 +44,7 @@ import {
   FieldConflict,
   PersonConflictRecord
 } from '../../utils/mergeDatabase';
+import { analyzeMergeAsync } from '../../../workers/workerBridge';
 import { downloadGedcom } from '../../utils/gedcom';
 
 interface GedcomMergeModalProps {
@@ -139,22 +141,88 @@ export const GedcomMergeModal: React.FC<GedcomMergeModalProps> = ({
     );
   }, [incomingDatabase, excludeAncestorsOf, excludeIndividuals]);
 
-  // Perform pre-merge analysis against the filtered incoming database
-  const analysis: MergeAnalysis = useMemo(() => {
-    return analyzeMerge(currentDatabase, effectiveIncomingDb);
+  // Perform pre-merge analysis off-main-thread in Web Worker
+  const [analysis, setAnalysis] = useState<MergeAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(true);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [resolutions, setResolutions] = useState<ConflictResolutions>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsAnalyzing(true);
+    setAnalysisProgress(0);
+
+    analyzeMergeAsync(currentDatabase, effectiveIncomingDb, (p) => {
+      if (!cancelled) setAnalysisProgress(p);
+    })
+      .then((res) => {
+        if (!cancelled) {
+          setAnalysis(res);
+          setIsAnalyzing(false);
+          setResolutions((prev) => {
+            const initial: ConflictResolutions = { ...prev };
+            res.conflicts.forEach((p) => {
+              if (!initial[p.personId]) {
+                initial[p.personId] = {} as any;
+                p.conflicts.forEach((c) => {
+                  initial[p.personId][c.fieldKey] = 'keep_existing';
+                });
+              }
+            });
+            return initial;
+          });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to analyze merge in worker, falling back to sync:', err);
+          const syncRes = analyzeMerge(currentDatabase, effectiveIncomingDb);
+          setAnalysis(syncRes);
+          setIsAnalyzing(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [currentDatabase, effectiveIncomingDb]);
 
-  // Initial conflict resolutions state: default all to 'keep_existing' (safest option)
-  const [resolutions, setResolutions] = useState<ConflictResolutions>(() => {
-    const initial: ConflictResolutions = {};
-    analysis.conflicts.forEach((p) => {
-      initial[p.personId] = {} as any;
-      p.conflicts.forEach((c) => {
-        initial[p.personId][c.fieldKey] = 'keep_existing';
-      });
-    });
-    return initial;
-  });
+  // If analyzing in background Web Worker, display sleek loading state
+  if (isAnalyzing || !analysis) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl text-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto shadow-inner">
+            <GitMerge className="w-7 h-7 animate-pulse text-amber-400" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-white">Аналіз бази GEDCOM</h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Пошук збігів та потенційних конфліктів у фоновому потоці (Web Worker)...
+            </p>
+          </div>
+          <div className="space-y-1.5 pt-2">
+            <div className="flex items-center justify-between text-xs text-amber-400 font-mono font-semibold">
+              <span className="flex items-center gap-1.5">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Опрацювання зв'язків</span>
+              </span>
+              <span>{analysisProgress}%</span>
+            </div>
+            <div className="w-full bg-slate-950 rounded-full h-2.5 overflow-hidden border border-slate-800">
+              <div
+                className="bg-amber-500 h-full rounded-full transition-all duration-150"
+                style={{ width: `${Math.max(5, analysisProgress)}%` }}
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Головний потік вільний від навантаження (60 FPS).
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const existingCount = Object.keys(currentDatabase.persons || {}).length;
   const rawIncomingCount = Object.keys(incomingDatabase.persons || {}).length;

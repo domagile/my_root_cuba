@@ -564,15 +564,14 @@ export const useResearchStore = create<ResearchDataState>((set, get) => ({
         idbGet<ArchiveRequest[]>(`${STORAGE_KEY}_requests`),
         idbGet<YearMatrixEntry[]>(`${STORAGE_KEY}_matrix`)
       ]);
-      const state = get();
       const updates: Partial<ResearchDataState> = {};
-      if (Array.isArray(m) && m.length > state.metricRecords.length) updates.metricRecords = m;
-      if (Array.isArray(d) && d.length > state.documents.length) updates.documents = d;
-      if (Array.isArray(t) && t.length > state.tasks.length) updates.tasks = t;
-      if (Array.isArray(f) && f.length > state.findings.length) updates.findings = f;
-      if (Array.isArray(h) && h.length > state.hypotheses.length) updates.hypotheses = h;
-      if (Array.isArray(r) && r.length > state.requests.length) updates.requests = r;
-      if (Array.isArray(mx) && mx.length > state.matrixEntries.length) updates.matrixEntries = mx;
+      if (Array.isArray(m) && m.length > 0) updates.metricRecords = m;
+      if (Array.isArray(d) && d.length > 0) updates.documents = d;
+      if (Array.isArray(t) && t.length > 0) updates.tasks = t;
+      if (Array.isArray(f) && f.length > 0) updates.findings = f;
+      if (Array.isArray(h) && h.length > 0) updates.hypotheses = h;
+      if (Array.isArray(r) && r.length > 0) updates.requests = r;
+      if (Array.isArray(mx) && mx.length > 0) updates.matrixEntries = mx;
       if (Object.keys(updates).length > 0) set(updates);
     } catch {}
   }

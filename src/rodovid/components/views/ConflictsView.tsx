@@ -38,7 +38,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { Person, Family, TreeConflict, DuplicatePair } from '../../../types';
-import { runTreeDataHealthAudit, autoFixTreeConflict } from '../../../utils/treeAudit';
+import { runTreeDataHealthAudit, autoFixTreeConflict, TreeHealthReport } from '../../../utils/treeAudit';
 import {
   detectDuplicatePersons,
   isDuplicatePairIgnored,
@@ -46,6 +46,7 @@ import {
   unignoreDuplicatePair,
   getIgnoredDuplicatePairKeys
 } from '../../../utils/duplicateDetector';
+import { detectDuplicatesAsync, auditTreeAsync } from '../../../workers/workerBridge';
 import { quickMergePersons, batchMergeSafeDuplicates } from '../../../utils/personMerge';
 import { SmartMergeModal } from '../modals/SmartMergeModal';
 import { PersonDetailModal } from '../../../components/Tree/PersonDetailModal';
@@ -138,14 +139,45 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     showNotification('Пару відновлено для подальшої перевірки.');
   };
 
-  // Run Realtime Audits
-  const auditReport = useMemo(() => {
-    return runTreeDataHealthAudit(persons, families);
-  }, [persons, families]);
+  // Run Realtime Audits & Duplicate Detection in Web Worker
+  const [auditReport, setAuditReport] = useState<TreeHealthReport>(() => runTreeDataHealthAudit(persons, families));
+  const [duplicatePairs, setDuplicatePairs] = useState<DuplicatePair[]>(() => detectDuplicatePersons(persons));
+  const [scanProgress, setScanProgress] = useState(0);
 
-  const duplicatePairs = useMemo(() => {
-    return detectDuplicatePersons(persons);
-  }, [persons]);
+  useEffect(() => {
+    let cancelled = false;
+    setIsScanningDuplicates(true);
+    setScanProgress(0);
+
+    auditTreeAsync(persons, families)
+      .then((rep) => {
+        if (!cancelled) setAuditReport(rep);
+      })
+      .catch((err) => {
+        console.warn('Worker tree audit fallback:', err);
+      });
+
+    detectDuplicatesAsync(persons, false, ignoredPairIds, (p) => {
+      if (!cancelled) setScanProgress(p);
+    })
+      .then((dups) => {
+        if (!cancelled) {
+          setDuplicatePairs(dups);
+          setIsScanningDuplicates(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.warn('Worker duplicate search fallback:', err);
+          setDuplicatePairs(detectDuplicatePersons(persons));
+          setIsScanningDuplicates(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [persons, families]);
 
   const ignoredSet = useMemo(() => new Set(ignoredPairIds), [ignoredPairIds]);
 
@@ -207,13 +239,26 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
     showNotification(`Автоматично об'єднано ${res.mergedCount} дублікатів у базі даних!`);
   };
 
-  // Trigger manual rescan with visual indicator
+  // Trigger manual rescan in background Web Worker
   const handleTriggerRescan = () => {
     setIsScanningDuplicates(true);
-    setTimeout(() => {
-      setIsScanningDuplicates(false);
-      showNotification(`Перевірку бази завершено! Проаналізовано ${persons.length} осіб.`);
-    }, 600);
+    setScanProgress(0);
+
+    auditTreeAsync(persons, families)
+      .then((rep) => setAuditReport(rep))
+      .catch(() => {});
+
+    detectDuplicatesAsync(persons, false, ignoredPairIds, (p) => setScanProgress(p))
+      .then((dups) => {
+        setDuplicatePairs(dups);
+        setIsScanningDuplicates(false);
+        showNotification(`Перевірку бази завершено у фоновому потоці Web Worker! Проаналізовано ${persons.length} осіб.`);
+      })
+      .catch((err) => {
+        console.warn('Manual rescan fallback:', err);
+        setDuplicatePairs(detectDuplicatePersons(persons));
+        setIsScanningDuplicates(false);
+      });
   };
 
   // Filtered conflicts
@@ -739,6 +784,16 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                     </p>
                   </div>
                 </div>
+                <div className="flex items-center gap-2 pt-1 pl-10">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    Web Worker 60 FPS
+                  </span>
+                  {isScanningDuplicates && (
+                    <span className="text-[11px] text-amber-400 font-mono">
+                      Опрацьовано: {scanProgress}%
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
@@ -748,10 +803,10 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                   onClick={handleTriggerRescan}
                   disabled={isScanningDuplicates}
                   className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  title="Запустити повторний аналіз усієї бази осіб"
+                  title="Запустити повторний аналіз усієї бази осіб у фоновому Web Worker"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isScanningDuplicates ? 'animate-spin' : ''}`} />
-                  <span>{isScanningDuplicates ? 'Сканування...' : 'Пересканувати базу'}</span>
+                  <span>{isScanningDuplicates ? `Сканування (${scanProgress}%)...` : 'Пересканувати базу'}</span>
                 </button>
 
                 {/* Batch merge button */}

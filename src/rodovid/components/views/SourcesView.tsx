@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   BookOpen,
   Plus,
@@ -86,6 +87,231 @@ const renderTextWithLinks = (text: string, themeColorClass: string) => {
   });
 };
 
+interface SourceCardProps {
+  source: Source;
+  theme: any;
+  isDark: boolean;
+  selectedTag: string | null;
+  setSelectedTag: (tag: string | null) => void;
+  onEditSource: (id: string) => void;
+  onDeleteSource?: (id: string) => void;
+  setSourceToDelete: (val: { id: string; title: string }) => void;
+}
+
+const SourceCard: React.FC<SourceCardProps> = ({
+  source,
+  theme,
+  isDark,
+  selectedTag,
+  setSelectedTag,
+  onEditSource,
+  onDeleteSource,
+  setSourceToDelete,
+}) => {
+  const docTypeLabel = source.documentType || detectDocumentType(source);
+
+  return (
+    <div
+      key={source.id}
+      className={`p-5 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all flex flex-col justify-between space-y-4 shadow-xs hover:shadow-md h-full`}
+    >
+      <div className="space-y-3">
+        {/* Card Header: Type Badge & Action Buttons */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span
+              className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${
+                isDark
+                  ? 'bg-amber-950/70 text-amber-400 border border-amber-800/60'
+                  : 'bg-amber-100 text-amber-900 border border-amber-300'
+              }`}
+            >
+              {docTypeLabel}
+            </span>
+            {source.publication && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-black/5 dark:bg-white/5 text-neutral-400 border border-black/5 dark:border-white/5">
+                {source.publication}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => onEditSource(source.id)}
+              className={`p-1.5 ${theme.textMuted} hover:text-amber-500 rounded-lg hover:bg-neutral-500/10 transition-colors cursor-pointer`}
+              title="Редагувати джерело"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+            {onDeleteSource && (
+              <button
+                onClick={() =>
+                  setSourceToDelete({
+                    id: source.id,
+                    title: source.title || 'Архівне джерело',
+                  })
+                }
+                className={`p-1.5 ${theme.textMuted} hover:text-rose-500 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer`}
+                title="Видалити джерело"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Title */}
+        <h3 className={`font-bold text-sm ${theme.textPrimary} leading-snug line-clamp-2`}>
+          {source.title}
+        </h3>
+
+        {/* Repository / Archive */}
+        {(source.repository || source.archive) && (
+          <div className={`text-xs ${theme.textMuted} flex items-center gap-1.5`}>
+            <Archive className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <span className="line-clamp-1 font-medium">
+              {source.repository || source.archive}
+            </span>
+          </div>
+        )}
+
+        {/* Author / Creator */}
+        {source.author && (
+          <p className="text-[11px] text-neutral-400 italic line-clamp-1">
+            Укладач: {source.author}
+          </p>
+        )}
+
+        {/* Archive Reference Badges (Fund, Inventory, Case, Page) */}
+        {(source.archiveReference ||
+          source.archiveFund ||
+          source.fund ||
+          source.inventory ||
+          source.caseNumber ||
+          source.page) && (
+          <div
+            className={`p-2.5 rounded-xl ${theme.surfaceBg} font-mono text-xs ${
+              isDark ? 'text-amber-300' : 'text-amber-900'
+            } flex flex-wrap gap-1.5 border ${theme.borderSubtle}`}
+          >
+            {source.archiveReference ? (
+              <span>{source.archiveReference}</span>
+            ) : (
+              <>
+                {(source.archiveFund || source.fund) && (
+                  <span>Фонд {source.archiveFund || source.fund}</span>
+                )}
+                {source.inventory && <span>Опис {source.inventory}</span>}
+                {source.caseNumber && <span>Справа {source.caseNumber}</span>}
+                {source.page && <span>Арк. {source.page}</span>}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Notes / Transcription with auto-links */}
+        {(source.notes || source.transcription) && (
+          <p className={`text-xs ${theme.textSecondary} line-clamp-3 italic pt-0.5 leading-relaxed`}>
+            "{renderTextWithLinks(
+              source.notes || source.transcription || '',
+              isDark ? 'text-amber-400' : 'text-amber-700'
+            )}"
+          </p>
+        )}
+
+        {/* Custom Fields */}
+        {Array.isArray(source.customFields) && source.customFields.length > 0 && (
+          <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1">
+              <Layers className="w-3 h-3 text-amber-500" />
+              <span>Власні поля ({source.customFields.length}):</span>
+            </div>
+            <div className="space-y-1">
+              {source.customFields.map((cf, idx) => {
+                const isLink =
+                  cf.type === 'link' ||
+                  cf.value?.startsWith('http://') ||
+                  cf.value?.startsWith('https://');
+
+                return (
+                  <div
+                    key={cf.id || idx}
+                    className="flex items-start justify-between gap-2 text-xs py-0.5"
+                  >
+                    <span className="text-neutral-500 text-[11px] shrink-0 font-medium">
+                      {cf.label}:
+                    </span>
+                    {isLink ? (
+                      <a
+                        href={cf.value}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-amber-600 dark:text-amber-400 hover:underline font-bold text-[11px] inline-flex items-center gap-1 truncate max-w-[70%]"
+                        title={cf.value}
+                      >
+                        <span className="truncate">{cf.value}</span>
+                        <ExternalLink className="w-3 h-3 shrink-0" />
+                      </a>
+                    ) : (
+                      <span
+                        className={`font-medium ${theme.textPrimary} text-[11px] text-right truncate`}
+                      >
+                        {cf.value || '—'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Tags & Hashtags Badges */}
+        {Array.isArray(source.tags) && source.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {source.tags.map((tag) => {
+              const cleanTag = tag.trim().replace(/^#+/, '');
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => setSelectedTag(cleanTag)}
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors cursor-pointer ${
+                    selectedTag?.toLowerCase() === cleanTag.toLowerCase()
+                      ? 'bg-amber-500 text-white border-amber-600'
+                      : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20 hover:bg-amber-500/20'
+                  }`}
+                >
+                  #{cleanTag}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Card Footer: Clickable primary URL link */}
+      {(source.url || source.documentLink) && (
+        <div className="pt-2 border-t border-black/5 dark:border-white/5">
+          <a
+            href={source.url || source.documentLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/25 text-xs font-bold flex items-center justify-between transition-colors shadow-2xs group"
+          >
+            <span className="flex items-center gap-1.5 truncate">
+              <LinkIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className="truncate">Переглянути першоджерело онлайн</span>
+            </span>
+            <ExternalLink className="w-3.5 h-3.5 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+          </a>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const SourcesView: React.FC<SourcesViewProps> = ({
   database,
   onOpenAddSource,
@@ -101,6 +327,19 @@ export const SourcesView: React.FC<SourcesViewProps> = ({
   const [groupBy, setGroupBy] = useState<GroupByOption>('none');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [sourceToDelete, setSourceToDelete] = useState<{ id: string; title: string } | null>(null);
+
+  const [columns, setColumns] = useState(3);
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window === 'undefined') return;
+      if (window.innerWidth >= 1024) setColumns(3);
+      else if (window.innerWidth >= 640) setColumns(2);
+      else setColumns(1);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const sources = useMemo(() => {
     return Object.values(database.sources || {}) as Source[];
@@ -236,6 +475,22 @@ export const SourcesView: React.FC<SourcesViewProps> = ({
     }
   };
 
+  const sourceRows = useMemo(() => {
+    const rows: Source[][] = [];
+    for (let i = 0; i < filteredSources.length; i += columns) {
+      rows.push(filteredSources.slice(i, i + columns));
+    }
+    return rows;
+  }, [filteredSources, columns]);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: sourceRows.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => 260,
+    overscan: 2,
+  });
+
   return (
     <div className={`max-w-7xl mx-auto px-4 py-6 space-y-6 ${theme.textPrimary}`}>
       {/* Top action bar */}
@@ -243,10 +498,15 @@ export const SourcesView: React.FC<SourcesViewProps> = ({
         className={`${theme.cardBg} border ${theme.cardBorder} rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4`}
       >
         <div>
-          <h2 className={`text-xl font-bold ${theme.textPrimary} flex items-center gap-2.5`}>
-            <BookOpen className="w-5 h-5 text-amber-500" />
-            <span>Джерела та Архівні Документи ({sources.length})</span>
-          </h2>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h2 className={`text-xl font-bold ${theme.textPrimary} flex items-center gap-2`}>
+              <BookOpen className="w-5 h-5 text-amber-500" />
+              <span>Джерела та Архівні Документи ({sources.length})</span>
+            </h2>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/10 text-amber-500 border border-amber-500/20 font-semibold">
+              Virtual Scroll 60 FPS
+            </span>
+          </div>
           <p className={`text-xs ${theme.textMuted} mt-1`}>
             Реєстр метричних книг, ревізьких казок, сповідних розписів, посилань та користувацьких полів
           </p>
@@ -361,14 +621,98 @@ export const SourcesView: React.FC<SourcesViewProps> = ({
       )}
 
       {/* Source Groups or Flat List */}
-      <div className="space-y-6">
-        {groupedSources.map((group) => {
-          const isCollapsed = collapsedGroups[group.groupKey];
+      {filteredSources.length === 0 ? (
+        <div
+          className={`p-12 text-center ${theme.cardBg} border ${theme.cardBorder} rounded-2xl ${theme.textMuted} text-xs space-y-3`}
+        >
+          <BookOpen className="w-8 h-8 text-neutral-400 mx-auto opacity-50" />
+          <p className="font-medium">
+            {searchQuery || selectedTag
+              ? 'За вашим запитом джерел не знайдено'
+              : 'Реєстр джерел порожній. Натисніть «+ Додати джерело», щоб додати перший документ.'}
+          </p>
+          {(searchQuery || selectedTag) && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedTag(null);
+              }}
+              className="px-3.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-500 text-xs font-bold hover:bg-amber-500/25 cursor-pointer transition-colors"
+            >
+              Скинути фільтри
+            </button>
+          )}
+        </div>
+      ) : groupBy === 'none' ? (
+        <div className="space-y-4">
+          <div
+            ref={containerRef}
+            className="overflow-y-auto max-h-[calc(100vh-250px)] pr-1"
+          >
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((vRow) => {
+                const rowItems = sourceRows[vRow.index] || [];
+                return (
+                  <div
+                    key={vRow.key}
+                    data-index={vRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${vRow.start}px)`,
+                    }}
+                    className="pb-4"
+                  >
+                    <div
+                      className={`grid grid-cols-1 ${
+                        columns >= 3 ? 'lg:grid-cols-3 md:grid-cols-2' : columns === 2 ? 'grid-cols-2' : 'grid-cols-1'
+                      } gap-4`}
+                    >
+                      {rowItems.map((source) => (
+                        <SourceCard
+                          key={source.id}
+                          source={source}
+                          theme={theme}
+                          isDark={isDark}
+                          selectedTag={selectedTag}
+                          setSelectedTag={setSelectedTag}
+                          onEditSource={onEditSource}
+                          onDeleteSource={onDeleteSource}
+                          setSourceToDelete={setSourceToDelete}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
-          return (
-            <div key={group.groupKey} className="space-y-3">
-              {/* Group Header (if grouped) */}
-              {groupBy !== 'none' && (
+          {/* Virtualization statistics footer */}
+          <div className={`flex items-center justify-between text-xs ${theme.textMuted} px-2 pt-2 border-t ${theme.borderSubtle}`}>
+            <span>Показано: {filteredSources.length} із {sources.length} джерел (віртуалізація реєстру)</span>
+            <span className="font-mono text-[10px] text-amber-500 font-medium">
+              DOM вікон: {rowVirtualizer.getVirtualItems().length * columns} карток у пам'яті (60 FPS)
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {groupedSources.map((group) => {
+            const isCollapsed = collapsedGroups[group.groupKey];
+
+            return (
+              <div key={group.groupKey} className="space-y-3">
+                {/* Group Header */}
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapse(group.groupKey)}
@@ -390,246 +734,30 @@ export const SourcesView: React.FC<SourcesViewProps> = ({
                     {isCollapsed ? 'Розгорнути' : 'Згорнути'}
                   </span>
                 </button>
-              )}
 
-              {/* Group Content */}
-              {!isCollapsed && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {group.items.map((source) => {
-                    const docTypeLabel =
-                      source.documentType || detectDocumentType(source);
-
-                    return (
-                      <div
+                {/* Group Content */}
+                {!isCollapsed && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {group.items.map((source) => (
+                      <SourceCard
                         key={source.id}
-                        className={`p-5 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all flex flex-col justify-between space-y-4 shadow-xs hover:shadow-md`}
-                      >
-                        <div className="space-y-3">
-                          {/* Card Header: Type Badge & Action Buttons */}
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span
-                                className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${
-                                  isDark
-                                    ? 'bg-amber-950/70 text-amber-400 border border-amber-800/60'
-                                    : 'bg-amber-100 text-amber-900 border border-amber-300'
-                                }`}
-                              >
-                                {docTypeLabel}
-                              </span>
-                              {source.publication && (
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-black/5 dark:bg-white/5 text-neutral-400 border border-black/5 dark:border-white/5">
-                                  {source.publication}
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                onClick={() => onEditSource(source.id)}
-                                className={`p-1.5 ${theme.textMuted} hover:text-amber-500 rounded-lg hover:bg-neutral-500/10 transition-colors cursor-pointer`}
-                                title="Редагувати джерело"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              {onDeleteSource && (
-                                <button
-                                  onClick={() =>
-                                    setSourceToDelete({
-                                      id: source.id,
-                                      title: source.title || 'Архівне джерело'
-                                    })
-                                  }
-                                  className={`p-1.5 ${theme.textMuted} hover:text-rose-500 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer`}
-                                  title="Видалити джерело"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Title */}
-                          <h3 className={`font-bold text-sm ${theme.textPrimary} leading-snug line-clamp-2`}>
-                            {source.title}
-                          </h3>
-
-                          {/* Repository / Archive */}
-                          {(source.repository || source.archive) && (
-                            <div className={`text-xs ${theme.textMuted} flex items-center gap-1.5`}>
-                              <Archive className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                              <span className="line-clamp-1 font-medium">
-                                {source.repository || source.archive}
-                              </span>
-                            </div>
-                          )}
-
-                          {/* Author / Creator */}
-                          {source.author && (
-                            <p className="text-[11px] text-neutral-400 italic line-clamp-1">
-                              Укладач: {source.author}
-                            </p>
-                          )}
-
-                          {/* Archive Reference Badges (Fund, Inventory, Case, Page) */}
-                          {(source.archiveReference ||
-                            source.archiveFund ||
-                            source.fund ||
-                            source.inventory ||
-                            source.caseNumber ||
-                            source.page) && (
-                            <div
-                              className={`p-2.5 rounded-xl ${theme.surfaceBg} font-mono text-xs ${
-                                isDark ? 'text-amber-300' : 'text-amber-900'
-                              } flex flex-wrap gap-1.5 border ${theme.borderSubtle}`}
-                            >
-                              {source.archiveReference ? (
-                                <span>{source.archiveReference}</span>
-                              ) : (
-                                <>
-                                  {(source.archiveFund || source.fund) && (
-                                    <span>Фонд {source.archiveFund || source.fund}</span>
-                                  )}
-                                  {source.inventory && <span>Опис {source.inventory}</span>}
-                                  {source.caseNumber && <span>Справа {source.caseNumber}</span>}
-                                  {source.page && <span>Арк. {source.page}</span>}
-                                </>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Notes / Transcription with auto-links */}
-                          {(source.notes || source.transcription) && (
-                            <p className={`text-xs ${theme.textSecondary} line-clamp-3 italic pt-0.5 leading-relaxed`}>
-                              "{renderTextWithLinks(
-                                source.notes || source.transcription || '',
-                                isDark ? 'text-amber-400' : 'text-amber-700'
-                              )}"
-                            </p>
-                          )}
-
-                          {/* Custom Fields (Власні поля з лінками та іншим) */}
-                          {Array.isArray(source.customFields) && source.customFields.length > 0 && (
-                            <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1.5">
-                              <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1">
-                                <Layers className="w-3 h-3 text-amber-500" />
-                                <span>Власні поля ({source.customFields.length}):</span>
-                              </div>
-                              <div className="space-y-1">
-                                {source.customFields.map((cf, idx) => {
-                                  const isLink =
-                                    cf.type === 'link' ||
-                                    cf.value?.startsWith('http://') ||
-                                    cf.value?.startsWith('https://');
-
-                                  return (
-                                    <div
-                                      key={cf.id || idx}
-                                      className="flex items-start justify-between gap-2 text-xs py-0.5"
-                                    >
-                                      <span className="text-neutral-500 text-[11px] shrink-0 font-medium">
-                                        {cf.label}:
-                                      </span>
-                                      {isLink ? (
-                                        <a
-                                          href={cf.value}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          onClick={(e) => e.stopPropagation()}
-                                          className="text-amber-600 dark:text-amber-400 hover:underline font-bold text-[11px] inline-flex items-center gap-1 truncate max-w-[70%]"
-                                          title={cf.value}
-                                        >
-                                          <span className="truncate">{cf.value}</span>
-                                          <ExternalLink className="w-3 h-3 shrink-0" />
-                                        </a>
-                                      ) : (
-                                        <span
-                                          className={`font-medium ${theme.textPrimary} text-[11px] text-right truncate`}
-                                        >
-                                          {cf.value || '—'}
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Tags & Hashtags Badges */}
-                          {Array.isArray(source.tags) && source.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1 pt-1">
-                              {source.tags.map((tag) => {
-                                const cleanTag = tag.trim().replace(/^#+/, '');
-                                return (
-                                  <button
-                                    key={tag}
-                                    type="button"
-                                    onClick={() => setSelectedTag(cleanTag)}
-                                    className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors cursor-pointer ${
-                                      selectedTag?.toLowerCase() === cleanTag.toLowerCase()
-                                        ? 'bg-amber-500 text-white border-amber-600'
-                                        : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20 hover:bg-amber-500/20'
-                                    }`}
-                                  >
-                                    #{cleanTag}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Card Footer: Clickable primary URL link */}
-                        {(source.url || source.documentLink) && (
-                          <div className="pt-2 border-t border-black/5 dark:border-white/5">
-                            <a
-                              href={source.url || source.documentLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="w-full py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/25 text-xs font-bold flex items-center justify-between transition-colors shadow-2xs group"
-                            >
-                              <span className="flex items-center gap-1.5 truncate">
-                                <LinkIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                <span className="truncate">Переглянути першоджерело онлайн</span>
-                              </span>
-                              <ExternalLink className="w-3.5 h-3.5 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {filteredSources.length === 0 && (
-          <div
-            className={`p-12 text-center ${theme.cardBg} border ${theme.cardBorder} rounded-2xl ${theme.textMuted} text-xs space-y-3`}
-          >
-            <BookOpen className="w-8 h-8 text-neutral-400 mx-auto opacity-50" />
-            <p className="font-medium">
-              {searchQuery || selectedTag
-                ? 'За вашим запитом джерел не знайдено'
-                : 'Реєстр джерел порожній. Натисніть «+ Додати джерело», щоб додати перший документ.'}
-            </p>
-            {(searchQuery || selectedTag) && (
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setSelectedTag(null);
-                }}
-                className="px-3.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-500 text-xs font-bold hover:bg-amber-500/25 cursor-pointer transition-colors"
-              >
-                Скинути фільтри
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+                        source={source}
+                        theme={theme}
+                        isDark={isDark}
+                        selectedTag={selectedTag}
+                        setSelectedTag={setSelectedTag}
+                        onEditSource={onEditSource}
+                        onDeleteSource={onDeleteSource}
+                        setSourceToDelete={setSourceToDelete}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {sourceToDelete && (
         <ConfirmDeleteModal
