@@ -312,6 +312,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       'bio-notes': true,
       'events': true,
       'photos': true,
+      'documents': true,
       'custom-fields': true,
     };
     saveAccordionSections(allOpen, personId, get().personModalActiveSection);
@@ -327,6 +328,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       'bio-notes': false,
       'events': false,
       'photos': false,
+      'documents': false,
       'custom-fields': false,
     };
     saveAccordionSections(allClosed, personId, get().personModalActiveSection);

@@ -21,7 +21,8 @@ import {
   SlidersHorizontal,
   Info,
   Check,
-  AlertCircle
+  AlertCircle,
+  XCircle
 } from 'lucide-react';
 import { Person, Family, DuplicatePair, MergeFieldSelection } from '../../types';
 import { useGenealogy } from '../../context/GenealogyContext';
@@ -604,6 +605,25 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
               >
                 Скасувати
               </button>
+
+              {personA && personB && personA.id !== personB.id && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    ignoreDuplicatePair(personA.id, personB.id);
+                    setStatusMessage({
+                      type: 'success',
+                      text: 'Позначено як «Не дублікат». Цю пару більше не буде запропоновано як дублікат.'
+                    });
+                    setTimeout(onClose, 900);
+                  }}
+                  className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-rose-300 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-700 dark:text-rose-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Позначити як різні особи (ніколи більше не показувати як дублікат)"
+                >
+                  <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Не дублікат</span>
+                </button>
+              )}
 
               {duplicatePairObj && (
                 <button

@@ -45,7 +45,9 @@ import {
   Eye,
   Pencil,
   Crown,
-  Baby
+  Baby,
+  XCircle,
+  Archive
 } from 'lucide-react';
 import { formatClanName, normalizeUkrainianSurnameGender } from '../../utils/ukrainianPhonetics';
 import {
@@ -55,6 +57,7 @@ import {
   getMetricStatusConfig
 } from '../../utils/researchStatusUtils';
 import { PersonProfileView } from './PersonProfileView';
+import { PersonDocumentsSection } from '../PersonDocumentsSection';
 import { DoveIcon } from '../common/GenealogyIcons';
 import { useGenealogy } from '../../context/GenealogyContext';
 import { getThemeConfig } from '../../utils/theme';
@@ -76,7 +79,13 @@ import {
   ParentContextInheritance
 } from '../../utils/ukrainianNameUtils';
 import { ContactAuthorModal } from '../ContactAuthorModal';
-import { findDuplicatesForPerson, PersonDuplicateMatch } from '../../utils/duplicateDetector';
+import {
+  findDuplicatesForPerson,
+  PersonDuplicateMatch,
+  ignoreDuplicatePair,
+  isDuplicatePairIgnored,
+  getIgnoredDuplicatePairKeys
+} from '../../utils/duplicateDetector';
 import { MergePersonsByIdModal } from '../modals/MergePersonsByIdModal';
 import { PersonReportModal } from '../common/PersonReportModal';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
@@ -146,6 +155,7 @@ const MODAL_SECTIONS: { id: ModalSection; label: string; icon: React.ComponentTy
   { id: 'bio-notes', label: 'Біографія і нотатки', icon: BookOpen },
   { id: 'events', label: 'Події та факти', icon: Calendar },
   { id: 'photos', label: 'Фотографії', icon: Camera },
+  { id: 'documents', label: 'Документи та архівні скани', icon: Archive },
   { id: 'custom-fields', label: 'Власні поля', icon: Layers }
 ];
 
@@ -373,6 +383,81 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     if (initialRelation?.type === 'spouse' && targetPerson) return targetPerson.id;
     return '';
   });
+
+  // Multiple spouses tracking
+  const [linkedSpouseIds, setLinkedSpouseIds] = useState<string[]>(() => {
+    const list = new Set<string>();
+    if (effectivePerson?.spouseIds) {
+      effectivePerson.spouseIds.forEach((id) => list.add(id));
+    }
+    if (initialRelation?.type === 'spouse' && targetPerson) {
+      list.add(targetPerson.id);
+    }
+    return Array.from(list);
+  });
+
+  // Children tracking (supports inline additions and existing persons)
+  const [linkedChildrenIds, setLinkedChildrenIds] = useState<string[]>(() => {
+    const list = new Set<string>();
+    if (effectivePerson?.childrenIds) {
+      effectivePerson.childrenIds.forEach((id) => list.add(id));
+    }
+    if (effectivePerson) {
+      persons.forEach((p) => {
+        if (p.fatherId === effectivePerson.id || p.motherId === effectivePerson.id) {
+          list.add(p.id);
+        }
+      });
+    }
+    if (initialRelation?.type === 'child' && targetPerson) {
+      list.add(targetPerson.id);
+    }
+    return Array.from(list);
+  });
+
+  // Inline Creation & Selection modes for Father
+  const [fatherMode, setFatherMode] = useState<'select' | 'create'>('select');
+  const [fatherSearchQuery, setFatherSearchQuery] = useState('');
+  const [newFatherLastName, setNewFatherLastName] = useState('');
+  const [newFatherFirstName, setNewFatherFirstName] = useState('');
+  const [newFatherPatronymic, setNewFatherPatronymic] = useState('');
+  const [newFatherBirthYear, setNewFatherBirthYear] = useState('');
+  const [fatherFeedbackMsg, setFatherFeedbackMsg] = useState<{ text: string; type: 'success' | 'info' } | null>(null);
+
+  // Inline Creation & Selection modes for Mother
+  const [motherMode, setMotherMode] = useState<'select' | 'create'>('select');
+  const [motherSearchQuery, setMotherSearchQuery] = useState('');
+  const [newMotherLastName, setNewMotherLastName] = useState('');
+  const [newMotherMaidenName, setNewMotherMaidenName] = useState('');
+  const [newMotherFirstName, setNewMotherFirstName] = useState('');
+  const [newMotherPatronymic, setNewMotherPatronymic] = useState('');
+  const [newMotherBirthYear, setNewMotherBirthYear] = useState('');
+  const [motherFeedbackMsg, setMotherFeedbackMsg] = useState<{ text: string; type: 'success' | 'info' } | null>(null);
+
+  // Inline Creation & Selection modes for Spouses
+  const [spouseMode, setSpouseMode] = useState<'select' | 'create'>('select');
+  const [spouseSearchQuery, setSpouseSearchQuery] = useState('');
+  const [selectedExistingSpouseId, setSelectedExistingSpouseId] = useState('');
+  const [newSpouseLastName, setNewSpouseLastName] = useState('');
+  const [newSpouseMaidenName, setNewSpouseMaidenName] = useState('');
+  const [newSpouseFirstName, setNewSpouseFirstName] = useState('');
+  const [newSpousePatronymic, setNewSpousePatronymic] = useState('');
+  const [newSpouseGender, setNewSpouseGender] = useState<Gender>(() => (gender === 'female' ? 'male' : 'female'));
+  const [newSpouseBirthYear, setNewSpouseBirthYear] = useState('');
+  const [newSpouseMarriageYear, setNewSpouseMarriageYear] = useState('');
+  const [spouseFeedbackMsg, setSpouseFeedbackMsg] = useState<{ text: string; type: 'success' | 'info' } | null>(null);
+
+  // Inline Creation & Selection modes for Children
+  const [childMode, setChildMode] = useState<'select' | 'create'>('select');
+  const [childSearchQuery, setChildSearchQuery] = useState('');
+  const [selectedExistingChildId, setSelectedExistingChildId] = useState('');
+  const [newChildLastName, setNewChildLastName] = useState('');
+  const [newChildFirstName, setNewChildFirstName] = useState('');
+  const [newChildPatronymic, setNewChildPatronymic] = useState('');
+  const [newChildGender, setNewChildGender] = useState<Gender>('male');
+  const [newChildBirthYear, setNewChildBirthYear] = useState('');
+  const [newChildOtherParentId, setNewChildOtherParentId] = useState('');
+  const [childFeedbackMsg, setChildFeedbackMsg] = useState<{ text: string; type: 'success' | 'info' } | null>(null);
 
   // Selected father and mother objects
   const selectedFather = useMemo(() => {
@@ -675,6 +760,24 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
   // Duplicate check and Merge by ID state
   const [dismissedDuplicateIds, setDismissedDuplicateIds] = useState<string[]>([]);
+  const [ignoredDuplicateRevision, setIgnoredDuplicateRevision] = useState<number>(0);
+
+  useEffect(() => {
+    const handleIgnoredDuplicatesChange = () => setIgnoredDuplicateRevision((v) => v + 1);
+    window.addEventListener('rodovid_ignored_duplicates_changed', handleIgnoredDuplicatesChange);
+    return () => {
+      window.removeEventListener('rodovid_ignored_duplicates_changed', handleIgnoredDuplicatesChange);
+    };
+  }, []);
+
+  const handleMarkNotDuplicate = (matchPersonId: string) => {
+    if (!matchPersonId) return;
+    setDismissedDuplicateIds((prev) => Array.from(new Set([...prev, matchPersonId])));
+    if (effectivePerson?.id) {
+      ignoreDuplicatePair(effectivePerson.id, matchPersonId);
+    }
+  };
+
   const [isMergeModalOpen, setIsMergeModalOpen] = useState<boolean>(false);
   const [mergeModalPair, setMergeModalPair] = useState<{ idA?: string; idB?: string } | null>(null);
   const [duplicateWarningDismissedForSave, setDuplicateWarningDismissedForSave] = useState<boolean>(false);
@@ -975,8 +1078,15 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       effectivePerson?.id,
       48
     );
-    return matches.filter((m) => !dismissedDuplicateIds.includes(m.person.id));
-  }, [draftPersonForDuplicates, persons, effectivePerson, dismissedDuplicateIds, firstName, lastName]);
+    const ignoredSet = getIgnoredDuplicatePairKeys();
+    return matches.filter((m) => {
+      if (dismissedDuplicateIds.includes(m.person.id)) return false;
+      if (effectivePerson?.id && isDuplicatePairIgnored(effectivePerson.id, m.person.id, ignoredSet)) {
+        return false;
+      }
+      return true;
+    });
+  }, [draftPersonForDuplicates, persons, effectivePerson, dismissedDuplicateIds, firstName, lastName, ignoredDuplicateRevision]);
 
   const handleUseExistingPerson = (existingPerson: Person) => {
     if (initialRelation) {
@@ -1219,6 +1329,292 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const otherEligiblePersons = useMemo(() => {
     return persons.filter((p) => p.id !== initialPersonToEdit?.id);
   }, [persons, initialPersonToEdit]);
+
+  // Filtered lists for fast search in selectors
+  const filteredFatherPersons = useMemo(() => {
+    if (!fatherSearchQuery.trim()) return malePersons;
+    const q = fatherSearchQuery.toLowerCase().trim();
+    return malePersons.filter((p) => {
+      const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''} ${p.birthYear || ''}`.toLowerCase();
+      return name.includes(q);
+    });
+  }, [malePersons, fatherSearchQuery]);
+
+  const filteredMotherPersons = useMemo(() => {
+    if (!motherSearchQuery.trim()) return femalePersons;
+    const q = motherSearchQuery.toLowerCase().trim();
+    return femalePersons.filter((p) => {
+      const name = `${p.name?.surname || p.lastName || ''} ${p.maidenName ? `(${p.maidenName})` : ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''} ${p.birthYear || ''}`.toLowerCase();
+      return name.includes(q);
+    });
+  }, [femalePersons, motherSearchQuery]);
+
+  const filteredSpousePersons = useMemo(() => {
+    const available = otherEligiblePersons.filter((p) => !linkedSpouseIds.includes(p.id) && p.id !== fatherId && p.id !== motherId);
+    if (!spouseSearchQuery.trim()) return available;
+    const q = spouseSearchQuery.toLowerCase().trim();
+    return available.filter((p) => {
+      const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''} ${p.birthYear || ''}`.toLowerCase();
+      return name.includes(q);
+    });
+  }, [otherEligiblePersons, linkedSpouseIds, fatherId, motherId, spouseSearchQuery]);
+
+  const filteredChildPersons = useMemo(() => {
+    const available = otherEligiblePersons.filter((p) => !linkedChildrenIds.includes(p.id) && p.id !== fatherId && p.id !== motherId && !linkedSpouseIds.includes(p.id));
+    if (!childSearchQuery.trim()) return available;
+    const q = childSearchQuery.toLowerCase().trim();
+    return available.filter((p) => {
+      const name = `${p.name?.surname || p.lastName || ''} ${p.name?.given || p.firstName || ''} ${p.name?.patronymic || p.patronymic || ''} ${p.birthYear || ''}`.toLowerCase();
+      return name.includes(q);
+    });
+  }, [otherEligiblePersons, linkedChildrenIds, fatherId, motherId, linkedSpouseIds, childSearchQuery]);
+
+  // Candidate other parents for a child (known spouses/partners of this person)
+  const candidateSpouses = useMemo(() => {
+    return linkedSpouseIds.map((id) => persons.find((p) => p.id === id)).filter(Boolean) as Person[];
+  }, [linkedSpouseIds, persons]);
+
+  // Handler to create and link new Father
+  const handleCreateNewFather = () => {
+    const fGiven = newFatherFirstName.trim();
+    const fSurname = newFatherLastName.trim() || lastName.trim() || clan.trim();
+    if (!fGiven && !fSurname) {
+      setFatherFeedbackMsg({ text: "Будь ласка, вкажіть прізвище або ім'я батька.", type: 'info' });
+      return;
+    }
+    const fId = `p-father-${Date.now()}`;
+    const newFatherPerson: Person = {
+      id: fId,
+      name: {
+        given: fGiven,
+        surname: fSurname,
+        patronymic: newFatherPatronymic.trim() || undefined
+      },
+      firstName: fGiven,
+      lastName: fSurname,
+      patronymic: newFatherPatronymic.trim() || undefined,
+      gender: 'male',
+      birthYear: newFatherBirthYear.trim() ? parseInt(newFatherBirthYear.trim(), 10) : undefined,
+      clan: clan.trim() || undefined,
+      researchBranch: researchBranch && researchBranch !== "Без прив'язки" ? researchBranch : undefined,
+      childrenIds: effectivePerson ? [effectivePerson.id] : [],
+      isLiving: false
+    };
+    addPerson(newFatherPerson);
+    handleFatherSelect(fId);
+    setFatherFeedbackMsg({ text: `Батька «${fSurname} ${fGiven}» успішно створено та прив'язано!`, type: 'success' });
+    setTimeout(() => setFatherFeedbackMsg(null), 4000);
+    setNewFatherFirstName('');
+    setNewFatherPatronymic('');
+    setNewFatherBirthYear('');
+    setFatherMode('select');
+  };
+
+  // Handler to create and link new Mother
+  const handleCreateNewMother = () => {
+    const mGiven = newMotherFirstName.trim();
+    const mSurname = newMotherLastName.trim() || newMotherMaidenName.trim();
+    const mMaiden = newMotherMaidenName.trim();
+    if (!mGiven && !mSurname && !mMaiden) {
+      setMotherFeedbackMsg({ text: "Будь ласка, вкажіть ім'я або дівоче прізвище матері.", type: 'info' });
+      return;
+    }
+    const mId = `p-mother-${Date.now()}`;
+    const newMotherPerson: Person = {
+      id: mId,
+      name: {
+        given: mGiven,
+        surname: mSurname || mMaiden,
+        maidenName: mMaiden || undefined,
+        patronymic: newMotherPatronymic.trim() || undefined
+      },
+      firstName: mGiven,
+      lastName: mSurname || mMaiden,
+      maidenName: mMaiden || undefined,
+      patronymic: newMotherPatronymic.trim() || undefined,
+      gender: 'female',
+      birthYear: newMotherBirthYear.trim() ? parseInt(newMotherBirthYear.trim(), 10) : undefined,
+      clan: clan.trim() || undefined,
+      researchBranch: researchBranch && researchBranch !== "Без прив'язки" ? researchBranch : undefined,
+      childrenIds: effectivePerson ? [effectivePerson.id] : [],
+      isLiving: false
+    };
+    addPerson(newMotherPerson);
+    handleMotherSelect(mId);
+    setMotherFeedbackMsg({ text: `Матір «${mSurname || mMaiden} ${mGiven}» успішно створено та прив'язано!`, type: 'success' });
+    setTimeout(() => setMotherFeedbackMsg(null), 4000);
+    setNewMotherFirstName('');
+    setNewMotherMaidenName('');
+    setNewMotherPatronymic('');
+    setNewMotherBirthYear('');
+    setMotherMode('select');
+  };
+
+  // Handler to link existing Spouse
+  const handleLinkExistingSpouse = () => {
+    if (!selectedExistingSpouseId) return;
+    const sp = persons.find((p) => p.id === selectedExistingSpouseId);
+    if (!sp) return;
+    const spName = `${sp.name?.surname || sp.lastName || ''} ${sp.name?.given || sp.firstName || ''}`.trim();
+    setLinkedSpouseIds((prev) => Array.from(new Set([...prev, selectedExistingSpouseId])));
+    if (!spouseId) setSpouseId(selectedExistingSpouseId);
+    setSelectedExistingSpouseId('');
+    setSpouseFeedbackMsg({ text: `Подружжя «${spName}» прив'язано!`, type: 'success' });
+    setTimeout(() => setSpouseFeedbackMsg(null), 4000);
+  };
+
+  // Handler to create and link new Spouse
+  const handleCreateNewSpouse = () => {
+    const sGiven = newSpouseFirstName.trim();
+    const sSurname = newSpouseLastName.trim() || newSpouseMaidenName.trim();
+    const sMaiden = newSpouseMaidenName.trim();
+    if (!sGiven && !sSurname && !sMaiden) {
+      setSpouseFeedbackMsg({ text: "Будь ласка, вкажіть прізвище або ім'я подружжя.", type: 'info' });
+      return;
+    }
+    const sId = `p-spouse-${Date.now()}`;
+    const newSpousePerson: Person = {
+      id: sId,
+      name: {
+        given: sGiven,
+        surname: sSurname || sMaiden,
+        maidenName: sMaiden || undefined,
+        patronymic: newSpousePatronymic.trim() || undefined
+      },
+      firstName: sGiven,
+      lastName: sSurname || sMaiden,
+      maidenName: sMaiden || undefined,
+      patronymic: newSpousePatronymic.trim() || undefined,
+      gender: newSpouseGender,
+      birthYear: newSpouseBirthYear.trim() ? parseInt(newSpouseBirthYear.trim(), 10) : undefined,
+      marriageDate: newSpouseMarriageYear.trim() || undefined,
+      spouseIds: effectivePerson ? [effectivePerson.id] : [],
+      researchBranch: researchBranch && researchBranch !== "Без прив'язки" ? researchBranch : undefined,
+      isLiving: false
+    };
+    addPerson(newSpousePerson);
+    setLinkedSpouseIds((prev) => Array.from(new Set([...prev, sId])));
+    setSpouseId(sId);
+    setSpouseFeedbackMsg({ text: `Подружжя «${sSurname || sMaiden} ${sGiven}» успішно створено та прив'язано!`, type: 'success' });
+    setTimeout(() => setSpouseFeedbackMsg(null), 4000);
+    setNewSpouseFirstName('');
+    setNewSpouseLastName('');
+    setNewSpouseMaidenName('');
+    setNewSpousePatronymic('');
+    setNewSpouseBirthYear('');
+    setNewSpouseMarriageYear('');
+    setSpouseMode('select');
+  };
+
+  // Handler to remove a Spouse
+  const handleRemoveSpouse = (idToRemove: string) => {
+    setLinkedSpouseIds((prev) => prev.filter((id) => id !== idToRemove));
+    if (spouseId === idToRemove) {
+      const remaining = linkedSpouseIds.filter((id) => id !== idToRemove);
+      setSpouseId(remaining[0] || '');
+    }
+  };
+
+  // Handler to link existing Child
+  const handleLinkExistingChild = () => {
+    if (!selectedExistingChildId) return;
+    const cPerson = persons.find((p) => p.id === selectedExistingChildId);
+    if (!cPerson) return;
+    const cName = `${cPerson.name?.surname || cPerson.lastName || ''} ${cPerson.name?.given || cPerson.firstName || ''}`.trim();
+    setLinkedChildrenIds((prev) => Array.from(new Set([...prev, selectedExistingChildId])));
+    const isCurMale = gender === 'male' || gender === 'M';
+    updatePerson({
+      ...cPerson,
+      fatherId: isCurMale ? (effectivePerson?.id || cPerson.fatherId) : cPerson.fatherId,
+      motherId: !isCurMale ? (effectivePerson?.id || cPerson.motherId) : cPerson.motherId
+    });
+    setSelectedExistingChildId('');
+    setChildFeedbackMsg({ text: `Дитину «${cName}» успішно додано до родини!`, type: 'success' });
+    setTimeout(() => setChildFeedbackMsg(null), 4000);
+  };
+
+  // Handler to create and link new Child
+  const handleCreateNewChild = () => {
+    const cGiven = newChildFirstName.trim();
+    const cSurname = newChildLastName.trim() || lastName.trim() || clan.trim();
+    if (!cGiven && !cSurname) {
+      setChildFeedbackMsg({ text: "Будь ласка, вкажіть прізвище або ім'я дитини.", type: 'info' });
+      return;
+    }
+    const cId = `p-child-${Date.now()}`;
+    const isCurMale = gender === 'male' || gender === 'M';
+    const childFatherId = isCurMale ? (effectivePerson?.id || undefined) : (newChildOtherParentId || undefined);
+    const childMotherId = !isCurMale ? (effectivePerson?.id || undefined) : (newChildOtherParentId || undefined);
+
+    const newChildPerson: Person = {
+      id: cId,
+      name: {
+        given: cGiven,
+        surname: cSurname,
+        patronymic: newChildPatronymic.trim() || undefined
+      },
+      firstName: cGiven,
+      lastName: cSurname,
+      patronymic: newChildPatronymic.trim() || undefined,
+      gender: newChildGender,
+      birthYear: newChildBirthYear.trim() ? parseInt(newChildBirthYear.trim(), 10) : undefined,
+      fatherId: childFatherId,
+      motherId: childMotherId,
+      clan: clan.trim() || undefined,
+      researchBranch: researchBranch && researchBranch !== "Без прив'язки" ? researchBranch : undefined,
+      isLiving: false
+    };
+    addPerson(newChildPerson);
+    setLinkedChildrenIds((prev) => Array.from(new Set([...prev, cId])));
+
+    if (childFatherId && childMotherId) {
+      const existingFam = Object.values(families || {}).find(
+        (fam: any) =>
+          ((fam.husbandId === childFatherId && fam.wifeId === childMotherId) ||
+           (fam.husbandId === childMotherId && fam.wifeId === childFatherId))
+      );
+      if (existingFam) {
+        const curChildrenIds = existingFam.childrenIds || (existingFam.children || []).map((c: any) => c.personId);
+        if (!curChildrenIds.includes(cId)) {
+          saveFamily({
+            ...existingFam,
+            children: [...(existingFam.children || []), { personId: cId }],
+            childrenIds: Array.from(new Set([...curChildrenIds, cId]))
+          });
+        }
+      } else {
+        saveFamily({
+          id: `fam-${Date.now()}`,
+          husbandId: childFatherId,
+          wifeId: childMotherId,
+          relationshipType: 'married',
+          children: [{ personId: cId }],
+          childrenIds: [cId]
+        });
+      }
+    }
+
+    setChildFeedbackMsg({ text: `Дитину «${cSurname} ${cGiven}» створено та додано до родини!`, type: 'success' });
+    setTimeout(() => setChildFeedbackMsg(null), 4000);
+    setNewChildFirstName('');
+    setNewChildPatronymic('');
+    setNewChildBirthYear('');
+    setChildMode('select');
+  };
+
+  // Handler to remove a Child
+  const handleRemoveChild = (idToRemove: string) => {
+    setLinkedChildrenIds((prev) => prev.filter((id) => id !== idToRemove));
+    const childPerson = persons.find((p) => p.id === idToRemove);
+    if (childPerson && effectivePerson) {
+      const isCurMale = gender === 'male' || gender === 'M';
+      updatePerson({
+        ...childPerson,
+        fatherId: isCurMale && childPerson.fatherId === effectivePerson.id ? undefined : childPerson.fatherId,
+        motherId: !isCurMale && childPerson.motherId === effectivePerson.id ? undefined : childPerson.motherId
+      });
+    }
+  };
 
   // Profile completion calculation (%)
   const profileCompletion = useMemo(() => {
@@ -1964,7 +2360,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         isLiving,
         fatherId: fatherId || undefined,
         motherId: motherId || undefined,
-        spouseIds: spouseId ? [spouseId] : effectivePerson.spouseIds || [],
+        spouseIds: linkedSpouseIds.length > 0 ? linkedSpouseIds : undefined,
+        childrenIds: linkedChildrenIds.length > 0 ? linkedChildrenIds : undefined,
         siblingIds: siblingIds.length > 0 ? siblingIds : undefined,
         godparents: godparents.length > 0 ? godparents : undefined,
         godparentIds: godparents.map((gp) => gp.personId).filter(Boolean) as string[],
@@ -2019,8 +2416,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         isLiving,
         fatherId: fatherId || undefined,
         motherId: motherId || undefined,
-        spouseIds: spouseId ? [spouseId] : [],
-        childrenIds: [],
+        spouseIds: linkedSpouseIds.length > 0 ? linkedSpouseIds : [],
+        childrenIds: linkedChildrenIds.length > 0 ? linkedChildrenIds : [],
         siblingIds: siblingIds.length > 0 ? siblingIds : undefined,
         godparents: godparents.length > 0 ? godparents : undefined,
         godparentIds: godparents.map((gp) => gp.personId).filter(Boolean) as string[],
@@ -2182,9 +2579,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       }
     }
 
-    // If spouse selected, update spouse's spouseIds
-    if (spouseId) {
-      const sp = persons.find((p) => p.id === spouseId);
+    // Synchronize all spouses in linkedSpouseIds
+    linkedSpouseIds.forEach((spId) => {
+      const sp = persons.find((p) => p.id === spId);
       if (sp) {
         const nextSpouseIds = Array.from(new Set([...(sp.spouseIds || []), savedPersonId]));
         if (nextSpouseIds.length !== (sp.spouseIds || []).length) {
@@ -2194,7 +2591,24 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           });
         }
       }
-    }
+    });
+
+    // Synchronize all children in linkedChildrenIds
+    const isCurMale = gender === 'male' || gender === 'M';
+    linkedChildrenIds.forEach((cId) => {
+      const c = persons.find((p) => p.id === cId);
+      if (c) {
+        const needsFather = isCurMale && c.fatherId !== savedPersonId;
+        const needsMother = !isCurMale && c.motherId !== savedPersonId;
+        if (needsFather || needsMother) {
+          updatePerson({
+            ...c,
+            fatherId: isCurMale ? savedPersonId : c.fatherId,
+            motherId: !isCurMale ? savedPersonId : c.motherId
+          });
+        }
+      }
+    });
 
     // If both father and mother exist, ensure Family is linked or created
     if (fatherId && motherId) {
@@ -2336,6 +2750,17 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         onSaveAndOpenProfile(savedPersonId);
       }
     }
+
+    // Persist ignored duplicate pairs for all dismissed matches or if duplicate warning was dismissed for this save
+    const idsToIgnore = new Set<string>(dismissedDuplicateIds);
+    if (duplicateWarningDismissedForSave) {
+      potentialDuplicates.forEach((d) => idsToIgnore.add(d.person.id));
+    }
+    idsToIgnore.forEach((ignoredId) => {
+      if (ignoredId && ignoredId !== savedPersonId) {
+        ignoreDuplicatePair(savedPersonId, ignoredId);
+      }
+    });
 
     clearPersonDraft(effectivePerson?.id);
 
@@ -3033,11 +3458,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
                           <button
                             type="button"
-                            onClick={() => setDismissedDuplicateIds((prev) => [...prev, matchPerson.id])}
-                            className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                            title="Ігнорувати / Це інша особа"
+                            onClick={() => handleMarkNotDuplicate(matchPerson.id)}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-neutral-100 hover:bg-rose-50 hover:text-rose-600 dark:bg-neutral-800 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 text-neutral-700 dark:text-neutral-300 border border-neutral-300 dark:border-neutral-700 transition-colors cursor-pointer flex items-center gap-1"
+                            title="Позначити, що це різні особи: ніколи більше не пропонувати як дублікат"
                           >
-                            <X className="w-4 h-4" />
+                            <XCircle className="w-3.5 h-3.5 text-neutral-400 hover:text-rose-500" />
+                            <span>Не дублікат</span>
                           </button>
                         </div>
                       </div>
@@ -3838,62 +4264,366 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               {openSections.parents && (
                 <div className="p-4 sm:p-5 pt-2 space-y-4 border-t border-black/5 dark:border-white/5">
                   <div className="space-y-4 text-xs">
-                {/* Parents selectors */}
+                {/* Parents selectors with Inline Typing & List Selection */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Father */}
-                  <div className="space-y-1.5 p-3 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]">
-                    <div className="flex items-center justify-between">
+                  {/* Father (Батько) */}
+                  <div className="space-y-2.5 p-3 sm:p-3.5 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]">
+                    <div className="flex items-center justify-between flex-wrap gap-1.5">
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
                         <User className="w-3.5 h-3.5 text-blue-500" />
                         <span>Батько</span>
                       </label>
-                      {fatherId && (
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
-                          <Sparkles className="w-2.5 h-2.5" />
-                          <span>автозаповнення активне</span>
-                        </span>
-                      )}
+                      
+                      {/* Segmented Mode Switcher */}
+                      <div className="inline-flex p-0.5 rounded-lg bg-black/5 dark:bg-white/10 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setFatherMode('select')}
+                          className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
+                            fatherMode === 'select'
+                              ? 'bg-white dark:bg-slate-800 text-neutral-900 dark:text-white shadow-xs font-bold'
+                              : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                          }`}
+                        >
+                          Зі списку
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFatherMode('create');
+                            if (!newFatherLastName) setNewFatherLastName(lastName || clan || '');
+                          }}
+                          className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer flex items-center gap-1 ${
+                            fatherMode === 'create'
+                              ? 'bg-[#B88E3E] text-white shadow-xs font-bold'
+                              : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                          }`}
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>Вписати нового</span>
+                        </button>
+                      </div>
                     </div>
-                    <select
-                      value={fatherId}
-                      onChange={(e) => handleFatherSelect(e.target.value)}
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    >
-                      <option value="">-- Оберіть батька зі списку осіб --</option>
-                      {malePersons.map((p, pIdx) => (
-                        <option key={`father_opt_${p.id}_${pIdx}`} value={p.id}>
-                          {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
-                        </option>
-                      ))}
-                    </select>
+
+                    {fatherFeedbackMsg && (
+                      <div className="p-1.5 rounded-lg text-[11px] flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 animate-in fade-in duration-150">
+                        <CheckCircle2 className="w-3 h-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        <span>{fatherFeedbackMsg.text}</span>
+                      </div>
+                    )}
+
+                    {/* Mode 1: Select from Tree */}
+                    {fatherMode === 'select' && (
+                      <div className="space-y-2">
+                        {selectedFather ? (
+                          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-blue-500/30 flex items-center justify-between gap-2 shadow-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 font-bold text-xs">
+                                ♂
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-xs text-neutral-900 dark:text-white truncate">
+                                  {selectedFather.name?.surname || selectedFather.lastName || ''} {selectedFather.name?.given || selectedFather.firstName || ''} {selectedFather.name?.patronymic || selectedFather.patronymic || ''}
+                                </div>
+                                <div className="text-[10px] text-neutral-500 flex items-center gap-1.5">
+                                  <span>{selectedFather.birthYear ? `нар. ${selectedFather.birthYear}` : 'рік невідомий'}</span>
+                                  {selectedFather.clan && <span className="text-amber-600">({formatClanName(selectedFather.clan)})</span>}
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setFatherId('')}
+                              className="px-2 py-1 rounded-lg text-[11px] text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
+                              title="Від'єднати батька"
+                            >
+                              Від'єднати
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {malePersons.length > 5 && (
+                              <div className="relative">
+                                <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+                                <input
+                                  type="text"
+                                  value={fatherSearchQuery}
+                                  onChange={(e) => setFatherSearchQuery(e.target.value)}
+                                  placeholder="Пошук батька за ім'ям чи роком..."
+                                  className={`w-full pl-7 pr-2.5 py-1 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
+                              </div>
+                            )}
+                            <select
+                              value={fatherId}
+                              onChange={(e) => handleFatherSelect(e.target.value)}
+                              className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                            >
+                              <option value="">-- Оберіть батька зі списку ({filteredFatherPersons.length}) --</option>
+                              {filteredFatherPersons.map((p, pIdx) => (
+                                <option key={`father_opt_${p.id}_${pIdx}`} value={p.id}>
+                                  {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.name?.patronymic || p.patronymic || ''} {p.birthYear ? `(${p.birthYear})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Mode 2: Inline Typing / Create New Father */}
+                    {fatherMode === 'create' && (
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-blue-500/30 space-y-2.5 shadow-xs animate-in fade-in duration-150">
+                        <div className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 flex items-center justify-between">
+                          <span>Вписати дані нового батька:</span>
+                          <span className="text-[10px] text-blue-500 font-mono">Стать: Чоловіча</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">Прізвище</label>
+                            <input
+                              type="text"
+                              value={newFatherLastName}
+                              onChange={(e) => setNewFatherLastName(e.target.value)}
+                              placeholder={lastName || clan || "Прізвище"}
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">Ім'я *</label>
+                            <input
+                              type="text"
+                              value={newFatherFirstName}
+                              onChange={(e) => setNewFatherFirstName(e.target.value)}
+                              placeholder="Ім'я батька"
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">По батькові</label>
+                            <input
+                              type="text"
+                              value={newFatherPatronymic}
+                              onChange={(e) => setNewFatherPatronymic(e.target.value)}
+                              placeholder="По батькові"
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">Рік народження</label>
+                            <input
+                              type="text"
+                              value={newFatherBirthYear}
+                              onChange={(e) => setNewFatherBirthYear(e.target.value)}
+                              placeholder="напр. 1950"
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setFatherMode('select')}
+                            className="px-2.5 py-1 rounded-lg text-[11px] text-neutral-500 hover:text-neutral-800 dark:hover:text-white cursor-pointer"
+                          >
+                            Скасувати
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCreateNewFather}
+                            className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Створити й прив'язати</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Mother */}
-                  <div className="space-y-1.5 p-3 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]">
-                    <div className="flex items-center justify-between">
+                  {/* Mother (Матір) */}
+                  <div className="space-y-2.5 p-3 sm:p-3.5 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]">
+                    <div className="flex items-center justify-between flex-wrap gap-1.5">
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
                         <User className="w-3.5 h-3.5 text-rose-500" />
                         <span>Матір</span>
                       </label>
-                      {motherId && (
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
-                          <Sparkles className="w-2.5 h-2.5" />
-                          <span>зв'язок встановлено</span>
-                        </span>
-                      )}
+                      
+                      {/* Segmented Mode Switcher */}
+                      <div className="inline-flex p-0.5 rounded-lg bg-black/5 dark:bg-white/10 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setMotherMode('select')}
+                          className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
+                            motherMode === 'select'
+                              ? 'bg-white dark:bg-slate-800 text-neutral-900 dark:text-white shadow-xs font-bold'
+                              : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                          }`}
+                        >
+                          Зі списку
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMotherMode('create')}
+                          className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer flex items-center gap-1 ${
+                            motherMode === 'create'
+                              ? 'bg-[#B88E3E] text-white shadow-xs font-bold'
+                              : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                          }`}
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>Вписати нову</span>
+                        </button>
+                      </div>
                     </div>
-                    <select
-                      value={motherId}
-                      onChange={(e) => handleMotherSelect(e.target.value)}
-                      className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                    >
-                      <option value="">-- Оберіть матір зі списку осіб --</option>
-                      {femalePersons.map((p, pIdx) => (
-                        <option key={`mother_opt_${p.id}_${pIdx}`} value={p.id}>
-                          {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
-                        </option>
-                      ))}
-                    </select>
+
+                    {motherFeedbackMsg && (
+                      <div className="p-1.5 rounded-lg text-[11px] flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 animate-in fade-in duration-150">
+                        <CheckCircle2 className="w-3 h-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        <span>{motherFeedbackMsg.text}</span>
+                      </div>
+                    )}
+
+                    {/* Mode 1: Select from Tree */}
+                    {motherMode === 'select' && (
+                      <div className="space-y-2">
+                        {selectedMother ? (
+                          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-500/30 flex items-center justify-between gap-2 shadow-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-7 h-7 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 font-bold text-xs">
+                                ♀
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-xs text-neutral-900 dark:text-white truncate">
+                                  {selectedMother.name?.surname || selectedMother.lastName || ''} {selectedMother.maidenName ? `(${selectedMother.maidenName})` : ''} {selectedMother.name?.given || selectedMother.firstName || ''}
+                                </div>
+                                <div className="text-[10px] text-neutral-500">
+                                  {selectedMother.birthYear ? `нар. ${selectedMother.birthYear}` : 'рік невідомий'}
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setMotherId('')}
+                              className="px-2 py-1 rounded-lg text-[11px] text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
+                              title="Від'єднати матір"
+                            >
+                              Від'єднати
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {femalePersons.length > 5 && (
+                              <div className="relative">
+                                <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+                                <input
+                                  type="text"
+                                  value={motherSearchQuery}
+                                  onChange={(e) => setMotherSearchQuery(e.target.value)}
+                                  placeholder="Пошук матері за ім'ям чи роком..."
+                                  className={`w-full pl-7 pr-2.5 py-1 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                                />
+                              </div>
+                            )}
+                            <select
+                              value={motherId}
+                              onChange={(e) => handleMotherSelect(e.target.value)}
+                              className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
+                            >
+                              <option value="">-- Оберіть матір зі списку ({filteredMotherPersons.length}) --</option>
+                              {filteredMotherPersons.map((p, pIdx) => (
+                                <option key={`mother_opt_${p.id}_${pIdx}`} value={p.id}>
+                                  {p.name?.surname || p.lastName || ''} {p.maidenName ? `(${p.maidenName})` : ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Mode 2: Inline Typing / Create New Mother */}
+                    {motherMode === 'create' && (
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-rose-500/30 space-y-2.5 shadow-xs animate-in fade-in duration-150">
+                        <div className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 flex items-center justify-between">
+                          <span>Вписати дані нової матері:</span>
+                          <span className="text-[10px] text-rose-500 font-mono">Стать: Жіноча</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">Прізвище (шлюбне)</label>
+                            <input
+                              type="text"
+                              value={newMotherLastName}
+                              onChange={(e) => setNewMotherLastName(e.target.value)}
+                              placeholder="Шлюбне прізвище"
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">Дівоче прізвище</label>
+                            <input
+                              type="text"
+                              value={newMotherMaidenName}
+                              onChange={(e) => setNewMotherMaidenName(e.target.value)}
+                              placeholder="Дівоче прізвище"
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="col-span-1">
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">Ім'я *</label>
+                            <input
+                              type="text"
+                              value={newMotherFirstName}
+                              onChange={(e) => setNewMotherFirstName(e.target.value)}
+                              placeholder="Ім'я"
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                          <div className="col-span-1">
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">По батькові</label>
+                            <input
+                              type="text"
+                              value={newMotherPatronymic}
+                              onChange={(e) => setNewMotherPatronymic(e.target.value)}
+                              placeholder="По батькові"
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                          <div className="col-span-1">
+                            <label className="text-[10px] text-neutral-500 block mb-0.5">Рік народження</label>
+                            <input
+                              type="text"
+                              value={newMotherBirthYear}
+                              onChange={(e) => setNewMotherBirthYear(e.target.value)}
+                              placeholder="Рік"
+                              className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setMotherMode('select')}
+                            className="px-2.5 py-1 rounded-lg text-[11px] text-neutral-500 hover:text-neutral-800 dark:hover:text-white cursor-pointer"
+                          >
+                            Скасувати
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCreateNewMother}
+                            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Створити й прив'язати</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -3976,24 +4706,573 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   </div>
                 )}
 
-                {/* Spouse Selector */}
-                <div className="p-3 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] space-y-1.5">
-                  <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
-                    <Heart className="w-3.5 h-3.5 text-rose-500" />
-                    <span>Подружжя / Партнер</span>
-                  </label>
-                  <select
-                    value={spouseId}
-                    onChange={(e) => setSpouseId(e.target.value)}
-                    className={`w-full p-2.5 rounded-xl border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-2 focus:ring-[#B88E3E]`}
-                  >
-                    <option value="">-- Оберіть партнера/подружжя зі списку осіб --</option>
-                    {otherEligiblePersons.map((p, pIdx) => (
-                      <option key={`spouse_opt_${p.id}_${pIdx}`} value={p.id}>
-                        {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                {/* Spouses / Partners Section (Подружжя / Партнери) */}
+                <div className="p-3 sm:p-3.5 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
+                      <Heart className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Подружжя / Партнери</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono">
+                        {linkedSpouseIds.length}
+                      </span>
+                    </label>
+
+                    {/* Mode Switcher */}
+                    <div className="inline-flex p-0.5 rounded-lg bg-black/5 dark:bg-white/10 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setSpouseMode('select')}
+                        className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
+                          spouseMode === 'select'
+                            ? 'bg-white dark:bg-slate-800 text-neutral-900 dark:text-white shadow-xs font-bold'
+                            : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                        }`}
+                      >
+                        Зі списку
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSpouseMode('create');
+                          setNewSpouseGender(gender === 'female' ? 'male' : 'female');
+                        }}
+                        className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer flex items-center gap-1 ${
+                          spouseMode === 'create'
+                            ? 'bg-[#B88E3E] text-white shadow-xs font-bold'
+                            : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                        }`}
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        <span>Вписати подружжя</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {spouseFeedbackMsg && (
+                    <div className="p-1.5 rounded-lg text-[11px] flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 animate-in fade-in duration-150">
+                      <CheckCircle2 className="w-3 h-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <span>{spouseFeedbackMsg.text}</span>
+                    </div>
+                  )}
+
+                  {/* List of currently linked spouses */}
+                  {linkedSpouseIds.length > 0 && (
+                    <div className="space-y-1.5">
+                      {linkedSpouseIds.map((sId) => {
+                        const sp = persons.find((p) => p.id === sId);
+                        if (!sp) {
+                          return (
+                            <div
+                              key={`linked_spouse_invalid_${sId}`}
+                              className="p-2 sm:p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-800 flex items-center justify-between gap-2 shadow-xs"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                                <div className="min-w-0 text-xs text-rose-700 dark:text-rose-300">
+                                  <span className="font-semibold">Недійсне посилання на подружжя:</span>{' '}
+                                  <span className="font-mono text-[11px] font-bold">ID {sId}</span> (особи немає в базі)
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setLinkedSpouseIds((prev) => prev.filter((id) => id !== sId))}
+                                className="px-2 py-1 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shrink-0 cursor-pointer"
+                                title="Видалити недійсне посилання"
+                              >
+                                Видалити
+                              </button>
+                            </div>
+                          );
+                        }
+                        const isFemale = sp.gender === 'female' || sp.gender === 'F';
+                        return (
+                          <div
+                            key={`linked_spouse_${sId}`}
+                            className="p-2 sm:p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-500/20 flex items-center justify-between gap-2 shadow-xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div
+                                className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 font-bold text-[11px] ${
+                                  isFemale
+                                    ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
+                                    : 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
+                                }`}
+                              >
+                                {isFemale ? '♀' : '♂'}
+                              </div>
+                              <div className="min-w-0">
+                                <span className="font-bold text-xs text-neutral-900 dark:text-white truncate">
+                                  {sp.name?.surname || sp.lastName || ''} {sp.maidenName ? `(${sp.maidenName})` : ''} {sp.name?.given || sp.firstName || ''} {sp.name?.patronymic || sp.patronymic || ''}
+                                </span>
+                                <span className="text-[10px] text-neutral-500 ml-2">
+                                  {sp.birthYear ? `нар. ${sp.birthYear}` : ''}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSpouse(sId)}
+                              className="px-2 py-0.5 rounded text-[11px] text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
+                              title="Від'єднати"
+                            >
+                              Від'єднати
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Add Spouse from List */}
+                  {spouseMode === 'select' && (
+                    <div className="space-y-2">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        {otherEligiblePersons.length > 5 && (
+                          <div className="relative flex-1">
+                            <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+                            <input
+                              type="text"
+                              value={spouseSearchQuery}
+                              onChange={(e) => setSpouseSearchQuery(e.target.value)}
+                              placeholder="Пошук у дереві за ім'ям..."
+                              className={`w-full pl-7 pr-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                        )}
+                        <select
+                          value={selectedExistingSpouseId}
+                          onChange={(e) => setSelectedExistingSpouseId(e.target.value)}
+                          className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                        >
+                          <option value="">-- Оберіть особу з дерева ({filteredSpousePersons.length}) --</option>
+                          {filteredSpousePersons.map((p, pIdx) => (
+                            <option key={`spouse_cand_${p.id}_${pIdx}`} value={p.id}>
+                              {p.gender === 'female' ? '♀' : '♂'} {p.name?.surname || p.lastName || ''} {p.maidenName ? `(${p.maidenName})` : ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!selectedExistingSpouseId}
+                          onClick={handleLinkExistingSpouse}
+                          className="px-3 py-1.5 rounded-lg bg-[#B88E3E] hover:bg-[#a37c33] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Прив'язати</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add Spouse by Typing / Inline Creation */}
+                  {spouseMode === 'create' && (
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-rose-500/30 space-y-2.5 shadow-xs animate-in fade-in duration-150">
+                      <div className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 flex items-center justify-between">
+                        <span>Вписати дані нового партнера / подружжя:</span>
+                        <div className="inline-flex p-0.5 rounded bg-black/5 dark:bg-white/10 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setNewSpouseGender('male')}
+                            className={`px-2 py-0.5 rounded font-medium cursor-pointer ${
+                              newSpouseGender === 'male' ? 'bg-blue-600 text-white font-bold' : 'text-neutral-500'
+                            }`}
+                          >
+                            Чоловік ♂
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewSpouseGender('female')}
+                            className={`px-2 py-0.5 rounded font-medium cursor-pointer ${
+                              newSpouseGender === 'female' ? 'bg-rose-600 text-white font-bold' : 'text-neutral-500'
+                            }`}
+                          >
+                            Дружина ♀
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">Прізвище</label>
+                          <input
+                            type="text"
+                            value={newSpouseLastName}
+                            onChange={(e) => setNewSpouseLastName(e.target.value)}
+                            placeholder="Прізвище"
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">
+                            {newSpouseGender === 'female' ? 'Дівоче прізвище' : 'Примітка'}
+                          </label>
+                          <input
+                            type="text"
+                            value={newSpouseMaidenName}
+                            onChange={(e) => setNewSpouseMaidenName(e.target.value)}
+                            placeholder={newSpouseGender === 'female' ? "Дівоче прізвище" : ""}
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">Ім'я *</label>
+                          <input
+                            type="text"
+                            value={newSpouseFirstName}
+                            onChange={(e) => setNewSpouseFirstName(e.target.value)}
+                            placeholder="Ім'я"
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">По батькові</label>
+                          <input
+                            type="text"
+                            value={newSpousePatronymic}
+                            onChange={(e) => setNewSpousePatronymic(e.target.value)}
+                            placeholder="По батькові"
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">Рік народження</label>
+                          <input
+                            type="text"
+                            value={newSpouseBirthYear}
+                            onChange={(e) => setNewSpouseBirthYear(e.target.value)}
+                            placeholder="Рік"
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="w-1/2">
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">Рік одруження / шлюбу</label>
+                          <input
+                            type="text"
+                            value={newSpouseMarriageYear}
+                            onChange={(e) => setNewSpouseMarriageYear(e.target.value)}
+                            placeholder="напр. 1975"
+                            className={`w-full px-2.5 py-1 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 self-end">
+                          <button
+                            type="button"
+                            onClick={() => setSpouseMode('select')}
+                            className="px-2.5 py-1 rounded-lg text-[11px] text-neutral-500 hover:text-neutral-800 dark:hover:text-white cursor-pointer"
+                          >
+                            Скасувати
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCreateNewSpouse}
+                            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Створити й прив'язати</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Children Section (Діти: сини та доньки) */}
+                <div className="p-3 sm:p-3.5 rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <label className="font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 text-xs">
+                      <Baby className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Діти (Сини та доньки)</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono">
+                        {linkedChildrenIds.length}
+                      </span>
+                    </label>
+
+                    {/* Mode Switcher */}
+                    <div className="inline-flex p-0.5 rounded-lg bg-black/5 dark:bg-white/10 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setChildMode('select')}
+                        className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
+                          childMode === 'select'
+                            ? 'bg-white dark:bg-slate-800 text-neutral-900 dark:text-white shadow-xs font-bold'
+                            : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                        }`}
+                      >
+                        Зі списку
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setChildMode('create');
+                          if (!newChildLastName) setNewChildLastName(lastName || clan || '');
+                          if (!newChildPatronymic && (gender === 'male' || gender === 'M') && firstName.trim()) {
+                            setNewChildPatronymic(generateUkrainianPatronymic(firstName.trim(), newChildGender));
+                          }
+                          if (!newChildOtherParentId && linkedSpouseIds.length > 0) {
+                            setNewChildOtherParentId(linkedSpouseIds[0]);
+                          }
+                        }}
+                        className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer flex items-center gap-1 ${
+                          childMode === 'create'
+                            ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                            : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-white'
+                        }`}
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        <span>Вписати нову дитину</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {childFeedbackMsg && (
+                    <div className="p-1.5 rounded-lg text-[11px] flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 animate-in fade-in duration-150">
+                      <CheckCircle2 className="w-3 h-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <span>{childFeedbackMsg.text}</span>
+                    </div>
+                  )}
+
+                  {/* List of currently linked children */}
+                  {linkedChildrenIds.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {linkedChildrenIds.map((cId) => {
+                        const child = persons.find((p) => p.id === cId);
+                        if (!child) {
+                          return (
+                            <div
+                              key={`linked_child_invalid_${cId}`}
+                              className="p-2 sm:p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-800 flex items-center justify-between gap-2 shadow-xs"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                                <div className="min-w-0 text-xs text-rose-700 dark:text-rose-300">
+                                  <span className="font-semibold">Недійсне посилання на дитину:</span>{' '}
+                                  <span className="font-mono text-[11px] font-bold">ID {cId}</span> (дитини немає в базі)
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setLinkedChildrenIds((prev) => prev.filter((id) => id !== cId))}
+                                className="px-2 py-1 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shrink-0 cursor-pointer"
+                                title="Видалити недійсне посилання"
+                              >
+                                Видалити
+                              </button>
+                            </div>
+                          );
+                        }
+                        const isFemale = child.gender === 'female' || child.gender === 'F';
+                        return (
+                          <div
+                            key={`linked_child_${cId}`}
+                            className="p-2 sm:p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-500/20 flex items-center justify-between gap-2 shadow-xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div
+                                className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 font-bold text-[11px] ${
+                                  isFemale
+                                    ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
+                                    : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                                }`}
+                              >
+                                {isFemale ? '♀' : '♂'}
+                              </div>
+                              <div className="min-w-0">
+                                <span className="font-bold text-xs text-neutral-900 dark:text-white truncate">
+                                  {child.name?.surname || child.lastName || ''} {child.name?.given || child.firstName || ''} {child.name?.patronymic || child.patronymic || ''}
+                                </span>
+                                <span className="text-[10px] text-neutral-500 ml-2">
+                                  {child.birthYear ? `нар. ${child.birthYear}` : ''}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveChild(cId)}
+                              className="px-2 py-0.5 rounded text-[11px] text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
+                              title="Від'єднати дитину"
+                            >
+                              Від'єднати
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-2.5 rounded-lg border border-dashed border-black/10 dark:border-white/10 text-center text-[11px] text-neutral-400">
+                      Дітей ще не додано. Ви можете обрати дитину зі списку або вписати нову.
+                    </div>
+                  )}
+
+                  {/* Add Child from List */}
+                  {childMode === 'select' && (
+                    <div className="space-y-2">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        {otherEligiblePersons.length > 5 && (
+                          <div className="relative flex-1">
+                            <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+                            <input
+                              type="text"
+                              value={childSearchQuery}
+                              onChange={(e) => setChildSearchQuery(e.target.value)}
+                              placeholder="Пошук у дереві за ім'ям..."
+                              className={`w-full pl-7 pr-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                            />
+                          </div>
+                        )}
+                        <select
+                          value={selectedExistingChildId}
+                          onChange={(e) => setSelectedExistingChildId(e.target.value)}
+                          className={`flex-1 p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                        >
+                          <option value="">-- Оберіть особу з дерева ({filteredChildPersons.length}) --</option>
+                          {filteredChildPersons.map((p, pIdx) => (
+                            <option key={`child_cand_${p.id}_${pIdx}`} value={p.id}>
+                              {p.gender === 'female' ? '♀' : '♂'} {p.name?.surname || p.lastName || ''} {p.name?.given || p.firstName || ''} {p.birthYear ? `(${p.birthYear})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!selectedExistingChildId}
+                          onClick={handleLinkExistingChild}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Додати дитину</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add Child by Typing / Inline Creation */}
+                  {childMode === 'create' && (
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-emerald-500/30 space-y-2.5 shadow-xs animate-in fade-in duration-150">
+                      <div className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-300 flex items-center justify-between">
+                        <span>Вписати дані нової дитини:</span>
+                        <div className="inline-flex p-0.5 rounded bg-black/5 dark:bg-white/10 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewChildGender('male');
+                              if ((gender === 'male' || gender === 'M') && firstName.trim()) {
+                                setNewChildPatronymic(generateUkrainianPatronymic(firstName.trim(), 'male'));
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded font-medium cursor-pointer ${
+                              newChildGender === 'male' ? 'bg-emerald-600 text-white font-bold' : 'text-neutral-500'
+                            }`}
+                          >
+                            Син ♂
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewChildGender('female');
+                              if ((gender === 'male' || gender === 'M') && firstName.trim()) {
+                                setNewChildPatronymic(generateUkrainianPatronymic(firstName.trim(), 'female'));
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded font-medium cursor-pointer ${
+                              newChildGender === 'female' ? 'bg-rose-600 text-white font-bold' : 'text-neutral-500'
+                            }`}
+                          >
+                            Донька ♀
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">Прізвище</label>
+                          <input
+                            type="text"
+                            value={newChildLastName}
+                            onChange={(e) => setNewChildLastName(e.target.value)}
+                            placeholder={lastName || clan || "Прізвище дитини"}
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">Ім'я *</label>
+                          <input
+                            type="text"
+                            value={newChildFirstName}
+                            onChange={(e) => setNewChildFirstName(e.target.value)}
+                            placeholder="Ім'я дитини"
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">По батькові</label>
+                          <input
+                            type="text"
+                            value={newChildPatronymic}
+                            onChange={(e) => setNewChildPatronymic(e.target.value)}
+                            placeholder="По батькові"
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">Рік народження</label>
+                          <input
+                            type="text"
+                            value={newChildBirthYear}
+                            onChange={(e) => setNewChildBirthYear(e.target.value)}
+                            placeholder="напр. 2015"
+                            className={`w-full px-2.5 py-1.5 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Other Parent Selector if spouses exist */}
+                      {candidateSpouses.length > 0 && (
+                        <div>
+                          <label className="text-[10px] text-neutral-500 block mb-0.5">
+                            {gender === 'male' || gender === 'M' ? 'Матір дитини (з подружжя)' : 'Батько дитини (з подружжя)'}
+                          </label>
+                          <select
+                            value={newChildOtherParentId}
+                            onChange={(e) => setNewChildOtherParentId(e.target.value)}
+                            className={`w-full p-2 rounded-lg border ${theme.inputBg} ${theme.inputBorder} ${theme.inputText} text-xs focus:outline-none focus:ring-1 focus:ring-[#B88E3E]`}
+                          >
+                            <option value="">-- Не вказувати іншого з батьків --</option>
+                            {candidateSpouses.map((sp) => (
+                              <option key={`cand_parent_${sp.id}`} value={sp.id}>
+                                {sp.name?.surname || sp.lastName || ''} {sp.name?.given || sp.firstName || ''} {sp.birthYear ? `(${sp.birthYear})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setChildMode('select')}
+                          className="px-2.5 py-1 rounded-lg text-[11px] text-neutral-500 hover:text-neutral-800 dark:hover:text-white cursor-pointer"
+                        >
+                          Скасувати
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCreateNewChild}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Створити й додати дитину</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Unified Spiritual Relations Section: Хрещені, хресники та свідки */}
@@ -5018,7 +6297,63 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               theme={theme}
             />
 
-            {/* SECTION 8: Власні поля */}
+            {/* SECTION 8: Документи та архівні скани */}
+            <div
+              id="section-documents"
+              className={`rounded-2xl border transition-all ${
+                openSections.documents
+                  ? `${theme.cardBg} ${theme.cardBorder} shadow-sm`
+                  : `${theme.cardBg} ${theme.borderSubtle} opacity-90 hover:opacity-100`
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => toggleSectionAccordion('documents')}
+                className="w-full p-4 flex items-center justify-between text-left cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                    <Archive className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${theme.textPrimary}`}>Документи та архівні скани</h3>
+                    <p className={`text-[11px] ${theme.textMuted}`}>
+                      Метричні книги, ревізії, свідоцтва, скани з відправкою в GitHub або Google Drive
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-neutral-400">
+                    {effectivePerson?.documents?.length ? `${effectivePerson.documents.length} прикріплено` : '0 документів'}
+                  </span>
+                  {openSections.documents ? (
+                    <ChevronUp className="w-4 h-4 text-neutral-400" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-neutral-400" />
+                  )}
+                </div>
+              </button>
+
+              {openSections.documents && (
+                <div className="p-4 pt-0 border-t border-black/5 dark:border-white/5 mt-2">
+                  {effectivePerson ? (
+                    <PersonDocumentsSection
+                      person={effectivePerson}
+                      onUpdatePerson={(updatedPerson) => {
+                        updatePerson(updatedPerson);
+                      }}
+                      isReadOnly={isReadOnly}
+                    />
+                  ) : (
+                    <div className="p-4 rounded-xl border border-dashed border-stone-200 dark:border-stone-800 text-center text-xs text-neutral-500">
+                      Збережіть картку особи, щоб прикріпити до неї архівні документи та метрики.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* SECTION 9: Власні поля */}
             <CustomFieldsSection
               isOpen={Boolean(openSections['custom-fields'])}
               onToggle={() => toggleSectionAccordion('custom-fields')}
@@ -5178,16 +6513,27 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                         {mp.birthPlace ? `, ${mp.birthPlace}` : ''}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDuplicateSaveDialog(false);
-                        handleUseExistingPerson(mp);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shrink-0 cursor-pointer"
-                    >
-                      {initialRelation ? 'Приєднати' : 'Відкрити'}
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleMarkNotDuplicate(mp.id)}
+                        className="px-2 py-1.5 rounded-lg text-xs font-semibold border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer flex items-center gap-1"
+                        title="Позначити як не дублікат"
+                      >
+                        <XCircle className="w-3.5 h-3.5 text-neutral-400" />
+                        <span>Не дублікат</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowDuplicateSaveDialog(false);
+                          handleUseExistingPerson(mp);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shrink-0 cursor-pointer"
+                      >
+                        {initialRelation ? 'Приєднати' : 'Відкрити'}
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -5204,13 +6550,15 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  potentialDuplicates.forEach((d) => handleMarkNotDuplicate(d.person.id));
                   setDuplicateWarningDismissedForSave(true);
                   setShowDuplicateSaveDialog(false);
                   setTimeout(() => handleSave(false), 50);
                 }}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors cursor-pointer flex items-center gap-1.5"
               >
-                Все одно створити окремо
+                <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Це не дублікат (створити окремо)</span>
               </button>
             </div>
           </div>

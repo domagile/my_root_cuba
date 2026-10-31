@@ -41,7 +41,8 @@ import {
   XCircle,
   Archive,
   FolderGit2,
-  Plus
+  Plus,
+  HardDrive
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -90,7 +91,9 @@ export const SettingsView: React.FC = () => {
     isManualPushing,
     isManualPulling,
     triggerUploadToCloud,
-    triggerDownloadFromCloud
+    triggerDownloadFromCloud,
+    googleDriveEmail,
+    setGoogleDriveEmail
   } = useGenealogy();
 
   const {
@@ -112,6 +115,29 @@ export const SettingsView: React.FC = () => {
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [confirmPull, setConfirmPull] = useState(false);
   const [cloudFeedback, setCloudFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
+  const [driveEmailInput, setDriveEmailInput] = useState(googleDriveEmail || '');
+  const [driveFeedback, setDriveFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDriveEmailInput(googleDriveEmail || '');
+  }, [googleDriveEmail]);
+
+  const handleSaveDriveEmail = () => {
+    if (!driveEmailInput.trim() || !driveEmailInput.includes('@')) {
+      setDriveFeedback('Вкажіть коректну адресу пошти Google (наприклад name@gmail.com)');
+      return;
+    }
+    setGoogleDriveEmail(driveEmailInput.trim());
+    setDriveFeedback('Google Диск успішно збережено!');
+    setTimeout(() => setDriveFeedback(null), 4000);
+  };
+
+  const handleDisconnectDrive = () => {
+    setGoogleDriveEmail('');
+    setDriveEmailInput('');
+    setDriveFeedback('Google Диск відключено.');
+    setTimeout(() => setDriveFeedback(null), 4000);
+  };
 
   const handleManualUpload = async () => {
     setCloudFeedback(null);
@@ -873,16 +899,87 @@ export const SettingsView: React.FC = () => {
         </div>
       </section>
 
-      {/* SECTION: GitHub Archive & Scans Storage */}
+      {/* SECTION: Distributed Smart Storage (GitHub for deceased, Google Drive for living) */}
       <section className="space-y-4 pt-4 border-t border-black/10">
         <div>
           <h2 className={`text-lg font-bold ${theme.cardTitle} flex items-center gap-2`}>
             <Archive className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-            <span>GitHub Сховище для архівних сканів та документів (1-клік)</span>
+            <span>Розподілене сховище: GitHub (для померлих) + Google Диск (для живих)</span>
           </h2>
           <p className={`text-xs ${theme.cardSubtext} mt-1`}>
-            Автоматичне вивантаження важких метричних сканів, ревізій та фотографій померлих предків напряму у ваш GitHub репозиторій.
+            Інтелектуальна маршрутизація: скани метричних книг померлих предків зберігаються у GitHub Архіві, а документи живих родичів — у приватному Google Диску з дотриманням конфіденційності.
           </p>
+        </div>
+
+        {/* Dual Storage Overview Banner */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* Card 1: Deceased -> GitHub */}
+          <div className="p-4 rounded-2xl bg-purple-500/10 border border-purple-500/25 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-sm text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                <Archive className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                <span>📜 Померлі предки → GitHub Архів</span>
+              </span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                githubConfig.isConfigured ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' : 'bg-neutral-500/20 text-neutral-600 dark:text-neutral-400'
+              }`}>
+                {githubConfig.isConfigured ? 'Активно' : 'Потрібне налаштування'}
+              </span>
+            </div>
+            <p className="text-purple-900/80 dark:text-purple-200/80 text-[11px] leading-relaxed">
+              Історичні метричні книги (народження, шлюб, смерть), сповідні розписи та ревізькі казки зберігаються у версіованій файловій структурі репозиторію.
+            </p>
+            <div className="font-mono text-[10px] bg-purple-950/20 p-2 rounded-lg text-purple-800 dark:text-purple-300 break-all">
+              archive / [Рід] / [Покоління] / [ПІБ] / [файл]
+            </div>
+          </div>
+
+          {/* Card 2: Living -> Google Drive */}
+          <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/25 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-sm text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
+                <HardDrive className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>🌿 Живі родичі → Google Диск (GDPR)</span>
+              </span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                googleDriveEmail ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300' : 'bg-neutral-500/20 text-neutral-600 dark:text-neutral-400'
+              }`}>
+                {googleDriveEmail ? 'Підключено' : 'Вкажіть пошту'}
+              </span>
+            </div>
+            <p className="text-blue-900/80 dark:text-blue-200/80 text-[11px] leading-relaxed">
+              Сучасні документи (паспорти, свідоцтва, фото) живих членів родини не потрапляють у відкриті репозиторії та залишаються у вашому Google Диску.
+            </p>
+            <div className="pt-1 flex items-center gap-2">
+              <input
+                type="email"
+                value={driveEmailInput}
+                onChange={(e) => setDriveEmailInput(e.target.value)}
+                placeholder="ваша_пошта@gmail.com"
+                className={`flex-1 p-2 rounded-lg border ${theme.cardBorder} ${theme.badgeBg} ${theme.badgeText} text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500`}
+              />
+              <button
+                type="button"
+                onClick={handleSaveDriveEmail}
+                className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-xs transition-colors"
+              >
+                Зберегти
+              </button>
+              {googleDriveEmail && (
+                <button
+                  type="button"
+                  onClick={handleDisconnectDrive}
+                  className="px-2 py-2 rounded-lg text-rose-500 hover:bg-rose-500/10 text-xs shrink-0 cursor-pointer"
+                  title="Відключити Google Drive"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {driveFeedback && (
+              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">{driveFeedback}</p>
+            )}
+          </div>
         </div>
 
         <div className={`p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} shadow-sm space-y-5`}>
@@ -893,7 +990,7 @@ export const SettingsView: React.FC = () => {
             </div>
             <div className="space-y-1 text-purple-950 dark:text-purple-200">
               <p className="font-bold text-sm">
-                Як працює автоматична структура папок:
+                Налаштування GitHub репозиторію для померлих предків:
               </p>
               <p className="leading-relaxed">
                 Кожен завантажений документ автоматично зберігається за шляхом:

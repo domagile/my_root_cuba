@@ -42,9 +42,12 @@ import {
   Route,
   Layers,
   Search,
-  Scissors
+  Scissors,
+  AlertTriangle,
+  Archive
 } from 'lucide-react';
 import { Person, Gender } from '../../types';
+import { PersonDocumentsSection } from '../PersonDocumentsSection';
 import { isPersonMale, isPersonFemale } from '../../rodovid/utils/genderUtils';
 import { comparePersonsByAge, getPersonRodName } from '../../rodovid/utils/treeLayout';
 import { formatClanName } from '../../utils/ukrainianPhonetics';
@@ -112,7 +115,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   // Collapsible sections for family block
   const [isSpouseChildrenOpen, setIsSpouseChildrenOpen] = useState<boolean>(true);
   const [isParentsChildrenOpen, setIsParentsChildrenOpen] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<'family' | 'kinship_line' | 'bio' | 'events' | 'sources' | 'photos'>('family');
+  const [activeTab, setActiveTab] = useState<'family' | 'kinship_line' | 'bio' | 'events' | 'documents' | 'photos'>('family');
   const [copiedKinshipLine, setCopiedKinshipLine] = useState<boolean>(false);
 
   // Root person of tree
@@ -409,6 +412,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   }, [father, mother, person.fatherId, person.motherId, person.parentFamilyId, person.id, families, persons]);
 
   const deleteAncestorsOfPerson = useGenealogyStore((s) => s.deleteAncestorsOfPerson);
+  const updatePerson = useGenealogyStore((s) => s.updatePerson);
   const openAuthModal = useUIStore((s) => s.openAuthModal);
   const [isLocalConfirmAncestorsOpen, setIsLocalConfirmAncestorsOpen] = useState(false);
 
@@ -473,6 +477,30 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
     });
     return list.sort(comparePersonsByAge);
   }, [person, persons]);
+
+  // Check for dangling spouse/child IDs that don't exist in persons
+  const danglingSpouseIds = useMemo(() => {
+    if (!person.spouseIds) return [];
+    return person.spouseIds.filter((id) => !persons.some((p) => p.id === id));
+  }, [person.spouseIds, persons]);
+
+  const danglingChildIds = useMemo(() => {
+    if (!person.childrenIds) return [];
+    return person.childrenIds.filter((id) => !persons.some((p) => p.id === id));
+  }, [person.childrenIds, persons]);
+
+  const [danglingSuccessMessage, setDanglingSuccessMessage] = useState<string | null>(null);
+
+  const handleCleanDanglingLinks = () => {
+    const nextPerson: Person = {
+      ...person,
+      spouseIds: person.spouseIds ? person.spouseIds.filter((id) => persons.some((p) => p.id === id)) : undefined,
+      childrenIds: person.childrenIds ? person.childrenIds.filter((id) => persons.some((p) => p.id === id)) : undefined
+    };
+    updatePerson(nextPerson);
+    setDanglingSuccessMessage('Недійсні посилання успішно видалено з картки особи.');
+    setTimeout(() => setDanglingSuccessMessage(null), 4000);
+  };
 
   // Godparents
   const godparentsList = useMemo(() => {
@@ -687,8 +715,8 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   return (
     <div className="flex flex-col h-full bg-stone-50 dark:bg-[#14171c] text-neutral-900 dark:text-neutral-100 overflow-hidden">
         {/* Top Profile Header Bar */}
-        <div className="p-3.5 sm:p-5 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 shrink-0 shadow-xs">
-          <div className="flex items-start sm:items-center gap-3 min-w-0">
+        <div className="p-4 sm:p-5 border-b border-stone-200 dark:border-[#2b3038] bg-white dark:bg-[#1a1e24] flex flex-col gap-3.5 shrink-0 shadow-xs">
+          <div className="flex items-start sm:items-center gap-3.5 min-w-0 w-full">
             <div
               className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 border-2 shadow-xs ${
                 isMale
@@ -708,7 +736,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                 <User className="w-6 h-6 stroke-[1.8]" />
               )}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                 <h2 className="font-extrabold text-base sm:text-lg text-neutral-900 dark:text-white leading-tight break-words">
                   {lastName} {hasMaiden && <span className="text-amber-600 dark:text-amber-400 font-semibold">({maidenName}) </span>}
@@ -745,7 +773,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                   );
                 })()}
               </div>
-              <div className="text-xs text-neutral-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-1">
+              <div className="text-xs text-neutral-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-1.5">
                 <span>{lifespanStr}</span>
                 {person.birthPlace && (
                   <>
@@ -760,8 +788,8 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
             </div>
           </div>
 
-          {/* Action Controls in Header */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap shrink-0 pt-2 2xl:pt-0 border-t 2xl:border-t-0 border-stone-100 dark:border-[#272c33]">
+          {/* Action Controls in Header Toolbar - dedicated row with clear wrap and no overlap */}
+          <div className="flex items-center gap-2 flex-wrap pt-2.5 border-t border-stone-200/70 dark:border-[#272c33] w-full">
             {/* Main Edit Person Icon / Button */}
             {!isReadOnly && (
               <button
@@ -850,6 +878,26 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                 <span className="hidden sm:inline">Контакт</span>
               </button>
             )}
+
+            {/* Quick button to Documents tab */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('documents')}
+              className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'documents'
+                  ? 'bg-[#B88E3E] text-white border-[#B88E3E] shadow-sm'
+                  : 'border-amber-400/80 dark:border-amber-700/60 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+              }`}
+              title="Переглянути та прикріпити архівні документи, скани та метрики"
+            >
+              <FileText className="w-3.5 h-3.5 text-[#B88E3E]" />
+              <span className="hidden sm:inline">Документи</span>
+              {(person.documents?.length || 0) > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-mono">
+                  {person.documents?.length}
+                </span>
+              )}
+            </button>
 
             <button
               type="button"
@@ -954,6 +1002,24 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
           >
             <Calendar className="w-3.5 h-3.5 shrink-0" />
             <span>Події життя</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('documents')}
+            className={`px-3 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'documents'
+                ? 'border-[#B88E3E] text-[#B88E3E]'
+                : 'border-transparent text-neutral-600 dark:text-slate-400 hover:text-neutral-900 dark:hover:text-white'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5 shrink-0" />
+            <span>Документи та метрики</span>
+            {(person.documents?.length || 0) > 0 && (
+              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-[#B88E3E]/20 text-[#B88E3E] font-mono">
+                {person.documents?.length}
+              </span>
+            )}
           </button>
 
           {(person.photos && person.photos.length > 0) && (
@@ -1274,6 +1340,45 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                 </div>
               ) : null}
             </div>
+
+            {/* Dangling links notice & 1-click cleanup */}
+            {(danglingSpouseIds.length > 0 || danglingChildIds.length > 0) && (
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs animate-in fade-in duration-200">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-amber-950 dark:text-amber-200 text-sm">
+                      У картці виявлено недійсні приховані зв'язки
+                    </div>
+                    <div className="text-xs text-amber-800/90 dark:text-amber-300/90">
+                      {danglingSpouseIds.length > 0 && (
+                        <span>• Подружжя з ID: <strong className="font-mono">{danglingSpouseIds.join(', ')}</strong> (немає в базі). </span>
+                      )}
+                      {danglingChildIds.length > 0 && (
+                        <span>• Дитина з ID: <strong className="font-mono">{danglingChildIds.join(', ')}</strong> (немає в базі). </span>
+                      )}
+                      Ці посилання не відображаються як окремі картки людей, але фіксуються в аудиті дерева як помилки.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCleanDanglingLinks}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-colors shrink-0 cursor-pointer"
+                >
+                  Очистити недійсні зв'язки
+                </button>
+              </div>
+            )}
+
+            {danglingSuccessMessage && (
+              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>{danglingSuccessMessage}</span>
+              </div>
+            )}
 
             {/* Two-Column Family Grid (Matching uploaded FamilySearch layout) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
@@ -2220,6 +2325,18 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
                 <img src={ph} alt={`Фото ${idx + 1}`} className="w-full h-44 object-cover hover:scale-105 transition-transform" />
               </div>
             ))}
+          </div>
+        )}
+
+        {activeTab === 'documents' && (
+          <div className="space-y-4">
+            <PersonDocumentsSection
+              person={person}
+              onUpdatePerson={(updatedPerson) => {
+                updatePerson(updatedPerson);
+              }}
+              isReadOnly={isReadOnly}
+            />
           </div>
         )}
       </div>

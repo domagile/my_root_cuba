@@ -997,6 +997,8 @@ export function isDuplicatePairIgnored(idA: string, idB: string, ignoredSet?: Se
   const set = ignoredSet || getIgnoredDuplicatePairKeys();
   const normalizedKey = getDuplicatePairKey(idA, idB);
   if (set.has(normalizedKey)) return true;
+  if (set.has(`dup_${normalizedKey}`)) return true;
+  if (set.has(`${idA}___${idB}`) || set.has(`${idB}___${idA}`)) return true;
   if (set.has(`dup_${idA}___${idB}`) || set.has(`dup_${idB}___${idA}`)) return true;
   if (set.has(`dup_${idA}_${idB}`) || set.has(`dup_${idB}_${idA}`)) return true;
   if (set.has(`${idA}:::${idB}`) || set.has(`${idB}:::${idA}`)) return true;
@@ -1008,9 +1010,13 @@ export function isDuplicatePairIgnored(idA: string, idB: string, ignoredSet?: Se
  */
 export function ignoreDuplicatePair(idA: string, idB: string): void {
   try {
+    if (!idA || !idB || idA === idB) return;
     const set = getIgnoredDuplicatePairKeys();
     const key = getDuplicatePairKey(idA, idB);
     set.add(key);
+    set.add(`dup_${key}`);
+    set.add(`${idA}___${idB}`);
+    set.add(`${idB}___${idA}`);
     set.add(`dup_${idA}___${idB}`);
     set.add(`dup_${idB}___${idA}`);
     set.add(`dup_${idA}_${idB}`);
@@ -1018,9 +1024,22 @@ export function ignoreDuplicatePair(idA: string, idB: string): void {
     set.add(`${idA}:::${idB}`);
     set.add(`${idB}:::${idA}`);
     const list = Array.from(set);
-    persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, list);
-    // Persist to Firestore cloud settings so it survives refresh and cross-device sessions
+
+    // 1. Immediately store in localStorage so synchronous reads get the updated list instantly
+    try {
+      localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(list));
+    } catch {}
+
+    // 2. Persist to IndexedDB with immediate flag
+    persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, list, true);
+
+    // 3. Invalidate duplicate detector memoization cache
+    clearDuplicateDetectorCache();
+
+    // 4. Persist to Firestore cloud settings so it survives refresh and cross-device sessions
     saveIgnoredDuplicatePairsToCloud(list).catch(() => {});
+
+    // 5. Broadcast event across app
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed', { detail: { idA, idB, ignored: true } }));
     }
@@ -1034,9 +1053,13 @@ export function ignoreDuplicatePair(idA: string, idB: string): void {
  */
 export function unignoreDuplicatePair(idA: string, idB: string): void {
   try {
+    if (!idA || !idB) return;
     const set = getIgnoredDuplicatePairKeys();
     const key = getDuplicatePairKey(idA, idB);
     set.delete(key);
+    set.delete(`dup_${key}`);
+    set.delete(`${idA}___${idB}`);
+    set.delete(`${idB}___${idA}`);
     set.delete(`dup_${idA}___${idB}`);
     set.delete(`dup_${idB}___${idA}`);
     set.delete(`dup_${idA}_${idB}`);
@@ -1044,9 +1067,15 @@ export function unignoreDuplicatePair(idA: string, idB: string): void {
     set.delete(`${idA}:::${idB}`);
     set.delete(`${idB}:::${idA}`);
     const list = Array.from(set);
-    persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, list);
-    // Persist to Firestore cloud settings
+
+    try {
+      localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(list));
+    } catch {}
+
+    persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, list, true);
+    clearDuplicateDetectorCache();
     saveIgnoredDuplicatePairsToCloud(list).catch(() => {});
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed', { detail: { idA, idB, ignored: false } }));
     }

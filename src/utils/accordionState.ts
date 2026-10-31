@@ -11,6 +11,7 @@ export type ModalSection =
   | 'bio-notes'
   | 'events'
   | 'photos'
+  | 'documents'
   | 'custom-fields';
 
 export type ModalAccordionState = Record<ModalSection, boolean>;
@@ -23,6 +24,7 @@ export const DEFAULT_MODAL_ACCORDION_SECTIONS: ModalAccordionState = {
   'bio-notes': false,
   'events': false,
   'photos': false,
+  'documents': false,
   'custom-fields': false,
 };
 
@@ -34,6 +36,7 @@ export const MODAL_SECTION_KEYS: ModalSection[] = [
   'bio-notes',
   'events',
   'photos',
+  'documents',
   'custom-fields'
 ];
 
