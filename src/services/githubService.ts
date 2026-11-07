@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { GitHubStorageConfig, Person } from '../types';
+import { GitHubStorageConfig, Person, PlaceDossier, ResearchNote } from '../types';
 
 const STORAGE_KEY = 'rodovid_github_config';
 
@@ -500,3 +500,190 @@ export function parseDocumentViewerUrl(url: string): {
     isEmbeddable: false
   };
 }
+
+/**
+ * Upload a text or Markdown file to GitHub
+ */
+export async function uploadTextToGitHub(params: {
+  config?: GitHubStorageConfig;
+  path: string;
+  textContent: string;
+  commitMessage: string;
+}): Promise<{
+  success: boolean;
+  rawUrl?: string;
+  htmlUrl?: string;
+  path?: string;
+  error?: string;
+}> {
+  // Convert UTF-8 string to base64 safely supporting Cyrillic characters
+  const utf8Bytes = new TextEncoder().encode(params.textContent);
+  let binary = '';
+  const len = utf8Bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(utf8Bytes[i]);
+  }
+  const base64 = btoa(binary);
+
+  return uploadFileToGitHub({
+    config: params.config,
+    path: params.path,
+    fileBase64: base64,
+    commitMessage: params.commitMessage
+  });
+}
+
+/**
+ * Save Place Notepad & Dossier to GitHub as Markdown file
+ */
+export async function savePlaceDossierToGitHub(
+  placeName: string,
+  dossier: Partial<PlaceDossier> | undefined,
+  config?: GitHubStorageConfig
+): Promise<{ success: boolean; htmlUrl?: string; path?: string; error?: string }> {
+  const safeName = sanitizePathSegment(placeName);
+  const path = `archive/places/${safeName}.md`;
+
+  const lines: string[] = [];
+  lines.push(`# Блокнот населеного пункту: ${placeName}`);
+  lines.push('');
+  if (dossier?.settlementType) lines.push(`- **Тип:** ${dossier.settlementType}`);
+  if (dossier?.historicalName) lines.push(`- **Історична назва:** ${dossier.historicalName}`);
+  if (dossier?.district) lines.push(`- **Повіт / Район / Область:** ${dossier.district}`);
+  if (dossier?.parishChurch) lines.push(`- **Церковна парафія:** ${dossier.parishChurch}`);
+  if (dossier?.foundedYear) lines.push(`- **Рік заснування:** ${dossier.foundedYear}`);
+  lines.push(`- **Дата синхронізації:** ${new Date().toLocaleString('uk-UA')}`);
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  lines.push('## Вільні записи та історія села/міста:');
+  lines.push('');
+  lines.push(dossier?.notes || dossier?.historyText || '(Записів у блокноті ще немає)');
+  lines.push('');
+
+  if (dossier?.sourceLinks && dossier.sourceLinks.length > 0) {
+    lines.push('---');
+    lines.push('');
+    lines.push('## Архівні джерела та онлайн-метрики:');
+    lines.push('');
+    dossier.sourceLinks.forEach((src) => {
+      const title = src.title || src.url;
+      const desc = src.description ? ` — ${src.description}` : '';
+      const arch = src.archive ? ` [${src.archive}]` : '';
+      lines.push(`- [${title}](${src.url})${arch}${desc}`);
+    });
+    lines.push('');
+  }
+
+  const textContent = lines.join('\n');
+  return uploadTextToGitHub({
+    config,
+    path,
+    textContent,
+    commitMessage: `Блокнот населеного пункту: ${placeName}`
+  });
+}
+
+/**
+ * Batch save all places to GitHub
+ */
+export async function saveAllPlacesToGitHub(
+  places: Record<string, PlaceDossier>,
+  config?: GitHubStorageConfig
+): Promise<{ success: boolean; count: number; error?: string }> {
+  const cfg = config || getGitHubConfig();
+  if (!cfg.isConfigured) {
+    return { success: false, count: 0, error: 'GitHub не налаштовано' };
+  }
+
+  const list = Object.values(places || {});
+  let successCount = 0;
+
+  for (const p of list) {
+    if (!p || !p.placeName) continue;
+    const res = await savePlaceDossierToGitHub(p.placeName, p, cfg);
+    if (res.success) successCount++;
+  }
+
+  return { success: true, count: successCount };
+}
+
+/**
+ * Save Detective Note to GitHub as Markdown file
+ */
+export async function saveDetectiveNoteToGitHub(
+  note: ResearchNote,
+  config?: GitHubStorageConfig
+): Promise<{ success: boolean; htmlUrl?: string; path?: string; error?: string }> {
+  const safeTitle = sanitizePathSegment(note.title || 'Нотатка');
+  const path = `archive/detective_notes/${safeTitle}_${note.id}.md`;
+
+  const lines: string[] = [];
+  lines.push(`# ${note.title || 'Детективна розкопка'}`);
+  lines.push('');
+  lines.push(`- **ID розкопки:** ${note.id}`);
+  lines.push(`- **Створено:** ${new Date(note.createdAt).toLocaleString('uk-UA')}`);
+  lines.push(`- **Оновлено:** ${new Date(note.updatedAt).toLocaleString('uk-UA')}`);
+  if (note.tags && note.tags.length > 0) {
+    lines.push(`- **Теги:** ${note.tags.join(', ')}`);
+  }
+  if (note.color && note.color !== 'default') {
+    lines.push(`- **Категорія/Колір:** ${note.color}`);
+  }
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+
+  if (note.isChecklist && note.checklistItems && note.checklistItems.length > 0) {
+    lines.push('## Чекліст розкопок:');
+    lines.push('');
+    note.checklistItems.forEach((ci) => {
+      lines.push(`- [${ci.isCompleted ? 'x' : ' '}] ${ci.text}`);
+    });
+    lines.push('');
+  }
+
+  if (note.content) {
+    lines.push('## Зміст розкопки:');
+    lines.push('');
+    lines.push(note.content);
+    lines.push('');
+  }
+
+  if (note.linkUrl) {
+    lines.push(`**Посилання на джерело:** [${note.linkUrl}](${note.linkUrl})`);
+    lines.push('');
+  }
+
+  const textContent = lines.join('\n');
+  return uploadTextToGitHub({
+    config,
+    path,
+    textContent,
+    commitMessage: `Детективні розкопки: ${note.title || note.id}`
+  });
+}
+
+/**
+ * Batch save all Detective Notes to GitHub
+ */
+export async function saveAllDetectiveNotesToGitHub(
+  notes: ResearchNote[],
+  config?: GitHubStorageConfig
+): Promise<{ success: boolean; count: number; error?: string }> {
+  const cfg = config || getGitHubConfig();
+  if (!cfg.isConfigured) {
+    return { success: false, count: 0, error: 'GitHub не налаштовано' };
+  }
+
+  const activeNotes = notes.filter((n) => !n.isTrash);
+  let successCount = 0;
+
+  for (const n of activeNotes) {
+    const res = await saveDetectiveNoteToGitHub(n, cfg);
+    if (res.success) successCount++;
+  }
+
+  return { success: true, count: successCount };
+}
+

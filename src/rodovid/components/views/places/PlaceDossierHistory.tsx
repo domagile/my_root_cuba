@@ -23,6 +23,8 @@ export const PlaceDossierHistory: React.FC<PlaceDossierHistoryProps> = ({
   theme,
   isDark
 }) => {
+  const [settlementType, setSettlementType] = useState(dossier?.settlementType || 'село');
+  const [foundedYear, setFoundedYear] = useState(dossier?.foundedYear ? String(dossier.foundedYear) : '');
   const [historicalName, setHistoricalName] = useState(dossier?.historicalName || '');
   const [district, setDistrict] = useState(dossier?.district || '');
   const [parishChurch, setParishChurch] = useState(dossier?.parishChurch || '');
@@ -31,6 +33,8 @@ export const PlaceDossierHistory: React.FC<PlaceDossierHistoryProps> = ({
 
   // Sync state when dossier or placeName changes
   useEffect(() => {
+    setSettlementType(dossier?.settlementType || 'село');
+    setFoundedYear(dossier?.foundedYear ? String(dossier.foundedYear) : '');
     setHistoricalName(dossier?.historicalName || '');
     setDistrict(dossier?.district || '');
     setParishChurch(dossier?.parishChurch || '');
@@ -41,6 +45,8 @@ export const PlaceDossierHistory: React.FC<PlaceDossierHistoryProps> = ({
     const updated: PlaceDossier = {
       id: dossier?.id || placeName.trim(),
       placeName: dossier?.placeName || placeName.trim(),
+      settlementType: settlementType.trim() || undefined,
+      foundedYear: foundedYear.trim() || undefined,
       historicalName: historicalName.trim() || undefined,
       district: district.trim() || undefined,
       parishChurch: parishChurch.trim() || undefined,
@@ -117,10 +123,40 @@ export const PlaceDossierHistory: React.FC<PlaceDossierHistoryProps> = ({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>
-              Історичні / альтернативні назви
+              Тип поселення
+            </label>
+            <select
+              value={settlementType}
+              onChange={(e) => setSettlementType(e.target.value)}
+              className={`w-full px-3 py-2 rounded-xl text-xs ${theme.surfaceBg} border ${theme.borderSubtle} focus:border-amber-500 focus:outline-hidden ${theme.textPrimary}`}
+            >
+              <option value="село">Село</option>
+              <option value="місто">Місто</option>
+              <option value="містечко">Містечко / СМТ</option>
+              <option value="хутір">Хутір</option>
+              <option value="інше">Інше / Урочище</option>
+            </select>
+          </div>
+
+          <div>
+            <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>
+              Рік заснування
+            </label>
+            <input
+              type="text"
+              value={foundedYear}
+              onChange={(e) => setFoundedYear(e.target.value)}
+              placeholder="напр. 1654 або XVII ст."
+              className={`w-full px-3 py-2 rounded-xl text-xs ${theme.surfaceBg} border ${theme.borderSubtle} focus:border-amber-500 focus:outline-hidden ${theme.textPrimary}`}
+            />
+          </div>
+
+          <div>
+            <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>
+              Історичні / старі назви
             </label>
             <input
               type="text"
@@ -133,7 +169,7 @@ export const PlaceDossierHistory: React.FC<PlaceDossierHistoryProps> = ({
 
           <div>
             <label className={`block text-xs font-medium ${theme.textMuted} mb-1.5`}>
-              Адміністративно-територіальний поділ
+              Повіт / Губернія / Район
             </label>
             <input
               type="text"

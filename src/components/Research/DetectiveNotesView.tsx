@@ -20,7 +20,12 @@ import {
   Filter,
   Plus,
   X,
-  FileText
+  FileText,
+  UploadCloud,
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
 import { ResearchNote, NoteColor } from '../../types';
 import { useNotesStore, NoteFilterType } from '../../stores/useNotesStore';
@@ -29,6 +34,7 @@ import { getThemeConfig } from '../../utils/theme';
 import { NoteCard, NOTE_COLORS } from './NoteCard';
 import { NoteCreator } from './NoteCreator';
 import { NoteEditModal } from './NoteEditModal';
+import { getGitHubConfig, saveAllDetectiveNotesToGitHub } from '../../services/githubService';
 
 export const DetectiveNotesView: React.FC = () => {
   const themePalette = useUIStore((s) => s.themePalette);
@@ -51,6 +57,49 @@ export const DetectiveNotesView: React.FC = () => {
   } = useNotesStore();
 
   const [editingNote, setEditingNote] = useState<ResearchNote | null>(null);
+  const [isSyncingGitHub, setIsSyncingGitHub] = useState(false);
+  const [githubSyncStatus, setGithubSyncStatus] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+    url?: string;
+  } | null>(null);
+
+  const handleSyncToGitHub = async () => {
+    const config = getGitHubConfig();
+    if (!config.isConfigured) {
+      setGithubSyncStatus({
+        type: 'info',
+        text: 'GitHub ще не налаштовано. Вкажіть токен та репозиторій у карточці особи (розділ Документи) або підключіть GitHub.'
+      });
+      return;
+    }
+
+    setIsSyncingGitHub(true);
+    setGithubSyncStatus(null);
+    try {
+      const activeNotes = notes.filter((n) => !n.isTrash);
+      const res = await saveAllDetectiveNotesToGitHub(activeNotes, config);
+      if (res.success) {
+        setGithubSyncStatus({
+          type: 'success',
+          text: `Успішно синхронізовано ${res.count} нотаток у GitHub (${config.owner}/${config.repo} → archive/detective_notes/)`,
+          url: `https://github.com/${config.owner}/${config.repo}/tree/${config.branch || 'main'}/archive/detective_notes`
+        });
+      } else {
+        setGithubSyncStatus({
+          type: 'error',
+          text: `Не вдалося зберегти в GitHub: ${res.error || 'Невідома помилка'}`
+        });
+      }
+    } catch (err: any) {
+      setGithubSyncStatus({
+        type: 'error',
+        text: `Помилка: ${err.message || String(err)}`
+      });
+    } finally {
+      setIsSyncingGitHub(false);
+    }
+  };
 
   // Extract all unique tags and their count from non-trash notes
   const allTagsWithCount = useMemo(() => {
@@ -226,8 +275,75 @@ export const DetectiveNotesView: React.FC = () => {
               <List className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          {/* GitHub Sync Button */}
+          <button
+            type="button"
+            onClick={handleSyncToGitHub}
+            disabled={isSyncingGitHub}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              isDark
+                ? 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-neutral-700'
+                : 'bg-white hover:bg-neutral-100 text-neutral-800 border-neutral-300 shadow-2xs'
+            } disabled:opacity-50`}
+            title="Синхронізувати всі детективні розкопки з GitHub"
+          >
+            {isSyncingGitHub ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
+            ) : (
+              <UploadCloud className="w-3.5 h-3.5 text-amber-500" />
+            )}
+            <span className="hidden sm:inline">Зберегти в GitHub</span>
+            <span className="sm:hidden">GitHub</span>
+          </button>
         </div>
       </div>
+
+      {/* GitHub Sync Status Banner */}
+      {githubSyncStatus && (
+        <div
+          className={`mx-4 sm:mx-6 mt-3 p-3 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+            githubSyncStatus.type === 'success'
+              ? isDark
+                ? 'bg-emerald-950/60 border-emerald-800 text-emerald-200'
+                : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+              : githubSyncStatus.type === 'error'
+              ? isDark
+                ? 'bg-rose-950/60 border-rose-800 text-rose-200'
+                : 'bg-rose-50 border-rose-300 text-rose-900'
+              : isDark
+              ? 'bg-amber-950/60 border-amber-800 text-amber-200'
+              : 'bg-amber-50 border-amber-300 text-amber-900'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {githubSyncStatus.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+            )}
+            <span>{githubSyncStatus.text}</span>
+            {githubSyncStatus.url && (
+              <a
+                href={githubSyncStatus.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold underline inline-flex items-center gap-1 hover:opacity-80 ml-1"
+              >
+                <span>Відкрити в GitHub</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setGithubSyncStatus(null)}
+            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-white cursor-pointer p-0.5"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Main Container */}
       <div className="p-4 sm:p-6 max-w-7xl mx-auto w-full space-y-6">

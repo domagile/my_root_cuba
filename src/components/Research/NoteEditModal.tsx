@@ -22,12 +22,16 @@ import {
   Clock,
   Globe,
   Eye,
-  Edit3
+  Edit3,
+  UploadCloud,
+  CheckCircle,
+  Loader2
 } from 'lucide-react';
 import { ResearchNote, NoteColor, ChecklistItem } from '../../types';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { getThemeConfig } from '../../utils/theme';
+import { getGitHubConfig, saveDetectiveNoteToGitHub } from '../../services/githubService';
 import { NOTE_COLORS, getNoteColorClasses } from './NoteCard';
 import {
   renderContentWithClickableLinks,
@@ -75,9 +79,45 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
   const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
   const [showTagInput, setShowTagInput] = useState(false);
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+  const [isSyncingGH, setIsSyncingGH] = useState(false);
+  const [ghSyncedUrl, setGhSyncedUrl] = useState<string | null>(null);
 
   const modalRef = useRef<HTMLDivElement>(null);
   const newChecklistInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSaveToGitHub = async () => {
+    const config = getGitHubConfig();
+    if (!config.isConfigured) {
+      alert('GitHub не налаштовано. Налаштуйте репозиторій у карточці особи (розділ Документи).');
+      return;
+    }
+    setIsSyncingGH(true);
+    try {
+      const updatedNote: ResearchNote = {
+        ...note!,
+        title: title.trim(),
+        content: content.trim(),
+        isChecklist,
+        checklistItems: checklistItems.filter((i) => i.text.trim().length > 0),
+        color,
+        isPinned,
+        isArchived,
+        tags,
+        imageUrl: imageUrl.trim() || undefined,
+        linkUrl: linkUrl.trim() || undefined
+      };
+      const res = await saveDetectiveNoteToGitHub(updatedNote, config);
+      if (res.success) {
+        setGhSyncedUrl(res.htmlUrl || `https://github.com/${config.owner}/${config.repo}`);
+      } else {
+        alert(`Помилка синхронізації з GitHub: ${res.error || 'Невідома помилка'}`);
+      }
+    } catch (err: any) {
+      alert(`Помилка: ${err.message || String(err)}`);
+    } finally {
+      setIsSyncingGH(false);
+    }
+  };
 
   useEffect(() => {
     if (note) {
@@ -622,6 +662,27 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
               <Archive className="w-4 h-4" />
             </button>
 
+            {/* GitHub Sync Button */}
+            <button
+              type="button"
+              onClick={handleSaveToGitHub}
+              disabled={isSyncingGH}
+              className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                ghSyncedUrl
+                  ? 'text-emerald-500 bg-emerald-500/10'
+                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'
+              }`}
+              title={ghSyncedUrl ? 'Збережено в GitHub!' : 'Зберегти нотатку в GitHub (archive/detective_notes/)'}
+            >
+              {isSyncingGH ? (
+                <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+              ) : ghSyncedUrl ? (
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+              ) : (
+                <UploadCloud className="w-4 h-4" />
+              )}
+            </button>
+
             {/* Delete / Trash Button */}
             <button
               type="button"
@@ -636,13 +697,26 @@ export const NoteEditModal: React.FC<NoteEditModalProps> = ({ note, onClose }) =
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={handleSaveAndClose}
-            className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-          >
-            Готово
-          </button>
+          <div className="flex items-center gap-2">
+            {ghSyncedUrl && (
+              <a
+                href={ghSyncedUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 hover:underline"
+              >
+                <span>У GitHub</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={handleSaveAndClose}
+              className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              Готово
+            </button>
+          </div>
         </div>
       </div>
     </div>

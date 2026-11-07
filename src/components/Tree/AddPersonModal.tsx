@@ -117,6 +117,7 @@ import { BioNotesSection } from './sections/BioNotesSection';
 import { EventsSection } from './sections/EventsSection';
 import { PhotosSection } from './sections/PhotosSection';
 import { CustomFieldsSection } from './sections/CustomFieldsSection';
+import { EventScanBadge } from '../common/EventScanBadge';
 import {
   savePersonDraft,
   loadPersonDraft,
@@ -705,6 +706,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [deathPlace, setDeathPlace] = useState(effectivePerson?.deathPlace || '');
   const [deathPlaceHistorical, setDeathPlaceHistorical] = useState('');
   const [deathReason, setDeathReason] = useState(effectivePerson?.deathReason || '');
+
+  // Event scan attachments
+  const [birthScanUrl, setBirthScanUrl] = useState(effectivePerson?.birthScanUrl || '');
+  const [birthScanTitle, setBirthScanTitle] = useState(effectivePerson?.birthScanTitle || '');
+  const [marriageScanUrl, setMarriageScanUrl] = useState(effectivePerson?.marriageScanUrl || '');
+  const [marriageScanTitle, setMarriageScanTitle] = useState(effectivePerson?.marriageScanTitle || '');
+  const [deathScanUrl, setDeathScanUrl] = useState(effectivePerson?.deathScanUrl || '');
+  const [deathScanTitle, setDeathScanTitle] = useState(effectivePerson?.deathScanTitle || '');
 
   const [residencePlace, setResidencePlace] = useState(
     effectivePerson?.residencePlace || (!effectivePerson ? initialParentContext?.suggestedResidencePlace || '' : '')
@@ -2350,12 +2359,18 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         birthDate: birthDate.trim() || undefined,
         birthPlace: birthPlace.trim() || undefined,
         birthYear,
+        birthScanUrl: birthScanUrl.trim() || undefined,
+        birthScanTitle: birthScanTitle.trim() || undefined,
         marriageDate: marriageDate.trim() || undefined,
         marriagePlace: marriagePlace.trim() || undefined,
+        marriageScanUrl: marriageScanUrl.trim() || undefined,
+        marriageScanTitle: marriageScanTitle.trim() || undefined,
         deathDate: isLiving ? undefined : deathDate.trim() || undefined,
         deathPlace: isLiving ? undefined : deathPlace.trim() || undefined,
         deathYear: isLiving ? undefined : deathYear,
         deathReason: isLiving ? undefined : deathReason.trim() || undefined,
+        deathScanUrl: isLiving ? undefined : (deathScanUrl.trim() || undefined),
+        deathScanTitle: isLiving ? undefined : (deathScanTitle.trim() || undefined),
         residencePlace: residencePlace.trim() || undefined,
         isLiving,
         fatherId: fatherId || undefined,
@@ -2406,12 +2421,18 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         birthDate: birthDate.trim() || undefined,
         birthPlace: birthPlace.trim() || undefined,
         birthYear,
+        birthScanUrl: birthScanUrl.trim() || undefined,
+        birthScanTitle: birthScanTitle.trim() || undefined,
         marriageDate: marriageDate.trim() || undefined,
         marriagePlace: marriagePlace.trim() || undefined,
+        marriageScanUrl: marriageScanUrl.trim() || undefined,
+        marriageScanTitle: marriageScanTitle.trim() || undefined,
         deathDate: isLiving ? undefined : deathDate.trim() || undefined,
         deathPlace: isLiving ? undefined : deathPlace.trim() || undefined,
         deathYear: isLiving ? undefined : deathYear,
         deathReason: isLiving ? undefined : deathReason.trim() || undefined,
+        deathScanUrl: isLiving ? undefined : (deathScanUrl.trim() || undefined),
+        deathScanTitle: isLiving ? undefined : (deathScanTitle.trim() || undefined),
         residencePlace: residencePlace.trim() || undefined,
         isLiving,
         fatherId: fatherId || undefined,
@@ -5998,7 +6019,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
                       Народження
                     </label>
-                    <span className="text-[10px] text-neutral-400">Знайдіть місце або поставте точку вручну</span>
+                    <EventScanBadge
+                      scanUrl={birthScanUrl}
+                      scanTitle={birthScanTitle || 'Скан метрики про народження'}
+                      eventLabel="Народження"
+                      personName={`${lastName || ''} ${firstName || ''}`}
+                      onAttachScan={(url, title) => {
+                        setBirthScanUrl(url);
+                        setBirthScanTitle(title);
+                      }}
+                      onDetachScan={() => {
+                        setBirthScanUrl('');
+                        setBirthScanTitle('');
+                      }}
+                      personDocuments={effectivePerson?.documents || []}
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -6063,7 +6098,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
                       Шлюб
                     </label>
-                    <span className="text-[10px] text-neutral-400">Знайдіть місце або поставте точку вручну</span>
+                    <EventScanBadge
+                      scanUrl={marriageScanUrl}
+                      scanTitle={marriageScanTitle || 'Скан вінчального запису'}
+                      eventLabel="Шлюб"
+                      personName={`${lastName || ''} ${firstName || ''}`}
+                      onAttachScan={(url, title) => {
+                        setMarriageScanUrl(url);
+                        setMarriageScanTitle(title);
+                      }}
+                      onDetachScan={() => {
+                        setMarriageScanUrl('');
+                        setMarriageScanTitle('');
+                      }}
+                      personDocuments={effectivePerson?.documents || []}
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -6128,7 +6177,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       <label className="font-bold text-neutral-700 dark:text-neutral-300 uppercase tracking-wide text-[11px]">
                         Смерть
                       </label>
-                      <span className="text-[10px] text-neutral-400">Знайдіть місце або поставте точку вручну</span>
+                      <EventScanBadge
+                        scanUrl={deathScanUrl}
+                        scanTitle={deathScanTitle || 'Скан метричного запису про смерть'}
+                        eventLabel="Смерть"
+                        personName={`${lastName || ''} ${firstName || ''}`}
+                        onAttachScan={(url, title) => {
+                          setDeathScanUrl(url);
+                          setDeathScanTitle(title);
+                        }}
+                        onDetachScan={() => {
+                          setDeathScanUrl('');
+                          setDeathScanTitle('');
+                        }}
+                        personDocuments={effectivePerson?.documents || []}
+                      />
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-2">

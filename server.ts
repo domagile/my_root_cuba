@@ -492,4 +492,14 @@ async function startServer() {
   process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
-startServer();
+process.on('uncaughtException', (err) => {
+  console.error('[Rodovid Server] Uncaught exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Rodovid Server] Unhandled rejection at:', promise, 'reason:', reason);
+});
+
+startServer().catch((err) => {
+  console.error('[Rodovid Server] Fatal error during startup:', err);
+});

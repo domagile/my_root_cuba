@@ -24,7 +24,12 @@ import {
   ScrollText,
   FileText,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Plus,
+  UploadCloud,
+  CheckCircle2,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { GenealogyDatabase, Person } from '../../types/genealogy';
 import { getFullName } from '../../utils/relationship';
@@ -34,8 +39,9 @@ import { useResearchStore } from '../../../stores/useResearchStore';
 import { getThemeConfig } from '../../../utils/theme';
 import { normalizeUkrainianPlace } from '../../../utils/ukrainianPhonetics';
 import { OriginStatsMap } from './OriginStatsMap';
-import { PlaceDossierView } from './places/PlaceDossierView';
+import { PlaceDossierView, DossierTabType } from './places/PlaceDossierView';
 import { PlaceDossier } from '../../../types';
+import { getGitHubConfig, saveAllPlacesToGitHub } from '../../../services/githubService';
 
 interface PlacesMapViewProps {
   database: GenealogyDatabase;
@@ -69,12 +75,55 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
   const [selectedPlace, setSelectedPlace] = useState<string | null>(null);
   const [eventTypeFilter, setEventTypeFilter] = useState<'all' | 'birth' | 'marriage' | 'death'>('all');
   const [placesViewSubmode, setPlacesViewSubmode] = useState<'map_catalog' | 'origin_stats'>('map_catalog');
-  const [activeDossierTab, setActiveDossierTab] = useState<'overview' | 'history' | 'sources' | 'notes'>('overview');
+  const [activeDossierTab, setActiveDossierTab] = useState<DossierTabType>('overview');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isAddingPlaceInline, setIsAddingPlaceInline] = useState(false);
+  const [newPlaceName, setNewPlaceName] = useState('');
+  const [isSyncingAllPlacesGH, setIsSyncingAllPlacesGH] = useState(false);
+  const [placesGHSyncStatus, setPlacesGHSyncStatus] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+    url?: string;
+  } | null>(null);
 
   const places = useGenealogyStore((s) => s.places);
   const savePlace = useGenealogyStore((s) => s.savePlace);
   const metricRecords = useResearchStore((s) => s.metricRecords);
+
+  const handleSyncAllPlacesToGitHub = async () => {
+    const config = getGitHubConfig();
+    if (!config.isConfigured) {
+      setPlacesGHSyncStatus({
+        type: 'info',
+        text: 'GitHub ще не налаштовано. Вкажіть токен та репозиторій у карточці особи (розділ Документи).'
+      });
+      return;
+    }
+    setIsSyncingAllPlacesGH(true);
+    setPlacesGHSyncStatus(null);
+    try {
+      const res = await saveAllPlacesToGitHub(places, config);
+      if (res.success) {
+        setPlacesGHSyncStatus({
+          type: 'success',
+          text: `Синхронізовано ${res.count} блокнотів населених пунктів у GitHub (${config.owner}/${config.repo} → archive/places/)`,
+          url: `https://github.com/${config.owner}/${config.repo}/tree/${config.branch || 'main'}/archive/places`
+        });
+      } else {
+        setPlacesGHSyncStatus({
+          type: 'error',
+          text: `Помилка синхронізації: ${res.error || 'Невідома помилка'}`
+        });
+      }
+    } catch (err: any) {
+      setPlacesGHSyncStatus({
+        type: 'error',
+        text: `Помилка: ${err.message || String(err)}`
+      });
+    } finally {
+      setIsSyncingAllPlacesGH(false);
+    }
+  };
 
   const getPlaceDossier = (placeName: string): PlaceDossier | undefined => {
     if (!placeName || !places) return undefined;
@@ -89,6 +138,22 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
 
   const handleSaveDossier = (updated: PlaceDossier) => {
     savePlace(updated);
+  };
+
+  const handleCreatePlaceInline = (rawName?: string) => {
+    const name = (rawName || newPlaceName).trim();
+    if (!name) return;
+    const normalized = normalizeUkrainianPlace(name) || name;
+    const newDossier: PlaceDossier = {
+      id: normalized,
+      placeName: name,
+      updatedAt: new Date().toISOString()
+    };
+    savePlace(newDossier);
+    setSelectedPlace(normalized);
+    setActiveDossierTab('notepad');
+    setNewPlaceName('');
+    setIsAddingPlaceInline(false);
   };
 
   const personsList = useMemo(() => {
@@ -192,8 +257,27 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
       });
     }
 
+    // 4. Scan explicitly saved PlaceDossiers from useGenealogyStore
+    if (places) {
+      Object.values(places).forEach((dossier) => {
+        if (!dossier || !dossier.placeName) return;
+        const normalized = normalizeUkrainianPlace(dossier.placeName) || dossier.placeName.trim();
+        if (!normalized || normalized === '-' || normalized === '?') return;
+        if (!placesMap[normalized]) {
+          placesMap[normalized] = {
+            birthCount: 0,
+            deathCount: 0,
+            marriageCount: 0,
+            otherCount: 0,
+            persons: [],
+            events: []
+          };
+        }
+      });
+    }
+
     return placesMap;
-  }, [personsList, database]);
+  }, [personsList, database, places]);
 
   const placeList = useMemo(() => {
     return (Object.entries(placeData) as [string, PlaceInfo][])
@@ -288,7 +372,7 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
                 title="Розгорнути список локацій «Географія Роду»"
                 className={`hidden md:flex flex-col items-center py-4 px-1.5 w-12 shrink-0 border-r ${theme.cardBorder} ${theme.cardBg} cursor-pointer hover:bg-amber-500/5 transition-all select-none justify-between`}
               >
-                <div className="flex flex-col items-center gap-3">
+                <div className="flex flex-col items-center gap-2.5">
                   <button
                     type="button"
                     onClick={(e) => {
@@ -299,6 +383,18 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
                     className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 transition-colors cursor-pointer"
                   >
                     <PanelLeftOpen className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsSidebarCollapsed(false);
+                      setIsAddingPlaceInline(true);
+                    }}
+                    title="Додати новий блокнот села чи міста"
+                    className="p-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
                   </button>
                   <Compass className="w-4 h-4 text-amber-500 opacity-80" />
                 </div>
@@ -327,6 +423,17 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
                   <PanelLeftOpen className="w-4 h-4" />
                   <span>Показати список локацій ({placeList.length})</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSidebarCollapsed(false);
+                    setIsAddingPlaceInline(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-600 text-white text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Блокнот</span>
+                </button>
               </div>
             </>
           ) : (
@@ -352,6 +459,117 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
                     </button>
                   </div>
                 </div>
+
+                {/* Inline Add Village / City Notepad Creator */}
+                {isAddingPlaceInline ? (
+                  <div className={`p-3 rounded-xl border border-amber-500 ${isDark ? 'bg-amber-950/40' : 'bg-amber-50'} space-y-2`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>Новий блокнот села / міста</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setIsAddingPlaceInline(false); setNewPlaceName(''); }}
+                        className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 text-xs p-1 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Введіть назву села або міста..."
+                      value={newPlaceName}
+                      onChange={(e) => setNewPlaceName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleCreatePlaceInline();
+                        if (e.key === 'Escape') { setIsAddingPlaceInline(false); setNewPlaceName(''); }
+                      }}
+                      autoFocus
+                      className={`w-full px-3 py-2 text-xs rounded-lg ${theme.surfaceBg} border ${theme.borderSubtle} focus:border-amber-500 focus:outline-hidden ${theme.textPrimary}`}
+                    />
+                    <div className="flex items-center justify-end gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => { setIsAddingPlaceInline(false); setNewPlaceName(''); }}
+                        className={`px-2.5 py-1 text-xs rounded-lg ${theme.surfaceBg} border ${theme.borderSubtle} ${theme.textMuted} cursor-pointer`}
+                      >
+                        Скасувати
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCreatePlaceInline()}
+                        disabled={!newPlaceName.trim()}
+                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-50 cursor-pointer shadow-xs"
+                      >
+                        Створити блокнот
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingPlaceInline(true)}
+                        className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>+ Додати село / місто</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSyncAllPlacesToGitHub}
+                        disabled={isSyncingAllPlacesGH}
+                        className={`p-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
+                          isDark
+                            ? 'bg-neutral-800 hover:bg-neutral-700 border-neutral-700 text-amber-400'
+                            : 'bg-white hover:bg-neutral-50 border-neutral-300 text-amber-600'
+                        }`}
+                        title="Синхронізувати всі блокноти сіл/міст у GitHub (archive/places/)"
+                      >
+                        {isSyncingAllPlacesGH ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <UploadCloud className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* GitHub Places Sync Banner */}
+                  {placesGHSyncStatus && (
+                    <div
+                      className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                        placesGHSyncStatus.type === 'success'
+                          ? isDark
+                            ? 'bg-emerald-950/60 border-emerald-800 text-emerald-200'
+                            : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                          : placesGHSyncStatus.type === 'error'
+                          ? isDark
+                            ? 'bg-rose-950/60 border-rose-800 text-rose-200'
+                            : 'bg-rose-50 border-rose-300 text-rose-900'
+                          : isDark
+                          ? 'bg-amber-950/60 border-amber-800 text-amber-200'
+                          : 'bg-amber-50 border-amber-300 text-amber-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {placesGHSyncStatus.type === 'success' ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                        )}
+                        <span className="truncate">{placesGHSyncStatus.text}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPlacesGHSyncStatus(null)}
+                        className="text-neutral-400 hover:text-neutral-600 dark:hover:text-white cursor-pointer p-0.5 shrink-0"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
 
           <div className="relative">
             <Search className={`w-4 h-4 absolute left-3 top-3 ${theme.textMuted}`} />
@@ -411,14 +629,25 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
 
         <div ref={sidebarContainerRef} className="flex-1 overflow-y-auto p-3">
           {placeList.length === 0 ? (
-            <div className={`p-8 text-center ${theme.textMuted} text-xs space-y-2`}>
+            <div className={`p-8 text-center ${theme.textMuted} text-xs space-y-3`}>
               <MapPin className="w-8 h-8 mx-auto opacity-40 text-amber-500 mb-1" />
-              <p className="font-medium">Локацій не знайдено</p>
+              <p className="font-semibold text-sm">Локацій не знайдено</p>
               <p className="text-[11px]">
                 {searchQuery 
                   ? 'Спробуйте змінити пошуковий запит або фільтр'
-                  : 'Додайте місця народження, шлюбу чи подій у картках осіб'}
+                  : 'Додайте місто чи село до картотеки або вкажіть його у картці особи'}
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSidebarCollapsed(false);
+                  setIsAddingPlaceInline(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer mt-1"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Додати село чи місто (блокнот)</span>
+              </button>
             </div>
           ) : (
             <div
@@ -580,6 +809,10 @@ export const PlacesMapView: React.FC<PlacesMapViewProps> = ({ database, onSelect
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
         placesCount={placeList.length}
+        onOpenAddPlace={() => {
+          setIsSidebarCollapsed(false);
+          setIsAddingPlaceInline(true);
+        }}
       />
     </div>
   )}

@@ -45,6 +45,7 @@ import {
   isPersonDeceased
 } from '../services/storageRoutingService';
 import { DocumentLightboxModal } from './common/DocumentLightboxModal';
+import { MetricOcrAssistantModal } from './modals/MetricOcrAssistantModal';
 import { useGenealogy } from '../context/GenealogyContext';
 import { isPersonMale, isPersonFemale } from '../utils/genderUtils';
 import { getFullName } from '../rodovid/utils/relationship';
@@ -56,6 +57,30 @@ export interface EnrichedDocumentItem extends PersonDocumentItem {
   childName?: string;
   childBirthYear?: number | string;
   relationLabel?: string;
+}
+
+export interface QueuedSheet {
+  id: string;
+  file: File;
+  base64: string;
+  name: string;
+  sheetLabel: string;
+  title: string;
+  eventTarget: 'birth' | 'marriage' | 'death' | 'other';
+}
+
+export function inferSheetLabel(filename: string, index: number): string {
+  const clean = filename.replace(/\.[^/.]+$/, '');
+  const match = clean.match(/(?:арк|ark|лист|sheet|стор|fol|folio)?[\s_.-]*(\d+)\s*([a-zа-яєіїґ]*)/i);
+  if (match) {
+    const num = match[1];
+    const suffix = match[2]?.toLowerCase() || '';
+    if (suffix.includes('зв') || suffix.includes('zv') || suffix.includes('ob') || suffix.includes('b')) {
+      return `арк. ${num} зв.`;
+    }
+    return `арк. ${num}`;
+  }
+  return `арк. ${index + 1}`;
 }
 
 interface PersonDocumentsSectionProps {
@@ -91,6 +116,9 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
     return githubConfig.isConfigured ? 'github' : 'file';
   });
   const [selectedFile, setSelectedFile] = useState<{ file: File; base64: string; name: string } | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<QueuedSheet[]>([]);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [ocrDoc, setOcrDoc] = useState<EnrichedDocumentItem | null>(null);
   const [docTitle, setDocTitle] = useState('');
   const [docUrl, setDocUrl] = useState('');
   const [docType, setDocType] = useState<string>('metric');
@@ -299,96 +327,195 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
 
   const totalDocumentsCount = ownDocuments.length + childrenDocuments.length;
 
-  // Handle File Selection
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Multi-upload file handlers
+  const handleFilesAdded = async (fileList: FileList | File[]) => {
+    const filesArray = Array.from(fileList);
+    if (filesArray.length === 0) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      setSelectedFile({
-        file,
-        base64,
-        name: file.name
+    const readPromises = filesArray.map((file, idx) => {
+      return new Promise<QueuedSheet>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = reader.result as string;
+          const sheetLabel = inferSheetLabel(file.name, selectedFiles.length + idx);
+          const lower = file.name.toLowerCase();
+          const eventTarget = lower.includes('народж') || lower.includes('birth')
+            ? 'birth'
+            : lower.includes('шлюб') || lower.includes('marr')
+            ? 'marriage'
+            : lower.includes('смерт') || lower.includes('death')
+            ? 'death'
+            : 'other';
+
+          resolve({
+            id: `sheet-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+            file,
+            base64,
+            name: file.name,
+            sheetLabel,
+            title: `Метричний запис (${sheetLabel})`,
+            eventTarget
+          });
+        };
+        reader.readAsDataURL(file);
       });
-      if (!docTitle) {
-        // Humanize default title from filename without extension
-        const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[_\-]/g, ' ');
-        setDocTitle(cleanName);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // 1-Click Upload to GitHub
-  const handleUploadToGitHub = async () => {
-    if (!selectedFile) return;
-    setIsUploading(true);
-    setUploadStatusMsg({ text: 'Відправка файлу у ваш GitHub репозиторій...' });
-
-    const archivePath = generatePersonArchivePath(person, selectedFile.name, githubConfig.baseFolder || 'archive');
-
-    const res = await uploadFileToGitHub({
-      config: githubConfig,
-      path: archivePath,
-      fileBase64: selectedFile.base64,
-      commitMessage: `Додано архівний документ: ${docTitle || selectedFile.name} для особи ${person.id}`
     });
 
-    if (res.success && res.rawUrl) {
-      const newDoc: PersonDocumentItem = {
-        id: `doc-${Date.now()}`,
-        title: docTitle.trim() || selectedFile.name,
-        url: res.rawUrl,
-        type: docType,
-        storageType: 'github',
-        githubPath: res.path,
-        year: docYear.trim() || undefined,
-        archiveRef: docArchiveRef.trim() || undefined,
-        page: docPage.trim() || undefined,
-        notes: docNotes.trim() || undefined,
-        createdAt: new Date().toISOString()
-      };
+    const newSheets = await Promise.all(readPromises);
+    setSelectedFiles((prev) => [...prev, ...newSheets]);
 
-      const updatedDocs = [...(person.documents || []), newDoc];
+    if (!docTitle && newSheets.length > 0) {
+      if (newSheets.length === 1 && selectedFiles.length === 0) {
+        setDocTitle(newSheets[0].name.replace(/\.[^/.]+$/, '').replace(/[_\-]/g, ' '));
+      } else {
+        setDocTitle(`Архівна справа (${selectedFiles.length + newSheets.length} аркушів)`);
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      handleFilesAdded(e.target.files);
+    }
+  };
+
+  const handleDropFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFiles(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesAdded(e.dataTransfer.files);
+    }
+  };
+
+  const handleRemoveQueuedSheet = (id: string) => {
+    setSelectedFiles((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const handleUpdateQueuedSheet = (id: string, updates: Partial<QueuedSheet>) => {
+    setSelectedFiles((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
+    );
+  };
+
+  // 1-Click Multi-Upload to GitHub
+  const handleUploadToGitHub = async () => {
+    if (selectedFiles.length === 0) return;
+    setIsUploading(true);
+
+    const uploadedDocs: PersonDocumentItem[] = [];
+    const updatedPersonFields: Partial<Person> = {};
+
+    try {
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const sheet = selectedFiles[i];
+        setUploadStatusMsg({
+          text: `Відправка аркуша ${i + 1} з ${selectedFiles.length}: ${sheet.sheetLabel} (${sheet.name})...`
+        });
+
+        const archivePath = generatePersonArchivePath(person, sheet.name, githubConfig.baseFolder || 'archive');
+
+        const res = await uploadFileToGitHub({
+          config: githubConfig,
+          path: archivePath,
+          fileBase64: sheet.base64,
+          commitMessage: `Додано архівний скан: ${sheet.sheetLabel} (${sheet.title}) для особи ${person.id}`
+        });
+
+        if (res.success && res.rawUrl) {
+          const newDoc: PersonDocumentItem = {
+            id: `doc-${Date.now()}-${i}`,
+            title: sheet.title.trim() || sheet.name,
+            url: res.rawUrl,
+            type: docType,
+            storageType: 'github',
+            githubPath: res.path,
+            year: docYear.trim() || undefined,
+            archiveRef: docArchiveRef.trim() || undefined,
+            page: sheet.sheetLabel || docPage.trim() || undefined,
+            notes: docNotes.trim() || undefined,
+            createdAt: new Date().toISOString(),
+            sheetNumber: sheet.sheetLabel,
+            eventTarget: sheet.eventTarget
+          };
+          uploadedDocs.push(newDoc);
+
+          // Direct event binding
+          if (sheet.eventTarget === 'birth' && !updatedPersonFields.birthScanUrl) {
+            updatedPersonFields.birthScanUrl = res.rawUrl;
+            updatedPersonFields.birthScanTitle = sheet.title;
+          } else if (sheet.eventTarget === 'marriage' && !updatedPersonFields.marriageScanUrl) {
+            updatedPersonFields.marriageScanUrl = res.rawUrl;
+            updatedPersonFields.marriageScanTitle = sheet.title;
+          } else if (sheet.eventTarget === 'death' && !updatedPersonFields.deathScanUrl) {
+            updatedPersonFields.deathScanUrl = res.rawUrl;
+            updatedPersonFields.deathScanTitle = sheet.title;
+          }
+        } else {
+          throw new Error(res.error || `Помилка завантаження файлу ${sheet.name}`);
+        }
+      }
+
+      const updatedDocs = [...(person.documents || []), ...uploadedDocs];
       onUpdatePerson({
         ...person,
+        ...updatedPersonFields,
         documents: updatedDocs
       });
 
       setIsUploading(false);
-      setUploadStatusMsg({ text: 'Файл успішно завантажено в GitHub та прив\'язано до картки!' });
+      setUploadStatusMsg({
+        text: `Успішно завантажено ${uploadedDocs.length} аркушів в GitHub та прив'язано до картки!`
+      });
       setTimeout(() => {
         resetForm();
         setActiveModal(null);
-      }, 1000);
-    } else {
+      }, 1200);
+    } catch (err: any) {
       setIsUploading(false);
-      setUploadStatusMsg({ text: res.error || 'Помилка завантаження на GitHub', isError: true });
+      setUploadStatusMsg({
+        text: err.message || 'Помилка пакетного завантаження на GitHub',
+        isError: true
+      });
     }
   };
 
-  // Save directly to Firestore (Base64)
+  // Save directly to Firestore (Base64) - Multi-sheet support
   const handleSaveToFirestore = () => {
-    if (!selectedFile) return;
+    if (selectedFiles.length === 0) return;
 
-    const newDoc: PersonDocumentItem = {
-      id: `doc-${Date.now()}`,
-      title: docTitle.trim() || selectedFile.name,
-      url: selectedFile.base64,
-      type: docType,
-      storageType: 'firestore',
-      year: docYear.trim() || undefined,
-      archiveRef: docArchiveRef.trim() || undefined,
-      page: docPage.trim() || undefined,
-      notes: docNotes.trim() || undefined,
-      createdAt: new Date().toISOString()
-    };
+    const updatedPersonFields: Partial<Person> = {};
+    const createdDocs: PersonDocumentItem[] = selectedFiles.map((sheet, idx) => {
+      if (sheet.eventTarget === 'birth' && !updatedPersonFields.birthScanUrl) {
+        updatedPersonFields.birthScanUrl = sheet.base64;
+        updatedPersonFields.birthScanTitle = sheet.title;
+      } else if (sheet.eventTarget === 'marriage' && !updatedPersonFields.marriageScanUrl) {
+        updatedPersonFields.marriageScanUrl = sheet.base64;
+        updatedPersonFields.marriageScanTitle = sheet.title;
+      } else if (sheet.eventTarget === 'death' && !updatedPersonFields.deathScanUrl) {
+        updatedPersonFields.deathScanUrl = sheet.base64;
+        updatedPersonFields.deathScanTitle = sheet.title;
+      }
 
-    const updatedDocs = [...(person.documents || []), newDoc];
+      return {
+        id: `doc-${Date.now()}-${idx}`,
+        title: sheet.title.trim() || sheet.name,
+        url: sheet.base64,
+        type: docType,
+        storageType: 'firestore',
+        year: docYear.trim() || undefined,
+        archiveRef: docArchiveRef.trim() || undefined,
+        page: sheet.sheetLabel || docPage.trim() || undefined,
+        notes: docNotes.trim() || undefined,
+        createdAt: new Date().toISOString(),
+        sheetNumber: sheet.sheetLabel,
+        eventTarget: sheet.eventTarget
+      };
+    });
+
+    const updatedDocs = [...(person.documents || []), ...createdDocs];
     onUpdatePerson({
       ...person,
+      ...updatedPersonFields,
       documents: updatedDocs
     });
 
@@ -436,6 +563,8 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
 
   const resetForm = () => {
     setSelectedFile(null);
+    setSelectedFiles([]);
+    setIsDraggingFiles(false);
     setDocTitle('');
     setDocUrl('');
     setDocType('metric');
@@ -674,6 +803,16 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
 
                     <div className="flex flex-wrap items-center gap-1.5">
                       {getStorageBadge(doc.storageType, doc.url)}
+                      {doc.sheetNumber && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                          {doc.sheetNumber}
+                        </span>
+                      )}
+                      {doc.eventTarget && doc.eventTarget !== 'other' && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                          {doc.eventTarget === 'birth' ? 'Народження' : doc.eventTarget === 'marriage' ? 'Шлюб' : 'Смерть'}
+                        </span>
+                      )}
                       {doc.year && (
                         <span className={`text-[10px] font-mono ${theme.textMuted}`}>
                           {doc.year} р.
@@ -691,6 +830,18 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                 {/* Actions */}
                 <div className="flex flex-col items-end justify-between gap-2 shrink-0 self-stretch">
                   <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOcrDoc(doc);
+                      }}
+                      className="p-1 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 cursor-pointer"
+                      title="ШІ-помічник розшифровки скоропису (OCR)"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => setViewingDoc(doc)}
@@ -902,10 +1053,23 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                     </div>
                   ) : null}
 
-                  {/* File Upload Dropzone */}
-                  <div className="p-4 rounded-xl border-2 border-dashed border-purple-500/40 hover:border-purple-500 text-center space-y-2 bg-purple-500/5 transition-colors">
+                  {/* File Upload Dropzone (Multi-upload & Drag-and-Drop) */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDraggingFiles(true);
+                    }}
+                    onDragLeave={() => setIsDraggingFiles(false)}
+                    onDrop={handleDropFiles}
+                    className={`p-4 rounded-xl border-2 border-dashed text-center space-y-2 transition-all ${
+                      isDraggingFiles
+                        ? 'border-purple-500 bg-purple-500/15 scale-[1.01]'
+                        : 'border-purple-500/40 hover:border-purple-500 bg-purple-500/5'
+                    }`}
+                  >
                     <input
                       type="file"
+                      multiple
                       accept="image/*,application/pdf"
                       id="doc-file-upload-github"
                       onChange={handleFileChange}
@@ -915,25 +1079,103 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                       htmlFor="doc-file-upload-github"
                       className="cursor-pointer block space-y-1.5"
                     >
-                      <Upload className="w-8 h-8 text-purple-600 dark:text-purple-400 mx-auto" />
+                      <Upload className={`w-8 h-8 mx-auto ${isDraggingFiles ? 'text-purple-500 animate-bounce' : 'text-purple-600 dark:text-purple-400'}`} />
                       <div className="font-bold text-neutral-700 dark:text-neutral-200">
-                        {selectedFile ? selectedFile.name : 'Оберіть скан метрики або документ для GitHub'}
+                        {selectedFiles.length > 0
+                          ? `Обрано ${selectedFiles.length} аркуш(ів). Натисніть або перетягніть ще`
+                          : 'Перетягніть кілька аркушів справи сюди (або оберіть файли)'}
                       </div>
                       <p className="text-[10px] text-neutral-500">
-                        Підтримуються JPG, PNG, WEBP, PDF (файл автоматично закодується та закомітиться)
+                        Підтримується завантаження кількох сторінок одночасно (напр. аркуш 14, 14зв, 15)
                       </p>
                     </label>
                   </div>
 
+                  {/* Queued Sheets List */}
+                  {selectedFiles.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t border-purple-500/20">
+                      <div className="flex items-center justify-between text-xs font-bold text-neutral-800 dark:text-neutral-200">
+                        <span>Аркуші справи для завантаження ({selectedFiles.length}):</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFiles([])}
+                          className="text-rose-500 hover:text-rose-600 text-[11px] font-normal cursor-pointer"
+                        >
+                          Очистити всі
+                        </button>
+                      </div>
+
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {selectedFiles.map((sheet, idx) => (
+                          <div
+                            key={sheet.id}
+                            className="p-2.5 rounded-xl bg-purple-500/5 dark:bg-purple-950/20 border border-purple-500/20 flex items-center justify-between gap-2.5 text-xs"
+                          >
+                            {/* Thumbnail */}
+                            <div className="w-10 h-10 rounded-lg bg-black/10 overflow-hidden shrink-0 flex items-center justify-center">
+                              <img src={sheet.base64} alt={sheet.name} className="w-full h-full object-cover" />
+                            </div>
+
+                            {/* Details & Inputs */}
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-neutral-800 dark:text-neutral-200 truncate">
+                                  #{idx + 1} {sheet.name}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-neutral-400 shrink-0">Аркуш:</span>
+                                  <input
+                                    type="text"
+                                    value={sheet.sheetLabel}
+                                    onChange={(e) => handleUpdateQueuedSheet(sheet.id, { sheetLabel: e.target.value })}
+                                    placeholder="напр. арк. 14 зв."
+                                    className="w-full px-2 py-0.5 text-[11px] font-mono rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
+                                  />
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-neutral-400 shrink-0">Подія:</span>
+                                  <select
+                                    value={sheet.eventTarget}
+                                    onChange={(e) => handleUpdateQueuedSheet(sheet.id, { eventTarget: e.target.value as any })}
+                                    className="w-full px-1.5 py-0.5 text-[11px] rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
+                                  >
+                                    <option value="other">Архівний скан</option>
+                                    <option value="birth">Народження</option>
+                                    <option value="marriage">Шлюб</option>
+                                    <option value="death">Смерть</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Remove button */}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveQueuedSheet(sheet.id)}
+                              className="p-1 rounded-lg text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                              title="Видалити цей аркуш"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* GitHub Path Preview */}
-                  {selectedFile && (
+                  {selectedFiles.length > 0 && (
                     <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-900 dark:text-purple-300 space-y-1">
                       <div className="flex items-center gap-1.5 font-bold text-[11px]">
                         <Archive className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
                         <span>Структура збереження в GitHub ({githubConfig.owner}/{githubConfig.repo}):</span>
                       </div>
                       <code className="text-[10px] block break-all font-mono bg-purple-950/20 p-1.5 rounded border border-purple-500/20">
-                        {generatePersonArchivePath(person, selectedFile.name, githubConfig.baseFolder || 'archive')}
+                        {generatePersonArchivePath(person, selectedFiles[0].name, githubConfig.baseFolder || 'archive')}
                       </code>
                     </div>
                   )}
@@ -1013,6 +1255,7 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                   <div className="p-3 rounded-xl border border-dashed border-[#B88E3E]/40 text-center space-y-1 bg-black/5 dark:bg-white/5">
                     <input
                       type="file"
+                      multiple
                       accept="image/*,application/pdf"
                       id="doc-file-local"
                       onChange={handleFileChange}
@@ -1020,10 +1263,12 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                     />
                     <label htmlFor="doc-file-local" className="cursor-pointer block">
                       <div className="font-semibold text-xs text-[#B88E3E]">
-                        {selectedFile ? selectedFile.name : 'Або зберегти файл прямо в локальну базу даних'}
+                        {selectedFiles.length > 0
+                          ? `Обрано ${selectedFiles.length} файл(ів). Натисніть, щоб додати ще`
+                          : 'Або зберегти файл прямо в локальну базу даних'}
                       </div>
                       <p className="text-[10px] text-neutral-500">
-                        Файл буде збережено у форматі Base64 у вашому проекті
+                        Файли будуть збережені у форматі Base64 у вашому проекті
                       </p>
                     </label>
                   </div>
@@ -1149,11 +1394,17 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                 <button
                   type="button"
                   onClick={handleUploadToGitHub}
-                  disabled={!selectedFile || isUploading || (isLiving && !acknowledgeLivingGitHubWarning)}
+                  disabled={selectedFiles.length === 0 || isUploading || (isLiving && !acknowledgeLivingGitHubWarning)}
                   className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <Archive className="w-3.5 h-3.5" />
-                  <span>{isUploading ? 'Відправка в GitHub...' : '🚀 Завантажити в GitHub Архів'}</span>
+                  <span>
+                    {isUploading
+                      ? 'Відправка в GitHub...'
+                      : selectedFiles.length > 1
+                      ? `🚀 Завантажити ${selectedFiles.length} аркушів в GitHub`
+                      : '🚀 Завантажити в GitHub Архів'}
+                  </span>
                 </button>
               ) : uploadMode === 'gdrive' ? (
                 <button
@@ -1165,7 +1416,7 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                   <HardDrive className="w-3.5 h-3.5" />
                   <span>Прикріпити з Google Диску</span>
                 </button>
-              ) : selectedFile ? (
+              ) : selectedFiles.length > 0 ? (
                 <button
                   type="button"
                   onClick={handleSaveToFirestore}
@@ -1173,7 +1424,11 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
                   className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B88E3E] hover:bg-[#a07a32] text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <Layers className="w-3.5 h-3.5" />
-                  <span>Зберегти файл у базу</span>
+                  <span>
+                    {selectedFiles.length > 1
+                      ? `Зберегти ${selectedFiles.length} аркушів у базу`
+                      : 'Зберегти файл у базу'}
+                  </span>
                 </button>
               ) : (
                 <button
@@ -1201,6 +1456,17 @@ export const PersonDocumentsSection: React.FC<PersonDocumentsSectionProps> = ({
               : `${person.lastName || ''} ${person.firstName || ''}`
           }
           onClose={() => setViewingDoc(null)}
+        />
+      )}
+
+      {/* OCR ASSISTANT MODAL */}
+      {ocrDoc && (
+        <MetricOcrAssistantModal
+          imageUrl={parseDocumentViewerUrl(ocrDoc.url).displayUrl || ocrDoc.url}
+          documentTitle={ocrDoc.title}
+          documentItem={ocrDoc}
+          currentPerson={person}
+          onClose={() => setOcrDoc(null)}
         />
       )}
     </div>

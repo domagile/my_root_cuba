@@ -20,10 +20,12 @@ import {
   Lock,
   Layers,
   Archive,
-  Info
+  Info,
+  Sparkles
 } from 'lucide-react';
 import { parseDocumentViewerUrl } from '../../services/githubService';
 import { PersonDocumentItem } from '../../types';
+import { MetricOcrAssistantModal } from '../modals/MetricOcrAssistantModal';
 
 interface DocumentLightboxModalProps {
   document: PersonDocumentItem | {
@@ -53,6 +55,7 @@ export const DocumentLightboxModal: React.FC<DocumentLightboxModalProps> = ({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showMetadata, setShowMetadata] = useState(true);
+  const [showOcrModal, setShowOcrModal] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const parsed = parseDocumentViewerUrl(document.url);
@@ -181,6 +184,15 @@ export const DocumentLightboxModal: React.FC<DocumentLightboxModalProps> = ({
 
         {/* Toolbar buttons */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <button
+            onClick={() => setShowOcrModal(true)}
+            className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+            title="ШІ-помічник розшифровки скоропису та метрик"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+            <span className="hidden sm:inline">ШІ-розшифровка (OCR)</span>
+          </button>
+
           <button
             onClick={() => setShowMetadata(!showMetadata)}
             className={`p-2 rounded-xl text-xs transition-colors ${showMetadata ? 'bg-white/20 text-white' : 'text-neutral-400 hover:text-white hover:bg-white/10'}`}
@@ -369,6 +381,17 @@ export const DocumentLightboxModal: React.FC<DocumentLightboxModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Metric OCR Assistant Modal */}
+      {showOcrModal && (
+        <MetricOcrAssistantModal
+          imageUrl={parsed.displayUrl || document.url}
+          documentTitle={document.title}
+          documentItem={document as PersonDocumentItem}
+          personName={personName}
+          onClose={() => setShowOcrModal(false)}
+        />
+      )}
     </div>
   );
 };

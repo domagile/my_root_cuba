@@ -20,12 +20,16 @@ import {
   X,
   User,
   Check,
-  Globe
+  Globe,
+  UploadCloud,
+  CheckCircle,
+  Loader2
 } from 'lucide-react';
 import { ResearchNote, NoteColor, ChecklistItem } from '../../types';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { getThemeConfig } from '../../utils/theme';
+import { getGitHubConfig, saveDetectiveNoteToGitHub } from '../../services/githubService';
 import {
   renderContentWithClickableLinks,
   extractAllLinksFromNote,
@@ -117,6 +121,31 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, onOpenEdit, onTagClick
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [isSyncingGH, setIsSyncingGH] = useState(false);
+  const [ghSynced, setGhSynced] = useState(false);
+
+  const handlePushToGitHub = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const config = getGitHubConfig();
+    if (!config.isConfigured) {
+      alert('GitHub не налаштовано. Налаштуйте репозиторій у карточці особи (розділ Документи).');
+      return;
+    }
+    setIsSyncingGH(true);
+    try {
+      const res = await saveDetectiveNoteToGitHub(note, config);
+      if (res.success) {
+        setGhSynced(true);
+        setTimeout(() => setGhSynced(false), 3000);
+      } else {
+        alert(`Помилка синхронізації з GitHub: ${res.error || 'Невідома помилка'}`);
+      }
+    } catch (err: any) {
+      alert(`Помилка: ${err.message || String(err)}`);
+    } finally {
+      setIsSyncingGH(false);
+    }
+  };
 
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -385,6 +414,27 @@ export const NoteCard: React.FC<NoteCardProps> = ({ note, onOpenEdit, onTagClick
                 title={note.isArchived ? 'Розархівувати' : 'Архівувати'}
               >
                 <Archive className="w-3.5 h-3.5" />
+              </button>
+
+              {/* GitHub Sync Button */}
+              <button
+                type="button"
+                onClick={handlePushToGitHub}
+                disabled={isSyncingGH}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  ghSynced
+                    ? 'text-emerald-500 bg-emerald-500/10'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'
+                }`}
+                title={ghSynced ? 'Збережено в GitHub!' : 'Зберегти нотатку в GitHub (archive/detective_notes/)'}
+              >
+                {isSyncingGH ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                ) : ghSynced ? (
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+                ) : (
+                  <UploadCloud className="w-3.5 h-3.5" />
+                )}
               </button>
             </div>
 

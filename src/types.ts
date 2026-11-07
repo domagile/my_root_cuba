@@ -77,6 +77,9 @@ export interface PersonLifeEventItem {
   historicalPlace?: string;
   description?: string;
   source?: string;
+  scanUrl?: string;
+  scanTitle?: string;
+  documentId?: string;
 }
 
 export interface Person {
@@ -145,6 +148,12 @@ export interface Person {
   customFields?: CustomFieldItem[] | Record<string, string>;
   documents?: PersonDocumentItem[];
   media?: PersonDocumentItem[];
+  birthScanUrl?: string;
+  birthScanTitle?: string;
+  marriageScanUrl?: string;
+  marriageScanTitle?: string;
+  deathScanUrl?: string;
+  deathScanTitle?: string;
 }
 
 export interface PersonDocumentItem {
@@ -157,7 +166,11 @@ export interface PersonDocumentItem {
   year?: string | number;
   archiveRef?: string;
   page?: string;
+  sheetNumber?: string;
+  eventTarget?: 'birth' | 'marriage' | 'death' | 'baptism' | 'burial' | 'other' | string;
   notes?: string;
+  transcription?: string;
+  aiParsedData?: any;
   createdAt?: string;
   isLivingTarget?: boolean;
 }
@@ -709,6 +722,8 @@ export interface PlaceSourceLink {
 export interface PlaceDossier {
   id: string;
   placeName: string;
+  settlementType?: 'city' | 'village' | 'town' | 'hamlet' | 'other' | string;
+  foundedYear?: string | number;
   historicalName?: string;
   parishChurch?: string;
   district?: string;

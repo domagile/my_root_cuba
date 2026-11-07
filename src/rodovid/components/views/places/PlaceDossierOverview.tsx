@@ -20,6 +20,7 @@ import { getFullName } from '../../../utils/relationship';
 import { PlaceDossier } from '../../../../types';
 import { ThemeConfig } from '../../../../utils/theme';
 import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../../stores/useUIStore';
+import { renderLinkifiedText, extractLinksFromText } from '../../../../utils/linkUtils';
 
 interface PlaceEventDetail {
   personId: string;
@@ -44,7 +45,7 @@ interface PlaceDossierOverviewProps {
   placeObj: PlaceInfo | null;
   dossier: PlaceDossier | undefined;
   onSelectPerson: (id: string) => void;
-  onSwitchTab: (tab: 'overview' | 'history' | 'sources' | 'notes') => void;
+  onSwitchTab: (tab: 'overview' | 'notepad' | 'history' | 'sources' | 'notes') => void;
   theme: ThemeConfig;
   isDark: boolean;
 }
@@ -66,33 +67,31 @@ export const PlaceDossierOverview: React.FC<PlaceDossierOverviewProps> = ({
     <div className="space-y-6">
       {/* Dossier Highlights / Quick jump cards if data exists */}
       {(hasHistory || sourcesCount > 0 || hasNotes) && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {hasHistory && (
-            <button
-              onClick={() => onSwitchTab('history')}
-              className={`p-3 rounded-xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all text-left flex items-start justify-between group shadow-xs cursor-pointer`}
-            >
-              <div className="space-y-1 min-w-0">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-500">
-                  <BookOpen className="w-3.5 h-3.5 shrink-0" />
-                  <span>Історія села/міста</span>
-                </div>
-                <p className={`text-[11px] ${theme.textMuted} truncate`}>
-                  {dossier?.historicalName || dossier?.district || 'Заповнено літопис'}
-                </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            onClick={() => onSwitchTab('notepad')}
+            className={`p-3.5 rounded-xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all text-left flex items-start justify-between group shadow-xs cursor-pointer`}
+          >
+            <div className="space-y-1 min-w-0">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-500">
+                <FileText className="w-4 h-4 shrink-0" />
+                <span>Блокнот села (Вільний формат)</span>
               </div>
-              <ChevronRight className="w-4 h-4 text-neutral-400 group-hover:text-amber-500 transition-colors shrink-0 mt-0.5" />
-            </button>
-          )}
+              <p className={`text-[11px] ${theme.textMuted} truncate`}>
+                {dossier?.notes || dossier?.historyText ? (dossier.notes || dossier.historyText || '').slice(0, 60) + '...' : 'Натисніть, щоб записати інформацію про село'}
+              </p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-neutral-400 group-hover:text-amber-500 transition-colors shrink-0 mt-0.5" />
+          </button>
 
           {sourcesCount > 0 && (
             <button
               onClick={() => onSwitchTab('sources')}
-              className={`p-3 rounded-xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all text-left flex items-start justify-between group shadow-xs cursor-pointer`}
+              className={`p-3.5 rounded-xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all text-left flex items-start justify-between group shadow-xs cursor-pointer`}
             >
               <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-500">
-                  <ScrollText className="w-3.5 h-3.5 shrink-0" />
+                  <ScrollText className="w-4 h-4 shrink-0" />
                   <span>Метрики та скани ({sourcesCount})</span>
                 </div>
                 <p className={`text-[11px] ${theme.textMuted} truncate`}>
@@ -102,58 +101,76 @@ export const PlaceDossierOverview: React.FC<PlaceDossierOverviewProps> = ({
               <ChevronRight className="w-4 h-4 text-neutral-400 group-hover:text-emerald-500 transition-colors shrink-0 mt-0.5" />
             </button>
           )}
-
-          {hasNotes && (
-            <button
-              onClick={() => onSwitchTab('notes')}
-              className={`p-3 rounded-xl ${theme.cardBg} border ${theme.cardBorder} hover:border-amber-500/60 transition-all text-left flex items-start justify-between group shadow-xs cursor-pointer`}
-            >
-              <div className="space-y-1 min-w-0">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-500">
-                  <FileText className="w-3.5 h-3.5 shrink-0" />
-                  <span>Нотатки дослідника</span>
-                </div>
-                <p className={`text-[11px] ${theme.textMuted} truncate`}>
-                  {dossier?.notes ? dossier.notes.slice(0, 40) + '...' : 'Є дослідницькі записи'}
-                </p>
-              </div>
-              <ChevronRight className="w-4 h-4 text-neutral-400 group-hover:text-sky-500 transition-colors shrink-0 mt-0.5" />
-            </button>
-          )}
         </div>
       )}
 
-      {/* Historical / Geographic Card */}
-      <div className={`w-full p-6 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} relative overflow-hidden shadow-xs`}>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      {/* Callout if notepad is empty */}
+      {!dossier?.notes && !dossier?.historyText && (
+        <div className={`p-4 rounded-2xl ${theme.cardBg} border-2 border-dashed border-amber-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs`}>
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Navigation className="w-5 h-5 text-amber-500" />
-              <span className={`font-bold ${theme.textPrimary} text-base`}>{placeName || 'Локація роду'}</span>
+            <div className="flex items-center gap-2 text-amber-500 font-semibold text-xs">
+              <FileText className="w-4 h-4" />
+              <span>Блокнот цього населеного пункту порожній</span>
             </div>
             <p className={`text-xs ${theme.textMuted}`}>
-              {dossier?.district ? `${dossier.district} • ` : ''}Історико-етнографічний та архівний регіон України
+              Записуйте сюди будь-яку інформацію про це село у вільному форматі: історію, приписні церкви, ревізії, поміщиків чи спогади родини.
             </p>
           </div>
-
-          {placeObj && (
-            <div className="flex items-center gap-4 text-xs font-mono">
-              <div className={`p-2.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} text-center`}>
-                <span className={`block text-[10px] ${theme.textMuted} font-sans`}>Народжень</span>
-                <strong className="text-emerald-500 text-sm">{placeObj.birthCount}</strong>
-              </div>
-              <div className={`p-2.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} text-center`}>
-                <span className={`block text-[10px] ${theme.textMuted} font-sans`}>Шлюбів</span>
-                <strong className="text-rose-500 text-sm">{placeObj.marriageCount}</strong>
-              </div>
-              <div className={`p-2.5 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle} text-center`}>
-                <span className={`block text-[10px] ${theme.textMuted} font-sans`}>Поховань</span>
-                <strong className="text-purple-500 text-sm">{placeObj.deathCount}</strong>
-              </div>
-            </div>
-          )}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => onSwitchTab('notepad')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>✍️ Відкрити блокнот села</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Village Free-Form Notepad Card / Overview */}
+      {(dossier?.notes || dossier?.historyText) && (
+        <div className={`w-full p-5 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} space-y-3 shadow-xs`}>
+          <div className="flex items-center justify-between border-b pb-3 border-neutral-200 dark:border-neutral-800">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-amber-500" />
+              <h4 className={`text-xs font-bold uppercase tracking-wider ${theme.textPrimary}`}>
+                Блокнот села «{placeName}» (Вільний формат)
+              </h4>
+            </div>
+            <button
+              type="button"
+              onClick={() => onSwitchTab('notepad')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Редагувати в блокноті →</span>
+            </button>
+          </div>
+          <div className={`p-4 rounded-xl ${theme.surfaceBg} border ${theme.borderSubtle}`}>
+            <div className={`text-xs md:text-sm leading-relaxed ${theme.textPrimary} font-sans line-clamp-8`}>
+              {renderLinkifiedText(dossier.notes || dossier.historyText || '', isDark)}
+            </div>
+            {extractLinksFromText(dossier.notes || dossier.historyText || '').length > 0 && (
+              <div className="mt-3 pt-3 border-t border-neutral-200 dark:border-neutral-800 flex flex-wrap gap-2">
+                {extractLinksFromText(dossier.notes || dossier.historyText || '').map((l, i) => (
+                  <a
+                    key={i}
+                    href={l.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 hover:border-blue-500 hover:opacity-90 transition-all"
+                  >
+                    <span>{l.title}</span>
+                    <ExternalLink className="w-3 h-3 opacity-70" />
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Related Persons Grid */}
       <div className="space-y-3">
@@ -218,8 +235,13 @@ export const PlaceDossierOverview: React.FC<PlaceDossierOverviewProps> = ({
             ))}
           </div>
         ) : (
-          <div className={`p-6 text-center ${theme.cardBg} border ${theme.cardBorder} rounded-xl text-xs ${theme.textMuted}`}>
-            Оберіть населений пункт зі списку ліворуч
+          <div className={`p-6 text-center ${theme.cardBg} border ${theme.cardBorder} rounded-xl text-xs ${theme.textMuted} space-y-1.5`}>
+            <p className="font-medium text-neutral-700 dark:text-neutral-300">
+              У дереві поки що не знайдено осіб, пов'язаних із «{placeName}»
+            </p>
+            <p className="text-[11px]">
+              Населений пункт збережено в картотеці локацій. Ви можете вказати його як місце народження, шлюбу чи смерті в картці предка.
+            </p>
           </div>
         )}
       </div>

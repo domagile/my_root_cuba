@@ -42,7 +42,8 @@ import {
   Archive,
   FolderGit2,
   Plus,
-  HardDrive
+  HardDrive,
+  UploadCloud
 } from 'lucide-react';
 import { useGenealogy } from '../context/GenealogyContext';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -58,6 +59,7 @@ import {
   createGitHubRepository
 } from '../services/githubService';
 import { getStorageStats } from '../utils/indexedDbStorage';
+import { ScanMigrationModal } from './modals/ScanMigrationModal';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -117,6 +119,7 @@ export const SettingsView: React.FC = () => {
   const [cloudFeedback, setCloudFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
   const [driveEmailInput, setDriveEmailInput] = useState(googleDriveEmail || '');
   const [driveFeedback, setDriveFeedback] = useState<string | null>(null);
+  const [isScanMigrationOpen, setIsScanMigrationOpen] = useState(false);
 
   useEffect(() => {
     setDriveEmailInput(googleDriveEmail || '');
@@ -1221,7 +1224,43 @@ export const SettingsView: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* 1-Click Scan Migration to GitHub Box */}
+          <div className="p-4 rounded-xl border border-purple-500/30 bg-gradient-to-r from-purple-500/10 via-amber-500/5 to-purple-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+                <UploadCloud className="w-5 h-5" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-extrabold text-sm text-neutral-900 dark:text-white">
+                    Пакетна міграція сканів у GitHub (1-клік)
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                    Оптимізація пам'яті
+                  </span>
+                </div>
+                <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed max-w-xl">
+                  Автоматично знайде раніше завантажені фотографії та важкі скани предків, розкладе по папках <code className="bg-purple-950/20 dark:bg-purple-900/40 px-1 py-0.2 rounded font-mono text-[10px]">archive/[Рід]/[Покоління]/[Особа]</code> і перенесе в GitHub, звільнивши пам'ять бази.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsScanMigrationOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+            >
+              <UploadCloud className="w-4 h-4" />
+              <span>Запустити міграцію</span>
+            </button>
+          </div>
         </div>
+
+        {/* Scan Migration Modal */}
+        {isScanMigrationOpen && (
+          <ScanMigrationModal onClose={() => setIsScanMigrationOpen(false)} />
+        )}
       </section>
 
       {/* SECTION 3: Data Storage, Export & Import */}

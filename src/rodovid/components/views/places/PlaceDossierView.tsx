@@ -14,15 +14,15 @@ import {
   MapPin,
   Sparkles,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Plus
 } from 'lucide-react';
 import { Person } from '../../../types/genealogy';
 import { PlaceDossier } from '../../../../types';
 import { ThemeConfig } from '../../../../utils/theme';
 import { PlaceDossierOverview } from './PlaceDossierOverview';
-import { PlaceDossierHistory } from './PlaceDossierHistory';
+import { PlaceDossierNotepad } from './PlaceDossierNotepad';
 import { PlaceDossierSources } from './PlaceDossierSources';
-import { PlaceDossierNotes } from './PlaceDossierNotes';
 
 interface PlaceEventDetail {
   personId: string;
@@ -42,6 +42,8 @@ interface PlaceInfo {
   events: PlaceEventDetail[];
 }
 
+export type DossierTabType = 'overview' | 'notepad' | 'history' | 'sources' | 'notes';
+
 interface PlaceDossierViewProps {
   placeName: string;
   placeObj: PlaceInfo | null;
@@ -50,11 +52,12 @@ interface PlaceDossierViewProps {
   onSelectPerson: (id: string) => void;
   theme: ThemeConfig;
   isDark: boolean;
-  activeDossierTab: 'overview' | 'history' | 'sources' | 'notes';
-  setActiveDossierTab: (tab: 'overview' | 'history' | 'sources' | 'notes') => void;
+  activeDossierTab: DossierTabType;
+  setActiveDossierTab: (tab: DossierTabType) => void;
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
   placesCount?: number;
+  onOpenAddPlace?: () => void;
 }
 
 export const PlaceDossierView: React.FC<PlaceDossierViewProps> = ({
@@ -69,7 +72,8 @@ export const PlaceDossierView: React.FC<PlaceDossierViewProps> = ({
   setActiveDossierTab,
   isSidebarCollapsed,
   onToggleSidebar,
-  placesCount
+  placesCount,
+  onOpenAddPlace
 }) => {
   if (!placeName) {
     return (
@@ -85,20 +89,29 @@ export const PlaceDossierView: React.FC<PlaceDossierViewProps> = ({
             <span>Показати список локацій</span>
           </button>
         )}
-        <div className="text-center space-y-2 max-w-xs">
+        <div className="text-center space-y-3 max-w-sm">
           <MapPin className="w-10 h-10 mx-auto opacity-30 text-amber-500" />
-          <p className="font-semibold text-sm">Оберіть населений пункт</p>
-          <p className="text-xs">Виберіть село чи місто зі списку ліворуч, щоб переглянути родовід та вести краєзнавче досьє.</p>
+          <p className="font-semibold text-sm">Оберіть або створіть блокнот населеного пункту</p>
+          <p className="text-xs">Виберіть село чи місто зі списку ліворуч, або створіть новий блокнот населеного пункту у вільному форматі.</p>
+          {onOpenAddPlace && (
+            <button
+              type="button"
+              onClick={onOpenAddPlace}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ Створити блокнот села / міста</span>
+            </button>
+          )}
         </div>
       </div>
     );
   }
 
-  const hasHistory = !!(dossier?.historyText || dossier?.historicalName || dossier?.district || dossier?.parishChurch);
+  const hasNotepadContent = !!(dossier?.notes || dossier?.historyText);
   const sourcesCount = dossier?.sourceLinks?.length || 0;
-  const hasNotes = !!dossier?.notes;
 
-  const tabs: { id: 'overview' | 'history' | 'sources' | 'notes'; label: string; icon: React.ReactNode; badge?: string | number }[] = [
+  const tabs: { id: DossierTabType; label: string; icon: React.ReactNode; badge?: string | number }[] = [
     {
       id: 'overview',
       label: 'Огляд та родовід',
@@ -106,22 +119,16 @@ export const PlaceDossierView: React.FC<PlaceDossierViewProps> = ({
       badge: placeObj?.persons.length ? placeObj.persons.length : undefined
     },
     {
-      id: 'history',
-      label: 'Історія села/міста',
-      icon: <BookOpen className="w-4 h-4" />,
-      badge: hasHistory ? '✓' : undefined
+      id: 'notepad',
+      label: 'Блокнот села (Вільні записи)',
+      icon: <FileText className="w-4 h-4" />,
+      badge: hasNotepadContent ? '✓' : undefined
     },
     {
       id: 'sources',
       label: 'Онлайн-метрики та архіви',
       icon: <ScrollText className="w-4 h-4" />,
       badge: sourcesCount > 0 ? sourcesCount : undefined
-    },
-    {
-      id: 'notes',
-      label: 'Дослідницькі нотатки',
-      icon: <FileText className="w-4 h-4" />,
-      badge: hasNotes ? '✓' : undefined
     }
   ];
 
@@ -182,6 +189,17 @@ export const PlaceDossierView: React.FC<PlaceDossierViewProps> = ({
               >
                 <PanelLeftClose className="w-3.5 h-3.5 text-amber-500" />
                 <span className="hidden sm:inline">Згорнути локації</span>
+              </button>
+            )}
+
+            {onOpenAddPlace && (
+              <button
+                type="button"
+                onClick={onOpenAddPlace}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Нове місто/село</span>
               </button>
             )}
 
@@ -246,8 +264,8 @@ export const PlaceDossierView: React.FC<PlaceDossierViewProps> = ({
           />
         )}
 
-        {activeDossierTab === 'history' && (
-          <PlaceDossierHistory
+        {(activeDossierTab === 'notepad' || activeDossierTab === 'history' || activeDossierTab === 'notes') && (
+          <PlaceDossierNotepad
             placeName={placeName}
             dossier={dossier}
             onSave={onSaveDossier}
@@ -258,16 +276,6 @@ export const PlaceDossierView: React.FC<PlaceDossierViewProps> = ({
 
         {activeDossierTab === 'sources' && (
           <PlaceDossierSources
-            placeName={placeName}
-            dossier={dossier}
-            onSave={onSaveDossier}
-            theme={theme}
-            isDark={isDark}
-          />
-        )}
-
-        {activeDossierTab === 'notes' && (
-          <PlaceDossierNotes
             placeName={placeName}
             dossier={dossier}
             onSave={onSaveDossier}

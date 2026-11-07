@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { Person, Gender } from '../../types';
 import { PersonDocumentsSection } from '../PersonDocumentsSection';
+import { EventScanBadge } from '../common/EventScanBadge';
 import { isPersonMale, isPersonFemale } from '../../rodovid/utils/genderUtils';
 import { comparePersonsByAge, getPersonRodName } from '../../rodovid/utils/treeLayout';
 import { formatClanName } from '../../utils/ukrainianPhonetics';
@@ -117,6 +118,7 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   const [isParentsChildrenOpen, setIsParentsChildrenOpen] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'family' | 'kinship_line' | 'bio' | 'events' | 'documents' | 'photos'>('family');
   const [copiedKinshipLine, setCopiedKinshipLine] = useState<boolean>(false);
+  const updatePerson = useGenealogyStore((s) => s.updatePerson);
 
   // Root person of tree
   const rootPerson = useMemo(() => {
@@ -412,7 +414,6 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
   }, [father, mother, person.fatherId, person.motherId, person.parentFamilyId, person.id, families, persons]);
 
   const deleteAncestorsOfPerson = useGenealogyStore((s) => s.deleteAncestorsOfPerson);
-  const updatePerson = useGenealogyStore((s) => s.updatePerson);
   const openAuthModal = useUIStore((s) => s.openAuthModal);
   const [isLocalConfirmAncestorsOpen, setIsLocalConfirmAncestorsOpen] = useState(false);
 
@@ -2279,41 +2280,134 @@ export const PersonProfileView: React.FC<PersonProfileViewProps> = ({
 
         {activeTab === 'events' && (
           <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#1a1e24] border border-stone-200 dark:border-[#2d333b] space-y-4">
-            <h4 className="font-bold text-sm text-neutral-900 dark:text-white flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-amber-500" />
-              <span>Хронологія життя</span>
-            </h4>
-            <div className="space-y-3 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-700 pl-6">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-[#272c33]">
+              <h4 className="font-bold text-sm text-neutral-900 dark:text-white flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-amber-500" />
+                <span>Хронологія життя та прив'язка розворотів метрик</span>
+              </h4>
+              <span className="text-[11px] text-slate-400">
+                Клікніть на розворот метрики для перегляду або збільшення
+              </span>
+            </div>
+
+            <div className="space-y-4 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-700 pl-6">
               {/* Birth event */}
               {(person.birthDate || person.birthYear) && (
-                <div className="relative">
-                  <div className="absolute -left-[19px] top-1 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-white dark:ring-[#1a1e24]" />
-                  <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">Народження</div>
-                  <div className="text-sm font-semibold">{person.birthDate || person.birthYear}</div>
-                  {person.birthPlace && <div className="text-xs text-slate-400">{person.birthPlace}</div>}
+                <div className="relative p-2.5 rounded-xl bg-stone-50/50 dark:bg-[#15191e] border border-stone-200/60 dark:border-slate-800/80 space-y-1">
+                  <div className="absolute -left-[27px] top-3.5 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-white dark:ring-[#1a1e24]" />
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                        Народження
+                      </span>
+                      <span className="text-sm font-semibold">{person.birthDate || person.birthYear}</span>
+                    </div>
+
+                    <EventScanBadge
+                      person={person}
+                      eventType="birth"
+                      eventTitle="Народження"
+                      scanUrl={person.birthScanUrl}
+                      scanTitle={person.birthScanTitle}
+                      onAttachScan={(url, title) => updatePerson({ ...person, birthScanUrl: url, birthScanTitle: title })}
+                      onDetachScan={() => updatePerson({ ...person, birthScanUrl: undefined, birthScanTitle: undefined })}
+                      isReadOnly={isReadOnly}
+                    />
+                  </div>
+                  {person.birthPlace && <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1"><MapPin className="w-3 h-3 text-slate-400" />{person.birthPlace}</div>}
                 </div>
               )}
 
               {/* Marriage event */}
               {person.marriageDate && (
-                <div className="relative">
-                  <div className="absolute -left-[19px] top-1 w-3 h-3 rounded-full bg-rose-500 ring-4 ring-white dark:ring-[#1a1e24]" />
-                  <div className="text-xs font-bold text-rose-600 dark:text-rose-400">Шлюб</div>
-                  <div className="text-sm font-semibold">{person.marriageDate}</div>
-                  {person.marriagePlace && <div className="text-xs text-slate-400">{person.marriagePlace}</div>}
+                <div className="relative p-2.5 rounded-xl bg-stone-50/50 dark:bg-[#15191e] border border-stone-200/60 dark:border-slate-800/80 space-y-1">
+                  <div className="absolute -left-[27px] top-3.5 w-3 h-3 rounded-full bg-rose-500 ring-4 ring-white dark:ring-[#1a1e24]" />
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider">
+                        Шлюб
+                      </span>
+                      <span className="text-sm font-semibold">{person.marriageDate}</span>
+                    </div>
+
+                    <EventScanBadge
+                      person={person}
+                      eventType="marriage"
+                      eventTitle="Шлюб"
+                      scanUrl={person.marriageScanUrl}
+                      scanTitle={person.marriageScanTitle}
+                      onAttachScan={(url, title) => updatePerson({ ...person, marriageScanUrl: url, marriageScanTitle: title })}
+                      onDetachScan={() => updatePerson({ ...person, marriageScanUrl: undefined, marriageScanTitle: undefined })}
+                      isReadOnly={isReadOnly}
+                    />
+                  </div>
+                  {person.marriagePlace && <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1"><MapPin className="w-3 h-3 text-slate-400" />{person.marriagePlace}</div>}
                 </div>
               )}
 
               {/* Death event */}
               {(person.deathDate || person.deathYear) && (
-                <div className="relative">
-                  <div className="absolute -left-[19px] top-1 w-3 h-3 rounded-full bg-stone-500 ring-4 ring-white dark:ring-[#1a1e24]" />
-                  <div className="text-xs font-bold text-stone-600 dark:text-stone-400">Смерть</div>
-                  <div className="text-sm font-semibold">{person.deathDate || person.deathYear}</div>
-                  {person.deathPlace && <div className="text-xs text-slate-400">{person.deathPlace}</div>}
+                <div className="relative p-2.5 rounded-xl bg-stone-50/50 dark:bg-[#15191e] border border-stone-200/60 dark:border-slate-800/80 space-y-1">
+                  <div className="absolute -left-[27px] top-3.5 w-3 h-3 rounded-full bg-stone-500 ring-4 ring-white dark:ring-[#1a1e24]" />
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-stone-600 dark:text-stone-400 uppercase tracking-wider">
+                        Смерть
+                      </span>
+                      <span className="text-sm font-semibold">{person.deathDate || person.deathYear}</span>
+                    </div>
+
+                    <EventScanBadge
+                      person={person}
+                      eventType="death"
+                      eventTitle="Смерть"
+                      scanUrl={person.deathScanUrl}
+                      scanTitle={person.deathScanTitle}
+                      onAttachScan={(url, title) => updatePerson({ ...person, deathScanUrl: url, deathScanTitle: title })}
+                      onDetachScan={() => updatePerson({ ...person, deathScanUrl: undefined, deathScanTitle: undefined })}
+                      isReadOnly={isReadOnly}
+                    />
+                  </div>
+                  {person.deathPlace && <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1"><MapPin className="w-3 h-3 text-slate-400" />{person.deathPlace}</div>}
                   {person.deathReason && <div className="text-xs text-rose-500">Причина: {person.deathReason}</div>}
                 </div>
               )}
+
+              {/* Custom Events if any */}
+              {Array.isArray(person.events) && person.events.map((ev: any, evIdx: number) => (
+                <div key={ev.id || `ev_${evIdx}`} className="relative p-2.5 rounded-xl bg-stone-50/50 dark:bg-[#15191e] border border-stone-200/60 dark:border-slate-800/80 space-y-1">
+                  <div className="absolute -left-[27px] top-3.5 w-3 h-3 rounded-full bg-amber-500 ring-4 ring-white dark:ring-[#1a1e24]" />
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                        {ev.title || ev.type || 'Подія'}
+                      </span>
+                      <span className="text-sm font-semibold">{ev.date || ev.year || ''}</span>
+                    </div>
+
+                    <EventScanBadge
+                      person={person}
+                      eventType="other"
+                      eventTitle={ev.title || ev.type || 'Подія'}
+                      scanUrl={ev.scanUrl}
+                      scanTitle={ev.scanTitle}
+                      onAttachScan={(url, title) => {
+                        const updatedEvents = [...(person.events || [])];
+                        updatedEvents[evIdx] = { ...ev, scanUrl: url, scanTitle: title };
+                        updatePerson({ ...person, events: updatedEvents });
+                      }}
+                      onDetachScan={() => {
+                        const updatedEvents = [...(person.events || [])];
+                        updatedEvents[evIdx] = { ...ev, scanUrl: undefined, scanTitle: undefined };
+                        updatePerson({ ...person, events: updatedEvents });
+                      }}
+                      isReadOnly={isReadOnly}
+                    />
+                  </div>
+                  {ev.place && <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1"><MapPin className="w-3 h-3 text-slate-400" />{ev.place}</div>}
+                  {ev.description && <div className="text-xs text-neutral-600 dark:text-neutral-300">{ev.description}</div>}
+                </div>
+              ))}
             </div>
           </div>
         )}

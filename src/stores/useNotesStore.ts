@@ -3,6 +3,7 @@ import { ResearchNote, NoteColor, ChecklistItem } from '../types';
 import { saveNoteDoc, deleteNoteDoc } from '../lib/firebase';
 import { isDemoNote } from '../utils/demoPurge';
 import { persistLocalData, idbGet } from '../utils/indexedDbStorage';
+import { getGitHubConfig, saveDetectiveNoteToGitHub } from '../services/githubService';
 
 const STORAGE_KEY = 'genealogy_research_notes_v1';
 
@@ -108,6 +109,13 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
       const next = [newNote, ...state.notes];
       persistNotes(next);
       saveNoteDoc(newNote);
+
+      // Auto-save to GitHub if configured
+      const ghConfig = getGitHubConfig();
+      if (ghConfig.isConfigured) {
+        saveDetectiveNoteToGitHub(newNote, ghConfig).catch(() => {});
+      }
+
       return { notes: next };
     });
 
@@ -130,7 +138,15 @@ export const useNotesStore = create<NotesStoreState>((set, get) => ({
       });
 
       persistNotes(next);
-      if (updatedItem) saveNoteDoc(updatedItem);
+      if (updatedItem) {
+        saveNoteDoc(updatedItem);
+
+        // Auto-save to GitHub if configured
+        const ghConfig = getGitHubConfig();
+        if (ghConfig.isConfigured) {
+          saveDetectiveNoteToGitHub(updatedItem, ghConfig).catch(() => {});
+        }
+      }
       return { notes: next };
     });
   },

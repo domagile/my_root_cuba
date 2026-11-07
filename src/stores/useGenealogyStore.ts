@@ -33,6 +33,7 @@ import { clearTreeAuditCache } from '../utils/treeAudit';
 import { clearKinshipCache } from '../rodovid/utils/relationship';
 import { clearGlobalSearchCache } from '../utils/globalTreeSearch';
 import { clearTreeLayoutCache } from '../rodovid/utils/treeLayout';
+import { getGitHubConfig, savePlaceDossierToGitHub } from '../services/githubService';
 
 export function invalidateAllTreeCaches(): void {
   try {
@@ -1071,6 +1072,19 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const nextPlaces = { ...state.places, [key]: updatedPlace };
       persistLocalData(`${STORAGE_KEY}_places`, nextPlaces);
       notifySyncChange('places', updatedPlace.id, () => savePlaceDoc(updatedPlace));
+
+      // Auto-save village / place notebook to GitHub if configured
+      try {
+        const ghConfig = getGitHubConfig();
+        if (ghConfig.isConfigured) {
+          savePlaceDossierToGitHub(updatedPlace.placeName, updatedPlace, ghConfig).catch((err) => {
+            console.warn('[GitHub AutoSync] Failed to sync place to GitHub:', err);
+          });
+        }
+      } catch (e) {
+        console.warn('[GitHub AutoSync] Error initiating GitHub sync for place:', e);
+      }
+
       return { places: nextPlaces };
     }),
 
