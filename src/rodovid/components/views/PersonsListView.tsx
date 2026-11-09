@@ -7,6 +7,8 @@ import {
   UserPlus,
   Plus,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   BookOpen,
   Calendar,
   MapPin,
@@ -56,6 +58,24 @@ import { normalizeUkrainianSurnameGender, areSurnamesEquivalent, areSurnamesBili
 import { getPersonRodName } from '../../utils/treeLayout';
 import { detectDuplicatePersons } from '../../../utils/duplicateDetector';
 import { DuplicatePair } from '../../../types';
+
+export type PersonSortOption =
+  | 'surname'
+  | 'firstName'
+  | 'birth'
+  | 'death'
+  | 'age'
+  | 'gender'
+  | 'birthPlace'
+  | 'clan'
+  | 'researchStatus'
+  | 'metricStatus'
+  | 'occupation'
+  | 'events'
+  | 'citations'
+  | 'documents'
+  | 'tag'
+  | 'tagCount';
 
 interface PersonsListViewProps {
   database: GenealogyDatabase;
@@ -242,8 +262,41 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   const [metricSearchStatusFilter, setMetricSearchStatusFilter] = useState<'ALL' | MetricSearchStatus>('ALL');
   const [tagFilter, setTagFilter] = useState<string>('ALL');
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState<boolean>(false);
-  const [sortBy, setSortBy] = useState<'surname' | 'birth' | 'events' | 'citations' | 'tag' | 'tagCount'>('surname');
+
+  const [sortBy, setSortBy] = useState<PersonSortOption>('surname');
   const [sortAsc, setSortAsc] = useState(true);
+
+  const sortLabels: Record<PersonSortOption, string> = {
+    surname: 'За прізвищем (А-Я)',
+    firstName: 'За іменем (А-Я)',
+    birth: 'За роком народження',
+    death: 'За роком смерті',
+    age: 'За віком / тривалістю життя',
+    clan: 'За родом / гілкою',
+    gender: 'За статтю',
+    birthPlace: 'За місцем народження',
+    occupation: 'За професією / станом',
+    researchStatus: 'За статусом дослідження',
+    metricStatus: 'За пошуком метрик',
+    events: 'За кількістю подій',
+    citations: 'За кількістю джерел',
+    documents: 'За сканами та документами',
+    tag: 'За хештегом (А-Я)',
+    tagCount: 'За кількістю тегів'
+  };
+
+  const handleColumnSort = (target: PersonSortOption) => {
+    if (sortBy === target) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortBy(target);
+      if (['events', 'citations', 'documents', 'tagCount', 'age'].includes(target)) {
+        setSortAsc(false);
+      } else {
+        setSortAsc(true);
+      }
+    }
+  };
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [personToDelete, setPersonToDelete] = useState<Person | null>(null);
   const [personToDeleteAncestors, setPersonToDeleteAncestors] = useState<Person | null>(null);
@@ -552,37 +605,179 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
   }, [database.persons, searchTerm, personClanFilter, genderFilter, statusFilter, researchStatusFilter, metricSearchStatusFilter, tagFilter, showDuplicatesOnly, duplicatePersonIds]);
 
   const sortedPersons = useMemo(() => {
+    // Helper to extract 4-digit year number from string or number
+    const parseYearNum = (val?: string | number): number | null => {
+      if (typeof val === 'number') return isNaN(val) ? null : val;
+      if (!val) return null;
+      const m = String(val).match(/\b(1[5-9]\d\d|20\d\d)\b/);
+      return m ? parseInt(m[1], 10) : null;
+    };
+
+    const getPersonAge = (p: Person): number | null => {
+      const bYear = parseYearNum(p.birthYear) ?? parseYearNum(p.birthDate);
+      if (!bYear) return null;
+      const dYear = parseYearNum(p.deathYear) ?? parseYearNum(p.deathDate);
+      if (dYear && dYear >= bYear) return dYear - bYear;
+      if (p.isLiving) return Math.max(0, new Date().getFullYear() - bYear);
+      return null;
+    };
+
     return [...personsList].sort((a, b) => {
       let comparison = 0;
-      if (sortBy === 'surname') {
-        const surA = (a.name?.surname || a.lastName || a.name?.maidenName || a.maidenName || '').trim();
-        const surB = (b.name?.surname || b.lastName || b.name?.maidenName || b.maidenName || '').trim();
-        const normA = normalizeUkrainianSurnameGender(surA) || surA;
-        const normB = normalizeUkrainianSurnameGender(surB) || surB;
-        comparison = normA.localeCompare(normB, 'uk', { sensitivity: 'base' });
-        if (comparison === 0) {
-          comparison = surA.localeCompare(surB, 'uk', { sensitivity: 'base' });
+
+      switch (sortBy) {
+        case 'surname': {
+          const surA = (a.name?.surname || a.lastName || a.name?.maidenName || a.maidenName || '').trim();
+          const surB = (b.name?.surname || b.lastName || b.name?.maidenName || b.maidenName || '').trim();
+          const normA = normalizeUkrainianSurnameGender(surA) || surA;
+          const normB = normalizeUkrainianSurnameGender(surB) || surB;
+          comparison = normA.localeCompare(normB, 'uk', { sensitivity: 'base' });
+          if (comparison === 0) {
+            comparison = surA.localeCompare(surB, 'uk', { sensitivity: 'base' });
+          }
+          if (comparison === 0) {
+            const givA = (a.name?.given || a.firstName || '').trim();
+            const givB = (b.name?.given || b.firstName || '').trim();
+            comparison = givA.localeCompare(givB, 'uk', { sensitivity: 'base' });
+          }
+          break;
         }
-        if (comparison === 0) {
+
+        case 'firstName': {
           const givA = (a.name?.given || a.firstName || '').trim();
           const givB = (b.name?.given || b.firstName || '').trim();
           comparison = givA.localeCompare(givB, 'uk', { sensitivity: 'base' });
+          if (comparison === 0) {
+            const surA = (a.name?.surname || a.lastName || '').trim();
+            const surB = (b.name?.surname || b.lastName || '').trim();
+            comparison = surA.localeCompare(surB, 'uk', { sensitivity: 'base' });
+          }
+          break;
         }
-      } else if (sortBy === 'birth') {
-        const yA = Number(a.birthYear) || 0;
-        const yB = Number(b.birthYear) || 0;
-        comparison = yA - yB;
-      } else if (sortBy === 'events') {
-        comparison = (a.events?.length || 0) - (b.events?.length || 0);
-      } else if (sortBy === 'citations') {
-        comparison = (a.citations?.length || 0) - (b.citations?.length || 0);
-      } else if (sortBy === 'tag') {
-        const tagA = (a.tags && a.tags.length > 0) ? a.tags[0] : 'яяя';
-        const tagB = (b.tags && b.tags.length > 0) ? b.tags[0] : 'яяя';
-        comparison = tagA.localeCompare(tagB, 'uk');
-      } else if (sortBy === 'tagCount') {
-        comparison = (b.tags?.length || 0) - (a.tags?.length || 0);
+
+        case 'birth': {
+          const yA = parseYearNum(a.birthYear) ?? parseYearNum(a.birthDate);
+          const yB = parseYearNum(b.birthYear) ?? parseYearNum(b.birthDate);
+          if (yA === null && yB === null) comparison = 0;
+          else if (yA === null) comparison = 1;
+          else if (yB === null) comparison = -1;
+          else comparison = yA - yB;
+          break;
+        }
+
+        case 'death': {
+          const yA = parseYearNum(a.deathYear) ?? parseYearNum(a.deathDate);
+          const yB = parseYearNum(b.deathYear) ?? parseYearNum(b.deathDate);
+          if (yA === null && yB === null) comparison = 0;
+          else if (yA === null) comparison = 1;
+          else if (yB === null) comparison = -1;
+          else comparison = yA - yB;
+          break;
+        }
+
+        case 'age': {
+          const ageA = getPersonAge(a);
+          const ageB = getPersonAge(b);
+          if (ageA === null && ageB === null) comparison = 0;
+          else if (ageA === null) comparison = 1;
+          else if (ageB === null) comparison = -1;
+          else comparison = ageA - ageB;
+          break;
+        }
+
+        case 'gender': {
+          const gA = normalizeGender(a.gender);
+          const gB = normalizeGender(b.gender);
+          comparison = gA.localeCompare(gB);
+          break;
+        }
+
+        case 'birthPlace': {
+          const plA = (a.birthPlace || '').trim();
+          const plB = (b.birthPlace || '').trim();
+          if (!plA && !plB) comparison = 0;
+          else if (!plA) comparison = 1;
+          else if (!plB) comparison = -1;
+          else comparison = plA.localeCompare(plB, 'uk', { sensitivity: 'base' });
+          break;
+        }
+
+        case 'clan': {
+          const clanA = getPersonRodName(a) || a.clan || '';
+          const clanB = getPersonRodName(b) || b.clan || '';
+          if (!clanA && !clanB) comparison = 0;
+          else if (!clanA) comparison = 1;
+          else if (!clanB) comparison = -1;
+          else comparison = clanA.localeCompare(clanB, 'uk', { sensitivity: 'base' });
+          break;
+        }
+
+        case 'researchStatus': {
+          const rank = (p: Person) => isPersonConfirmed(p) ? 0 : isPersonHypothesis(p) ? 1 : 2;
+          comparison = rank(a) - rank(b);
+          break;
+        }
+
+        case 'metricStatus': {
+          const rankMap: Record<string, number> = {
+            found: 0,
+            in_progress: 1,
+            partial: 2,
+            not_found: 3,
+            not_searched: 4
+          };
+          const rankA = rankMap[getMetricSearchStatus(a)] ?? 5;
+          const rankB = rankMap[getMetricSearchStatus(b)] ?? 5;
+          comparison = rankA - rankB;
+          break;
+        }
+
+        case 'occupation': {
+          const occA = (a.occupation || a.estateOrSocialStatus || a.socialStatus || '').trim();
+          const occB = (b.occupation || b.estateOrSocialStatus || b.socialStatus || '').trim();
+          if (!occA && !occB) comparison = 0;
+          else if (!occA) comparison = 1;
+          else if (!occB) comparison = -1;
+          else comparison = occA.localeCompare(occB, 'uk', { sensitivity: 'base' });
+          break;
+        }
+
+        case 'events': {
+          comparison = (a.events?.length || 0) - (b.events?.length || 0);
+          break;
+        }
+
+        case 'citations': {
+          comparison = (a.citations?.length || 0) - (b.citations?.length || 0);
+          break;
+        }
+
+        case 'documents': {
+          const docCount = (p: Person) =>
+            (p.documents?.length || 0) +
+            (p.birthScanUrl ? 1 : 0) +
+            (p.marriageScanUrl ? 1 : 0) +
+            (p.deathScanUrl ? 1 : 0);
+          comparison = docCount(a) - docCount(b);
+          break;
+        }
+
+        case 'tag': {
+          const tagA = (a.tags && a.tags.length > 0) ? a.tags[0] : 'яяя';
+          const tagB = (b.tags && b.tags.length > 0) ? b.tags[0] : 'яяя';
+          comparison = tagA.localeCompare(tagB, 'uk');
+          break;
+        }
+
+        case 'tagCount': {
+          comparison = (b.tags?.length || 0) - (a.tags?.length || 0);
+          break;
+        }
+
+        default:
+          comparison = 0;
       }
+
       return sortAsc ? comparison : -comparison;
     });
   }, [personsList, sortBy, sortAsc]);
@@ -647,8 +842,18 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 Virtual Scroll 60 FPS
               </span>
             </div>
-            <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-              Всього знайдено {sortedPersons.length} з {Object.keys(database.persons).length} записів
+            <p className={`text-xs ${theme.textMuted} mt-0.5 flex items-center gap-2 flex-wrap`}>
+              <span>Всього знайдено {sortedPersons.length} з {Object.keys(database.persons).length} записів</span>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => setSortAsc(!sortAsc)}
+                className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 cursor-pointer transition-colors"
+                title="Натисніть для зміни напрямку сортування"
+              >
+                <span>Сортування: {sortLabels[sortBy] || sortBy}</span>
+                {sortAsc ? <ArrowUp className="w-3 h-3 stroke-[2.5]" /> : <ArrowDown className="w-3 h-3 stroke-[2.5]" />}
+              </button>
             </p>
           </div>
           <div className="flex items-center flex-wrap gap-2">
@@ -910,34 +1115,78 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
               </button>
             )}
 
-            {/* Sort Select */}
+            {/* Sort Dropdown & Direction Toggle */}
             <div className="flex items-center gap-1.5 w-auto shrink-0">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-                className={`px-2.5 py-2 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-xs ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
-              >
-                <option value="surname">За прізвищем</option>
-                <option value="tag">За хештегом (А-Я)</option>
-                <option value="tagCount">За к-стю тегів</option>
-                <option value="birth">За датою нар.</option>
-                <option value="events">За подіями</option>
-                <option value="citations">За джерелами</option>
-              </select>
+              <div className="relative">
+                <select
+                  value={sortBy}
+                  onChange={(e) => {
+                    const target = e.target.value as PersonSortOption;
+                    setSortBy(target);
+                    if (['events', 'citations', 'documents', 'tagCount', 'age'].includes(target)) {
+                      setSortAsc(false);
+                    } else {
+                      setSortAsc(true);
+                    }
+                  }}
+                  className={`px-3 py-2 ${theme.inputBg} border ${
+                    sortBy !== 'surname' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : theme.inputBorder
+                  } rounded-lg text-xs font-medium ${theme.textPrimary} focus:outline-none focus:border-emerald-500 cursor-pointer`}
+                  title="Оберіть критерій сортування осіб"
+                >
+                  <optgroup label="👤 ПІБ, Рід та Стать">
+                    <option value="surname">Прізвище (А-Я)</option>
+                    <option value="firstName">Ім'я (А-Я)</option>
+                    <option value="clan">Рід / Гілка (А-Я)</option>
+                    <option value="gender">Стать (Ч / Ж)</option>
+                    <option value="occupation">Професія / Стан</option>
+                  </optgroup>
+                  <optgroup label="📅 Хронологія та Вік">
+                    <option value="birth">Рік / дата народження</option>
+                    <option value="death">Рік / дата смерті</option>
+                    <option value="age">Вік / тривалість життя</option>
+                  </optgroup>
+                  <optgroup label="📍 Географія">
+                    <option value="birthPlace">Місце народження (А-Я)</option>
+                  </optgroup>
+                  <optgroup label="🔬 Статуси розкопок">
+                    <option value="researchStatus">Статус дослідження</option>
+                    <option value="metricStatus">Статус пошуку метрик</option>
+                  </optgroup>
+                  <optgroup label="📚 Архівна наповненість">
+                    <option value="documents">Кількість документів та сканів</option>
+                    <option value="citations">Кількість джерел</option>
+                    <option value="events">Кількість подій</option>
+                    <option value="tag">Хештег (А-Я)</option>
+                    <option value="tagCount">Кількість тегів</option>
+                  </optgroup>
+                </select>
+              </div>
 
               <button
                 type="button"
                 onClick={() => setSortAsc(!sortAsc)}
-                className={`p-2 shrink-0 ${theme.inputBg} border ${theme.inputBorder} rounded-lg ${theme.textSecondary} hover:${theme.textPrimary} cursor-pointer transition-colors`}
-                title={sortAsc ? 'За зростанням' : 'За спаданням'}
+                className={`px-2.5 py-2 shrink-0 ${theme.inputBg} border ${
+                  sortAsc ? 'border-emerald-500/40 text-emerald-400' : 'border-amber-500/40 text-amber-400'
+                } rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all hover:bg-black/5 dark:hover:bg-white/5 shadow-2xs`}
+                title={sortAsc ? 'Порядок: за зростанням (А-Я, від найдавніших). Натисніть для перемикання' : 'Порядок: за спаданням (Я-А, від найновіших). Натисніть для перемикання'}
               >
-                <ArrowUpDown className="w-4 h-4" />
+                {sortAsc ? (
+                  <>
+                    <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span className="hidden sm:inline text-[11px]">Зростання</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span className="hidden sm:inline text-[11px]">Спадання</span>
+                  </>
+                )}
               </button>
             </div>
 
             {/* View Mode Toggle (Table / Cards) */}
             <div className="ml-auto flex items-center shrink-0">
-
               <div className={`flex border ${theme.borderSubtle} rounded-lg overflow-hidden ${theme.surfaceBg} shrink-0`}>
                 <button
                   type="button"
@@ -957,6 +1206,49 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* Row 3: Quick Sort Pills Bar */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-dashed border-stone-200 dark:border-slate-800 text-xs">
+            <span className={`text-[11px] font-semibold ${theme.textMuted} flex items-center gap-1 shrink-0 mr-1`}>
+              <ArrowUpDown className="w-3.5 h-3.5 text-emerald-500" />
+              Швидке сортування:
+            </span>
+
+            {[
+              { id: 'surname' as PersonSortOption, label: 'ПІБ (А-Я)' },
+              { id: 'birth' as PersonSortOption, label: 'Рік народження' },
+              { id: 'clan' as PersonSortOption, label: 'Рід' },
+              { id: 'age' as PersonSortOption, label: 'Вік' },
+              { id: 'birthPlace' as PersonSortOption, label: 'Місце нар.' },
+              { id: 'documents' as PersonSortOption, label: 'Скани та документи' },
+              { id: 'citations' as PersonSortOption, label: 'Джерела' },
+              { id: 'events' as PersonSortOption, label: 'Події' },
+            ].map((pill) => {
+              const isActive = sortBy === pill.id;
+              return (
+                <button
+                  key={pill.id}
+                  type="button"
+                  onClick={() => handleColumnSort(pill.id)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all shrink-0 cursor-pointer ${
+                    isActive
+                      ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                      : `${theme.surfaceBg} ${theme.textSecondary} hover:${theme.textPrimary} border ${theme.borderSubtle}`
+                  }`}
+                  title={isActive ? (sortAsc ? 'Зараз: за зростанням (натисніть, щоб змінити на спадання)' : 'Зараз: за спаданням (натисніть, щоб змінити на зростання)') : `Сортувати за: ${pill.label}`}
+                >
+                  <span>{pill.label}</span>
+                  {isActive && (
+                    sortAsc ? (
+                      <ArrowUp className="w-3 h-3 text-white stroke-[2.5]" />
+                    ) : (
+                      <ArrowDown className="w-3 h-3 text-white stroke-[2.5]" />
+                    )
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -1035,15 +1327,222 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
             <table className={`w-full text-left text-xs ${theme.textSecondary}`}>
               <thead className={`sticky top-0 z-10 ${theme.surfaceBg} ${theme.textMuted} font-semibold uppercase tracking-wider text-[10px]`}>
                 <tr>
-                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>ПІБ / Особа</th>
-                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Стать</th>
-                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Роки життя</th>
-                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Дослідження</th>
-                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Метрики / Пошук</th>
-                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Місце народження</th>
-                  <th className={`py-3 px-4 border-b ${theme.borderSubtle}`}>Професія / Статус</th>
-                  <th className={`py-3 px-4 text-center border-b ${theme.borderSubtle}`}>Подій</th>
-                  <th className={`py-3 px-4 text-center border-b ${theme.borderSubtle}`}>Джерел</th>
+                  {/* ПІБ / Особа */}
+                  <th
+                    onClick={() => handleColumnSort('surname')}
+                    className={`py-3 px-4 border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'surname' || sortBy === 'firstName'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за ПІБ (${sortBy === 'surname' ? (sortAsc ? 'Зараз: за зростанням А-Я' : 'Зараз: за спаданням Я-А') : 'натисніть для сортування'})`}
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>ПІБ / Особа</span>
+                      {sortBy === 'surname' || sortBy === 'firstName' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Стать */}
+                  <th
+                    onClick={() => handleColumnSort('gender')}
+                    className={`py-3 px-4 border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'gender'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за статтю (${sortBy === 'gender' ? (sortAsc ? 'Чоловіки / Жінки' : 'Жінки / Чоловіки') : 'натисніть для сортування'})`}
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Стать</span>
+                      {sortBy === 'gender' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Роки життя */}
+                  <th
+                    onClick={() => handleColumnSort('birth')}
+                    className={`py-3 px-4 border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'birth' || sortBy === 'death' || sortBy === 'age'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за роками життя (${sortBy === 'birth' ? (sortAsc ? 'Від найдавніших до найновіших' : 'Від найновіших до найдавніших') : 'натисніть для сортування'})`}
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Роки життя</span>
+                      {sortBy === 'birth' || sortBy === 'death' || sortBy === 'age' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Дослідження */}
+                  <th
+                    onClick={() => handleColumnSort('researchStatus')}
+                    className={`py-3 px-4 border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'researchStatus'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за статусом дослідження`}
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Дослідження</span>
+                      {sortBy === 'researchStatus' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Метрики / Пошук */}
+                  <th
+                    onClick={() => handleColumnSort('metricStatus')}
+                    className={`py-3 px-4 border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'metricStatus'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за статусом пошуку метрик`}
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Метрики / Пошук</span>
+                      {sortBy === 'metricStatus' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Місце народження */}
+                  <th
+                    onClick={() => handleColumnSort('birthPlace')}
+                    className={`py-3 px-4 border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'birthPlace'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за місцем народження`}
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Місце народження</span>
+                      {sortBy === 'birthPlace' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Професія / Статус */}
+                  <th
+                    onClick={() => handleColumnSort('occupation')}
+                    className={`py-3 px-4 border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'occupation'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за професією або станом`}
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Професія / Статус</span>
+                      {sortBy === 'occupation' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Подій */}
+                  <th
+                    onClick={() => handleColumnSort('events')}
+                    className={`py-3 px-4 text-center border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'events'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за кількістю подій`}
+                  >
+                    <div className="inline-flex items-center justify-center gap-1.5">
+                      <span>Подій</span>
+                      {sortBy === 'events' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Джерел */}
+                  <th
+                    onClick={() => handleColumnSort('citations')}
+                    className={`py-3 px-4 text-center border-b ${theme.borderSubtle} cursor-pointer select-none transition-colors group ${
+                      sortBy === 'citations' || sortBy === 'documents'
+                        ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 font-bold'
+                        : `hover:${theme.textPrimary} hover:bg-black/5 dark:hover:bg-white/5`
+                    }`}
+                    title={`Сортувати за кількістю архівних джерел`}
+                  >
+                    <div className="inline-flex items-center justify-center gap-1.5">
+                      <span>Джерел</span>
+                      {sortBy === 'citations' || sortBy === 'documents' ? (
+                        sortAsc ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        ) : (
+                          <ArrowDown className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[2.5]" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-80 transition-opacity shrink-0" />
+                      )}
+                    </div>
+                  </th>
+
                   <th className={`py-3 px-4 text-right border-b ${theme.borderSubtle}`}>
                     Зв'язки та дії
                   </th>

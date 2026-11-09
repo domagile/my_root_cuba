@@ -241,7 +241,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
           onClick={(e) => {
             e.stopPropagation();
             if (e.metaKey || e.ctrlKey || e.button === 1) {
-              openPersonInNewWindow(p.id);
+              openPersonInNewWindow(p.id, { mode: 'view' });
               return;
             }
             if (p.id !== activePersonId) {
@@ -252,7 +252,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
             if (e.button === 1) {
               e.preventDefault();
               e.stopPropagation();
-              openPersonInNewWindow(p.id);
+              openPersonInNewWindow(p.id, { mode: 'view' });
             }
           }}
           onContextMenu={(e) => onContextMenu(e, p.id)}
@@ -287,7 +287,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
             </span>
           )}
           <a
-            href={getPersonUrl(p.id)}
+            href={getPersonUrl(p.id, { mode: 'view' })}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
@@ -337,7 +337,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
           onClick={(e) => {
             e.stopPropagation();
             if (e.metaKey || e.ctrlKey || e.button === 1) {
-              openPersonInNewWindow(p.id);
+              openPersonInNewWindow(p.id, { mode: 'view' });
               return;
             }
             if (p.id !== activePersonId) {
@@ -348,7 +348,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
             if (e.button === 1) {
               e.preventDefault();
               e.stopPropagation();
-              openPersonInNewWindow(p.id);
+              openPersonInNewWindow(p.id, { mode: 'view' });
             }
           }}
           onContextMenu={(e) => onContextMenu(e, p.id)}
@@ -414,7 +414,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
                   <Eye className="w-2.5 h-2.5" />
                 </button>
                 <a
-                  href={getPersonUrl(p.id)}
+                  href={getPersonUrl(p.id, { mode: 'view' })}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
@@ -518,7 +518,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
       onClick={(e) => {
         e.stopPropagation();
         if (e.metaKey || e.ctrlKey || e.button === 1) {
-          openPersonInNewWindow(p.id);
+          openPersonInNewWindow(p.id, { mode: 'view' });
           return;
         }
         if (p.id !== activePersonId) {
@@ -529,7 +529,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
         if (e.button === 1) {
           e.preventDefault();
           e.stopPropagation();
-          openPersonInNewWindow(p.id);
+          openPersonInNewWindow(p.id, { mode: 'view' });
         }
       }}
       onContextMenu={(e) => onContextMenu(e, p.id)}
@@ -1255,7 +1255,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
                 </button>
 
                 <a
-                  href={getPersonUrl(p.id)}
+                  href={getPersonUrl(p.id, { mode: 'view' })}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}

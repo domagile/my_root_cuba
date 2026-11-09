@@ -85,6 +85,15 @@ function AppContent() {
   }, [initFromUrl]);
 
   useEffect(() => {
+    // Synchronize initial deep-link person inspection from URL on page boot
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const pId = params.get('personId') || params.get('person');
+      if (pId && useUIStore.getState().activeInspectPersonId !== pId) {
+        useUIStore.getState().setInspectPersonId(pId);
+      }
+    } catch {}
+
     const handlePopState = () => {
       try {
         const params = new URLSearchParams(window.location.search);

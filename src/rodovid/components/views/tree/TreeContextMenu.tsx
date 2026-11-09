@@ -34,7 +34,7 @@ export const TreeContextMenu: React.FC<TreeContextMenuProps> = ({
   const isMale = person.gender === 'male' || (person as any).sex === 'M';
   const isFemale = person.gender === 'female' || (person as any).sex === 'F';
   const name = `${person.lastName || ''} ${person.firstName || ''}`.trim() || 'Особа';
-  const personUrl = getPersonUrl(person.id);
+  const personUrl = getPersonUrl(person.id, { mode: 'view' });
 
   return (
     <div
@@ -70,7 +70,10 @@ export const TreeContextMenu: React.FC<TreeContextMenuProps> = ({
             href={personUrl}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={onClose}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
             className="flex items-center gap-2.5 px-3.5 py-2 text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/40 font-semibold transition-colors cursor-pointer group"
           >
             <ExternalLink className="w-4 h-4 shrink-0 text-sky-500 group-hover:scale-110 transition-transform" />

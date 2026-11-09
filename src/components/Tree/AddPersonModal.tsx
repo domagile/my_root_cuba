@@ -47,7 +47,8 @@ import {
   Crown,
   Baby,
   XCircle,
-  Archive
+  Archive,
+  RefreshCw
 } from 'lucide-react';
 import { formatClanName, normalizeUkrainianSurnameGender } from '../../utils/ukrainianPhonetics';
 import {
@@ -68,7 +69,8 @@ import {
   CustomFieldItem,
   GodparentItem,
   HistoricalPlaceItem,
-  PersonLifeEventItem
+  PersonLifeEventItem,
+  GenealogyDatabase
 } from '../../types';
 import { parseAndNormalizeTags, getTreeHashtagsWithCounts, extractHashtagsFromText, COMMON_GENEALOGY_HASHTAG_PRESETS } from '../../utils/tagUtils';
 import { detectGenderFromName, isPersonMale, isPersonFemale, parseFullNameComponents } from '../../utils/genderUtils';
@@ -128,6 +130,7 @@ import {
 export type { ModalSection, ModalAccordionState };
 
 export interface AddPersonModalProps {
+  database?: GenealogyDatabase;
   personId?: string | null;
   initialPersonToEdit?: Person | null;
   initialRelation?: {
@@ -161,6 +164,7 @@ const MODAL_SECTIONS: { id: ModalSection; label: string; icon: React.ComponentTy
 ];
 
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({
+  database,
   personId,
   initialPersonToEdit,
   initialRelation,
@@ -200,16 +204,25 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
 
-  // Determine effective person either from prop or personId, prioritizing live store data
+  // Determine effective person either from prop or personId, prioritizing live store data, database prop, and global database
   const effectivePerson = useMemo(() => {
     const targetId = personId || initialPersonToEdit?.id;
     if (targetId) {
       const found = persons.find((p) => p.id === targetId);
       if (found) return found;
+      if (database?.persons && database.persons[targetId]) {
+        return database.persons[targetId];
+      }
+      try {
+        const db = getGenealogyDatabase?.();
+        if (db?.persons && db.persons[targetId]) {
+          return db.persons[targetId];
+        }
+      } catch {}
     }
     if (initialPersonToEdit) return initialPersonToEdit;
     return null;
-  }, [initialPersonToEdit, personId, persons]);
+  }, [database, getGenealogyDatabase, initialPersonToEdit, personId, persons]);
 
   // Target Person for initialRelation
   const targetPerson = initialRelation
@@ -806,15 +819,16 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     if (initialMode === 'edit' || initialMode === 'full') return 'full';
     if (initialMode === 'express') return 'express';
     if (initialMode === 'view') return 'view';
-    // If effectivePerson exists and not creating a new relation, default to view mode
-    return effectivePerson && !initialRelation ? 'view' : 'express';
+    // If personId or effectivePerson exists and not creating a new relation, default to view mode
+    if ((personId || effectivePerson) && !initialRelation) return 'view';
+    return 'express';
   });
 
   useEffect(() => {
-    if (personId && !initialRelation && initialMode !== 'edit' && initialMode !== 'full') {
+    if ((personId || effectivePerson) && !initialRelation && initialMode !== 'edit' && initialMode !== 'full') {
       setFormMode('view');
     }
-  }, [personId, initialRelation, initialMode]);
+  }, [personId, effectivePerson, initialRelation, initialMode]);
 
   // Family quick add modal state
   const [showFamilyQuickAddModal, setShowFamilyQuickAddModal] = useState(false);
@@ -3091,6 +3105,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               onDeleteAncestors={() => setIsConfirmDeleteAncestorsOpen(true)}
               isReadOnly={isReadOnly}
             />
+          </div>
+        ) : formMode === 'view' && (personId || initialPersonToEdit) ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shadow-inner">
+              <RefreshCw className="w-6 h-6 animate-spin text-[#B88E3E]" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                Завантаження анкети особи...
+              </p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-mono">
+                {personId || initialPersonToEdit?.id}
+              </p>
+            </div>
           </div>
         ) : formMode === 'express' ? (
           <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 max-w-4xl mx-auto w-full">

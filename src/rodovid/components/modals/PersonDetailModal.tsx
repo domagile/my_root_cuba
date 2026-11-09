@@ -24,6 +24,7 @@ export interface PersonDetailModalProps {
 }
 
 export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
+  database,
   personId,
   onClose,
   onSelectPerson,
@@ -44,9 +45,13 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
   if (!activePersonId) return null;
 
+  const targetPerson = database?.persons && activePersonId ? database.persons[activePersonId] : undefined;
+
   return (
     <AddPersonModal
+      database={database}
       personId={activePersonId}
+      initialPersonToEdit={targetPerson}
       initialMode={initialMode}
       onClose={onClose}
       onSelectPerson={(id) => {

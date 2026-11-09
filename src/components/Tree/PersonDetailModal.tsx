@@ -24,7 +24,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   onOpenAddRelation,
   onSelectPerson
 }) => {
-  const { deletePerson, setSelectedPersonId } = useGenealogy();
+  const { deletePerson, setSelectedPersonId, persons, getGenealogyDatabase } = useGenealogy();
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const currentUser = useAuthStore((s) => s.currentUser);
   const whitelist = useAuthStore((s) => s.whitelist);
@@ -34,6 +34,19 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   useEffect(() => {
     setActivePersonId(personId);
   }, [personId]);
+
+  const targetPerson = React.useMemo(() => {
+    if (!activePersonId) return null;
+    const found = persons.find((p) => p.id === activePersonId);
+    if (found) return found;
+    try {
+      const db = getGenealogyDatabase?.();
+      if (db?.persons && db.persons[activePersonId]) {
+        return db.persons[activePersonId];
+      }
+    } catch {}
+    return null;
+  }, [activePersonId, persons, getGenealogyDatabase]);
 
   const canEdit = Boolean(
     currentUser &&
@@ -50,6 +63,8 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   return (
     <AddPersonModal
       personId={activePersonId}
+      initialPersonToEdit={targetPerson}
+      initialMode="view"
       onClose={onClose}
       isReadOnly={!canEdit}
       onChangeRoot={(id) => {

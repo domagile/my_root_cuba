@@ -85,6 +85,7 @@ export const getPersonUrl = (
   if (typeof window === 'undefined') return `?personId=${personId}`;
   const url = new URL(window.location.href);
   url.searchParams.set('personId', personId);
+  url.searchParams.delete('person');
   if (options?.mode === 'tree') {
     url.searchParams.set('tab', 'tree');
     url.searchParams.set('root', personId);
@@ -123,7 +124,26 @@ export const openPersonInNewWindow = (
 ) => {
   if (typeof window === 'undefined') return;
   const targetUrl = getPersonUrl(personId, options, user);
-  window.open(targetUrl, '_blank', 'noopener,noreferrer');
+  try {
+    const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    if (!win) {
+      const a = document.createElement('a');
+      a.href = targetUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  } catch {
+    const a = document.createElement('a');
+    a.href = targetUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
 };
 
 export const getInitialPersonId = (): string | null => {
