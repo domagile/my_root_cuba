@@ -455,7 +455,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         localStorage.setItem(`${STORAGE_KEY}_whitelist`, JSON.stringify(nextWhitelist));
       } catch {}
       if (target) {
-        deleteWhitelistEntryFromCloud(target.id).catch(() => {});
+        deleteWhitelistEntryFromCloud(target.email).catch(() => {});
       }
       return { whitelist: nextWhitelist };
     });

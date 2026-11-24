@@ -1,3 +1,5 @@
+import { prepareCloudRestore } from '../services/cloudRestoreService';
+import { createProjectArchive, parseProjectArchive } from '../utils/projectArchive';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -24,15 +26,7 @@ import {
   fetchAllProjectDataFromCloud,
   savePersonDoc,
   savePersonDeltaDoc,
-  saveFamilyDoc,
-  saveEventDoc,
-  saveSourceDoc,
-  savePlaceDoc,
   deletePersonDoc,
-  deleteFamilyDoc,
-  deleteEventDoc,
-  deleteSourceDoc,
-  deletePlaceDoc,
   batchDeleteEntities,
   subscribeToIgnoredDuplicatePairsCloud,
   subscribeToDeletedTombstonesCloud,
@@ -54,7 +48,7 @@ import {
   getIgnoredDuplicatePairKeys
 } from '../utils/duplicateDetector';
 import { useResearchStore, INITIAL_METRICS, INITIAL_DOCUMENTS, INITIAL_TASKS, INITIAL_FINDINGS, INITIAL_HYPOTHESES, INITIAL_REQUESTS, INITIAL_MATRIX } from '../stores/useResearchStore';
-import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode, countDirtyItems, isQuotaExceededToday } from '../stores/useCloudSyncStore';
+import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode, isQuotaExceededToday } from '../stores/useCloudSyncStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { getSavedUserTreeState, resolveInitialPersonId } from '../utils/userTreeState';
@@ -63,11 +57,26 @@ import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent, isDemoResearchIt
 import { saveSnapshot } from '../utils/persistentBackup';
 import { autoMigrateLocalStorageToIDB } from '../utils/indexedDbStorage';
 import { useNotesStore } from '../stores/useNotesStore';
+import { synchronizeProject, ProjectSyncData } from '../services/cloudSyncService';
 export { useUIStore };
 export { useNotesStore };
 export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore';
 export { useResearchStore } from '../stores/useResearchStore';
 export { useCloudSyncStore } from '../stores/useCloudSyncStore';
+
+const cloudSyncApi = { savePersonDoc, savePersonDeltaDoc, batchDeleteEntities, saveProjectDataToCloud };
+
+function getCurrentCloudData(): ProjectSyncData {
+  const genealogy = useGenealogyStore.getState();
+  const research = useResearchStore.getState();
+  return {
+    persons: genealogy.persons, families: genealogy.families, events: genealogy.events,
+    sources: genealogy.sources, places: genealogy.places, trashPersons: genealogy.trashPersons,
+    metricRecords: research.metricRecords, documents: research.documents, tasks: research.tasks,
+    findings: research.findings, hypotheses: research.hypotheses,
+    requests: research.requests, matrixEntries: research.matrixEntries
+  };
+}
 
 export interface GenealogyContextType {
   // Cloud Sync
@@ -559,333 +568,48 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, [setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
 
-  // Debounced auto-sync to Firestore (ONLY active when user explicitly chooses 'auto' mode)
-  // Smart incremental strategy: push only the delta (changed fields) for specific updated persons!
+  // Both background and manual drains inspect every result and preserve new edits.
   useEffect(() => {
-    if (syncMode !== 'auto') {
-      return;
-    }
+    if (syncMode !== 'auto') return;
+    const upload = () => { void synchronizeProject(getCurrentCloudData, cloudSyncApi, { manual: false }); };
+    const timer = setTimeout(upload, 5000);
+    window.addEventListener('online', upload);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('online', upload);
+    };
+  }, [syncMode, persons, families, events, sources, places, metricRecords, documents,
+    tasks, findings, hypotheses, requests, matrixEntries, unsavedChangesCount]);
 
-    const timer = setTimeout(async () => {
-      const syncStore = useCloudSyncStore.getState();
-      const tracker = syncStore.dirtyTracker;
-      const dirtyDeltas = syncStore.dirtyPersonsDelta;
-      const totalDirty = countDirtyItems(tracker);
-
-      if (totalDirty === 0 && Object.keys(dirtyDeltas).length === 0) {
-        return;
-      }
-
-      setStatus('syncing');
-
-      try {
-        // 1. Process deletions
-        if (tracker.deletedPersons.length > 0) {
-          await Promise.allSettled(tracker.deletedPersons.map((id) => deletePersonDoc(id)));
+  const triggerUploadToCloud = useCallback((options?: { forceFull?: boolean }): Promise<{ success: boolean; message: string }> => {
+    return synchronizeProject(getCurrentCloudData, cloudSyncApi, {
+      manual: true,
+      forceFull: options?.forceFull,
+      beforeUpload: (data) => saveSnapshot({
+        persons: data.persons, families: data.families, sources: data.sources, events: data.events, places: data.places,
+        whitelist: [], researchData: {
+          metricRecords: data.metricRecords, documents: data.documents, tasks: data.tasks,
+          findings: data.findings, hypotheses: data.hypotheses,
+          requests: data.requests, matrixEntries: data.matrixEntries
         }
-        if (tracker.deletedFamilies.length > 0) {
-          await Promise.allSettled(tracker.deletedFamilies.map((id) => deleteFamilyDoc(id)));
-        }
-        if (tracker.deletedEvents.length > 0) {
-          await Promise.allSettled(tracker.deletedEvents.map((id) => deleteEventDoc(id)));
-        }
-        if (tracker.deletedSources.length > 0) {
-          await Promise.allSettled(tracker.deletedSources.map((id) => deleteSourceDoc(id)));
-        }
-        if (tracker.deletedPlaces.length > 0) {
-          await Promise.allSettled(tracker.deletedPlaces.map((id) => deletePlaceDoc(id)));
-        }
-
-        // 2. Incremental Person Delta Writes: Push ONLY changed fields for specific updated persons
-        const personPromises: Promise<boolean>[] = [];
-        for (const personId of tracker.persons) {
-          const delta = dirtyDeltas[personId];
-          if (delta && Object.keys(delta).length > 0) {
-            personPromises.push(savePersonDeltaDoc(personId, delta));
-          } else {
-            const p = persons.find((item) => item.id === personId);
-            if (p) {
-              personPromises.push(savePersonDoc(p));
-            }
-          }
-        }
-        await Promise.allSettled(personPromises);
-
-        // 3. Push dirty families if any
-        if (tracker.families.length > 0) {
-          const dirtyFams = tracker.families.map((id) => families[id]).filter(Boolean);
-          await Promise.allSettled(dirtyFams.map((f) => saveFamilyDoc(f)));
-        }
-
-        // 4. Push dirty events/sources/places if any
-        if (tracker.events.length > 0) {
-          const dirtyEvts = tracker.events.map((id) => events[id]).filter(Boolean);
-          await Promise.allSettled(dirtyEvts.map((e) => saveEventDoc(e)));
-        }
-        if (tracker.sources.length > 0) {
-          const dirtySrcs = tracker.sources.map((id) => sources[id]).filter(Boolean);
-          await Promise.allSettled(dirtySrcs.map((s) => saveSourceDoc(s)));
-        }
-        if (tracker.places.length > 0) {
-          const dirtyPlcs = tracker.places.map((id) => places[id]).filter(Boolean);
-          await Promise.allSettled(dirtyPlcs.map((pl) => savePlaceDoc(pl)));
-        }
-
-        setStatus('synced');
-        setLastSyncTime(new Date().toISOString());
-        syncStore.clearDirty();
-      } catch (err: any) {
-        setStatus('error', err?.message || 'Помилка фонової синхронізації');
-      }
-    }, 5000);
-
-    return () => clearTimeout(timer);
-  }, [syncMode, persons, families, events, sources, places, setStatus, setLastSyncTime]);
-
-  // Manual Trigger: Smart Delta Upload or Forced Full Upload to Cloud
-  const triggerUploadToCloud = useCallback(async (options?: { forceFull?: boolean }): Promise<{ success: boolean; message: string }> => {
-    const isForceFull = options?.forceFull === true;
-    const syncStore = useCloudSyncStore.getState();
-    const tracker = syncStore.dirtyTracker;
-    const totalDirty = countDirtyItems(tracker);
-
-    // If quota is already exhausted today, save snapshot locally and clear unsaved changes peacefully
-    if (syncStore.isQuotaExceeded) {
-      try {
-        await saveSnapshot({
-          persons,
-          families,
-          sources,
-          events,
-          whitelist: [],
-          researchData: {
-            metricRecords,
-            documents,
-            tasks,
-            findings,
-            hypotheses,
-            requests,
-            matrixEntries
-          }
-        }, `Локальна точка захисту (${persons.length} осіб)`);
-      } catch {}
-      syncStore.clearDirty();
-      setStatus('offline');
-      setLastSyncTime(new Date().toISOString());
-      return {
-        success: true,
-        message: 'Зміни надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально.'
-      };
-    }
-
-    // Smart Delta Guard: if not forceFull and there are no dirty changes
-    if (!isForceFull && totalDirty === 0 && !syncStore.hasUnsavedChanges) {
-      return {
-        success: true,
-        message: 'Усі дані вже синхронізовані! Немає нових змін для запису у Firestore.'
-      };
-    }
-
-    setIsManualPushing(true);
-    setStatus('syncing');
-    try {
-      // Create local snapshot point before cloud push
-      try {
-        await saveSnapshot({
-          persons,
-          families,
-          sources,
-          events,
-          whitelist: [],
-          researchData: {
-            metricRecords,
-            documents,
-            tasks,
-            findings,
-            hypotheses,
-            requests,
-            matrixEntries
-          }
-        }, `Точка перед вивантаженням у Firestore (${persons.length} осіб)`);
-      } catch (snapErr) {
-        console.warn('Snapshot backup failed before push:', snapErr);
-      }
-
-      if (isForceFull) {
-        // FULL FORCE UPLOAD: Push all entities
-        const trash = useGenealogyStore.getState().trashPersons;
-        if (trash && trash.length > 0) {
-          await Promise.allSettled(trash.map((t) => deletePersonDoc(t.id)));
-        }
-
-        const ok = await saveProjectDataToCloud({
-          persons,
-          families: Object.values(families || {}),
-          events: Object.values(events || {}),
-          sources: Object.values(sources || {}),
-          places: Object.values(places || {}),
-          metricRecords,
-          documents,
-          tasks,
-          findings,
-          hypotheses,
-          requests,
-          matrixEntries,
-          lastUpdated: new Date().toISOString()
-        });
-
-        if (ok) {
-          setStatus('synced');
-          setLastSyncTime(new Date().toISOString());
-          syncStore.clearDirty();
-          setIsManualPushing(false);
-          return {
-            success: true,
-            message: `Повний знімок успішно вивантажено: ${persons.length} осіб, ${Object.keys(families).length} родин у Firestore!`
-          };
-        }
-      } else {
-        // SMART DELTA UPLOAD: Push ONLY new & modified values!
-        const dirtyDeltas = syncStore.dirtyPersonsDelta;
-        const dirtyPersons = tracker.persons.length > 0
-          ? persons.filter((p) => tracker.persons.includes(p.id))
-          : [];
-        const dirtyFamilies = tracker.families.length > 0
-          ? Object.values(families || {}).filter((f) => tracker.families.includes(f.id))
-          : [];
-        const dirtyEvents = tracker.events.length > 0
-          ? Object.values(events || {}).filter((e) => tracker.events.includes(e.id))
-          : [];
-        const dirtySources = tracker.sources.length > 0
-          ? Object.values(sources || {}).filter((s) => tracker.sources.includes(s.id))
-          : [];
-        const dirtyPlaces = tracker.places.length > 0
-          ? Object.values(places || {}).filter((pl) => tracker.places.includes(pl.id))
-          : [];
-
-        // Batch delete removed items (atomic batches of max 400 operations)
-        if (tracker.deletedPersons.length > 0) {
-          await batchDeleteEntities('persons', tracker.deletedPersons, undefined, true);
-        }
-        if (tracker.deletedFamilies.length > 0) {
-          await batchDeleteEntities('families', tracker.deletedFamilies, undefined, true);
-        }
-        if (tracker.deletedEvents.length > 0) {
-          await batchDeleteEntities('events', tracker.deletedEvents, undefined, true);
-        }
-        if (tracker.deletedSources.length > 0) {
-          await batchDeleteEntities('sources', tracker.deletedSources, undefined, true);
-        }
-        if (tracker.deletedPlaces.length > 0) {
-          await batchDeleteEntities('places', tracker.deletedPlaces, undefined, true);
-        }
-
-        // Incremental Person Delta Writes: Push only changed fields for specific updated persons
-        let deltaWrittenCount = 0;
-        const personPromises: Promise<boolean>[] = [];
-        for (const personId of tracker.persons) {
-          const delta = dirtyDeltas[personId];
-          if (delta && Object.keys(delta).length > 0) {
-            personPromises.push(savePersonDeltaDoc(personId, delta));
-            deltaWrittenCount++;
-          } else {
-            const p = persons.find((item) => item.id === personId);
-            if (p) {
-              personPromises.push(savePersonDoc(p));
-              deltaWrittenCount++;
-            }
-          }
-        }
-        await Promise.allSettled(personPromises);
-
-        // Upload only dirty families, events, sources, places
-        const ok = await saveProjectDataToCloud({
-          families: dirtyFamilies.length > 0 ? dirtyFamilies : undefined,
-          events: dirtyEvents.length > 0 ? dirtyEvents : undefined,
-          sources: dirtySources.length > 0 ? dirtySources : undefined,
-          places: dirtyPlaces.length > 0 ? dirtyPlaces : undefined,
-          metricRecords: tracker.research.includes('metricRecords') ? metricRecords : undefined,
-          documents: tracker.research.includes('documents') ? documents : undefined,
-          tasks: tracker.research.includes('tasks') ? tasks : undefined,
-          findings: tracker.research.includes('findings') ? findings : undefined,
-          hypotheses: tracker.research.includes('hypotheses') ? hypotheses : undefined,
-          requests: tracker.research.includes('requests') ? requests : undefined,
-          matrixEntries: tracker.research.includes('matrixEntries') ? matrixEntries : undefined,
-          lastUpdated: new Date().toISOString()
-        });
-
-        if (ok || deltaWrittenCount > 0) {
-          const writtenCount = deltaWrittenCount + dirtyFamilies.length + dirtyEvents.length + dirtySources.length + dirtyPlaces.length + tracker.deletedPersons.length;
-          const quotaSaved = Math.max(0, persons.length - writtenCount);
-          setStatus('synced');
-          setLastSyncTime(new Date().toISOString());
-          syncStore.clearDirty();
-          setIsManualPushing(false);
-          return {
-            success: true,
-            message: `Розумне інкрементне збереження успішне: вивантажено тільки ${writtenCount} змінених записів (дельта полів)! Заощаджено ${quotaSaved} операцій квоти.`
-          };
-        }
-      }
-
-      if (useCloudSyncStore.getState().isQuotaExceeded) {
-        useCloudSyncStore.getState().clearDirty();
-        setStatus('offline');
-        setIsManualPushing(false);
-        return {
-          success: true,
-          message: 'Зміни надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально.'
-        };
-      }
-      setStatus('error', 'Помилка запису в Firestore');
-      setIsManualPushing(false);
-      return { success: false, message: 'Помилка вивантаження даних у хмару Firestore.' };
-    } catch (err: any) {
-      if (useCloudSyncStore.getState().isQuotaExceeded || err?.message?.includes('Quota') || err?.message?.includes('resource-exhausted')) {
-        useCloudSyncStore.getState().setQuotaExceeded(true);
-        useCloudSyncStore.getState().clearDirty();
-        setStatus('offline');
-        setIsManualPushing(false);
-        return {
-          success: true,
-          message: 'Зміни надійно збережено у пам’яті вашого браузера! Добову квоту Firestore вичерпано на сьогодні — дані захищені локально.'
-        };
-      }
-      const msg = err?.message || 'Помилка підключення до Firebase';
-      setStatus('error', msg);
-      setIsManualPushing(false);
-      return { success: false, message: msg };
-    }
-  }, [persons, families, events, sources, places, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries, setStatus, setLastSyncTime, setIsManualPushing]);
+      }, 'Точка перед вивантаженням у Firestore (' + data.persons.length + ' осіб)')
+    });
+  }, []);
 
   // Manual Trigger: Force Download from Cloud
   const triggerDownloadFromCloud = useCallback(async (): Promise<{ success: boolean; message: string; count?: number }> => {
     setIsManualPulling(true);
     setStatus('syncing');
     try {
-      // Save snapshot of current local state before pulling from cloud
-      try {
-        await saveSnapshot({
-          persons,
-          families,
-          sources,
-          events,
-          whitelist: [],
-          researchData: {
-            metricRecords,
-            documents,
-            tasks,
-            findings,
-            hypotheses,
-            requests,
-            matrixEntries
-          }
-        }, `Резервна точка перед завантаженням з хмари (${persons.length} осіб)`);
-      } catch (e) {
-        console.warn('Backup snapshot before pull error:', e);
-      }
-
-      const res = await fetchAllProjectDataFromCloud();
+      const res = await prepareCloudRestore(getCurrentCloudData, (data) => saveSnapshot({
+        persons: data.persons, families: data.families, sources: data.sources,
+        events: data.events, places: data.places, whitelist: [],
+        researchData: {
+          metricRecords: data.metricRecords, documents: data.documents, tasks: data.tasks,
+          findings: data.findings, hypotheses: data.hypotheses,
+          requests: data.requests, matrixEntries: data.matrixEntries
+        }
+      }, `Резервна точка перед завантаженням з хмари (${data.persons.length} осіб)`), fetchAllProjectDataFromCloud);
       if (res.success && res.data) {
         const d = res.data;
         let totalCount = 0;
@@ -957,9 +681,9 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (Array.isArray(d.requests)) setRequests(d.requests.filter((x: any) => !isDemoResearchItem(x)));
         if (Array.isArray(d.matrixEntries)) setMatrixEntries(d.matrixEntries.filter((x: any) => !isDemoResearchItem(x)));
 
+        useCloudSyncStore.getState().clearUnsavedChanges();
         setStatus('synced');
         setLastSyncTime(new Date().toISOString());
-        useCloudSyncStore.getState().clearUnsavedChanges();
         setIsManualPulling(false);
         return {
           success: true,
@@ -981,18 +705,16 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Export JSON
   const exportJsonData = useCallback(() => {
-    const projectData = {
-      version: '2.0',
-      exportedAt: new Date().toISOString(),
-      persons,
-      metricRecords,
-      documents,
-      tasks,
-      findings,
-      hypotheses,
-      requests,
-      matrixEntries
-    };
+    const currentTree = useGenealogyStore.getState();
+    const currentResearch = useResearchStore.getState();
+    const projectData = createProjectArchive({
+      persons: currentTree.persons, families: currentTree.families, sources: currentTree.sources,
+      events: currentTree.events, places: currentTree.places,
+      metricRecords: currentResearch.metricRecords, documents: currentResearch.documents,
+      tasks: currentResearch.tasks, findings: currentResearch.findings,
+      hypotheses: currentResearch.hypotheses, requests: currentResearch.requests,
+      matrixEntries: currentResearch.matrixEntries
+    });
     const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1000,15 +722,20 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     a.download = `genealogy_archive_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [persons, metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries]);
+  }, []);
 
   // Import JSON
   const importJsonData = useCallback(
     (jsonStr: string) => {
       try {
-        const parsed = JSON.parse(jsonStr);
+        const parsed = parseProjectArchive(jsonStr);
+        const normalizedPersons = parsed.persons?.filter((p: any) => !isDemoPerson(p)).map(normalizePerson);
+        if (parsed.families) setFamilies(parsed.families);
+        if (parsed.sources) setSources(parsed.sources);
+        if (parsed.events) setEvents(parsed.events);
+        if (parsed.places) setPlaces(parsed.places);
         if (parsed.persons && Array.isArray(parsed.persons)) {
-          setPersons(parsed.persons.filter((p: any) => !isDemoPerson(p)).map(normalizePerson));
+          setPersons(normalizedPersons);
         }
         if (parsed.metricRecords && Array.isArray(parsed.metricRecords)) {
           setMetricRecords(parsed.metricRecords.filter((m: any) => !isDemoResearchItem(m)));
@@ -1031,13 +758,14 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (parsed.matrixEntries && Array.isArray(parsed.matrixEntries)) {
           setMatrixEntries(parsed.matrixEntries.filter((e: any) => !isDemoResearchItem(e)));
         }
+        useCloudSyncStore.getState().markUnsavedChange();
         return true;
       } catch (err) {
         console.error('Import error:', err);
         return false;
       }
     },
-    [setPersons, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries]
+    [setPersons, setFamilies, setSources, setEvents, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries]
   );
 
   // Purge all demo data from tree and research

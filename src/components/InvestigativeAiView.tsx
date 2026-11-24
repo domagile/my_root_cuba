@@ -1,3 +1,4 @@
+import { requestAiJson } from '../services/aiApiClient';
 import React, { useState, useRef } from 'react';
 import { 
   Sparkles, 
@@ -246,10 +247,7 @@ export const InvestigativeAiView: React.FC = () => {
           textToSend += `\nПосилання на джерело: ${scanUrl.trim()}`;
         }
 
-        const res = await fetch('/api/ai/analyze-metric', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        const data = await requestAiJson('/api/ai/analyze-metric', {
             imageBase64: scanFileBase64,
             mimeType: scanFile?.type || 'image/jpeg',
             textContent: textToSend,
@@ -262,15 +260,12 @@ export const InvestigativeAiView: React.FC = () => {
               birthDate: p.birthDate,
               birthPlace: p.birthPlace
             }))
-          })
-        });
-
-        const data = await res.json();
+          });
         if (data.results && Array.isArray(data.results) && data.results.length > 0) {
           // Enrich server results with client-side phonetic fallback if needed
           const enrichedResults: RecognizedMetricItem[] = data.results.map((item: any, idx: number) => {
             let matchedName = item.matchedPersonName;
-            let confidence = item.confidence || 85;
+            let confidence = item.confidence ?? 0;
             let linkReason = item.linkReason || '';
             let matchedId = item.matchedPersonId;
 
@@ -312,7 +307,7 @@ export const InvestigativeAiView: React.FC = () => {
           });
 
           setScanResults(enrichedResults);
-          setUsedModel(data.source === 'gemini-3.7-flash' ? 'Gemini 3.7 Flash Multimodal' : 'Локальний аналізатор');
+          setUsedModel(data.source || 'Gemini');
         } else {
           setScanError('Не вдалося витягти структуровані записи з наданого матеріалу. Спробуйте інше зображення або чіткіший текстовий витяг.');
         }

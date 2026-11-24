@@ -43,10 +43,6 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
   const [treeTitle, setTreeTitle] = useState('Родовід нашої родини');
   const [authorName, setAuthorName] = useState('Дослідник родоводу');
   const [contactEmail, setContactEmail] = useState('domagile@gmail.com');
-  const [isPinProtected, setIsPinProtected] = useState(false);
-  const [pinCode, setPinCode] = useState('');
-  const [hideLivingDates, setHideLivingDates] = useState(false);
-  const [mode, setMode] = useState<'readonly' | 'editable'>('readonly');
   
   const [shareId, setShareId] = useState<string>('');
   const [shareUrl, setShareUrl] = useState<string>('');
@@ -76,9 +72,6 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
           if (parsed.title) setTreeTitle(parsed.title);
           if (parsed.authorName) setAuthorName(parsed.authorName);
           if (parsed.contactEmail) setContactEmail(parsed.contactEmail);
-          if (parsed.isPinProtected !== undefined) setIsPinProtected(parsed.isPinProtected);
-          if (parsed.pinCode) setPinCode(parsed.pinCode);
-          if (parsed.hideLivingDates !== undefined) setHideLivingDates(parsed.hideLivingDates);
           if (parsed.lastPublished) setLastPublished(parsed.lastPublished);
         } catch {}
       } else {
@@ -108,10 +101,9 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       rootPersonId: activePersonId || database.rootPersonId || Object.keys(database.persons)[0] || 'p1',
-      mode,
-      isPinProtected,
-      pinHash: isPinProtected && pinCode.trim() ? pinCode.trim() : undefined,
-      hideLivingDates,
+      mode: 'readonly',
+      isPinProtected: false,
+      hideLivingDates: true,
       personsCount: totalPersons,
       database: {
         persons: database.persons,
@@ -133,9 +125,6 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
         title: treeTitle,
         authorName,
         contactEmail,
-        isPinProtected,
-        pinCode,
-        hideLivingDates,
         lastPublished: now
       }));
       setStatusMessage({ text: 'Дерево успішно опубліковано в хмарі! Посилання готове до надсилання родичам.' });
@@ -263,65 +252,18 @@ export const ShareTreeModal: React.FC<ShareTreeModalProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <div className="font-semibold text-xs">Режим для родичів:</div>
-                  <div className="text-[11px] opacity-70">Родичі зможуть переглядати схему, біографії та шукати родичів</div>
+                  <div className="text-[11px] opacity-70">Без входу — схема та основні відомості лише про померлих</div>
                 </div>
                 <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
                   Тільки перегляд (Read-only)
                 </span>
               </div>
 
-              {/* PIN Code Protection Toggle */}
-              <div className="pt-2 border-t border-black/5 dark:border-white/5 flex items-start justify-between gap-3">
-                <div className="flex-1">
-                  <div className="font-semibold text-xs flex items-center gap-1.5">
-                    {isPinProtected ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Unlock className="w-3.5 h-3.5 opacity-60" />}
-                    Захистити дерево PIN-кодом
-                  </div>
-                  <div className="text-[11px] opacity-70">
-                    Відкрити дерево зможуть лише родичі, які знають 4-значний код
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={isPinProtected}
-                  onChange={(e) => setIsPinProtected(e.target.checked)}
-                  className="w-4 h-4 mt-1 accent-[#B88E3E] cursor-pointer"
-                />
-              </div>
-
-              {isPinProtected && (
-                <div className="pl-5 pt-1 animate-in fade-in">
-                  <label className="block text-[11px] font-semibold mb-1 opacity-80">
-                    Встановіть PIN-код доступу (наприклад 1945 або 2026):
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={8}
-                    value={pinCode}
-                    onChange={(e) => setPinCode(e.target.value)}
-                    placeholder="Введіть код..."
-                    className={`w-36 px-3 py-1.5 rounded-lg border ${theme.inputBorder} ${theme.inputBg} ${theme.inputText} text-xs font-mono font-bold tracking-widest text-center focus:outline-none focus:border-[#B88E3E]`}
-                  />
-                </div>
-              )}
-
-              {/* Privacy Filter Toggle */}
-              <div className="pt-2 border-t border-black/5 dark:border-white/5 flex items-start justify-between gap-3">
-                <div className="flex-1">
-                  <div className="font-semibold text-xs flex items-center gap-1.5">
-                    <Eye className="w-3.5 h-3.5 text-sky-500" />
-                    Приховати точні дати живих людей
-                  </div>
-                  <div className="text-[11px] opacity-70">
-                    Захист персональних даних (показуватиметься лише рік або "Живий")
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={hideLivingDates}
-                  onChange={(e) => setHideLivingDates(e.target.checked)}
-                  className="w-4 h-4 mt-1 accent-[#B88E3E] cursor-pointer"
-                />
+              <div className="pt-2 border-t border-black/5 dark:border-white/5 text-[11px] opacity-80">
+                Без входу за посиланням доступні лише померлі особи та їхні основні
+                біографічні дані. Живі особи, невідомий статус, нотатки, скани й джерела
+                залишаються приватними. Повне дерево доступне після входу через Google
+                користувачам із whitelist. Для оновлення публічних даних опублікуйте дерево повторно.
               </div>
             </div>
           </div>

@@ -58,7 +58,7 @@ import {
   fetchUserRepositories,
   createGitHubRepository
 } from '../services/githubService';
-import { getStorageStats } from '../utils/indexedDbStorage';
+import { getStorageStats, flushPendingLocalWrites } from '../utils/indexedDbStorage';
 import { ScanMigrationModal } from './modals/ScanMigrationModal';
 
 export const SettingsView: React.FC = () => {
@@ -73,6 +73,7 @@ export const SettingsView: React.FC = () => {
     families,
     sources,
     events,
+    places,
     metricRecords,
     tasks,
     hypotheses,
@@ -179,6 +180,7 @@ export const SettingsView: React.FC = () => {
   const [snapshots, setSnapshots] = useState<DataSnapshot[]>([]);
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
   const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null);
+  const [snapshotError, setSnapshotError] = useState(false);
 
   // IndexedDB Storage stats
   const [storageStats, setStorageStats] = useState<{
@@ -393,43 +395,51 @@ export const SettingsView: React.FC = () => {
   }, []);
 
   const handleCreateSnapshotNow = async () => {
+    setSnapshotError(false);
     setIsSavingSnapshot(true);
     try {
-      await saveSnapshot(
+      const saved = await saveSnapshot(
         {
           persons,
           families: families || {},
           sources: sources || {},
           events: events || {},
+          places: places || {},
+          researchData: { metricRecords, documents, tasks, findings, hypotheses, requests, matrixEntries },
           whitelist
         },
         'Ручна контрольна точка'
       );
+      if (!saved) throw new Error('Не вдалося записати контрольну точку. Перевірте місце та дозволи сховища.');
       await loadSnapshotsList();
-      setSnapshotMsg('Контрольну точку збережено в незалежне сховище!');
+      setSnapshotMsg('Контрольну точку збережено у сховищі цього браузера.');
       setTimeout(() => setSnapshotMsg(null), 3500);
     } catch (e) {
-      console.warn(e);
+      setSnapshotError(true);
+      setSnapshotMsg(e instanceof Error ? e.message : 'Не вдалося зберегти контрольну точку.');
     } finally {
       setIsSavingSnapshot(false);
     }
   };
 
-  const handleRestoreSnapshot = (snap: DataSnapshot) => {
+  const handleRestoreSnapshot = async (snap: DataSnapshot) => {
     if (!snap.data) return;
+    setSnapshotError(false);
     try {
       if (snap.data.persons) {
-        importJsonData(JSON.stringify(snap.data));
+        if (!importJsonData(JSON.stringify(snap.data))) throw new Error('Не вдалося прочитати контрольну точку.');
+        await flushPendingLocalWrites();
         setSnapshotMsg(`Архів успішно відновлено з точки ${new Date(snap.timestamp).toLocaleString('uk-UA')}`);
         setTimeout(() => setSnapshotMsg(null), 4000);
       }
     } catch (e) {
-      console.warn(e);
+      setSnapshotError(true);
+      setSnapshotMsg(e instanceof Error ? e.message : 'Не вдалося відновити контрольну точку.');
     }
   };
 
   const handleDeleteSnapshot = async (id: string) => {
-    await deleteSnapshot(id);
+    if (!await deleteSnapshot(id)) { setSnapshotError(true); setSnapshotMsg('Не вдалося видалити контрольну точку.'); return; }
     await loadSnapshotsList();
   };
 
@@ -609,6 +619,8 @@ export const SettingsView: React.FC = () => {
                 ? 'bg-amber-500/15 border-amber-500/30 text-amber-700 dark:text-amber-300'
                 : syncStatus === 'error'
                 ? 'bg-rose-500/15 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                : syncStatus === 'pending' || syncStatus === 'offline'
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-700 dark:text-amber-300'
                 : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
             }`}>
               {syncStatus === 'syncing' || isManualPushing || isManualPulling ? (
@@ -621,6 +633,8 @@ export const SettingsView: React.FC = () => {
                   <XCircle className="w-3.5 h-3.5 text-rose-500" />
                   <span>Помилка синхронізації</span>
                 </>
+              ) : syncStatus === 'pending' || syncStatus === 'offline' ? (
+                <span>{syncStatus === 'offline' ? 'Автономний режим: зміни не вивантажено' : 'Очікує підтвердження синхронізації'}</span>
               ) : (
                 <>
                   <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
@@ -1368,8 +1382,8 @@ export const SettingsView: React.FC = () => {
           </div>
 
           {snapshotMsg && (
-            <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2">
-              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <div role={snapshotError ? 'alert' : 'status'} className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${snapshotError ? 'bg-red-500/15 border-red-500/30 text-red-800 dark:text-red-200' : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-800 dark:text-emerald-200'}`}>
+              {snapshotError ? <AlertCircle className="w-4 h-4 shrink-0" /> : <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
               <span>{snapshotMsg}</span>
             </div>
           )}

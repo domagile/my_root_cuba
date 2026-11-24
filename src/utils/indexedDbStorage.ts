@@ -5,9 +5,11 @@
 
 /**
  * High-performance, non-blocking IndexedDB Storage Engine for Familio.
- * Replaces synchronous 5MB localStorage with unlimited asynchronous storage.
- * Provides transparent fallback, auto-migration, and fast synchronous boot cache.
+ * Stores large records asynchronously, subject to the browser storage quota.
+ * Provides legacy cache reads, auto-migration, and a fast synchronous boot cache.
  */
+
+import { useLocalPersistenceStore } from '../stores/useLocalPersistenceStore';
 
 const DB_NAME = 'familio_genealogy_idb_v1';
 const DB_VERSION = 1;
@@ -24,6 +26,12 @@ function getIDB(): Promise<IDBDatabase> {
 
   dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
+    let blocked = false;
+    request.onblocked = () => {
+      blocked = true;
+      dbPromise = null;
+      reject(new Error('Local storage is blocked by another tab. Close the other tab and retry.'));
+    };
 
     request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -34,9 +42,9 @@ function getIDB(): Promise<IDBDatabase> {
 
     request.onsuccess = (event: Event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      db.onclose = () => {
-        dbPromise = null;
-      };
+      if (blocked) { db.close(); return; }
+      db.onclose = () => { dbPromise = null; };
+      db.onversionchange = () => { db.close(); dbPromise = null; };
       resolve(db);
     };
 
@@ -55,7 +63,9 @@ function getIDB(): Promise<IDBDatabase> {
 const pendingWritesBuffer = new Map<string, any>();
 let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let maxWaitTimeoutId: ReturnType<typeof setTimeout> | null = null;
-let isFlushingInProgress = false;
+const pendingVersions = new Map<string, number>();
+let writeRevision = 0;
+let flushPromise: Promise<void> | null = null;
 
 const BATCH_DEBOUNCE_DELAY_MS = 300;
 const BATCH_MAX_WAIT_MS = 1200;
@@ -156,190 +166,133 @@ export async function idbGetMultiple(keys: string[]): Promise<Record<string, any
  * Asynchronously write a value to IndexedDB
  */
 export async function idbSet<T = any>(key: string, value: T): Promise<void> {
-  try {
-    const db = await getIDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.put(value, key);
-
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    // Fallback to localStorage
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {}
-  }
+  await idbSetMultiple({ [key]: value });
 }
 
-/**
- * Write multiple key-value pairs in a single readwrite transaction
- */
+/** Resolve only after the whole transaction commits. Never hide quota/abort errors. */
 export async function idbSetMultiple(entries: Record<string, any>): Promise<void> {
-  try {
-    const db = await getIDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
+  // A failed IndexedDB write must remain visibly pending. localStorage is only
+  // a legacy read cache: switching write backends could make stale data win on
+  // the next load, especially for large trees whose compact mirror is absent.
+  const db = await getIDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error || new Error('Local storage transaction aborted'));
+    tx.onerror = () => reject(tx.error || new Error('Local storage transaction failed'));
+    try {
       const store = tx.objectStore(STORE_NAME);
-
-      for (const [key, val] of Object.entries(entries)) {
-        store.put(val, key);
-      }
-
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch {
-    for (const [key, val] of Object.entries(entries)) {
-      try {
-        localStorage.setItem(key, JSON.stringify(val));
-      } catch {}
+      for (const [key, value] of Object.entries(entries)) store.put(value, key);
+    } catch (error) {
+      tx.abort();
+      reject(error);
     }
-  }
+  });
 }
 
 /**
  * Asynchronously delete a key from IndexedDB
  */
 export async function idbDelete(key: string): Promise<void> {
-  try {
-    const db = await getIDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.delete(key);
-
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    try {
-      localStorage.removeItem(key);
-    } catch {}
-  }
+  const db = await getIDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error || new Error('Local deletion aborted'));
+    tx.onerror = () => reject(tx.error || new Error('Local deletion failed'));
+    tx.objectStore(STORE_NAME).delete(key);
+  });
+  try { localStorage.removeItem(key); } catch { /* Optional legacy mirror */ }
 }
 
 /**
  * Flush all pending writes from the memory buffer to IndexedDB in a single batch transaction.
  * Also mirrors compact keys to localStorage.
  */
-export async function flushPendingLocalWrites(): Promise<void> {
-  if (flushTimeoutId) {
-    clearTimeout(flushTimeoutId);
-    flushTimeoutId = null;
-  }
-  if (maxWaitTimeoutId) {
-    clearTimeout(maxWaitTimeoutId);
-    maxWaitTimeoutId = null;
-  }
+function clearFlushTimers(): void {
+  if (flushTimeoutId) clearTimeout(flushTimeoutId);
+  if (maxWaitTimeoutId) clearTimeout(maxWaitTimeoutId);
+  flushTimeoutId = null;
+  maxWaitTimeoutId = null;
+}
 
-  if (pendingWritesBuffer.size === 0 || isFlushingInProgress) {
-    return;
-  }
-
-  isFlushingInProgress = true;
-  // Snapshot current pending batch
-  const batch: Record<string, any> = {};
-  pendingWritesBuffer.forEach((val, key) => {
-    batch[key] = val;
-  });
-  pendingWritesBuffer.clear();
-
-  try {
-    // 1. Single multi-put IDB transaction
-    await idbSetMultiple(batch);
-
-    // 2. Mirror light structures to localStorage in background
-    for (const [key, data] of Object.entries(batch)) {
-      try {
-        const serialized = JSON.stringify(data);
-        if (serialized.length < 1024 * 1024) {
-          localStorage.setItem(key, serialized);
-        } else {
-          localStorage.removeItem(key);
-        }
-      } catch {
-        try {
-          localStorage.removeItem(key);
-        } catch {}
-      }
-    }
-  } catch (err) {
-    console.warn('Batch storage flush warning:', err);
-  } finally {
-    isFlushingInProgress = false;
-    // If new writes arrived while flushing, schedule another flush
-    if (pendingWritesBuffer.size > 0 && !flushTimeoutId) {
-      flushTimeoutId = setTimeout(flushPendingLocalWrites, BATCH_DEBOUNCE_DELAY_MS);
+function mirrorCompactData(entries: Record<string, any>): void {
+  for (const [key, value] of Object.entries(entries)) {
+    try {
+      const serialized = JSON.stringify(value);
+      if (serialized.length < 1024 * 1024) localStorage.setItem(key, serialized);
+      else localStorage.removeItem(key);
+    } catch {
+      // The mirror is optional after an IndexedDB commit.
     }
   }
 }
 
-/**
- * Synchronous flush on page exit/unload so data is immediately saved to localStorage
- * if the browser kills background tasks before async IDB finishes.
- */
+export function flushPendingLocalWrites(): Promise<void> {
+  clearFlushTimers();
+  if (flushPromise) return flushPromise;
+  if (pendingWritesBuffer.size === 0) return Promise.resolve();
+
+  flushPromise = (async () => {
+    try {
+      while (pendingWritesBuffer.size > 0) {
+        const batch = Object.fromEntries(pendingWritesBuffer);
+        const versions = new Map(pendingVersions);
+        // Keep unconfirmed values in memory so reads and retries see them.
+        await idbSetMultiple(batch);
+        mirrorCompactData(batch);
+        for (const key of Object.keys(batch)) {
+          if (pendingVersions.get(key) === versions.get(key)) {
+            pendingWritesBuffer.delete(key);
+            pendingVersions.delete(key);
+          }
+        }
+        useLocalPersistenceStore.setState({ pendingWritesCount: pendingWritesBuffer.size, lastError: null });
+      }
+      clearFlushTimers();
+    } catch (error) {
+      clearFlushTimers();
+      useLocalPersistenceStore.setState({
+        pendingWritesCount: pendingWritesBuffer.size,
+        lastError: error instanceof Error ? error.message : 'Local storage write failed'
+      });
+      throw error;
+    } finally {
+      flushPromise = null;
+    }
+  })();
+  return flushPromise;
+}
+
+/** Best-effort emergency mirror. Large records still need a completed IDB commit. */
 export function flushPendingLocalWritesSync(): void {
   if (pendingWritesBuffer.size === 0) return;
-
-  pendingWritesBuffer.forEach((data, key) => {
-    try {
-      const serialized = JSON.stringify(data);
-      if (serialized.length < 1024 * 1024) {
-        localStorage.setItem(key, serialized);
-      }
-    } catch {}
-  });
-  // Also trigger async IDB flush
-  flushPendingLocalWrites().catch(() => {});
+  mirrorCompactData(Object.fromEntries(pendingWritesBuffer));
+  void flushPendingLocalWrites().catch(() => {});
 }
 
-/**
- * Unified persistence function with intelligent debounced batching:
- * 1. Batches rapid successive writes (typing, dragging, multi-updates) into a single transaction.
- * 2. Keeps UI thread at 60 FPS by eliminating redundant JSON.stringifications and IDB transactions.
- * 3. Supports immediate=true for critical transitions (import, restore, delete database).
- */
+export function hasPendingLocalWrites(): boolean {
+  return pendingWritesBuffer.size > 0;
+}
+
+/** Queue every write, including immediate writes, until durable confirmation. */
 export function persistLocalData(key: string, data: any, immediate: boolean = false): void {
+  pendingWritesBuffer.set(key, data);
+  pendingVersions.set(key, ++writeRevision);
+  useLocalPersistenceStore.setState({ pendingWritesCount: pendingWritesBuffer.size });
   if (immediate) {
-    pendingWritesBuffer.delete(key);
-    idbSet(key, data).catch(() => {});
-    try {
-      const serialized = JSON.stringify(data);
-      if (serialized.length < 1024 * 1024) {
-        localStorage.setItem(key, serialized);
-      } else {
-        localStorage.removeItem(key);
-      }
-    } catch {
-      try {
-        localStorage.removeItem(key);
-      } catch {}
-    }
+    void flushPendingLocalWrites().catch(() => {});
     return;
   }
-
-  // Add to batch buffer
-  pendingWritesBuffer.set(key, data);
-
-  // Debounce scheduling
-  if (flushTimeoutId) {
-    clearTimeout(flushTimeoutId);
-  }
-
-  flushTimeoutId = setTimeout(flushPendingLocalWrites, BATCH_DEBOUNCE_DELAY_MS);
-
-  if (!maxWaitTimeoutId) {
-    maxWaitTimeoutId = setTimeout(flushPendingLocalWrites, BATCH_MAX_WAIT_MS);
-  }
+  if (flushTimeoutId) clearTimeout(flushTimeoutId);
+  const flush = () => { void flushPendingLocalWrites().catch(() => {}); };
+  flushTimeoutId = setTimeout(flush, BATCH_DEBOUNCE_DELAY_MS);
+  if (!maxWaitTimeoutId) maxWaitTimeoutId = setTimeout(flush, BATCH_MAX_WAIT_MS);
 }
 
 /**
  * Auto-migration on first load:
- * Copies existing historical localStorage data into IndexedDB so historical trees,
- * research records, notes, and custom emblems are immediately preserved in the unlimited storage layer.
+ * Copies historical localStorage data into IndexedDB without removing the original cache.
  */
 export async function autoMigrateLocalStorageToIDB(): Promise<void> {
   if (typeof window === 'undefined') return;
@@ -387,16 +340,12 @@ export async function autoMigrateLocalStorageToIDB(): Promise<void> {
     for (const key of keysToCheck) {
       try {
         const idbVal = await idbGet(key);
-        if (!idbVal) {
+        if (idbVal === null) {
           const localVal = localStorage.getItem(key);
           if (localVal) {
-            try {
-              const parsed = JSON.parse(localVal);
-              await idbSet(key, parsed);
-            } catch {
-              // Plain string (e.g., custom emblem data URL)
-              await idbSet(key, localVal);
-            }
+            let parsed: any = localVal;
+            try { parsed = JSON.parse(localVal); } catch { /* Historical plain string */ }
+            await idbSet(key, parsed);
           }
         }
       } catch {}
@@ -448,8 +397,12 @@ export async function getStorageStats(): Promise<{
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', () => {
+  window.addEventListener('beforeunload', (event) => {
     flushPendingLocalWritesSync();
+    if (hasPendingLocalWrites()) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
   });
   window.addEventListener('pagehide', () => {
     flushPendingLocalWritesSync();

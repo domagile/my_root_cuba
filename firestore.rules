@@ -1,175 +1,193 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function hasVerifiedEmail() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true;
     }
 
-    function isSignedIn() {
-      return request.auth != null;
+    // Existing INITIAL_WHITELIST owners, limited to this tree and real Firebase identities.
+    function isOwner(projectId) {
+      return hasVerifiedEmail() && projectId == 'defaultProject'
+        && request.auth.token.email.lower() in ['domagile@gmail.com', 'cubatarara400@gmail.com'];
     }
 
-    // Projects root match
+    function whitelistId(email) {
+      return email.lower().replace('[^a-z0-9]', '_');
+    }
+
+    function hasRole(projectId, roles) {
+      return hasVerifiedEmail()
+        && exists(/databases/$(database)/documents/projects/$(projectId)/whitelist/$(whitelistId(request.auth.token.email)))
+        && get(/databases/$(database)/documents/projects/$(projectId)/whitelist/$(whitelistId(request.auth.token.email))).data.email.lower() == request.auth.token.email.lower()
+        && get(/databases/$(database)/documents/projects/$(projectId)/whitelist/$(whitelistId(request.auth.token.email))).data.status == 'active'
+        && get(/databases/$(database)/documents/projects/$(projectId)/whitelist/$(whitelistId(request.auth.token.email))).data.role in roles;
+    }
+
+    function canRead(projectId) {
+      return isOwner(projectId) || hasRole(projectId, ['admin', 'editor', 'researcher', 'viewer']);
+    }
+
+    function canEdit(projectId) {
+      return isOwner(projectId) || hasRole(projectId, ['admin', 'editor', 'researcher']);
+    }
+
+    function canAdmin(projectId) {
+      return isOwner(projectId) || hasRole(projectId, ['admin']);
+    }
+
+    function validWhitelistEntry(entryId) {
+      return request.resource.data.email is string
+        && entryId == whitelistId(request.resource.data.email)
+        && request.resource.data.role in ['admin', 'editor', 'researcher', 'viewer']
+        && request.resource.data.status in ['active', 'suspended'];
+    }
+
+    function ownsRequest(data) {
+      return hasVerifiedEmail() && data.email is string
+        && data.email.lower() == request.auth.token.email.lower();
+    }
+
     match /projects/{projectId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if canRead(projectId);
+      allow write: if canEdit(projectId);
 
-      // Persons subcollection
-      match /persons/{personId} {
-        allow read: if true;
-        allow write: if true;
+      // Explicit allowlist: new collections remain private until reviewed.
+      match /{collectionName}/{recordId} {
+        allow read: if collectionName in [
+          'persons', 'families', 'events', 'sources', 'places', 'metricRecords',
+          'researchNotes', 'systemSettings', 'documents', 'hypotheses', 'tasks',
+          'findings', 'requests', 'matrixEntries'
+        ] && canRead(projectId);
+        allow write: if collectionName in [
+          'persons', 'families', 'events', 'sources', 'places', 'metricRecords',
+          'researchNotes', 'systemSettings', 'documents', 'hypotheses', 'tasks',
+          'findings', 'requests', 'matrixEntries'
+        ] && canEdit(projectId);
       }
 
-      // Families subcollection
-      match /families/{familyId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Events subcollection
-      match /events/{eventId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Sources subcollection
-      match /sources/{sourceId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Places subcollection (Village/City history, online metric links, researcher notes)
-      match /places/{placeId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Metric records subcollection
-      match /metricRecords/{recordId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Research Notes subcollection (Google Keep style notes)
-      match /researchNotes/{noteId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // System settings subcollection (ignoredDuplicates, tombstones, mergedPersons)
-      match /systemSettings/{settingId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Documents subcollection
-      match /documents/{documentId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Hypotheses subcollection
-      match /hypotheses/{hypothesisId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Tasks subcollection
-      match /tasks/{taskId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Findings subcollection
-      match /findings/{findingId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Archive requests subcollection
-      match /requests/{requestId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Access requests subcollection
-      match /accessRequests/{requestId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Whitelist subcollection
       match /whitelist/{entryId} {
-        allow read: if true;
-        allow write: if true;
+        allow read: if canRead(projectId);
+        allow create, update: if canAdmin(projectId) && validWhitelistEntry(entryId);
+        allow delete: if canAdmin(projectId);
       }
-
-      // Access config subcollection
       match /accessConfig/{configId} {
-        allow read: if true;
-        allow write: if true;
+        allow read, write: if canAdmin(projectId);
       }
-
-      // Matrix entries subcollection
-      match /matrixEntries/{entryId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Whitelist subcollection
-      match /whitelist/{whitelistId} {
-        allow read: if true;
-        allow write: if true;
-      }
-
-      // Project configuration subcollection
       match /config/{configId} {
-        allow read: if true;
-        allow write: if true;
+        allow read, write: if canAdmin(projectId);
+      }
+      match /accessRequests/{requestId} {
+        allow create: if ownsRequest(request.resource.data)
+          && request.resource.data.status == 'pending'
+          && request.resource.data.requestedRole in ['viewer', 'researcher', 'editor'];
+        allow read: if canAdmin(projectId) || ownsRequest(resource.data);
+        allow update, delete: if canAdmin(projectId);
       }
     }
 
-    // Top-level Whitelist collection
-    match /whitelist/{whitelistId} {
-      allow read: if true;
-      allow write: if true;
+    // Legacy mirrors are not an authority for project membership.
+    match /whitelist/{entryId} {
+      allow read: if canRead('defaultProject');
+      allow create, update: if canAdmin('defaultProject') && validWhitelistEntry(entryId);
+      allow delete: if canAdmin('defaultProject');
     }
-
-    // Top-level Admins collection
     match /admins/{adminId} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if canAdmin('defaultProject');
     }
-
-    // Access requests top-level collection
     match /accessRequests/{requestId} {
-      allow read: if true;
-      allow write: if true;
+      allow create: if ownsRequest(request.resource.data)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.requestedRole in ['viewer', 'researcher', 'editor'];
+      allow read: if canAdmin('defaultProject') || ownsRequest(resource.data);
+      allow update, delete: if canAdmin('defaultProject');
     }
-
-    // Trees and sharedTrees collections
-    match /trees/{treeId} {
-      allow read: if true;
-      allow write: if true;
+    match /genealogyProjects/{projectId} {
+      allow read: if canRead(projectId);
+      allow write: if canEdit(projectId);
     }
-
-    match /sharedTrees/{treeId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Healthcheck and connection validation
     match /test/{testId} {
-      allow read, write: if true;
+      allow read: if canRead('defaultProject');
+      allow write: if canEdit('defaultProject');
     }
 
-    // Legacy monolithic collection (for seamless one-time migration to subcollections)
-    match /genealogyProjects/{docId} {
-      allow read, write: if true;
+    function managesShare(treeId) {
+      return canAdmin('defaultProject') || (canEdit('defaultProject')
+        && get(/databases/$(database)/documents/sharedTrees/$(treeId)).data.ownerUid == request.auth.uid);
     }
 
-    // Default deny catch-all
+    // Full snapshots, including living people and PIN settings, are private.
+    match /sharedTrees/{treeId} {
+      allow read: if canRead('defaultProject');
+      allow create: if canEdit('defaultProject') && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if managesShare(treeId) && request.resource.data.ownerUid == request.auth.uid;
+      allow delete: if managesShare(treeId);
+    }
+
+    function activePublicVersion(treeId, versionId) {
+      let tree = get(/databases/$(database)/documents/publicTrees/$(treeId)).data;
+      return tree.schemaVersion == 1 && tree.enabled == true && tree.version == versionId;
+    }
+    function validPublicMetadata(treeId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['id', 'schemaVersion', 'version', 'enabled', 'rootPersonId', 'updatedAt'])
+        && data.id == treeId && data.schemaVersion == 1
+        && data.version is string && data.version.size() <= 128
+        && data.enabled is bool && data.rootPersonId is string && data.updatedAt is string;
+    }
+    function optionalString(data, key) {
+      return !(key in data) || (data[key] is string && data[key].size() <= 512);
+    }
+    function optionalYear(data, key) {
+      return !(key in data) || data[key] is int || (data[key] is string && data[key].size() <= 128);
+    }
+    function validPublicPerson(personId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'id', 'isLiving', 'gender', 'firstName', 'lastName', 'patronymic',
+          'maidenName', 'birthDate', 'birthYear', 'birthPlace', 'deathDate',
+          'deathYear', 'deathPlace', 'fatherId', 'motherId', 'parentFamilyId'
+        ])
+        && data.id == personId && data.isLiving == false
+        && data.gender in ['male', 'female', 'other', 'M', 'F', 'U']
+        && optionalString(data, 'firstName') && optionalString(data, 'lastName')
+        && optionalString(data, 'patronymic') && optionalString(data, 'maidenName')
+        && optionalString(data, 'birthDate') && optionalString(data, 'birthPlace')
+        && optionalString(data, 'deathDate') && optionalString(data, 'deathPlace')
+        && optionalYear(data, 'birthYear') && optionalYear(data, 'deathYear')
+        && optionalString(data, 'fatherId') && optionalString(data, 'motherId')
+        && optionalString(data, 'parentFamilyId');
+    }
+    function publicRelative(treeId, versionId, data, key) {
+      return !(key in data) || (data[key] is string
+        && get(/databases/$(database)/documents/publicTrees/$(treeId)/versions/$(versionId)/persons/$(data[key])).data.isLiving == false);
+    }
+
+    match /publicTrees/{treeId} {
+      // No public enumeration of links and no arbitrary public metadata.
+      allow get: if resource.data.schemaVersion == 1;
+      allow list: if false;
+      allow create, update: if managesShare(treeId) && validPublicMetadata(treeId);
+      allow delete: if managesShare(treeId);
+      match /versions/{versionId}/persons/{personId} {
+        allow read: if managesShare(treeId)
+          || (activePublicVersion(treeId, versionId) && resource.data.isLiving == false);
+        allow create, update: if managesShare(treeId) && validPublicPerson(personId);
+        allow delete: if managesShare(treeId);
+      }
+      match /versions/{versionId}/families/{familyId} {
+        allow read: if managesShare(treeId) || activePublicVersion(treeId, versionId);
+        allow create, update: if managesShare(treeId)
+          && request.resource.data.keys().hasOnly(['id', 'husbandId', 'wifeId'])
+          && request.resource.data.id == familyId
+          && publicRelative(treeId, versionId, request.resource.data, 'husbandId')
+          && publicRelative(treeId, versionId, request.resource.data, 'wifeId');
+        allow delete: if managesShare(treeId);
+      }
+    }
+
+    // Unknown paths, including the unused legacy /trees collection, stay closed.
     match /{document=**} {
       allow read, write: if false;
     }

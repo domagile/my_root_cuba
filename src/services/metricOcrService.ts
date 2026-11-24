@@ -4,6 +4,7 @@
  */
 
 import { Person } from '../types';
+import { requestAiJson } from './aiApiClient';
 
 export interface RecognizedMetricItem {
   extractedPersonName: string;
@@ -44,6 +45,7 @@ export async function urlOrBlobToBase64(url: string): Promise<{ base64: string; 
 
   // Fetch image blob
   const response = await fetch(url);
+  if (!response.ok) throw new Error(`Не вдалося завантажити скан (${response.status}).`);
   const blob = await response.blob();
   const mimeType = blob.type || 'image/jpeg';
 
@@ -106,27 +108,12 @@ export async function transcribeMetricImageWithAI(params: {
       }))
     };
 
-    const res = await fetch('/api/ai/analyze-metric', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-      return {
-        success: false,
-        results: [],
-        error: `Помилка сервера ШІ-аналізу (${res.status})`
-      };
-    }
-
-    const data = await res.json();
+    const data = await requestAiJson('/api/ai/analyze-metric', payload);
+    if (!Array.isArray(data.results)) throw new Error('Некоректний список результатів ШІ.');
     return {
       success: true,
       results: Array.isArray(data.results) ? data.results : [],
-      modelUsed: data.modelUsed,
+      modelUsed: data.source || data.modelUsed,
       fallback: data.fallback,
       message: data.message
     };
@@ -134,7 +121,7 @@ export async function transcribeMetricImageWithAI(params: {
     return {
       success: false,
       results: [],
-      error: `Мережева помилка аналізу зображення: ${err.message || String(err)}`
+      error: `Помилка аналізу зображення: ${err.message || String(err)}`
     };
   }
 }

@@ -23,6 +23,7 @@ export interface DataSnapshot {
     families: Record<string, any>;
     sources: Record<string, any>;
     events: Record<string, any>;
+    places?: Record<string, any>;
     trashPersons?: any[];
     whitelist: any[];
     accessConfig?: any;
@@ -47,7 +48,7 @@ function getDB(): Promise<IDBDatabase> {
 
   if (dbPromise) return dbPromise;
 
-  dbPromise = new Promise((resolve, reject) => {
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     try {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
@@ -62,7 +63,10 @@ function getDB(): Promise<IDBDatabase> {
       };
 
       request.onsuccess = (event) => {
-        resolve((event.target as IDBOpenDBRequest).result);
+        const db = (event.target as IDBOpenDBRequest).result;
+        db.onversionchange = () => { db.close(); dbPromise = null; };
+        db.onclose = () => { dbPromise = null; };
+        resolve(db);
       };
 
       request.onerror = (event) => {
@@ -72,7 +76,7 @@ function getDB(): Promise<IDBDatabase> {
     } catch (e) {
       reject(e);
     }
-  });
+  }).catch((error) => { dbPromise = null; throw error; });
 
   return dbPromise;
 }
@@ -83,13 +87,14 @@ function getDB(): Promise<IDBDatabase> {
 export async function saveToIDB(key: string, value: any): Promise<boolean> {
   try {
     const db = await getDB();
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const req = store.put(value, key);
 
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => {
+      tx.oncomplete = () => resolve(true);
+      tx.onabort = () => resolve(false);
+      tx.onerror = () => {
         console.warn(`Failed to write key ${key} to IndexedDB`);
         resolve(false);
       };
@@ -105,7 +110,7 @@ export async function saveToIDB(key: string, value: any): Promise<boolean> {
 export async function getFromIDB<T = any>(key: string): Promise<T | null> {
   try {
     const db = await getDB();
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
       const req = store.get(key);
@@ -139,17 +144,15 @@ export async function saveSnapshot(
       data: snapshotData
     };
 
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
       const tx = db.transaction(SNAPSHOTS_STORE, 'readwrite');
       const store = tx.objectStore(SNAPSHOTS_STORE);
       const req = store.put(snapshot);
 
-      req.onsuccess = () => {
-        // Also keep last 15 snapshots max to avoid filling storage
-        cleanOldSnapshots(store);
-        resolve(snapshot);
-      };
-      req.onerror = () => resolve(null);
+      req.onsuccess = () => cleanOldSnapshots(store);
+      tx.oncomplete = () => resolve(snapshot);
+      tx.onabort = () => resolve(null);
+      tx.onerror = () => resolve(null);
     });
   } catch {
     return null;
@@ -178,7 +181,7 @@ function cleanOldSnapshots(store: IDBObjectStore) {
 export async function getAllSnapshots(): Promise<DataSnapshot[]> {
   try {
     const db = await getDB();
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
       const tx = db.transaction(SNAPSHOTS_STORE, 'readwrite');
       const store = tx.objectStore(SNAPSHOTS_STORE);
       const req = store.getAll();
@@ -213,12 +216,13 @@ export async function getAllSnapshots(): Promise<DataSnapshot[]> {
 export async function deleteSnapshot(id: string): Promise<boolean> {
   try {
     const db = await getDB();
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
       const tx = db.transaction(SNAPSHOTS_STORE, 'readwrite');
       const store = tx.objectStore(SNAPSHOTS_STORE);
       const req = store.delete(id);
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => resolve(false);
+      tx.oncomplete = () => resolve(true);
+      tx.onabort = () => resolve(false);
+      tx.onerror = () => resolve(false);
     });
   } catch {
     return false;

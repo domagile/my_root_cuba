@@ -1,0 +1,30 @@
+name: Verify application
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.5'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run test:sync
+      - run: bun run test:storage
+      - run: bun run test:api
+      - run: bun run test:firestore
+      - run: bun run build
+      - run: bun run test:server

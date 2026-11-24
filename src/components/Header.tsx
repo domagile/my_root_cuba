@@ -249,7 +249,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                 ? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-400/30'
                 : syncStatus === 'error'
                 ? 'bg-rose-500/20 border-rose-500/50 text-rose-500 hover:bg-rose-500/30'
-                : hasUnsavedChanges && syncMode === 'manual'
+                : (hasUnsavedChanges || syncStatus === 'pending')
                 ? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 ring-1 ring-amber-400/30'
                 : 'bg-amber-500/10 dark:bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25'
             }`}
@@ -260,8 +260,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                 ? 'Firestore: Автономний локальний режим (добову квоту вичерпано, локальні дані в безпеці)'
                 : syncStatus === 'error'
                 ? 'Firestore: Помилка синхронізації'
-                : hasUnsavedChanges && syncMode === 'manual'
-                ? `Firestore: Є ${unsavedChangesCount} незбережених змін — Натисніть «Вивантажити»`
+                : (hasUnsavedChanges || syncStatus === 'pending')
+                ? (hasUnsavedChanges ? `Firestore: Є ${unsavedChangesCount} невивантажених змін — Натисніть «Вивантажити»` : 'Firestore: Синхронізацію ще не підтверджено')
                 : `Firestore: Синхронізовано з БД (${persons.length} осіб) — Натисніть для меню`
             }
           >
@@ -272,7 +272,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500"></span>
             ) : syncStatus === 'error' ? (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
-            ) : hasUnsavedChanges && syncMode === 'manual' ? (
+            ) : (hasUnsavedChanges || syncStatus === 'pending') ? (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
             ) : (
               <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
@@ -384,6 +384,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
                           <AlertCircle className="w-3 h-3 text-rose-500" />
                           <span className="text-rose-500">Помилка підключення</span>
                         </>
+                      ) : hasUnsavedChanges || syncStatus === 'pending' ? (
+                        <span className="text-amber-600 dark:text-amber-400">Очікує вивантаження</span>
                       ) : (
                         <>
                           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>

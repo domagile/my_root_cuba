@@ -19,6 +19,7 @@ import {
   batchDeleteEntities
 } from '../lib/firebase';
 import { useCloudSyncStore, EntitySyncType, isQuotaExceededToday } from './useCloudSyncStore';
+import { synchronizePersonDeltas } from '../services/cloudSyncService';
 import { computePersonDelta } from '../utils/personDelta';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
@@ -104,21 +105,9 @@ export function scheduleCloudPersonDelta(personId: string, delta: Partial<Person
     clearTimeout(cloudDeltaDebounceTimer);
   }
 
-  cloudDeltaDebounceTimer = setTimeout(async () => {
+  cloudDeltaDebounceTimer = setTimeout(() => {
     cloudDeltaDebounceTimer = null;
-    const entries = Array.from(pendingCloudPersonDeltas.entries());
-    pendingCloudPersonDeltas.clear();
-
-    for (const [id, coalescedDelta] of entries) {
-      if (Object.keys(coalescedDelta).length > 0) {
-        try {
-          const ok = await savePersonDeltaDoc(id, coalescedDelta);
-          if (ok) {
-            syncStore.clearPersonDirtyDelta(id);
-          }
-        } catch {}
-      }
-    }
+    void flushPendingCloudDeltas();
   }, CLOUD_DELTA_DEBOUNCE_MS);
 }
 
@@ -127,20 +116,9 @@ export async function flushPendingCloudDeltas(): Promise<void> {
     clearTimeout(cloudDeltaDebounceTimer);
     cloudDeltaDebounceTimer = null;
   }
-  const entries = Array.from(pendingCloudPersonDeltas.entries());
+  const ids = Array.from(pendingCloudPersonDeltas.keys());
   pendingCloudPersonDeltas.clear();
-  const syncStore = useCloudSyncStore.getState();
-
-  for (const [id, delta] of entries) {
-    if (Object.keys(delta).length > 0) {
-      try {
-        const ok = await savePersonDeltaDoc(id, delta);
-        if (ok) {
-          syncStore.clearPersonDirtyDelta(id);
-        }
-      } catch {}
-    }
-  }
+  await synchronizePersonDeltas(ids, savePersonDeltaDoc);
 }
 
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
@@ -271,7 +249,7 @@ export const normalizePerson = (p: Person): Person => {
     birthDate,
     deathYear,
     deathDate,
-    gender: p.gender === 'female' || p.gender === 'F' ? 'female' : 'male',
+    gender: p.gender === 'female' || p.gender === 'F' ? 'female' : p.gender === 'male' || p.gender === 'M' ? 'male' : 'other',
     avatar,
     avatarUrl: avatar,
     photoUrl: avatar,

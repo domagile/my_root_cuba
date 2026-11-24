@@ -1,3 +1,6 @@
+import { requestAiJson } from '../../services/aiApiClient';
+import { urlOrBlobToBase64 } from '../../services/metricOcrService';
+import { aiEntityToPerson } from '../../utils/aiEntityToPerson';
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   ZoomIn, 
@@ -55,6 +58,10 @@ export const NyshporkaViewer: React.FC<NyshporkaViewerProps> = ({
   const [showFiltersPanel, setShowFiltersPanel] = useState<boolean>(false);
   const [isCheatSheetOpen, setIsCheatSheetOpen] = useState<boolean>(false);
 
+  const [aiError, setAiError] = useState<string | null>(null);
+  const scanVersion = useRef(0);
+  useEffect(() => { scanVersion.current++; setAnalysisResult(null); setAiError(null); }, [currentFrameId, customImage]);
+
   // Paleographic Image Filters
   const [filters, setFilters] = useState<ImageFilters>({
     brightness: 100,
@@ -89,23 +96,8 @@ export const NyshporkaViewer: React.FC<NyshporkaViewerProps> = ({
     size: [2000, 3000]
   };
 
-  // Generate Latin/Polish Skryba transcription fallback if not present
-  const skrybaFallback = currentFrame.pysarText
-    ? currentFrame.pysarText
-        .split('\n')
-        .map((line: string) => {
-          return line
-            .replace(/Дело/g, 'Acta')
-            .replace(/Подольская/g, 'Podoliensis')
-            .replace(/духовная консисторія/g, 'Consistorium Spirituale')
-            .replace(/Долищинскаго Григодія/g, 'Doliszczynski Gregorius')
-            .replace(/с\. Линовенькаго/g, 'villa Lipowenkie')
-            .replace(/Балискаго уда/g, 'districtus Balcensis')
-            .replace(/ноября/g, 'Novembris')
-            .replace(/августа/g, 'Augusti');
-        })
-        .join('\n')
-    : '';
+  // Missing transcriptions stay empty; a transliteration is not a separate OCR result.
+  const skrybaFallback = '';
 
   const imageSrc = customImage || currentFrame.imageUrl;
   
@@ -179,43 +171,24 @@ ${currentText}
   };
 
   const handleTriggerAI = async () => {
+    const version = scanVersion.current;
+    setAiError(null);
     setIsAnalyzing(true);
     try {
-      const resp = await fetch('/api/nyshporka/htr-analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentContext: `Архівна справа ДАХмО 315-1-159, аркуш ${currentFrameId}. Рукопис XIX ст. (скоропис).`
-        })
+      const image = await urlOrBlobToBase64(imageSrc);
+      const data = await requestAiJson('/api/nyshporka/htr-analyze', {
+        imageBase64: image.base64, mimeType: image.mimeType,
+        documentContext: customImage ? 'Користувацький скан.' : `Архівна справа ДАХмО 315-1-159, аркуш ${currentFrameId}.`
       });
-      const data = await resp.json();
-      setAnalysisResult(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsAnalyzing(false);
-    }
+      if (version === scanVersion.current) setAnalysisResult(data);
+    } catch (error) {
+      if (version === scanVersion.current) setAiError(error instanceof Error ? error.message : 'Не вдалося розпізнати скан.');
+    } finally { setIsAnalyzing(false); }
   };
 
   const handleAddEntityToTree = (entity: any) => {
-    const parts = (entity.name || '').split(' ');
-    const lastName = parts[0] || 'Долищинський';
-    const firstName = parts[1] || 'Григорій';
-    const patronymic = parts[2] || '';
-
-    addPerson({
-      id: `person-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      firstName,
-      lastName,
-      patronymic,
-      gender: 'M',
-      birthYear: parseInt(entity.year) || 1796,
-      birthPlace: entity.place || 'с. Липовеньке, Балтський повіт',
-      notes: `Знайдено рушієм Нишпорка в архівній справі ДАХмО 315-1-159. Соціальний стан: ${entity.status || 'Священнослужитель/дякон'}. ${entity.role || ''}`,
-      isLiving: false,
-      researchStatus: 'confirmed'
-    });
-    alert(`Особу «${entity.name}» успішно додано до вашого родинного дерева!`);
+    addPerson(aiEntityToPerson(entity, customImage ? 'Користувацький скан.' : `Архівна справа ДАХмО 315-1-159, аркуш ${currentFrameId}.`));
+    alert(`Особу «${entity.name}» додано як кандидата, що потребує перевірки!`);
   };
 
   // Calculate CSS Filter style
@@ -228,6 +201,7 @@ ${currentText}
 
   return (
     <div className="space-y-4">
+      {aiError && <div role="alert" className="rounded-xl bg-red-100 text-red-950 p-4">{aiError}</div>}
       {/* Top Toolbar */}
       <div className={`p-4 rounded-2xl ${theme.cardBg} border ${theme.cardBorder} flex flex-wrap items-center justify-between gap-3 shadow-sm`}>
         {/* Frame Selection */}

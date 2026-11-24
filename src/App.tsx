@@ -11,6 +11,7 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { Person } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { LocalPersistenceBanner } from './components/LocalPersistenceBanner';
 import { AUTHOR_CONTACT_EMAIL } from './constants/contact';
 import { getThemeConfig } from './utils/theme';
 import { isUserWhitelisted } from './rodovid/utils/privacy';
@@ -274,6 +275,7 @@ function AppContent() {
           onOpenContactModal={() => setShowContactModal(true)}
         />
 
+        <LocalPersistenceBanner />
         {/* Tab Router */}
         <main className="flex-1 flex flex-col h-full min-h-0 relative overflow-x-auto overflow-y-hidden">
           <React.Suspense fallback={<ViewLoadingFallback />}>

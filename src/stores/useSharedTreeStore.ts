@@ -1,5 +1,9 @@
 import { create } from 'zustand';
-import { SharedTreeData, getSharedTreeFromCloud, subscribeToSharedTreeCloud, publishSharedTreeToCloud } from '../lib/firebase';
+import { SharedTreeData, getSharedTreeFromCloud, subscribeToSharedTreeCloud, publishSharedTreeToCloud, subscribeToFirebaseAuth } from '../lib/firebase';
+
+let unsubscribeTree: (() => void) | undefined;
+let unsubscribeAuth: (() => void) | undefined;
+let loadRevision = 0;
 
 interface SharedTreeState {
   shareId: string | null;
@@ -39,9 +43,14 @@ export const useSharedTreeStore = create<SharedTreeState>((set, get) => ({
   },
 
   loadSharedTree: async (shareId: string) => {
-    set({ isLoading: true, error: null, shareId, isSharedMode: true });
+    unsubscribeTree?.();
+    unsubscribeAuth?.();
+    const revision = ++loadRevision;
+    set({ isLoading: true, error: null, shareId, isSharedMode: true,
+      sharedTree: null, pinRequired: false, pinVerified: false });
     try {
       const res = await getSharedTreeFromCloud(shareId);
+      if (revision !== loadRevision) return false;
       if (res.success && res.data) {
         const tree = res.data;
         const requiresPin = Boolean(tree.isPinProtected && tree.pinHash);
@@ -55,13 +64,22 @@ export const useSharedTreeStore = create<SharedTreeState>((set, get) => ({
         });
 
         // Setup realtime sync for shared viewers
-        subscribeToSharedTreeCloud(shareId, (updatedTree) => {
+        unsubscribeTree = subscribeToSharedTreeCloud(shareId, (updatedTree) => {
+          if (revision !== loadRevision) return;
           if (updatedTree) {
             set((state) => ({
               ...state,
-              sharedTree: updatedTree
+              sharedTree: updatedTree, error: null
             }));
+          } else {
+            set({ sharedTree: null, error: 'Доступ відкликано або публічна версія оновлюється.' });
           }
+        }, Boolean(tree.publicOnly));
+        let initialAuthCallback = true;
+        unsubscribeAuth = subscribeToFirebaseAuth(() => {
+          if (initialAuthCallback) { initialAuthCallback = false; return; }
+          // Drop any private snapshot immediately when the Firebase session changes.
+          get().loadSharedTree(shareId);
         });
 
         return true;
@@ -74,6 +92,7 @@ export const useSharedTreeStore = create<SharedTreeState>((set, get) => ({
         return false;
       }
     } catch (e: any) {
+      if (revision !== loadRevision) return false;
       set({
         isLoading: false,
         error: e?.message || 'Помилка завантаження спільного дерева.',
@@ -99,6 +118,11 @@ export const useSharedTreeStore = create<SharedTreeState>((set, get) => ({
   },
 
   exitSharedMode: () => {
+    loadRevision++;
+    unsubscribeTree?.();
+    unsubscribeAuth?.();
+    unsubscribeTree = undefined;
+    unsubscribeAuth = undefined;
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.delete('share');

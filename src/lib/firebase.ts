@@ -39,6 +39,7 @@ import {
   Auth
 } from 'firebase/auth';
 import firebaseConfigRaw from '../../firebase-applet-config.json';
+import { getPublicTree, publishPublicTree } from '../services/publicTreeService';
 
 export const DEFAULT_PROJECT_ID = 'defaultProject';
 
@@ -870,65 +871,15 @@ export async function saveWhitelistEntryToCloud(
   entry: any,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (isCloudWriteBlocked()) {
-    return false;
-  }
-  try {
-    const db = getDbInstance();
-    if (!db || !entry?.id) return false;
-    const cleanData = JSON.parse(JSON.stringify(entry));
-    cleanData.updatedAt = new Date().toISOString();
-    const docRef = doc(db, 'projects', projectId, 'whitelist', String(entry.id));
-    await setDoc(docRef, cleanData, { merge: true });
-    // Also save in top-level whitelist for multi-browser and global admin lookup
-    try {
-      const topRef = doc(db, 'whitelist', String(entry.id));
-      await setDoc(topRef, cleanData, { merge: true });
-    } catch {}
-    return true;
-  } catch (err) {
-    if (isFirestoreQuotaError(err)) {
-      useCloudSyncStore.getState().setQuotaExceeded(true);
-      markQuotaExceededToday(true);
-      const firestore = getDbInstance();
-      if (firestore) {
-        disableNetwork(firestore).catch(() => {});
-      }
-    }
-    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/whitelist/${entry.id}`);
-    return false;
-  }
+  // Rules resolve membership by verified email, never by a client-generated ID.
+  return saveWhitelistDoc(entry, projectId);
 }
 
 export async function deleteWhitelistEntryFromCloud(
-  entryId: string,
+  emailOrId: string,
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
-  if (isCloudWriteBlocked()) {
-    return false;
-  }
-  try {
-    const db = getDbInstance();
-    if (!db || !entryId) return false;
-    const docRef = doc(db, 'projects', projectId, 'whitelist', String(entryId));
-    await deleteDoc(docRef);
-    try {
-      const topRef = doc(db, 'whitelist', String(entryId));
-      await deleteDoc(topRef);
-    } catch {}
-    return true;
-  } catch (err) {
-    if (isFirestoreQuotaError(err)) {
-      useCloudSyncStore.getState().setQuotaExceeded(true);
-      markQuotaExceededToday(true);
-      const firestore = getDbInstance();
-      if (firestore) {
-        disableNetwork(firestore).catch(() => {});
-      }
-    }
-    handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}/whitelist/${entryId}`);
-    return false;
-  }
+  return deleteWhitelistDoc(emailOrId, projectId);
 }
 
 export async function deleteAccessRequestFromCloud(
@@ -1425,6 +1376,8 @@ export async function saveProjectDataToCloud(
     requests?: any[];
     matrixEntries?: any[];
     lastUpdated?: string;
+    counts?: { personsCount: number; familiesCount: number; metricRecordsCount: number;
+      documentsCount: number; hypothesesCount: number };
   },
   projectId: string = DEFAULT_PROJECT_ID
 ): Promise<boolean> {
@@ -1481,11 +1434,11 @@ export async function saveProjectDataToCloud(
         metaDocRef,
         sanitizeForFirestore({
           lastUpdated: data.lastUpdated || new Date().toISOString(),
-          personsCount: data.persons?.length || 0,
-          familiesCount: data.families?.length || 0,
-          metricRecordsCount: data.metricRecords?.length || 0,
-          documentsCount: data.documents?.length || 0,
-          hypothesesCount: data.hypotheses?.length || 0
+          personsCount: data.counts?.personsCount ?? data.persons?.length ?? 0,
+          familiesCount: data.counts?.familiesCount ?? data.families?.length ?? 0,
+          metricRecordsCount: data.counts?.metricRecordsCount ?? data.metricRecords?.length ?? 0,
+          documentsCount: data.counts?.documentsCount ?? data.documents?.length ?? 0,
+          hypothesesCount: data.counts?.hypothesesCount ?? data.hypotheses?.length ?? 0
         }),
         { merge: true }
       ).then(() => true).catch((err) => {
@@ -1679,6 +1632,8 @@ export interface SharedTreeData {
   title: string;
   authorName: string;
   authorEmail?: string;
+  ownerUid?: string;
+  publicOnly?: boolean;
   createdAt: string;
   updatedAt: string;
   rootPersonId: string;
@@ -1729,12 +1684,18 @@ export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promis
   try {
     const db = getDbInstance();
     if (!db) return { success: false, shareId: treeData.id, shareUrl: '', error: 'База Firestore недоступна' };
+    const auth = getFirebaseAuth();
+    await auth?.authStateReady();
+    if (!auth?.currentUser?.emailVerified) {
+      return { success: false, shareId: treeData.id, shareUrl: '', error: 'Для публікації увійдіть через Google.' };
+    }
 
     const rawData: Record<string, any> = {
       id: treeData.id,
       title: treeData.title || 'Родинне дерево',
       authorName: treeData.authorName || 'Дослідник родоводу',
       authorEmail: treeData.authorEmail || '',
+      ownerUid: auth.currentUser.uid,
       createdAt: treeData.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       rootPersonId: treeData.rootPersonId || '',
@@ -1757,6 +1718,8 @@ export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promis
 
     const docRef = doc(db, 'sharedTrees', treeData.id);
     await setDoc(docRef, cleanData, { merge: true });
+
+    await publishPublicTree(db, treeData.id, treeData.database as any, treeData.rootPersonId);
 
     // Generate full URL
     let baseUrl = typeof window !== 'undefined' ? window.location.origin + window.location.pathname : '';
@@ -1789,9 +1752,22 @@ export async function publishSharedTreeToCloud(treeData: SharedTreeData): Promis
   }
 }
 
-/**
- * Fetches a shared tree from Firestore by its shareId
- */
+/** Fetch only the active, deceased-only public projection. */
+async function getPublicTreeFromCloud(shareId: string): Promise<SharedTreeData | null> {
+  const db = getDbInstance();
+  if (!db) return null;
+  const result = await getPublicTree(db, shareId);
+  if (!result) return null;
+  return {
+    id: shareId, title: 'Родовід: померлі особи', authorName: '',
+    createdAt: result.updatedAt, updatedAt: result.updatedAt,
+    rootPersonId: result.database.rootPersonId || '', mode: 'readonly', isPinProtected: false,
+    hideLivingDates: true, publicOnly: true, personsCount: Object.keys(result.database.persons).length,
+    database: result.database
+  };
+}
+
+/** Private snapshots require real Firebase Authentication and project membership. */
 export async function getSharedTreeFromCloud(shareId: string): Promise<{
   success: boolean;
   data?: SharedTreeData;
@@ -1800,55 +1776,49 @@ export async function getSharedTreeFromCloud(shareId: string): Promise<{
   try {
     const db = getDbInstance();
     if (!db) return { success: false, error: 'База Firestore недоступна' };
-
-    const docRef = doc(db, 'sharedTrees', shareId);
-    const snap = await getDoc(docRef);
-
-    if (!snap.exists()) {
-      return { success: false, error: 'Спільне дерево не знайдено за цим посиланням або термін дії вичерпано.' };
+    const auth = getFirebaseAuth();
+    await auth?.authStateReady();
+    if (auth?.currentUser?.emailVerified) {
+      try {
+        const snapshot = await getDocFromServer(doc(db, 'sharedTrees', shareId));
+        if (snapshot.exists()) return { success: true, data: snapshot.data() as SharedTreeData };
+      } catch (error: any) {
+        if (error?.code !== 'permission-denied') throw error;
+      }
     }
-
-    const data = snap.data() as SharedTreeData;
-    return {
-      success: true,
-      data
-    };
+    const data = await getPublicTreeFromCloud(shareId);
+    if (data) return { success: true, data };
+    return { success: false, error: 'Публічну версію ще не опубліковано або доступ відкликано.' };
   } catch (err: any) {
-    handleFirestoreError(err, OperationType.GET, `sharedTrees/${shareId}`);
-    return {
-      success: false,
-      error: err?.message || 'Не вдалося завантажити родинне дерево'
-    };
+    return { success: false, error: err?.code === 'permission-denied'
+      ? 'Публічну версію ще не опубліковано або доступ відкликано.'
+      : (err?.message || 'Не вдалося завантажити родинне дерево') };
   }
 }
 
-/**
- * Subscribes to real-time updates for a shared tree
- */
 export function subscribeToSharedTreeCloud(
   shareId: string,
-  callback: (tree: SharedTreeData | null) => void
+  callback: (tree: SharedTreeData | null) => void,
+  publicOnly: boolean = false
 ): () => void {
   const db = getDbInstance();
-  if (!db) {
-    callback(null);
-    return () => {};
-  }
-
-  const docRef = doc(db, 'sharedTrees', shareId);
-  return safeSnapshotListener(
-    docRef,
-    (snap) => {
-      if (snap.exists()) {
-        callback(snap.data() as SharedTreeData);
-      } else {
-        callback(null);
-      }
-    },
-    `sharedTrees/${shareId}`,
-    OperationType.GET
-  );
+  if (!db) { callback(null); return () => {}; }
+  let disposed = false;
+  let revision = 0;
+  const ref = doc(db, publicOnly ? 'publicTrees' : 'sharedTrees', shareId);
+  const unsubscribe = onSnapshot(ref, { includeMetadataChanges: true }, async snapshot => {
+    if (!publicOnly && snapshot.metadata.fromCache) return;
+    const currentRevision = ++revision;
+    if (!snapshot.exists() || (publicOnly && !snapshot.data().enabled)) {
+      callback(null);
+      return;
+    }
+    try {
+      const tree = publicOnly ? await getPublicTreeFromCloud(shareId) : snapshot.data() as SharedTreeData;
+      if (!disposed && currentRevision === revision) callback(tree);
+    } catch {
+      if (!disposed && currentRevision === revision) callback(null);
+    }
+  }, () => { if (!disposed) { revision++; callback(null); } });
+  return () => { disposed = true; revision++; unsubscribe(); };
 }
-
-
-

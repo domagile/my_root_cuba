@@ -1,4 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { requestAiJson } from '../../services/aiApiClient';
+import { urlOrBlobToBase64 } from '../../services/metricOcrService';
+import { aiEntityToPerson } from '../../utils/aiEntityToPerson';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sparkles, 
   Upload, 
@@ -21,7 +24,7 @@ import {
   Info
 } from 'lucide-react';
 import { useGenealogyStore } from '../../stores/useGenealogyStore';
-import { persistLocalData, idbGet } from '../../utils/indexedDbStorage';
+import { persistLocalData, idbGet, flushPendingLocalWrites } from '../../utils/indexedDbStorage';
 
 interface NyshporkaReadingProps {
   theme: any;
@@ -52,10 +55,14 @@ const DEFAULT_SCAN_AI_NOTES: Record<string, string> = {
 export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => {
   const [selectedSample, setSelectedSample] = useState<string>('0012');
   const [customImage, setCustomImage] = useState<string | null>(null);
+  const [customScanId, setCustomScanId] = useState('custom_scan');
   const [scriptType, setScriptType] = useState<string>('early_cursive');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isGeneratingNote, setIsGeneratingNote] = useState<boolean>(false);
   const [result, setResult] = useState<any | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const scanVersion = useRef(0);
+  useEffect(() => { scanVersion.current++; setResult(null); setAiError(null); }, [selectedSample, customImage]);
   const [activeTab, setActiveTab] = useState<'summary' | 'transcription' | 'modern' | 'entities' | 'lines'>('summary');
   
   // Local persistence for notes per scan ID
@@ -73,9 +80,8 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
     for (const [key, text] of Object.entries(DEFAULT_SCAN_AI_NOTES)) {
       initial[key] = {
         notes: text,
-        isAiGenerated: true,
-        lastUpdated: 'Автоматично сформовано ШІ',
-        model: 'gemini-3.8-flash'
+        isAiGenerated: false,
+        lastUpdated: 'Демонстраційна нотатка до прикладу'
       };
     }
     return initial;
@@ -123,7 +129,7 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
     }
   };
 
-  const currentScanId = customImage ? 'custom_scan' : selectedSample;
+  const currentScanId = customImage ? customScanId : selectedSample;
   const currentScanLabel = customImage 
     ? 'Завантажений користувацький скан' 
     : sampleImages[selectedSample]?.label || 'Архівний скан';
@@ -133,10 +139,9 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
 
   // Get or initialize active note
   const currentNoteData = scanNotes[currentScanId] || {
-    notes: DEFAULT_SCAN_AI_NOTES[currentScanId] || `📌 Тип документа: Архівний рукописний запис XVIII–XIX ст.\n👤 Ключові особи: ${currentScanContext || 'Особи, зазначені у документі'}.\n📍 Географія: Подільська губернія / Правобережна Україна.\n💡 Генеалогічний висновок: Натисніть «Згенерувати ШІ-висновок», щоб отримати автоматичний аналіз змісту запису.`,
-    isAiGenerated: true,
-    lastUpdated: 'Очікує генерації',
-    model: 'gemini-3.8-flash'
+    notes: DEFAULT_SCAN_AI_NOTES[currentScanId] || '',
+    isAiGenerated: false,
+    lastUpdated: 'Очікує генерації'
   };
 
   // Helper to persist scan notes to IndexedDB and mirrored storage
@@ -164,20 +169,17 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
       const base64 = ev.target?.result as string;
       setCustomImage(base64);
       setResult(null);
-      // If no custom note exists yet, initialize a placeholder
-      if (!scanNotes['custom_scan']) {
-        updateScanNoteState('custom_scan', {
-          notes: `📌 Тип документа: Завантажений архівний скан скоропису.\n👤 Ключові особи: Запис очікує палеографічного аналізу.\n📍 Географія: Територія України (XVIII-XIX ст.).\n💡 Генеалогічний висновок: Натисніть «Згенерувати ШІ-висновок» або «Запустити ШІ-розпізнавання», щоб система підготувала короткий висновок про зміст запису.`,
-          isAiGenerated: true,
-          lastUpdated: 'Щойно завантажено'
-        });
-      }
+      const scanId = `custom_scan_${crypto.randomUUID()}`;
+      setCustomScanId(scanId);
+      updateScanNoteState(scanId, { notes: '', isAiGenerated: false, lastUpdated: 'Очікує аналізу' });
     };
     reader.readAsDataURL(file);
   };
 
   // Generate / Regenerate AI Note specifically for current scan
   const handleGenerateAiNote = async () => {
+    const version = scanVersion.current;
+    setAiError(null);
     setIsGeneratingNote(true);
     try {
       const payload: any = {
@@ -188,16 +190,16 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
       };
 
       if (customImage) {
-        payload.imageBase64 = customImage;
+        const image = await urlOrBlobToBase64(customImage);
+        payload.imageBase64 = image.base64; payload.mimeType = image.mimeType;
       }
 
-      const res = await fetch('/api/nyshporka/generate-notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
+      if (!payload.transcription?.trim() && !payload.imageBase64) {
+        const image = await urlOrBlobToBase64(sampleImages[selectedSample].url);
+        payload.imageBase64 = image.base64; payload.mimeType = image.mimeType;
+      }
+      const data = await requestAiJson('/api/nyshporka/generate-notes', payload);
+      if (version !== scanVersion.current) return;
       if (data.aiNotes || data.summary) {
         const text = data.aiNotes || data.summary;
         updateScanNoteState(currentScanId, {
@@ -208,7 +210,7 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
         });
       }
     } catch (err) {
-      console.error('Failed to generate AI note:', err);
+      if (version === scanVersion.current) setAiError(err instanceof Error ? err.message : 'Не вдалося сформувати нотатку.');
     } finally {
       setIsGeneratingNote(false);
     }
@@ -216,6 +218,8 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
 
   // Full HTR recognition
   const handleRunAnalysis = async () => {
+    const version = scanVersion.current;
+    setAiError(null);
     setIsLoading(true);
     setResult(null);
     try {
@@ -227,17 +231,10 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
           : activeSample.context
       };
 
-      if (customImage) {
-        payload.imageBase64 = customImage;
-      }
-
-      const res = await fetch('/api/nyshporka/htr-analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
+      const image = await urlOrBlobToBase64(customImage || activeSample.url);
+      payload.imageBase64 = image.base64; payload.mimeType = image.mimeType;
+      const data = await requestAiJson('/api/nyshporka/htr-analyze', payload);
+      if (version !== scanVersion.current) return;
       setResult(data);
 
       // Automatically update the AI notes field with the returned summary if available
@@ -252,7 +249,7 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
       }
       setActiveTab('summary');
     } catch (err) {
-      console.error(err);
+      if (version === scanVersion.current) setAiError(err instanceof Error ? err.message : 'Не вдалося розпізнати скан.');
     } finally {
       setIsLoading(false);
     }
@@ -272,9 +269,12 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
     });
   };
 
-  const handleSaveNote = () => {
-    setSavedNoteFeedback(true);
-    setTimeout(() => setSavedNoteFeedback(false), 2000);
+  const handleSaveNote = async () => {
+    try {
+      await flushPendingLocalWrites();
+      setSavedNoteFeedback(true);
+      setTimeout(() => setSavedNoteFeedback(false), 2000);
+    } catch { setAiError('Не вдалося зберегти нотатку на пристрої. Не закривайте вкладку.'); }
   };
 
   const handleResetToDefaultAi = () => {
@@ -282,8 +282,8 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
     if (defaultNote) {
       updateScanNoteState(currentScanId, {
         notes: defaultNote,
-        isAiGenerated: true,
-        lastUpdated: 'Відновлено стандартний ШІ-висновок'
+        isAiGenerated: false,
+        lastUpdated: 'Відновлено демонстраційну нотатку'
       });
     } else {
       handleGenerateAiNote();
@@ -308,31 +308,16 @@ export const NyshporkaReading: React.FC<NyshporkaReadingProps> = ({ theme }) => 
   };
 
   const handleAddPerson = (entity: any) => {
-    const parts = (entity.name || '').split(' ');
-    const lastName = parts[0] || 'Невідомий';
-    const firstName = parts[1] || 'Предко';
-    const patronymic = parts[2] || '';
+    addPerson(aiEntityToPerson(entity, `Скан: ${currentScanLabel}.\n${currentNoteData.notes}`));
 
-    addPerson({
-      id: `person-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      firstName,
-      lastName,
-      patronymic,
-      gender: 'M',
-      birthYear: parseInt(entity.year) || 1800,
-      birthPlace: entity.place || 'Подільська губернія',
-      notes: `Виявлено рушієм скоропису Нишпорка (HTR). Стан: ${entity.status || ''}. Роль: ${entity.role || ''}.\nВисновок по документу:\n${currentNoteData.notes}`,
-      isLiving: false,
-      researchStatus: 'confirmed'
-    });
-
-    alert(`Особу «${entity.name}» додано до Родоводу з прив'язкою ШІ-нотатки скану!`);
+    alert(`Особу «${entity.name}» додано як кандидата, що потребує перевірки!`);
   };
 
   const currentPreviewUrl = customImage || sampleImages[selectedSample]?.url;
 
   return (
     <div className="space-y-6">
+      {aiError && <div role="alert" className="rounded-xl bg-red-100 text-red-950 p-4">{aiError}</div>}
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
