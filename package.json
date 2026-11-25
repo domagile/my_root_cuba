@@ -13,7 +13,7 @@
     "test:trash": "node --experimental-test-module-mocks --import tsx --test tests/trashRestore.test.ts",
     "test:firestore": "firebase emulators:exec --config firebase.emulators.json --project demo-my-root-cuba --only firestore \"tsx --test tests/firestore.rules.test.ts\"",
     "test:sync": "tsx --test tests/cloudSync.test.ts",
-    "test:storage": "tsx --test tests/localStorage.test.ts tests/persistentBackup.test.ts tests/projectArchive.test.ts tests/cloudRestore.test.ts",
+    "test:storage": "tsx --test tests/localStorage.test.ts tests/persistentBackup.test.ts tests/projectArchive.test.ts tests/cloudRestore.test.ts tests/cloudRead.test.ts",
     "test:api": "tsx --test tests/api.test.ts tests/aiClient.test.ts",
     "test:server": "tsx --test tests/server.test.ts",
     "test": "npm run test:sync && npm run test:storage && npm run test:api"

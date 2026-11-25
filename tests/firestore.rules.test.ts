@@ -1,4 +1,5 @@
 import { writePersonDeletionMarkers } from '../src/services/personDeletionCloudService';
+import { readProjectFromFirestore } from '../src/services/projectCloudReadService';
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -293,4 +294,13 @@ test('viewer and anonymous clients cannot change deletion markers through the tr
   await assertFails(writePersonDeletionMarkers(identity('viewer') as unknown as Firestore, project, { keep: false }));
   await assertFails(writePersonDeletionMarkers(env.unauthenticatedContext().firestore() as unknown as Firestore, project, { keep: false }));
   assert.deepEqual((await getDoc(ref)).data()!.ids, ['keep']);
+});
+
+test('viewer can download the tree with the read-only adapter without deleting or migrating cloud records', async () => {
+  const viewer = identity('viewer') as unknown as Firestore;
+  const result = await readProjectFromFirestore(viewer, project);
+  assert.deepEqual(result.data.persons!.map(person => person.id).sort(), ['deceased','living']);
+  const admin = identity('admin') as unknown as Firestore;
+  assert.equal((await getDoc(doc(admin, 'projects', project, 'persons', 'living'))).data()!.firstName, 'Private');
+  assert.equal((await getDocs(collection(admin, 'projects', project, 'systemSettings'))).size, 0);
 });

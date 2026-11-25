@@ -1,3 +1,4 @@
+import { selectCloudPersons } from '../services/cloudPersonReadService';
 import { acceptCloudTombstones } from '../utils/personDeletionState';
 import { prepareCloudRestore } from '../services/cloudRestoreService';
 import { createProjectArchive, parseProjectArchive } from '../utils/projectArchive';
@@ -28,7 +29,6 @@ import {
   savePersonDoc,
   updatePersonDeletionMarkers,
   savePersonDeltaDoc,
-  deletePersonDoc,
   batchDeleteEntities,
   subscribeToIgnoredDuplicatePairsCloud,
   subscribeToDeletedTombstonesCloud,
@@ -54,7 +54,7 @@ import { getSavedUserTreeState, resolveInitialPersonId } from '../utils/userTree
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent, isDemoResearchItem, purgeDemoStorage } from '../utils/demoPurge';
 import { saveSnapshot } from '../utils/persistentBackup';
-import { autoMigrateLocalStorageToIDB } from '../utils/indexedDbStorage';
+import { autoMigrateLocalStorageToIDB, persistLocalData } from '../utils/indexedDbStorage';
 import { useNotesStore } from '../stores/useNotesStore';
 import { synchronizeProject, ProjectSyncData } from '../services/cloudSyncService';
 export { useUIStore };
@@ -380,13 +380,6 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [currentUser, whitelist, persons, setSelectedPersonId]);
 
-  // Automatically purge any unknown placeholder persons who have no specified ancestors
-  useEffect(() => {
-    try {
-      useGenealogyStore.getState().purgeUnknownPersons();
-    } catch {}
-  }, []);
-
   // Auto-migrate historical localStorage into unlimited IndexedDB and hydrate all stores
   useEffect(() => {
     let active = true;
@@ -483,32 +476,11 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           } catch {}
           const mergedIds = new Set(Object.keys(mergedIdsMap));
 
-          const isExcluded = (id: string) => trashIds.has(id) || mergedIds.has(id) || tombstoneIds.has(id);
-
-          // Filter out demo persons, trashed persons, and merged duplicate persons
-          const cloudList: Person[] = [];
-          for (const p of cloudData.persons) {
-            if (!p?.id) continue;
-            if (isDemoPerson(p)) continue;
-            if (isExcluded(p.id)) {
-              // Actively purge ghost doc from Firestore so it never resurrects again
-              deletePersonDoc(p.id).catch(() => {});
-              continue;
-            }
-            cloudList.push(normalizePerson(p));
-          }
-
-          const cloudMap = new Map(cloudList.map((p) => [p.id, p]));
-          const merged: Person[] = [...cloudMap.values()];
-
-          // Preserve local persons that have not synced yet or exist in local store
-          for (const localP of prevPersons) {
-            if (!cloudMap.has(localP.id) && !isDemoPerson(localP) && !isExcluded(localP.id)) {
-              cloudMap.set(localP.id, localP);
-              merged.push(localP);
-            }
-          }
-          return merged;
+          return selectCloudPersons(cloudData.persons, {
+            excludedIds: new Set([...trashIds, ...mergedIds, ...tombstoneIds]),
+            localPersons: prevPersons,
+            pendingIds: new Set(useCloudSyncStore.getState().dirtyTracker.persons)
+          });
         });
       }
       if (cloudData.families && Array.isArray(cloudData.families)) {
@@ -617,29 +589,30 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }, `Резервна точка перед завантаженням з хмари (${data.persons.length} осіб)`), fetchAllProjectDataFromCloud);
       if (res.success && res.data) {
         const d = res.data;
+        if (res.settings?.deletedTombstones) acceptCloudTombstones(res.settings.deletedTombstones);
+        if (res.settings?.mergedPersons) {
+          persistLocalData('genealogy_merged_person_ids', res.settings.mergedPersons);
+          try { localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(res.settings.mergedPersons)); } catch {}
+        }
+        if (res.settings?.ignoredDuplicatePairs) {
+          persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, res.settings.ignoredDuplicatePairs);
+          try { localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(res.settings.ignoredDuplicatePairs)); } catch {}
+          window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed'));
+        }
         let totalCount = 0;
 
-        if (Array.isArray(d.persons) && d.persons.length > 0) {
+        if (Array.isArray(d.persons)) {
           const tombstoneIds = getTombstoneIds();
           const trashIds = new Set(useGenealogyStore.getState().trashPersons.map((p) => p.id));
-          let mergedIdsMap: Record<string, string> = {};
+          let mergedIdsMap: Record<string, string> = res.settings?.mergedPersons || {};
           try {
             const raw = localStorage.getItem('genealogy_merged_person_ids');
-            if (raw) mergedIdsMap = JSON.parse(raw);
+            if (raw && !res.settings?.mergedPersons) mergedIdsMap = JSON.parse(raw);
           } catch {}
           const mergedIds = new Set(Object.keys(mergedIdsMap));
-          const isExcluded = (id: string) => tombstoneIds.has(id) || trashIds.has(id) || mergedIds.has(id);
-
-          const validPersons: Person[] = [];
-          for (const p of d.persons) {
-            if (!p || !p.id) continue;
-            if (isDemoPerson(p)) continue;
-            if (isExcluded(p.id)) {
-              deletePersonDoc(p.id).catch(() => {});
-              continue;
-            }
-            validPersons.push(normalizePerson(p));
-          }
+          const validPersons = selectCloudPersons(d.persons, {
+            excludedIds: new Set([...tombstoneIds, ...trashIds, ...mergedIds])
+          });
           setPersons(validPersons);
           totalCount += validPersons.length;
         }

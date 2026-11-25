@@ -1,5 +1,5 @@
 import { writePersonDeletionMarkers } from '../services/personDeletionCloudService';
-import { acceptCloudTombstones, getDeletionStateRevision } from '../utils/personDeletionState';
+import { readProjectFromFirestore, type CloudProjectSnapshot } from '../services/projectCloudReadService';
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
@@ -1496,148 +1496,17 @@ export async function saveProjectDataToCloud(
  */
 export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_PROJECT_ID): Promise<{
   success: boolean;
-  data: {
-    persons?: any[];
-    families?: any[];
-    events?: any[];
-    sources?: any[];
-    places?: any[];
-    metricRecords?: any[];
-    documents?: any[];
-    tasks?: any[];
-    findings?: any[];
-    hypotheses?: any[];
-    requests?: any[];
-    matrixEntries?: any[];
-    accessRequests?: any[];
-    lastUpdated?: string;
-  };
+  data: CloudProjectSnapshot['data'];
+  settings?: CloudProjectSnapshot['settings'];
   error?: string;
 }> {
   try {
     const db = getDbInstance();
     if (!db) return { success: false, data: {}, error: 'База Firestore не ініціалізована' };
-
-    const subcollections = [
-      'persons',
-      'families',
-      'events',
-      'sources',
-      'places',
-      'metricRecords',
-      'documents',
-      'tasks',
-      'findings',
-      'hypotheses',
-      'requests',
-      'matrixEntries',
-      'accessRequests'
-    ];
-
-    const resultData: Record<string, any[]> = {};
-
-    await Promise.all(
-      subcollections.map(async (colName) => {
-        try {
-          const colRef = collection(db, 'projects', projectId, colName);
-          const snap = await getDocs(colRef);
-          resultData[colName] = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-        } catch (e) {
-          console.warn(`Failed to fetch subcollection ${colName}:`, e);
-          resultData[colName] = [];
-        }
-      })
-    );
-
-    // Also fetch and synchronize systemSettings (ignoredDuplicates, deletedTombstones, mergedPersons)
-    try {
-      const ignoredSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'ignoredDuplicates'));
-      if (ignoredSnap.exists()) {
-        const d = ignoredSnap.data();
-        if (Array.isArray(d?.keys) && d.keys.length > 0) {
-          try {
-            const raw = localStorage.getItem('rodovid_ignored_duplicate_pairs');
-            const localSet = new Set<string>(raw ? JSON.parse(raw) : []);
-            d.keys.forEach((k: string) => {
-              if (typeof k === 'string' && k.trim()) localSet.add(k.trim());
-            });
-            localStorage.setItem('rodovid_ignored_duplicate_pairs', JSON.stringify(Array.from(localSet)));
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed'));
-            }
-          } catch {}
-        }
-      }
-    } catch {}
-
-    try {
-      const deletionRevision = getDeletionStateRevision();
-      const tombSnap = await getDocFromServer(doc(db, 'projects', projectId, 'systemSettings', 'deletedTombstones'));
-      if (tombSnap.exists()) {
-        const ids = tombSnap.data()?.ids;
-        if (Array.isArray(ids)) acceptCloudTombstones(ids, deletionRevision);
-      }
-    } catch {}
-
-    try {
-      const mergedSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'mergedPersons'));
-      if (mergedSnap.exists()) {
-        const d = mergedSnap.data();
-        if (d?.mapping && typeof d.mapping === 'object') {
-          try {
-            const raw = localStorage.getItem('genealogy_merged_person_ids');
-            const localMerged = raw ? JSON.parse(raw) : {};
-            const combined = { ...localMerged, ...d.mapping };
-            localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(combined));
-          } catch {}
-        }
-      }
-    } catch {}
-
-    // Legacy Monolithic Document One-Time Migration Check:
-    // If subcollections are currently empty (e.g. 0 persons and 0 families), check if there is an old monolithic document
-    // at `genealogyProjects/{projectId}` or `genealogyProjects/defaultProject`. If found, load it and migrate to subcollections.
-    const totalLoaded = (resultData.persons?.length || 0) + (resultData.families?.length || 0);
-    if (totalLoaded === 0) {
-      try {
-        const legacyDocRef = doc(db, 'genealogyProjects', projectId || DEFAULT_PROJECT_ID);
-        const legacySnap = await getDoc(legacyDocRef);
-        if (legacySnap.exists()) {
-          const legacyData = legacySnap.data();
-          if (legacyData) {
-            console.log('Found legacy monolithic document, migrating to subcollections...');
-            if (Array.isArray(legacyData.persons) && legacyData.persons.length > 0) resultData.persons = legacyData.persons;
-            if (Array.isArray(legacyData.families) && legacyData.families.length > 0) resultData.families = legacyData.families;
-            if (Array.isArray(legacyData.events) && legacyData.events.length > 0) resultData.events = legacyData.events;
-            if (Array.isArray(legacyData.sources) && legacyData.sources.length > 0) resultData.sources = legacyData.sources;
-            if (Array.isArray(legacyData.places) && legacyData.places.length > 0) resultData.places = legacyData.places;
-            if (Array.isArray(legacyData.metricRecords) && legacyData.metricRecords.length > 0) resultData.metricRecords = legacyData.metricRecords;
-            if (Array.isArray(legacyData.documents) && legacyData.documents.length > 0) resultData.documents = legacyData.documents;
-            if (Array.isArray(legacyData.hypotheses) && legacyData.hypotheses.length > 0) resultData.hypotheses = legacyData.hypotheses;
-            if (Array.isArray(legacyData.matrixEntries) && legacyData.matrixEntries.length > 0) resultData.matrixEntries = legacyData.matrixEntries;
-
-            // Trigger background migration into subcollections
-            saveProjectDataToCloud(resultData, projectId || DEFAULT_PROJECT_ID).catch((migErr) => {
-              console.warn('Background migration to subcollections notice:', migErr);
-            });
-          }
-        }
-      } catch (legacyErr) {
-        console.warn('Legacy migration check notice:', legacyErr);
-      }
-    }
-
-    return {
-      success: true,
-      data: resultData
-    };
+    return { success: true, ...await readProjectFromFirestore(db, projectId) };
   } catch (err: any) {
     handleFirestoreError(err, OperationType.LIST, `projects/${projectId}`);
-    return {
-      success: false,
-      data: {},
-      error: err?.message || 'Помилка отримання даних з Firestore'
-    };
+    return { success: false, data: {}, error: err?.message || 'Помилка отримання даних з Firestore' };
   }
 }
 

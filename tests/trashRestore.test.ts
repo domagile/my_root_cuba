@@ -12,6 +12,9 @@ class MemoryStorage implements Storage {
   removeItem(key: string) { this.values.delete(key); }
 }
 Object.assign(globalThis, { indexedDB, localStorage: new MemoryStorage(), window: Object.assign(new EventTarget(), { indexedDB }) });
+localStorage.setItem('genealogy_workstation_data_v4_familio_persons', JSON.stringify([
+  { id: 'boot-placeholder', firstName: 'Невідомо', lastName: 'Невідомо', gender: 'U' }
+]));
 // No real Firebase module, app configuration or outbound transport is imported.
 const calls: string[] = [];
 const names = ['savePersonDoc','savePersonDeltaDoc','deletePersonDoc','saveFamilyDoc','deleteFamilyDoc','saveSourceDoc',
@@ -32,6 +35,13 @@ const { idbSetMultiple, idbGet, flushPendingLocalWrites } = await import('../src
 const key = 'genealogy_workstation_data_v4_familio';
 const journalKey = 'genealogy_person_deletion_changes_v1';
 const person = (id: string) => ({ id, firstName: 'Марія', lastName: 'Тестова', gender: 'F' as const, isDeleted: true, deletedAt: '2026-11-25' });
+const startupCalls = [...calls];
+const startupJournal = await idbGet(journalKey);
+
+test('startup filtering of unknown placeholders creates no cloud write or deletion intention', () => {
+  assert.deepEqual(startupCalls, []);
+  assert.equal(startupJournal, null);
+});
 
 beforeEach(async () => {
   await flushPendingLocalWrites();
@@ -49,6 +59,19 @@ async function seedTrash(ids = ['a','b','keep']) {
   localStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(ids));
   localStorage.setItem(`${key}_trashPersons`, JSON.stringify(trash));
   useGenealogyStore.setState({ trashPersons: trash });
+}
+
+for (const syncMode of ['manual', 'auto'] as const) {
+  test(`${syncMode}: applying a downloaded person list does not upload automatic placeholder cleanup`, () => {
+    useCloudSyncStore.setState({ syncMode });
+    useGenealogyStore.getState().setPersons([
+      { id: 'unknown', firstName: 'Невідомо', lastName: 'Невідомо', gender: 'U' },
+      { ...person('visible'), isDeleted: false }
+    ]);
+    assert.deepEqual(calls, []);
+    assert.equal(useCloudSyncStore.getState().hasUnsavedChanges, false);
+    assert.equal(getTombstoneIds().has('unknown'), false);
+  });
 }
 
 test('bulk restore clears selected deletion markers immediately and preserves unrelated trash', async () => {
@@ -101,6 +124,25 @@ function api(overrides: Record<string, any> = {}) {
   return { savePersonDoc: async () => true, savePersonDeltaDoc: async () => true,
     batchDeleteEntities: async () => true, saveProjectDataToCloud: async () => true,
     updatePersonDeletionMarkers: async (changes: Record<string, boolean>) => deletion.applyDeletionChangesToIds(['a','b','keep'], changes), ...overrides };
+}
+
+for (const syncMode of ['manual', 'auto'] as const) {
+  test(`${syncMode}: explicit delete is queued and a restore before upload cancels the queued document delete`, async () => {
+    useCloudSyncStore.setState({ syncMode });
+    useGenealogyStore.setState({ persons: [{ ...person('queued'), isDeleted: false }] });
+    useGenealogyStore.getState().deletePerson('queued');
+    assert.deepEqual(calls, []);
+    assert.deepEqual(useCloudSyncStore.getState().dirtyTracker.deletedPersons, ['queued']);
+    useGenealogyStore.getState().restorePerson('queued');
+    let deletes = 0;
+    const result = await synchronizeProject(data, api({
+      batchDeleteEntities: async () => { deletes++; return true; },
+      updatePersonDeletionMarkers: async () => []
+    }), { manual: syncMode === 'manual' });
+    assert.equal(result.success, true);
+    assert.equal(deletes, 0);
+    assert.equal(getTombstoneIds().has('queued'), false);
+  });
 }
 
 test('old cloud markers cannot hide a pending restored person, including after local hydration', async () => {
