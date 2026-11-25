@@ -11,7 +11,7 @@ class MemoryStorage {
 const memory = new MemoryStorage();
 const browser = Object.assign(new EventTarget(), { indexedDB });
 Object.assign(globalThis, { indexedDB, window: browser, localStorage: memory });
-const { idbGet, idbSet, persistLocalData, flushPendingLocalWrites, hasPendingLocalWrites } = await import('../src/utils/indexedDbStorage');
+const { idbGet, idbSet, persistLocalData, flushPendingLocalWrites, hasPendingLocalWrites, readLocalDataSync } = await import('../src/utils/indexedDbStorage');
 const { useLocalPersistenceStore } = await import('../src/stores/useLocalPersistenceStore');
 const originalTransaction = IDBDatabase.prototype.transaction;
 const originalSetItem = memory.setItem;
@@ -104,4 +104,45 @@ test('optional localStorage mirror failure does not undo a durable IndexedDB com
   await flushPendingLocalWrites();
   assert.equal(hasPendingLocalWrites(), false);
   assert.deepEqual(await idbGet('mirror'), { committed: true });
+});
+
+test('synchronous readers see the latest queued value before a batch commits', async () => {
+  readLocalDataSync('sync-key');
+  await idbSet('sync-key', ['old']);
+  persistLocalData('sync-key', ['new']);
+  assert.deepEqual(readLocalDataSync('sync-key'), ['new']);
+  await flushPendingLocalWrites();
+  assert.deepEqual(readLocalDataSync('sync-key'), ['new']);
+});
+
+test('a large committed value stays available to registered readers without a localStorage mirror', async () => {
+  readLocalDataSync('large-sync');
+  const value = ['large'.repeat(250_000)];
+  persistLocalData('large-sync', value);
+  await flushPendingLocalWrites();
+  assert.equal(localStorage.getItem('large-sync'), null);
+  assert.deepEqual(readLocalDataSync('large-sync'), value);
+});
+
+test('a cross-tab storage notification invalidates a committed read cache but not a local pending write', async () => {
+  readLocalDataSync('external-sync');
+  await idbSet('external-sync', ['old']);
+  localStorage.setItem('external-sync', JSON.stringify(['external']));
+  browser.dispatchEvent(Object.assign(new Event('storage'), { key: 'external-sync' }));
+  assert.deepEqual(readLocalDataSync('external-sync'), ['external']);
+  persistLocalData('external-sync', ['pending-local']);
+  localStorage.setItem('external-sync', JSON.stringify(['stale-external']));
+  browser.dispatchEvent(Object.assign(new Event('storage'), { key: 'external-sync' }));
+  assert.deepEqual(readLocalDataSync('external-sync'), ['pending-local']);
+});
+
+test('an unrelated queued write cannot prevent a registered reader from hydrating its authoritative value', async () => {
+  readLocalDataSync('hydrate-sync');
+  await idbSet('hydrate-sync', ['from-idb']);
+  localStorage.setItem('hydrate-sync', JSON.stringify(['stale-mirror']));
+  browser.dispatchEvent(Object.assign(new Event('storage'), { key: 'hydrate-sync' }));
+  const reading = idbGet('hydrate-sync');
+  persistLocalData('unrelated-key', 'new');
+  await reading;
+  assert.deepEqual(readLocalDataSync('hydrate-sync'), ['from-idb']);
 });

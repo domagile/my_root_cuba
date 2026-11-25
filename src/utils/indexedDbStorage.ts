@@ -61,6 +61,22 @@ function getIDB(): Promise<IDBDatabase> {
  * In-Memory Dirty Write Buffer for Debounced Batching
  */
 const pendingWritesBuffer = new Map<string, any>();
+// Only keys explicitly read synchronously retain a committed in-memory value.
+const synchronousKeys = new Set<string>();
+const synchronousValues = new Map<string, any>();
+const synchronousRevisions = new Map<string, number>();
+function advanceSynchronousRevision(key: string): void {
+  if (synchronousKeys.has(key)) synchronousRevisions.set(key, (synchronousRevisions.get(key) || 0) + 1);
+}
+export function readLocalDataSync<T = any>(key: string): T | null {
+  synchronousKeys.add(key);
+  if (pendingWritesBuffer.has(key)) return pendingWritesBuffer.get(key);
+  if (synchronousValues.has(key)) return synchronousValues.get(key);
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? null : JSON.parse(raw);
+  } catch { return null; }
+}
 let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let maxWaitTimeoutId: ReturnType<typeof setTimeout> | null = null;
 const pendingVersions = new Map<string, number>();
@@ -80,6 +96,7 @@ export async function idbGet<T = any>(key: string): Promise<T | null> {
   }
 
   try {
+    const revision = synchronousRevisions.get(key) || 0;
     const db = await getIDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
@@ -87,7 +104,15 @@ export async function idbGet<T = any>(key: string): Promise<T | null> {
       const req = store.get(key);
 
       req.onsuccess = () => {
-        resolve(req.result !== undefined ? req.result : null);
+        const value = req.result !== undefined ? req.result : null;
+        if (pendingWritesBuffer.has(key)) { resolve(pendingWritesBuffer.get(key)); return; }
+        if (synchronousKeys.has(key)) {
+          if (revision !== (synchronousRevisions.get(key) || 0) && synchronousValues.has(key)) {
+            resolve(synchronousValues.get(key)); return;
+          }
+          synchronousValues.set(key, value);
+        }
+        resolve(value);
       };
 
       req.onerror = () => {
@@ -188,6 +213,10 @@ export async function idbSetMultiple(entries: Record<string, any>): Promise<void
       reject(error);
     }
   });
+  for (const [key, value] of Object.entries(entries)) {
+    advanceSynchronousRevision(key);
+    if (synchronousKeys.has(key)) synchronousValues.set(key, value);
+  }
 }
 
 /**
@@ -202,6 +231,8 @@ export async function idbDelete(key: string): Promise<void> {
     tx.onerror = () => reject(tx.error || new Error('Local deletion failed'));
     tx.objectStore(STORE_NAME).delete(key);
   });
+  advanceSynchronousRevision(key);
+  synchronousValues.delete(key);
   try { localStorage.removeItem(key); } catch { /* Optional legacy mirror */ }
 }
 
@@ -277,6 +308,7 @@ export function hasPendingLocalWrites(): boolean {
 
 /** Queue every write, including immediate writes, until durable confirmation. */
 export function persistLocalData(key: string, data: any, immediate: boolean = false): void {
+  advanceSynchronousRevision(key);
   pendingWritesBuffer.set(key, data);
   pendingVersions.set(key, ++writeRevision);
   useLocalPersistenceStore.setState({ pendingWritesCount: pendingWritesBuffer.size });
@@ -316,6 +348,8 @@ export async function autoMigrateLocalStorageToIDB(): Promise<void> {
       'genealogy_workstation_data_v2_requests',
       'genealogy_workstation_data_v2_matrix',
       'genealogy_deleted_tombstone_ids_v1',
+      'genealogy_person_deletion_changes_v1',
+      'genealogy_deleted_family_links_v1',
       'rodovid_ignored_duplicate_pairs',
       'genealogy_merged_person_ids',
       'genealogy_research_notes_v1',
@@ -397,6 +431,9 @@ export async function getStorageStats(): Promise<{
 }
 
 if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key && !pendingWritesBuffer.has(event.key)) synchronousValues.delete(event.key);
+  });
   window.addEventListener('beforeunload', (event) => {
     flushPendingLocalWritesSync();
     if (hasPendingLocalWrites()) {
