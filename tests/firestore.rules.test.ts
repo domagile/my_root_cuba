@@ -1,3 +1,4 @@
+import { writePersonDeletionMarkers } from '../src/services/personDeletionCloudService';
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -263,4 +264,33 @@ test('a failed public write leaves the previous version inaccessible', async () 
   assert.equal((await getDoc(doc(db, 'publicTrees/share'))).data()!.enabled, false);
   assert.equal(await getPublicTree(guest, 'share'), null);
   await assertFails(getDoc(doc(guest, `${publicBase}/persons/deceased`)));
+});
+
+test('deletion marker transaction restores selected people while preserving unrelated markers', async () => {
+  const db = identity('editor') as unknown as Firestore;
+  const ref = doc(db, 'projects', project, 'systemSettings', 'deletedTombstones');
+  await setDoc(ref, { ids: ['restored','keep'] });
+  assert.deepEqual(await writePersonDeletionMarkers(db, project, { restored: false, added: true }), ['keep','added']);
+  assert.deepEqual((await getDoc(ref)).data()!.ids, ['keep','added']);
+});
+
+test('concurrent marker transactions do not overwrite another client’s independent deletion', async () => {
+  const first = identity('editor') as unknown as Firestore;
+  const second = identity('researcher') as unknown as Firestore;
+  const ref = doc(first, 'projects', project, 'systemSettings', 'deletedTombstones');
+  await setDoc(ref, { ids: ['restored','keep'] });
+  await Promise.all([
+    writePersonDeletionMarkers(first, project, { restored: false }),
+    writePersonDeletionMarkers(second, project, { other: true })
+  ]);
+  assert.deepEqual((await getDoc(ref)).data()!.ids.sort(), ['keep','other']);
+});
+
+test('viewer and anonymous clients cannot change deletion markers through the transaction helper', async () => {
+  const admin = identity('admin') as unknown as Firestore;
+  const ref = doc(admin, 'projects', project, 'systemSettings', 'deletedTombstones');
+  await setDoc(ref, { ids: ['keep'] });
+  await assertFails(writePersonDeletionMarkers(identity('viewer') as unknown as Firestore, project, { keep: false }));
+  await assertFails(writePersonDeletionMarkers(env.unauthenticatedContext().firestore() as unknown as Firestore, project, { keep: false }));
+  assert.deepEqual((await getDoc(ref)).data()!.ids, ['keep']);
 });

@@ -1,3 +1,4 @@
+import { acceptCloudTombstones } from '../utils/personDeletionState';
 import { prepareCloudRestore } from '../services/cloudRestoreService';
 import { createProjectArchive, parseProjectArchive } from '../utils/projectArchive';
 /**
@@ -25,13 +26,13 @@ import {
   saveProjectDataToCloud,
   fetchAllProjectDataFromCloud,
   savePersonDoc,
+  updatePersonDeletionMarkers,
   savePersonDeltaDoc,
   deletePersonDoc,
   batchDeleteEntities,
   subscribeToIgnoredDuplicatePairsCloud,
   subscribeToDeletedTombstonesCloud,
   subscribeToMergedPersonsCloud,
-  saveDeletedTombstonesToCloud,
   saveMergedPersonsToCloud
 } from '../lib/firebase';
 import { useUIStore } from '../stores/useUIStore';
@@ -39,9 +40,7 @@ import {
   useGenealogyStore,
   normalizePerson,
   INITIAL_PERSONS,
-  getTombstoneIds,
-  addTombstoneIds,
-  TOMBSTONE_STORAGE_KEY
+  getTombstoneIds
 } from '../stores/useGenealogyStore';
 import {
   RODOVID_IGNORED_DUPLICATE_PAIRS_KEY,
@@ -64,7 +63,7 @@ export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore'
 export { useResearchStore } from '../stores/useResearchStore';
 export { useCloudSyncStore } from '../stores/useCloudSyncStore';
 
-const cloudSyncApi = { savePersonDoc, savePersonDeltaDoc, batchDeleteEntities, saveProjectDataToCloud };
+const cloudSyncApi = { savePersonDoc, savePersonDeltaDoc, batchDeleteEntities, saveProjectDataToCloud, updatePersonDeletionMarkers };
 
 function getCurrentCloudData(): ProjectSyncData {
   const genealogy = useGenealogyStore.getState();
@@ -225,6 +224,7 @@ export interface GenealogyContextType {
 const GenealogyContext = createContext<GenealogyContextType | null>(null);
 
 export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [isLocalHydrated, setIsLocalHydrated] = React.useState(false);
   // Granular store bindings
   const activeTab = useUIStore((s) => s.activeTab);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
@@ -389,6 +389,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Auto-migrate historical localStorage into unlimited IndexedDB and hydrate all stores
   useEffect(() => {
+    let active = true;
     autoMigrateLocalStorageToIDB()
       .then(() => Promise.all([
         useGenealogyStore.getState().hydrateFromIndexedDB(),
@@ -396,21 +397,24 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         useNotesStore.getState().hydrateFromIndexedDB(),
         useUIStore.getState().hydrateEmblemFromIndexedDB()
       ]))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (active) setIsLocalHydrated(true); });
+    return () => { active = false; };
   }, []);
 
   // Realtime Cloud Settings Listener (Tombstones, Ignored Duplicates, Merged Persons)
   // Ensures cross-session and cross-device consistency so deleted persons and resolved duplicates never reappear
   useEffect(() => {
+    if (!isLocalHydrated) return;
     const syncState = useCloudSyncStore.getState();
     if (syncState.syncMode === 'manual' || syncState.isQuotaExceeded || isQuotaExceededToday()) {
       return;
     }
 
     const unsubTombstones = subscribeToDeletedTombstonesCloud((cloudTombstones) => {
-      if (Array.isArray(cloudTombstones) && cloudTombstones.length > 0) {
-        addTombstoneIds(cloudTombstones);
-        const tombSet = new Set(cloudTombstones);
+      if (Array.isArray(cloudTombstones)) {
+        acceptCloudTombstones(cloudTombstones);
+        const tombSet = getTombstoneIds();
         setPersons((prev) => prev.filter((p) => !tombSet.has(p.id)));
       }
     });
@@ -449,10 +453,11 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       unsubIgnored();
       unsubMerged();
     };
-  }, [setPersons]);
+  }, [isLocalHydrated, setPersons]);
 
   // Firestore Sync Listener
   useEffect(() => {
+    if (!isLocalHydrated) return;
     const syncState = useCloudSyncStore.getState();
     if (syncState.syncMode === 'manual' || syncState.isQuotaExceeded || isQuotaExceededToday()) {
       return;
@@ -566,11 +571,11 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => {
       unsubscribe();
     };
-  }, [setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
+  }, [isLocalHydrated, setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
 
   // Both background and manual drains inspect every result and preserve new edits.
   useEffect(() => {
-    if (syncMode !== 'auto') return;
+    if (!isLocalHydrated || syncMode !== 'auto') return;
     const upload = () => { void synchronizeProject(getCurrentCloudData, cloudSyncApi, { manual: false }); };
     const timer = setTimeout(upload, 5000);
     window.addEventListener('online', upload);
@@ -578,7 +583,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       clearTimeout(timer);
       window.removeEventListener('online', upload);
     };
-  }, [syncMode, persons, families, events, sources, places, metricRecords, documents,
+  }, [isLocalHydrated, syncMode, persons, families, events, sources, places, metricRecords, documents,
     tasks, findings, hypotheses, requests, matrixEntries, unsavedChangesCount]);
 
   const triggerUploadToCloud = useCallback((options?: { forceFull?: boolean }): Promise<{ success: boolean; message: string }> => {

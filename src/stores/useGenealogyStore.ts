@@ -13,7 +13,6 @@ import {
   deleteEventDoc,
   savePlaceDoc,
   deletePlaceDoc,
-  saveDeletedTombstonesToCloud,
   saveMergedPersonsToCloud,
   batchSaveEntities,
   batchDeleteEntities
@@ -35,6 +34,8 @@ import { clearKinshipCache } from '../rodovid/utils/relationship';
 import { clearGlobalSearchCache } from '../utils/globalTreeSearch';
 import { clearTreeLayoutCache } from '../rodovid/utils/treeLayout';
 import { getGitHubConfig, savePlaceDossierToGitHub } from '../services/githubService';
+import { getTombstoneIds, getPendingDeletionChanges, recordPersonDeletionChanges, hydratePersonDeletionState, TOMBSTONE_STORAGE_KEY } from '../utils/personDeletionState';
+export { getTombstoneIds, TOMBSTONE_STORAGE_KEY } from '../utils/personDeletionState';
 
 export function invalidateAllTreeCaches(): void {
   try {
@@ -122,51 +123,13 @@ export async function flushPendingCloudDeltas(): Promise<void> {
 }
 
 const STORAGE_KEY = 'genealogy_workstation_data_v4_familio';
-export const TOMBSTONE_STORAGE_KEY = 'genealogy_deleted_tombstone_ids_v1';
-
-export function getTombstoneIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(TOMBSTONE_STORAGE_KEY);
-    const set = new Set<string>(raw ? JSON.parse(raw) : []);
-    const trashRaw = localStorage.getItem(`${STORAGE_KEY}_trashPersons`);
-    if (trashRaw) {
-      const trashList = JSON.parse(trashRaw);
-      if (Array.isArray(trashList)) {
-        trashList.forEach((t: any) => {
-          if (t && t.id) set.add(t.id);
-        });
-      }
-    }
-    return set;
-  } catch {
-    return new Set();
-  }
-}
-
 export function addTombstoneIds(ids: string[]): void {
-  try {
-    const current = getTombstoneIds();
-    ids.forEach((id) => current.add(id));
-    const list = Array.from(current);
-    persistLocalData(TOMBSTONE_STORAGE_KEY, list);
-    const syncState = useCloudSyncStore.getState();
-    if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
-      saveDeletedTombstonesToCloud(list).catch(() => {});
-    }
-  } catch {}
+  recordPersonDeletionChanges(ids, true);
+  useCloudSyncStore.getState().markProjectUploadPending();
 }
-
 export function removeTombstoneId(id: string): void {
-  try {
-    const current = getTombstoneIds();
-    current.delete(id);
-    const list = Array.from(current);
-    persistLocalData(TOMBSTONE_STORAGE_KEY, list);
-    const syncState = useCloudSyncStore.getState();
-    if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
-      saveDeletedTombstonesToCloud(list).catch(() => {});
-    }
-  } catch {}
+  recordPersonDeletionChanges([id], false);
+  useCloudSyncStore.getState().markProjectUploadPending();
 }
 
 export const INITIAL_PERSONS: Person[] = (() => {
@@ -626,6 +589,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   deletePersons: (ids) =>
     set((state) => {
+      addTombstoneIds(ids);
       const targets = state.persons.filter((p) => ids.includes(p.id));
       const nextTrash = [
         ...state.trashPersons,
@@ -643,46 +607,25 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
 
-  restorePerson: (id) =>
-    set((state) => {
-      removeTombstoneId(id);
-      const target = state.trashPersons.find((p) => p.id === id);
-      if (!target) return state;
-
-      const restored: Person = {
-        ...target,
-        isDeleted: false,
-        deletedAt: undefined
-      };
-      const nextTrash = state.trashPersons.filter((p) => p.id !== id);
-      const normalizedRestored = normalizePerson(restored);
-      const nextPersons = [...state.persons, normalizedRestored];
-
-      persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
-      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
-      notifySyncChange('persons', normalizedRestored.id, () => savePersonDoc(normalizedRestored));
-
-      return { persons: nextPersons, trashPersons: nextTrash };
-    }),
+  restorePerson: (id) => get().restorePersons([id]),
 
   restorePersons: (ids) =>
     set((state) => {
-      const targets = state.trashPersons.filter((p) => ids.includes(p.id));
-      if (targets.length === 0) return state;
-
-      const restored = targets.map((t) =>
-        normalizePerson({ ...t, isDeleted: false, deletedAt: undefined })
-      );
-      const nextTrash = state.trashPersons.filter((p) => !ids.includes(p.id));
-      const nextPersons = [...state.persons, ...restored];
-
+      const selected = new Set(ids);
+      const targets = state.trashPersons.filter((person) => selected.has(person.id));
+      if (!targets.length) return state;
+      const restoredById = new Map(targets.map((person) => [person.id,
+        normalizePerson({ ...person, isDeleted: false, deletedAt: undefined })]));
+      const restoredIds = [...restoredById.keys()];
+      const activeIds = new Set(state.persons.map(person => person.id));
+      const nextPersons = [...state.persons, ...[...restoredById.values()].filter(person => !activeIds.has(person.id))];
+      const nextTrash = state.trashPersons.filter(person => !restoredById.has(person.id));
       persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
       persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
-      restored.forEach((r) => useCloudSyncStore.getState().markDirty('persons', r.id));
-      if (useCloudSyncStore.getState().syncMode === 'auto') {
-        batchSaveEntities('persons', restored).catch(() => {});
-      }
-
+      recordPersonDeletionChanges(restoredIds, false);
+      restoredIds.forEach(id => useCloudSyncStore.getState().markDirty('persons', id));
+      useCloudSyncStore.getState().markProjectUploadPending();
+      invalidateAllTreeCaches();
       return { persons: nextPersons, trashPersons: nextTrash };
     }),
 
@@ -1371,6 +1314,11 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
 
   hydrateFromIndexedDB: async () => {
     try {
+      await hydratePersonDeletionState();
+      if (Object.keys(getPendingDeletionChanges()).length > 0) {
+        useCloudSyncStore.getState().markProjectUploadPending();
+        useCloudSyncStore.getState().setStatus('pending');
+      }
       const [
         idbPersons,
         idbFamilies,
@@ -1379,8 +1327,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         idbPlaces,
         idbTrash,
         idbHistory,
-        idbSelected,
-        idbTombstones
+        idbSelected
       ] = await Promise.all([
         idbGet<Person[]>(`${STORAGE_KEY}_persons`),
         idbGet<Record<string, Family>>(`${STORAGE_KEY}_families`),
@@ -1389,24 +1336,17 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         idbGet<Record<string, PlaceDossier>>(`${STORAGE_KEY}_places`),
         idbGet<Person[]>(`${STORAGE_KEY}_trashPersons`),
         idbGet<ImportHistorySession[]>(`${STORAGE_KEY}_importHistory`),
-        idbGet<string>(`${STORAGE_KEY}_selectedPersonId`),
-        idbGet<string[]>(TOMBSTONE_STORAGE_KEY)
+        idbGet<string>(`${STORAGE_KEY}_selectedPersonId`)
       ]);
-
-      if (Array.isArray(idbTombstones) && idbTombstones.length > 0) {
-        addTombstoneIds(idbTombstones);
-      }
 
       const updates: Partial<GenealogyDataState> = {};
       const tombstones = getTombstoneIds();
 
-      if (Array.isArray(idbPersons) && idbPersons.length > 0) {
+      if (Array.isArray(idbPersons)) {
         const cleaned = idbPersons
           .filter((p) => p && p.id && !tombstones.has(p.id) && !isDemoPerson(p))
           .map(normalizePerson);
-        if (cleaned.length > 0) {
-          updates.persons = cleaned;
-        }
+        updates.persons = cleaned;
       }
       if (idbFamilies && typeof idbFamilies === 'object' && Object.keys(idbFamilies).length > 0) {
         updates.families = idbFamilies;

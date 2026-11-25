@@ -1,3 +1,5 @@
+import { writePersonDeletionMarkers } from '../services/personDeletionCloudService';
+import { acceptCloudTombstones, getDeletionStateRevision } from '../utils/personDeletionState';
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
@@ -323,7 +325,8 @@ export function safeSnapshotListener(
   queryOrDocRef: any,
   onNext: (snapshot: any) => void,
   path: string,
-  operationType: OperationType = OperationType.LIST
+  operationType: OperationType = OperationType.LIST,
+  includeMetadataChanges: boolean = false
 ): () => void {
   if (isCloudWriteBlocked()) {
     return () => {};
@@ -335,6 +338,7 @@ export function safeSnapshotListener(
   try {
     unsub = onSnapshot(
       queryOrDocRef,
+      { includeMetadataChanges },
       (snapshot) => {
         if (!isCancelled) {
           onNext(snapshot);
@@ -1043,6 +1047,25 @@ export async function saveDeletedTombstonesToCloud(
   }
 }
 
+/** Transactional per-person updates avoid overwriting another client's markers. */
+export async function updatePersonDeletionMarkers(
+  changes: Record<string, boolean>, projectId: string = DEFAULT_PROJECT_ID
+): Promise<string[] | null> {
+  if (isCloudWriteBlocked(true)) return null;
+  const db = getDbInstance();
+  if (!db) return null;
+  try {
+    return await writePersonDeletionMarkers(db, projectId, changes);
+  } catch (error) {
+    if (isFirestoreQuotaError(error)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+    }
+    handleFirestoreError(error, OperationType.WRITE, `projects/${projectId}/systemSettings/deletedTombstones`);
+    return null;
+  }
+}
+
 export function subscribeToDeletedTombstonesCloud(
   onUpdate: (ids: string[]) => void,
   projectId: string = DEFAULT_PROJECT_ID
@@ -1054,6 +1077,7 @@ export function subscribeToDeletedTombstonesCloud(
     return safeSnapshotListener(
       docRef,
       (snapshot) => {
+        if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) return;
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (Array.isArray(data?.ids)) {
@@ -1062,7 +1086,8 @@ export function subscribeToDeletedTombstonesCloud(
         }
       },
       `projects/${projectId}/systemSettings/deletedTombstones`,
-      OperationType.GET
+      OperationType.GET,
+      true
     );
   } catch {
     return () => {};
@@ -1546,19 +1571,11 @@ export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_P
     } catch {}
 
     try {
-      const tombSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'deletedTombstones'));
+      const deletionRevision = getDeletionStateRevision();
+      const tombSnap = await getDocFromServer(doc(db, 'projects', projectId, 'systemSettings', 'deletedTombstones'));
       if (tombSnap.exists()) {
-        const d = tombSnap.data();
-        if (Array.isArray(d?.ids) && d.ids.length > 0) {
-          try {
-            const raw = localStorage.getItem('genealogy_deleted_tombstone_ids_v1');
-            const localSet = new Set<string>(raw ? JSON.parse(raw) : []);
-            d.ids.forEach((id: string) => {
-              if (typeof id === 'string' && id.trim()) localSet.add(id.trim());
-            });
-            localStorage.setItem('genealogy_deleted_tombstone_ids_v1', JSON.stringify(Array.from(localSet)));
-          } catch {}
-        }
+        const ids = tombSnap.data()?.ids;
+        if (Array.isArray(ids)) acceptCloudTombstones(ids, deletionRevision);
       }
     } catch {}
 
