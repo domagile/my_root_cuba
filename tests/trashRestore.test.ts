@@ -46,8 +46,8 @@ test('startup filtering of unknown placeholders creates no cloud write or deleti
 beforeEach(async () => {
   await flushPendingLocalWrites();
   localStorage.clear();
-  await idbSetMultiple({ [TOMBSTONE_STORAGE_KEY]: [], [journalKey]: {}, [`${key}_persons`]: [], [`${key}_trashPersons`]: [] });
-  useGenealogyStore.setState({ persons: [], trashPersons: [], families: {}, sources: {}, events: {}, places: {} });
+  await idbSetMultiple({ [TOMBSTONE_STORAGE_KEY]: [], [journalKey]: {}, ['genealogy_deleted_family_links_v1']: {}, [`${key}_persons`]: [], [`${key}_trashPersons`]: [] });
+  useGenealogyStore.setState({ persons: [], trashPersons: [], deletedFamilyLinks: {}, families: {}, sources: {}, events: {}, places: {} });
   useCloudSyncStore.getState().clearDirty();
   useCloudSyncStore.setState({ syncMode: 'manual', isQuotaExceeded: false, pendingWritesCount: 0, pendingWriteError: null });
   calls.length = 0;
@@ -353,4 +353,75 @@ test('confirmed remote deletion creates a local trash copy without echoing the d
   assert.deepEqual(deletion.getPendingDeletionChanges(), {});
   assert.deepEqual(calls, []);
   assert.equal(useCloudSyncStore.getState().hasUnsavedChanges, false);
+});
+
+function seedFamily() {
+  useGenealogyStore.setState({
+    persons: ['dad','mom','child'].map(id => ({ ...person(id), isDeleted: false })),
+    families: { f: { id: 'f', husbandId: 'dad', wifeId: 'mom', marriageDate: '1900',
+      children: [{ personId: 'child', relationType: 'adopted' }], childrenIds: ['child'] } }
+  });
+}
+
+test('single deletion and restoration preserve family membership and queue the changed family', () => {
+  seedFamily();
+  const before = useGenealogyStore.getState().families;
+  useGenealogyStore.getState().deletePerson('dad');
+  assert.equal(useGenealogyStore.getState().families.f.husbandId, undefined);
+  assert.deepEqual(useCloudSyncStore.getState().dirtyTracker.families, ['f']);
+  const result = useGenealogyStore.getState().restorePerson('dad');
+  assert.deepEqual(useGenealogyStore.getState().families, before);
+  assert.deepEqual(result, { restoredCount: 1, skippedFamilyLinks: 0 });
+  assert.deepEqual(useGenealogyStore.getState().deletedFamilyLinks, {});
+});
+
+test('bulk deletion removes family memberships consistently and restores them after IndexedDB hydration', async () => {
+  seedFamily();
+  const before = useGenealogyStore.getState().families;
+  useGenealogyStore.getState().deletePersons(['dad','mom','child']);
+  assert.equal(useGenealogyStore.getState().families.f.children.length, 0);
+  await flushPendingLocalWrites();
+  useGenealogyStore.setState({ persons: [], trashPersons: [], families: {}, deletedFamilyLinks: {} });
+  await useGenealogyStore.getState().hydrateFromIndexedDB();
+  useGenealogyStore.getState().restorePersons(['mom','child','dad']);
+  assert.deepEqual(useGenealogyStore.getState().families, before);
+  assert.equal(useGenealogyStore.getState().persons.length, 3);
+});
+
+test('restoration reports a changed parent slot without overwriting the new family member', () => {
+  seedFamily();
+  useGenealogyStore.getState().deletePerson('dad');
+  const f = useGenealogyStore.getState().families.f;
+  useGenealogyStore.getState().setFamilies({ f: { ...f, husbandId: 'new-partner', notes: 'New edit' } });
+  const result = useGenealogyStore.getState().restorePerson('dad');
+  assert.equal(result.skippedFamilyLinks, 1);
+  assert.equal(useGenealogyStore.getState().families.f.husbandId, 'new-partner');
+  assert.equal(useGenealogyStore.getState().families.f.notes, 'New edit');
+  assert.ok(useGenealogyStore.getState().deletedFamilyLinks.dad);
+});
+
+test('failed family upload retains restored-person intention and retries the family before acknowledging markers', async () => {
+  seedFamily();
+  useGenealogyStore.getState().deletePerson('dad');
+  useGenealogyStore.getState().restorePerson('dad');
+  let markerCalls = 0;
+  const result = await synchronizeProject(data, api({
+    saveProjectDataToCloud: async (payload: any) => { assert.equal(payload.families[0].husbandId, 'dad'); return false; },
+    updatePersonDeletionMarkers: async () => { markerCalls++; return []; }
+  }), { manual: true });
+  assert.equal(result.success, false);
+  assert.equal(markerCalls, 0);
+  assert.equal(deletion.getPendingDeletionChanges().dad.deleted, false);
+  const retry = await synchronizeProject(data, api({ updatePersonDeletionMarkers: async () => [] }), { manual: true });
+  assert.equal(retry.success, true);
+});
+
+test('permanent deletion discards only the selected local family recovery history', () => {
+  seedFamily();
+  useGenealogyStore.getState().deletePersons(['dad','mom']);
+  useGenealogyStore.getState().permanentlyDeletePerson('dad');
+  assert.equal(useGenealogyStore.getState().deletedFamilyLinks.dad, undefined);
+  assert.ok(useGenealogyStore.getState().deletedFamilyLinks.mom);
+  useGenealogyStore.getState().emptyTrash();
+  assert.deepEqual(useGenealogyStore.getState().deletedFamilyLinks, {});
 });

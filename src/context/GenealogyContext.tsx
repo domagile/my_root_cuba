@@ -1,3 +1,4 @@
+import type { RestorePersonsResult } from '../services/familyRestoreService';
 import { selectCloudPersons } from '../services/cloudPersonReadService';
 import { getPendingDeletionChanges } from '../utils/personDeletionState';
 import { prepareCloudRestore } from '../services/cloudRestoreService';
@@ -118,8 +119,8 @@ export interface GenealogyContextType {
   updatePersons: (persons: Person[]) => void;
   deletePerson: (id: string) => void;
   deletePersons: (ids: string[]) => void;
-  restorePerson: (id: string) => void;
-  restorePersons: (ids: string[]) => void;
+  restorePerson: (id: string) => RestorePersonsResult;
+  restorePersons: (ids: string[]) => RestorePersonsResult;
   permanentlyDeletePerson: (id: string) => void;
   permanentlyDeletePersons: (ids: string[]) => void;
   emptyTrash: () => void;

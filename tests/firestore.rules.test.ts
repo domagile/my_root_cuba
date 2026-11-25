@@ -1,5 +1,7 @@
 import { writePersonDeletionMarkers } from '../src/services/personDeletionCloudService';
 import { readProjectFromFirestore } from '../src/services/projectCloudReadService';
+import { removeFamilyMemberships, restoreFamilyMemberships } from '../src/services/familyRestoreService';
+import { serializeFamilyForCloud } from '../src/utils/familyCloudData';
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -303,4 +305,19 @@ test('viewer can download the tree with the read-only adapter without deleting o
   const admin = identity('admin') as unknown as Firestore;
   assert.equal((await getDoc(doc(admin, 'projects', project, 'persons', 'living'))).data()!.firstName, 'Private');
   assert.equal((await getDocs(collection(admin, 'projects', project, 'systemSettings'))).size, 0);
+});
+
+test('family merge writes remove a parent and restore memberships without leaving a stale cloud parent', async () => {
+  const db = identity('editor') as unknown as Firestore;
+  const ref = doc(db, 'projects', project, 'families', 'restore');
+  const initial = { restore: { id: 'restore', husbandId: 'dad', wifeId: 'mom', children: [{ personId: 'child' }], childrenIds: ['child'], marriageDate: '1900' } };
+  await setDoc(ref, initial.restore);
+  const removed = removeFamilyMemberships(initial, new Set(['dad','child']));
+  await setDoc(ref, serializeFamilyForCloud(removed.families.restore), { merge: true });
+  const afterDelete = (await getDoc(ref)).data()!;
+  assert.equal(afterDelete.husbandId, null);
+  assert.deepEqual(afterDelete.childrenIds, []);
+  const restored = restoreFamilyMemberships(removed.families, removed.history, ['child','dad']);
+  await setDoc(ref, serializeFamilyForCloud(restored.families.restore), { merge: true });
+  assert.deepEqual((await getDoc(ref)).data(), initial.restore);
 });

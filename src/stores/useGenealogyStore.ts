@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { normalizePerson } from '../utils/personNormalization';
+import { removeFamilyMemberships, restoreFamilyMemberships, FAMILY_RESTORE_STORAGE_KEY, type FamilyRestoreHistory, type RestorePersonsResult } from '../services/familyRestoreService';
 import { reconcileCloudTrash } from '../services/cloudTrashService';
 export { normalizePerson } from '../utils/personNormalization';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig, PlaceDossier } from '../types';
@@ -29,7 +30,7 @@ import { useAuthStore } from './useAuthStore';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
 import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord, getPersonAncestorsIds } from '../rodovid/utils/mergeDatabase';
 import { purgeUnknownPlaceholderPersons, cleanDatabaseFromUnknownPersons, isUnknownPlaceholderPerson } from '../rodovid/utils/unknownPersonCleaner';
-import { persistLocalData, idbGet, flushPendingLocalWrites } from '../utils/indexedDbStorage';
+import { persistLocalData, readLocalDataSync, idbGet, flushPendingLocalWrites } from '../utils/indexedDbStorage';
 import { clearDuplicateDetectorCache } from '../utils/duplicateDetector';
 import { clearTreeAuditCache } from '../utils/treeAudit';
 import { clearKinshipCache } from '../rodovid/utils/relationship';
@@ -162,6 +163,7 @@ export interface GenealogyDataState {
   events: Record<string, LifeEvent>;
   places: Record<string, PlaceDossier>;
   trashPersons: Person[];
+  deletedFamilyLinks: FamilyRestoreHistory;
   applyConfirmedCloudDeletionState: (ids: string[], persons?: Person[], mergedIds?: string[]) => void;
   selectedPersonId: string | null;
   gitConfig: GitConfig;
@@ -175,11 +177,12 @@ export interface GenealogyDataState {
   updatePersons: (persons: Person[]) => void;
   deletePerson: (id: string) => void;
   deletePersons: (ids: string[]) => void;
-  restorePerson: (id: string) => void;
-  restorePersons: (ids: string[]) => void;
+  restorePerson: (id: string) => RestorePersonsResult;
+  restorePersons: (ids: string[]) => RestorePersonsResult;
   permanentlyDeletePerson: (id: string) => void;
   permanentlyDeletePersons: (ids: string[]) => void;
   emptyTrash: () => void;
+
   getPersonById: (id: string) => Person | undefined;
   deleteAncestorsOfPerson: (personId: string) => {
     deletedCount: number;
@@ -353,6 +356,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     }
   })(),
 
+  deletedFamilyLinks: readLocalDataSync<FamilyRestoreHistory>(FAMILY_RESTORE_STORAGE_KEY) || {},
+
   trashPersons: (() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_trashPersons`);
@@ -491,56 +496,33 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       return { persons: next };
     }),
 
-  deletePerson: (id) =>
-    set((state) => {
-      addTombstoneIds([id]);
+  deletePerson: (id) => get().deletePersons([id]),
 
-      const target = state.persons.find((p) => p.id === id);
-      const nextTrash = target
-        ? [...state.trashPersons, { ...target, isDeleted: true, deletedAt: new Date().toISOString() }]
-        : state.trashPersons;
-      const nextPersons = state.persons.filter((p) => p.id !== id);
-
-      // Clean up family references
-      const nextFamilies: Record<string, Family> = {};
-      Object.entries(state.families).forEach(([fId, fam]) => {
-        nextFamilies[fId] = {
-          ...fam,
-          husbandId: fam.husbandId === id ? undefined : fam.husbandId,
-          wifeId: fam.wifeId === id ? undefined : fam.wifeId,
-          children: (fam.children || []).filter((c) => c.personId !== id),
-          childrenIds: (fam.childrenIds || []).filter((cId) => cId !== id)
-        };
-      });
-
-      persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
-      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
-      persistLocalData(`${STORAGE_KEY}_families`, nextFamilies);
-      notifySyncDelete('persons', id);
-
-      return { persons: nextPersons, trashPersons: nextTrash, families: nextFamilies };
-    }),
-
-  deletePersons: (ids) =>
-    set((state) => {
-      addTombstoneIds(ids);
-      const targets = state.persons.filter((p) => ids.includes(p.id));
-      const nextTrash = [
-        ...state.trashPersons,
-        ...targets.map((t) => ({ ...t, isDeleted: true, deletedAt: new Date().toISOString() }))
-      ];
-      const nextPersons = state.persons.filter((p) => !ids.includes(p.id));
-
-      persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
-      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
-      ids.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
-
-      return { persons: nextPersons, trashPersons: nextTrash };
-    }),
+  deletePersons: (ids) => set(state => {
+    const selected = new Set(ids);
+    const targets = state.persons.filter(person => selected.has(person.id));
+    if (!targets.length) return state;
+    const deletedIds = new Set(targets.map(person => person.id));
+    const removed = removeFamilyMemberships(state.families, deletedIds);
+    const deletedFamilyLinks = { ...state.deletedFamilyLinks, ...removed.history };
+    const nextTrash = [...state.trashPersons.filter(person => !deletedIds.has(person.id)),
+      ...targets.map(person => ({ ...person, isDeleted: true, deletedAt: new Date().toISOString() }))];
+    const nextPersons = state.persons.filter(person => !deletedIds.has(person.id));
+    persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
+    persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
+    persistLocalData(`${STORAGE_KEY}_families`, removed.families);
+    persistLocalData(FAMILY_RESTORE_STORAGE_KEY, deletedFamilyLinks);
+    addTombstoneIds([...deletedIds]);
+    deletedIds.forEach(id => useCloudSyncStore.getState().markDeleted('persons', id));
+    removed.changedIds.forEach(id => useCloudSyncStore.getState().markDirty('families', id));
+    invalidateAllTreeCaches();
+    return { persons: nextPersons, trashPersons: nextTrash, families: removed.families, deletedFamilyLinks };
+  }),
 
   restorePerson: (id) => get().restorePersons([id]),
 
-  restorePersons: (ids) =>
+  restorePersons: (ids) => {
+    let result: RestorePersonsResult = { restoredCount: 0, skippedFamilyLinks: 0 };
     set((state) => {
       const selected = new Set(ids);
       const targets = state.trashPersons.filter((person) => selected.has(person.id));
@@ -551,42 +533,37 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       const activeIds = new Set(state.persons.map(person => person.id));
       const nextPersons = [...state.persons, ...[...restoredById.values()].filter(person => !activeIds.has(person.id))];
       const nextTrash = state.trashPersons.filter(person => !restoredById.has(person.id));
+      const recovered = restoreFamilyMemberships(state.families, state.deletedFamilyLinks, restoredIds);
+      result = { restoredCount: restoredIds.length, skippedFamilyLinks: recovered.skippedFamilyLinks };
+      persistLocalData(`${STORAGE_KEY}_families`, recovered.families);
+      persistLocalData(FAMILY_RESTORE_STORAGE_KEY, recovered.remaining);
+      recovered.changedIds.forEach(id => useCloudSyncStore.getState().markDirty('families', id));
       persistLocalData(`${STORAGE_KEY}_persons`, nextPersons);
       persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
       recordPersonDeletionChanges(restoredIds, false);
       restoredIds.forEach(id => useCloudSyncStore.getState().markDirty('persons', id));
       useCloudSyncStore.getState().markProjectUploadPending();
       invalidateAllTreeCaches();
-      return { persons: nextPersons, trashPersons: nextTrash };
-    }),
+      return { persons: nextPersons, trashPersons: nextTrash, families: recovered.families, deletedFamilyLinks: recovered.remaining };
+    });
+    return result;
+  },
 
-  permanentlyDeletePerson: (id) =>
-    set((state) => {
-      addTombstoneIds([id]);
+  permanentlyDeletePerson: (id) => get().permanentlyDeletePersons([id]),
 
-      const nextTrash = state.trashPersons.filter((p) => p.id !== id);
-      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
-      notifySyncDelete('persons', id);
-      return { trashPersons: nextTrash };
-    }),
+  permanentlyDeletePersons: (ids) => set(state => {
+    if (!ids.length) return state;
+    const selected = new Set(ids);
+    const nextTrash = state.trashPersons.filter(person => !selected.has(person.id));
+    const deletedFamilyLinks = Object.fromEntries(Object.entries(state.deletedFamilyLinks).filter(([id]) => !selected.has(id)));
+    addTombstoneIds(ids);
+    persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
+    persistLocalData(FAMILY_RESTORE_STORAGE_KEY, deletedFamilyLinks);
+    ids.forEach(id => useCloudSyncStore.getState().markDeleted('persons', id));
+    return { trashPersons: nextTrash, deletedFamilyLinks };
+  }),
 
-  permanentlyDeletePersons: (ids) =>
-    set((state) => {
-      addTombstoneIds(ids);
-      const nextTrash = state.trashPersons.filter((p) => !ids.includes(p.id));
-      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
-      ids.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
-      return { trashPersons: nextTrash };
-    }),
-
-  emptyTrash: () =>
-    set((state) => {
-      const ids = state.trashPersons.map((p) => p.id);
-      addTombstoneIds(ids);
-      persistLocalData(`${STORAGE_KEY}_trashPersons`, []);
-      ids.forEach((id) => useCloudSyncStore.getState().markDeleted('persons', id));
-      return { trashPersons: [] };
-    }),
+  emptyTrash: () => get().permanentlyDeletePersons(get().trashPersons.map(person => person.id)),
 
   getPersonById: (id) => get().persons.find((p) => p.id === id),
 
@@ -1245,7 +1222,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         idbPlaces,
         idbTrash,
         idbHistory,
-        idbSelected
+        idbSelected,
+        idbFamilyLinks
       ] = await Promise.all([
         idbGet<Person[]>(`${STORAGE_KEY}_persons`),
         idbGet<Record<string, Family>>(`${STORAGE_KEY}_families`),
@@ -1254,7 +1232,8 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
         idbGet<Record<string, PlaceDossier>>(`${STORAGE_KEY}_places`),
         idbGet<Person[]>(`${STORAGE_KEY}_trashPersons`),
         idbGet<ImportHistorySession[]>(`${STORAGE_KEY}_importHistory`),
-        idbGet<string>(`${STORAGE_KEY}_selectedPersonId`)
+        idbGet<string>(`${STORAGE_KEY}_selectedPersonId`),
+        idbGet<FamilyRestoreHistory>(FAMILY_RESTORE_STORAGE_KEY)
       ]);
 
       const updates: Partial<GenealogyDataState> = {};
@@ -1278,6 +1257,7 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
       if (idbPlaces && typeof idbPlaces === 'object' && Object.keys(idbPlaces).length > 0) {
         updates.places = idbPlaces;
       }
+      if (idbFamilyLinks && typeof idbFamilyLinks === 'object' && !Array.isArray(idbFamilyLinks)) updates.deletedFamilyLinks = idbFamilyLinks;
       if (Array.isArray(idbTrash)) {
         updates.trashPersons = idbTrash;
       }

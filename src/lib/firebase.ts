@@ -1,3 +1,4 @@
+import { serializeFamilyForCloud } from '../utils/familyCloudData';
 import { writePersonDeletionMarkers } from '../services/personDeletionCloudService';
 import { readProjectFromFirestore, type CloudProjectSnapshot } from '../services/projectCloudReadService';
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
@@ -460,7 +461,7 @@ export async function saveEntityDoc(
     try {
       const db = getDbInstance();
       if (!db || !itemId) return false;
-      const cleanData = JSON.parse(JSON.stringify(data));
+      const cleanData = subcollection === 'families' ? serializeFamilyForCloud(data) : JSON.parse(JSON.stringify(data));
       // In Firestore setDoc with { merge: true }, undefined fields are omitted by JSON.stringify.
       // Therefore, if the user explicitly clears deathDate or deathYear (or if they are absent),
       // we must explicitly write null so Firestore overwrites and wipes any old/phantom values:
@@ -1176,7 +1177,7 @@ export async function batchSaveEntities(
         if (item && (item.id || item.year)) {
           const id = String(item.id || `${item.village}_${item.year}`);
           const docRef = doc(db, 'projects', projectId, subcollection, id);
-          const cleanItem = JSON.parse(JSON.stringify(item));
+          const cleanItem = subcollection === 'families' ? serializeFamilyForCloud(item) : JSON.parse(JSON.stringify(item));
           if (subcollection === 'persons') {
             if (item.deathYear === undefined || item.deathYear === null) cleanItem.deathYear = null;
             if (item.deathDate === undefined || item.deathDate === null) cleanItem.deathDate = null;

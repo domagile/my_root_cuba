@@ -349,6 +349,7 @@ export async function autoMigrateLocalStorageToIDB(): Promise<void> {
       'genealogy_workstation_data_v2_matrix',
       'genealogy_deleted_tombstone_ids_v1',
       'genealogy_person_deletion_changes_v1',
+      'genealogy_deleted_family_links_v1',
       'rodovid_ignored_duplicate_pairs',
       'genealogy_merged_person_ids',
       'genealogy_research_notes_v1',
