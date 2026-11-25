@@ -73,7 +73,6 @@ export const Sidebar: React.FC = () => {
   ];
 
   const researchItems: { id: NavigationTab; label: string; icon: React.FC<{ className?: string }> }[] = [
-    { id: 'nyshporka', label: 'ШІ-читання скоропису', icon: Sparkles },
     { id: 'ai-analysis', label: 'Слідчий AI аналіз', icon: Sparkles },
     { id: 'research', label: 'Детективні розкопки', icon: Compass },
     { id: 'matrix', label: 'Літопис подій', icon: CalendarDays },
