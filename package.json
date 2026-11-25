@@ -15,7 +15,9 @@
     "test:storage": "tsx --test tests/localStorage.test.ts tests/persistentBackup.test.ts tests/projectArchive.test.ts tests/cloudRestore.test.ts",
     "test:api": "tsx --test tests/api.test.ts tests/aiClient.test.ts",
     "test:server": "tsx --test tests/server.test.ts",
-    "test": "npm run test:sync && npm run test:storage && npm run test:api"
+    "test": "npm run test:sync && npm run test:storage && npm run test:api && npm run test:tree",
+    "test:tree": "node --import tsx --test tests/treeLayout.test.ts",
+    "bench:tree": "node --import tsx benchmarks/treeLayoutCache.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

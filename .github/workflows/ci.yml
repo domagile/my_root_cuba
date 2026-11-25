@@ -23,6 +23,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run test:sync
+      - run: bun run test:tree
       - run: bun run test:storage
       - run: bun run test:api
       - run: bun run test:firestore
