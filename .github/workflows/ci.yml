@@ -25,6 +25,7 @@ jobs:
       - run: bun run test:sync
       - run: bun run test:storage
       - run: bun run test:api
+      - run: bun run test:delta
       - run: bun run test:firestore
       - run: bun run build
       - run: bun run test:server
