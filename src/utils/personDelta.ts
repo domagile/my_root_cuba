@@ -33,6 +33,9 @@ export function computePersonDelta(
     const prevVal = (prevPerson as any)[key];
     const nextVal = (nextPerson as any)[key];
 
+    // Shared immutable fields and identical primitives need no serialization.
+    if (Object.is(prevVal, nextVal)) continue;
+
     // Deep compare via JSON representation
     const prevJson = JSON.stringify(prevVal ?? null);
     const nextJson = JSON.stringify(nextVal ?? null);

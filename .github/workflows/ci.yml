@@ -27,6 +27,7 @@ jobs:
       - run: bun run test:search
       - run: bun run test:trash
       - run: bun run test:api
+      - run: bun run test:delta
       - run: bun run test:firestore
       - run: bun run build
       - run: bun run test:server

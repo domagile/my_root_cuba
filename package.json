@@ -11,6 +11,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:trash": "node --experimental-test-module-mocks --import tsx --test tests/trashRestore.test.ts",
+    "test:delta": "node --import tsx --test tests/personDelta.test.ts",
+    "bench:delta": "node --import tsx benchmarks/personDelta.ts",
     "test:firestore": "firebase emulators:exec --config firebase.emulators.json --project demo-my-root-cuba --only firestore \"tsx --test tests/firestore.rules.test.ts\"",
     "test:sync": "tsx --test tests/cloudSync.test.ts",
     "test:storage": "tsx --test tests/localStorage.test.ts tests/persistentBackup.test.ts tests/projectArchive.test.ts tests/cloudRestore.test.ts tests/cloudRead.test.ts tests/cloudTrash.test.ts tests/familyRestore.test.ts",
