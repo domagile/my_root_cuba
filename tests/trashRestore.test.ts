@@ -329,3 +329,28 @@ test('a confirmed pre-transaction snapshot cannot undo the transaction when its 
 test('per-person marker patches preserve unrelated remote deletions', () => {
   assert.deepEqual(deletion.applyDeletionChangesToIds(['remote','restored'], { restored: false, local: true }).sort(), ['local','remote']);
 });
+
+test('confirmed cloud reconciliation releases stale trash durably without queuing a cloud write', async () => {
+  await seedTrash(['a','keep']);
+  useGenealogyStore.getState().applyConfirmedCloudDeletionState(['keep'], [{ ...person('a'), isDeleted: false }]);
+  assert.deepEqual(useGenealogyStore.getState().persons.map(p => p.id), ['a']);
+  assert.deepEqual(useGenealogyStore.getState().trashPersons.map(p => p.id), ['keep']);
+  assert.equal(getTombstoneIds().has('a'), false);
+  assert.deepEqual(calls, []);
+  assert.equal(useCloudSyncStore.getState().hasUnsavedChanges, false);
+  await flushPendingLocalWrites();
+  useGenealogyStore.setState({ persons: [], trashPersons: [] });
+  await useGenealogyStore.getState().hydrateFromIndexedDB();
+  assert.deepEqual(useGenealogyStore.getState().persons.map(p => p.id), ['a']);
+  assert.equal(getTombstoneIds().has('a'), false);
+});
+
+test('confirmed remote deletion creates a local trash copy without echoing the deletion to the server', () => {
+  useGenealogyStore.setState({ persons: [{ ...person('remote-deleted'), isDeleted: false }] });
+  useGenealogyStore.getState().applyConfirmedCloudDeletionState(['remote-deleted']);
+  assert.equal(useGenealogyStore.getState().persons.length, 0);
+  assert.equal(useGenealogyStore.getState().trashPersons[0].id, 'remote-deleted');
+  assert.deepEqual(deletion.getPendingDeletionChanges(), {});
+  assert.deepEqual(calls, []);
+  assert.equal(useCloudSyncStore.getState().hasUnsavedChanges, false);
+});

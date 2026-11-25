@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { normalizePerson } from '../utils/personNormalization';
+import { reconcileCloudTrash } from '../services/cloudTrashService';
 export { normalizePerson } from '../utils/personNormalization';
 import { Person, Family, Source, LifeEvent, GenealogyDatabase, GitConfig, PlaceDossier } from '../types';
 import { FAMILIO_PERSONS, FAMILIO_FAMILIES, FAMILIO_SOURCES, FAMILIO_EVENTS } from '../data/familioData';
@@ -35,7 +36,7 @@ import { clearKinshipCache } from '../rodovid/utils/relationship';
 import { clearGlobalSearchCache } from '../utils/globalTreeSearch';
 import { clearTreeLayoutCache } from '../rodovid/utils/treeLayout';
 import { getGitHubConfig, savePlaceDossierToGitHub } from '../services/githubService';
-import { getTombstoneIds, getPendingDeletionChanges, recordPersonDeletionChanges, hydratePersonDeletionState, TOMBSTONE_STORAGE_KEY } from '../utils/personDeletionState';
+import { acceptCloudTombstones, getTombstoneIds, getPendingDeletionChanges, recordPersonDeletionChanges, hydratePersonDeletionState, TOMBSTONE_STORAGE_KEY } from '../utils/personDeletionState';
 export { getTombstoneIds, TOMBSTONE_STORAGE_KEY } from '../utils/personDeletionState';
 
 export function invalidateAllTreeCaches(): void {
@@ -161,6 +162,7 @@ export interface GenealogyDataState {
   events: Record<string, LifeEvent>;
   places: Record<string, PlaceDossier>;
   trashPersons: Person[];
+  applyConfirmedCloudDeletionState: (ids: string[], persons?: Person[], mergedIds?: string[]) => void;
   selectedPersonId: string | null;
   gitConfig: GitConfig;
   googleDriveEmail: string;
@@ -384,6 +386,16 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   })(),
 
   googleDriveEmail: '',
+
+  applyConfirmedCloudDeletionState: (ids, persons, mergedIds = []) => set(state => {
+    const next = reconcileCloudTrash(state, ids, persons, getPendingDeletionChanges(), new Set(mergedIds));
+    acceptCloudTombstones(ids);
+    if (next === state) return state;
+    persistLocalData(`${STORAGE_KEY}_persons`, next.persons);
+    persistLocalData(`${STORAGE_KEY}_trashPersons`, next.trashPersons);
+    invalidateAllTreeCaches();
+    return { persons: next.persons, trashPersons: next.trashPersons };
+  }),
 
   setPersons: (updater) =>
     set((state) => {

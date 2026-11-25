@@ -1272,18 +1272,20 @@ export function subscribeToSubcollection<T = any>(
   subcollection: string,
   onUpdate: (items: T[]) => void,
   limitCount: number = 300,
-  projectId: string = DEFAULT_PROJECT_ID
+  projectId: string = DEFAULT_PROJECT_ID,
+  confirmedOnly: boolean = false
 ): () => void {
   try {
     const db = getDbInstance();
     if (!db) return () => {};
 
     const colRef = collection(db, 'projects', projectId, subcollection);
-    const q = query(colRef, limit(limitCount));
+    const q = limitCount > 0 ? query(colRef, limit(limitCount)) : colRef;
 
     return safeSnapshotListener(
       q,
       (snapshot) => {
+        if (confirmedOnly && (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites)) return;
         try {
           const list = snapshot.docs.map((d: any) => {
             const row: any = { ...d.data(), id: d.id };
@@ -1304,7 +1306,8 @@ export function subscribeToSubcollection<T = any>(
         }
       },
       `projects/${projectId}/${subcollection}`,
-      OperationType.LIST
+      OperationType.LIST,
+      confirmedOnly
     );
   } catch (err) {
     console.warn(`Failed to subscribe to ${subcollection}:`, err);
@@ -1363,12 +1366,13 @@ export function subscribeToProjectData(
     const unsub = subscribeToSubcollection(
       colName,
       (items) => {
-        if (items && items.length > 0) {
+        if (items && (items.length > 0 || colName === 'persons')) {
           onDataUpdate({ [colName]: items });
         }
       },
-      400,
-      projectId
+      colName === 'persons' ? 0 : 400,
+      projectId,
+      colName === 'persons'
     );
     unsubscribers.push(unsub);
   });
