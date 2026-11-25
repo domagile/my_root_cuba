@@ -222,13 +222,45 @@ export function extractHighlightSnippet(fullText: string, queryToken: string, ma
   return snippet;
 }
 
+// These memo tables live for one search only. Bounds prevent large free-text
+// corpora from retaining an unbounded number of comparisons in a single query.
+class SearchPairMemo<T> {
+  private rows = new Map<string, Map<string, T>>();
+  private count = 0;
+  get(a: string, b: string, compute: (a: string, b: string) => T): T {
+    const row = this.rows.get(a);
+    if (row?.has(b)) return row.get(b)!;
+    const value = compute(a, b);
+    if (this.count < 20000) {
+      const target = row || new Map<string, T>();
+      target.set(b, value);
+      if (!row) this.rows.set(a, target);
+      this.count++;
+    }
+    return value;
+  }
+}
+interface SearchWorkCache {
+  matches: Map<string, ReturnType<typeof matchTokenFuzzyUncached>>;
+  equivalences: SearchPairMemo<boolean>;
+  distances: SearchPairMemo<number>;
+}
+
 /**
  * Evaluates fuzzy match between a target string and query tokens.
  * Returns score (0-100), fuzzy flag, fuzzy type.
  */
-export function matchTokenFuzzy(
+export function matchTokenFuzzy(target: string, queryVariations: string[], cache?: SearchWorkCache): ReturnType<typeof matchTokenFuzzyUncached> {
+  if (cache?.matches.has(target)) return cache.matches.get(target)!;
+  const result = matchTokenFuzzyUncached(target, queryVariations, cache);
+  if (cache && cache.matches.size < 10000) cache.matches.set(target, result);
+  return result;
+}
+
+function matchTokenFuzzyUncached(
   target: string,
-  queryVariations: string[]
+  queryVariations: string[],
+  cache?: SearchWorkCache
 ): {
   isMatch: boolean;
   score: number;
@@ -309,7 +341,7 @@ export function matchTokenFuzzy(
 
       for (const tWord of targetWords) {
         // Direct word equality or Slavic bilingual equivalence (Names, Patronymics, Surnames: Ukrainian <-> Russian)
-        if (tWord === qToken || areSlavicTokensEquivalent(tWord, qToken)) {
+        if (tWord === qToken || (cache ? cache.equivalences.get(tWord, qToken, areSlavicTokensEquivalent) : areSlavicTokensEquivalent(tWord, qToken))) {
           tokenMatched = true;
           tokenBestScore = Math.max(tokenBestScore, tWord === qToken ? 100 : 96);
           tokenFuzzy = tWord !== qToken;
@@ -370,7 +402,7 @@ export function matchTokenFuzzy(
 
         // Levenshtein Typo Tolerance
         if (qToken.length >= 3) {
-          const dist = calculateLevenshteinDistance(qToken, tWord);
+          const dist = cache ? cache.distances.get(qToken, tWord, calculateLevenshteinDistance) : calculateLevenshteinDistance(qToken, tWord);
           const maxAllowedDist = qToken.length <= 4 ? 1 : 2;
 
           if (dist <= maxAllowedDist) {
@@ -423,7 +455,7 @@ export function matchTokenFuzzy(
  * 2. Event Places
  * 3. Notes & Details
  */
-export function searchPerson(person: Person, queryVariations: string[]): GlobalSearchResult | null {
+export function searchPerson(person: Person, queryVariations: string[], cache?: SearchWorkCache): GlobalSearchResult | null {
   if (person.isDeleted) return null;
 
   const matches: SearchMatchDetail[] = [];
@@ -462,7 +494,7 @@ export function searchPerson(person: Person, queryVariations: string[]): GlobalS
 
   for (const nf of nameFields) {
     if (!nf.text) continue;
-    const match = matchTokenFuzzy(nf.text, queryVariations);
+    const match = matchTokenFuzzy(nf.text, queryVariations, cache);
     if (match.isMatch) {
       matches.push({
         category: 'name',
@@ -512,7 +544,7 @@ export function searchPerson(person: Person, queryVariations: string[]): GlobalS
 
   for (const pf of placeFields) {
     if (!pf.text) continue;
-    const match = matchTokenFuzzy(pf.text, queryVariations);
+    const match = matchTokenFuzzy(pf.text, queryVariations, cache);
     if (match.isMatch) {
       matches.push({
         category: 'place',
@@ -571,7 +603,7 @@ export function searchPerson(person: Person, queryVariations: string[]): GlobalS
 
   for (const nf of noteFields) {
     if (!nf.text) continue;
-    const match = matchTokenFuzzy(nf.text, queryVariations);
+    const match = matchTokenFuzzy(nf.text, queryVariations, cache);
     if (match.isMatch) {
       const snippet = extractHighlightSnippet(nf.text, match.matchedQueryVar || queryVariations[0]);
       matches.push({
@@ -647,9 +679,10 @@ export function executeGlobalTreeSearch(
   if (queryVariations.length === 0) return [];
 
   const results: GlobalSearchResult[] = [];
+  const workCache: SearchWorkCache = { matches: new Map(), equivalences: new SearchPairMemo<boolean>(), distances: new SearchPairMemo<number>() };
 
   for (const person of persons) {
-    const res = searchPerson(person, queryVariations);
+    const res = searchPerson(person, queryVariations, workCache);
     if (!res) continue;
 
     // Apply category filter if not 'all'

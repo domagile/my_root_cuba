@@ -379,6 +379,13 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
     setTabFilter('all');
   };
 
+  const restoreWithFeedback = (ids: string[]) => {
+    const result = restorePersons(ids);
+    const warning = result.skippedFamilyLinks > 0
+      ? ' Частину сімейних зв’язків не відновлено: сім’ї змінено після видалення. Перевірте їх вручну.' : '';
+    setToast({ message: `Відновлено осіб (${result.restoredCount}) з кошика.${warning}` });
+  };
+
   // Soft delete actions
   const handleDeleteSingle = (p: Person) => {
     setConfirmModal({
@@ -390,7 +397,7 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         setToast({
           message: `Особу «${p.firstName} ${p.lastName}» переміщено у кошик.`,
           actionText: 'Скасувати',
-          onAction: () => restorePerson(p.id)
+          onAction: () => restoreWithFeedback([p.id])
         });
       }
     });
@@ -409,24 +416,19 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
         setToast({
           message: `Вибраних осіб (${ids.length}) переміщено у кошик.`,
           actionText: 'Відновити',
-          onAction: () => restorePersons(ids)
+          onAction: () => restoreWithFeedback(ids)
         });
       }
     });
   };
 
   // Trash actions
-  const handleRestoreSingle = (p: Person) => {
-    restorePerson(p.id);
-    setToast({ message: `Особу «${p.firstName} ${p.lastName}» відновлено з кошика.` });
-  };
+  const handleRestoreSingle = (p: Person) => restoreWithFeedback([p.id]);
 
   const handleRestoreBatch = () => {
     if (selectedIds.size === 0) return;
-    const ids: string[] = Array.from(selectedIds);
-    restorePersons(ids);
+    restoreWithFeedback(Array.from(selectedIds));
     setSelectedIds(new Set<string>());
-    setToast({ message: `Відновлено осіб (${ids.length}) з кошика.` });
   };
 
   const handlePermanentDeleteSingle = (p: Person) => {
@@ -1948,8 +1950,8 @@ export const PersonsListView: React.FC<PersonsListViewProps> = ({
           {toast.onAction && (
             <button
               onClick={() => {
-                toast.onAction?.();
                 setToast(null);
+                toast.onAction?.();
               }}
               className="px-2.5 py-1 rounded bg-[#B88E3E] hover:bg-[#a37c33] text-[#0F0F0F] text-xs font-bold transition-all cursor-pointer"
             >

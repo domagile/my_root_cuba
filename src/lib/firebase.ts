@@ -1,3 +1,6 @@
+import { serializeFamilyForCloud } from '../utils/familyCloudData';
+import { writePersonDeletionMarkers } from '../services/personDeletionCloudService';
+import { readProjectFromFirestore, type CloudProjectSnapshot } from '../services/projectCloudReadService';
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
@@ -323,7 +326,8 @@ export function safeSnapshotListener(
   queryOrDocRef: any,
   onNext: (snapshot: any) => void,
   path: string,
-  operationType: OperationType = OperationType.LIST
+  operationType: OperationType = OperationType.LIST,
+  includeMetadataChanges: boolean = false
 ): () => void {
   if (isCloudWriteBlocked()) {
     return () => {};
@@ -335,6 +339,7 @@ export function safeSnapshotListener(
   try {
     unsub = onSnapshot(
       queryOrDocRef,
+      { includeMetadataChanges },
       (snapshot) => {
         if (!isCancelled) {
           onNext(snapshot);
@@ -456,7 +461,7 @@ export async function saveEntityDoc(
     try {
       const db = getDbInstance();
       if (!db || !itemId) return false;
-      const cleanData = JSON.parse(JSON.stringify(data));
+      const cleanData = subcollection === 'families' ? serializeFamilyForCloud(data) : JSON.parse(JSON.stringify(data));
       // In Firestore setDoc with { merge: true }, undefined fields are omitted by JSON.stringify.
       // Therefore, if the user explicitly clears deathDate or deathYear (or if they are absent),
       // we must explicitly write null so Firestore overwrites and wipes any old/phantom values:
@@ -1043,6 +1048,25 @@ export async function saveDeletedTombstonesToCloud(
   }
 }
 
+/** Transactional per-person updates avoid overwriting another client's markers. */
+export async function updatePersonDeletionMarkers(
+  changes: Record<string, boolean>, projectId: string = DEFAULT_PROJECT_ID
+): Promise<string[] | null> {
+  if (isCloudWriteBlocked(true)) return null;
+  const db = getDbInstance();
+  if (!db) return null;
+  try {
+    return await writePersonDeletionMarkers(db, projectId, changes);
+  } catch (error) {
+    if (isFirestoreQuotaError(error)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+    }
+    handleFirestoreError(error, OperationType.WRITE, `projects/${projectId}/systemSettings/deletedTombstones`);
+    return null;
+  }
+}
+
 export function subscribeToDeletedTombstonesCloud(
   onUpdate: (ids: string[]) => void,
   projectId: string = DEFAULT_PROJECT_ID
@@ -1054,6 +1078,7 @@ export function subscribeToDeletedTombstonesCloud(
     return safeSnapshotListener(
       docRef,
       (snapshot) => {
+        if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) return;
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (Array.isArray(data?.ids)) {
@@ -1062,7 +1087,8 @@ export function subscribeToDeletedTombstonesCloud(
         }
       },
       `projects/${projectId}/systemSettings/deletedTombstones`,
-      OperationType.GET
+      OperationType.GET,
+      true
     );
   } catch {
     return () => {};
@@ -1151,7 +1177,7 @@ export async function batchSaveEntities(
         if (item && (item.id || item.year)) {
           const id = String(item.id || `${item.village}_${item.year}`);
           const docRef = doc(db, 'projects', projectId, subcollection, id);
-          const cleanItem = JSON.parse(JSON.stringify(item));
+          const cleanItem = subcollection === 'families' ? serializeFamilyForCloud(item) : JSON.parse(JSON.stringify(item));
           if (subcollection === 'persons') {
             if (item.deathYear === undefined || item.deathYear === null) cleanItem.deathYear = null;
             if (item.deathDate === undefined || item.deathDate === null) cleanItem.deathDate = null;
@@ -1247,18 +1273,20 @@ export function subscribeToSubcollection<T = any>(
   subcollection: string,
   onUpdate: (items: T[]) => void,
   limitCount: number = 300,
-  projectId: string = DEFAULT_PROJECT_ID
+  projectId: string = DEFAULT_PROJECT_ID,
+  confirmedOnly: boolean = false
 ): () => void {
   try {
     const db = getDbInstance();
     if (!db) return () => {};
 
     const colRef = collection(db, 'projects', projectId, subcollection);
-    const q = query(colRef, limit(limitCount));
+    const q = limitCount > 0 ? query(colRef, limit(limitCount)) : colRef;
 
     return safeSnapshotListener(
       q,
       (snapshot) => {
+        if (confirmedOnly && (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites)) return;
         try {
           const list = snapshot.docs.map((d: any) => {
             const row: any = { ...d.data(), id: d.id };
@@ -1279,7 +1307,8 @@ export function subscribeToSubcollection<T = any>(
         }
       },
       `projects/${projectId}/${subcollection}`,
-      OperationType.LIST
+      OperationType.LIST,
+      confirmedOnly
     );
   } catch (err) {
     console.warn(`Failed to subscribe to ${subcollection}:`, err);
@@ -1338,12 +1367,13 @@ export function subscribeToProjectData(
     const unsub = subscribeToSubcollection(
       colName,
       (items) => {
-        if (items && items.length > 0) {
+        if (items && (items.length > 0 || colName === 'persons')) {
           onDataUpdate({ [colName]: items });
         }
       },
-      400,
-      projectId
+      colName === 'persons' ? 0 : 400,
+      projectId,
+      colName === 'persons'
     );
     unsubscribers.push(unsub);
   });
@@ -1471,156 +1501,17 @@ export async function saveProjectDataToCloud(
  */
 export async function fetchAllProjectDataFromCloud(projectId: string = DEFAULT_PROJECT_ID): Promise<{
   success: boolean;
-  data: {
-    persons?: any[];
-    families?: any[];
-    events?: any[];
-    sources?: any[];
-    places?: any[];
-    metricRecords?: any[];
-    documents?: any[];
-    tasks?: any[];
-    findings?: any[];
-    hypotheses?: any[];
-    requests?: any[];
-    matrixEntries?: any[];
-    accessRequests?: any[];
-    lastUpdated?: string;
-  };
+  data: CloudProjectSnapshot['data'];
+  settings?: CloudProjectSnapshot['settings'];
   error?: string;
 }> {
   try {
     const db = getDbInstance();
     if (!db) return { success: false, data: {}, error: 'База Firestore не ініціалізована' };
-
-    const subcollections = [
-      'persons',
-      'families',
-      'events',
-      'sources',
-      'places',
-      'metricRecords',
-      'documents',
-      'tasks',
-      'findings',
-      'hypotheses',
-      'requests',
-      'matrixEntries',
-      'accessRequests'
-    ];
-
-    const resultData: Record<string, any[]> = {};
-
-    await Promise.all(
-      subcollections.map(async (colName) => {
-        try {
-          const colRef = collection(db, 'projects', projectId, colName);
-          const snap = await getDocs(colRef);
-          resultData[colName] = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-        } catch (e) {
-          console.warn(`Failed to fetch subcollection ${colName}:`, e);
-          resultData[colName] = [];
-        }
-      })
-    );
-
-    // Also fetch and synchronize systemSettings (ignoredDuplicates, deletedTombstones, mergedPersons)
-    try {
-      const ignoredSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'ignoredDuplicates'));
-      if (ignoredSnap.exists()) {
-        const d = ignoredSnap.data();
-        if (Array.isArray(d?.keys) && d.keys.length > 0) {
-          try {
-            const raw = localStorage.getItem('rodovid_ignored_duplicate_pairs');
-            const localSet = new Set<string>(raw ? JSON.parse(raw) : []);
-            d.keys.forEach((k: string) => {
-              if (typeof k === 'string' && k.trim()) localSet.add(k.trim());
-            });
-            localStorage.setItem('rodovid_ignored_duplicate_pairs', JSON.stringify(Array.from(localSet)));
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed'));
-            }
-          } catch {}
-        }
-      }
-    } catch {}
-
-    try {
-      const tombSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'deletedTombstones'));
-      if (tombSnap.exists()) {
-        const d = tombSnap.data();
-        if (Array.isArray(d?.ids) && d.ids.length > 0) {
-          try {
-            const raw = localStorage.getItem('genealogy_deleted_tombstone_ids_v1');
-            const localSet = new Set<string>(raw ? JSON.parse(raw) : []);
-            d.ids.forEach((id: string) => {
-              if (typeof id === 'string' && id.trim()) localSet.add(id.trim());
-            });
-            localStorage.setItem('genealogy_deleted_tombstone_ids_v1', JSON.stringify(Array.from(localSet)));
-          } catch {}
-        }
-      }
-    } catch {}
-
-    try {
-      const mergedSnap = await getDoc(doc(db, 'projects', projectId, 'systemSettings', 'mergedPersons'));
-      if (mergedSnap.exists()) {
-        const d = mergedSnap.data();
-        if (d?.mapping && typeof d.mapping === 'object') {
-          try {
-            const raw = localStorage.getItem('genealogy_merged_person_ids');
-            const localMerged = raw ? JSON.parse(raw) : {};
-            const combined = { ...localMerged, ...d.mapping };
-            localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(combined));
-          } catch {}
-        }
-      }
-    } catch {}
-
-    // Legacy Monolithic Document One-Time Migration Check:
-    // If subcollections are currently empty (e.g. 0 persons and 0 families), check if there is an old monolithic document
-    // at `genealogyProjects/{projectId}` or `genealogyProjects/defaultProject`. If found, load it and migrate to subcollections.
-    const totalLoaded = (resultData.persons?.length || 0) + (resultData.families?.length || 0);
-    if (totalLoaded === 0) {
-      try {
-        const legacyDocRef = doc(db, 'genealogyProjects', projectId || DEFAULT_PROJECT_ID);
-        const legacySnap = await getDoc(legacyDocRef);
-        if (legacySnap.exists()) {
-          const legacyData = legacySnap.data();
-          if (legacyData) {
-            console.log('Found legacy monolithic document, migrating to subcollections...');
-            if (Array.isArray(legacyData.persons) && legacyData.persons.length > 0) resultData.persons = legacyData.persons;
-            if (Array.isArray(legacyData.families) && legacyData.families.length > 0) resultData.families = legacyData.families;
-            if (Array.isArray(legacyData.events) && legacyData.events.length > 0) resultData.events = legacyData.events;
-            if (Array.isArray(legacyData.sources) && legacyData.sources.length > 0) resultData.sources = legacyData.sources;
-            if (Array.isArray(legacyData.places) && legacyData.places.length > 0) resultData.places = legacyData.places;
-            if (Array.isArray(legacyData.metricRecords) && legacyData.metricRecords.length > 0) resultData.metricRecords = legacyData.metricRecords;
-            if (Array.isArray(legacyData.documents) && legacyData.documents.length > 0) resultData.documents = legacyData.documents;
-            if (Array.isArray(legacyData.hypotheses) && legacyData.hypotheses.length > 0) resultData.hypotheses = legacyData.hypotheses;
-            if (Array.isArray(legacyData.matrixEntries) && legacyData.matrixEntries.length > 0) resultData.matrixEntries = legacyData.matrixEntries;
-
-            // Trigger background migration into subcollections
-            saveProjectDataToCloud(resultData, projectId || DEFAULT_PROJECT_ID).catch((migErr) => {
-              console.warn('Background migration to subcollections notice:', migErr);
-            });
-          }
-        }
-      } catch (legacyErr) {
-        console.warn('Legacy migration check notice:', legacyErr);
-      }
-    }
-
-    return {
-      success: true,
-      data: resultData
-    };
+    return { success: true, ...await readProjectFromFirestore(db, projectId) };
   } catch (err: any) {
     handleFirestoreError(err, OperationType.LIST, `projects/${projectId}`);
-    return {
-      success: false,
-      data: {},
-      error: err?.message || 'Помилка отримання даних з Firestore'
-    };
+    return { success: false, data: {}, error: err?.message || 'Помилка отримання даних з Firestore' };
   }
 }
 

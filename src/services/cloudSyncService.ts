@@ -1,3 +1,4 @@
+import { getPendingDeletionChanges, acknowledgeDeletionChanges, getDeletionStateRevision } from '../utils/personDeletionState';
 import type { Person } from '../types';
 import { captureDirtySnapshot, isQuotaExceededToday, useCloudSyncStore } from '../stores/useCloudSyncStore';
 
@@ -39,6 +40,7 @@ export interface CloudSyncApi {
   savePersonDeltaDoc: (id: string, delta: Partial<Person>) => Promise<boolean>;
   batchDeleteEntities: (type: string, ids: string[], projectId?: string, allowManual?: boolean) => Promise<boolean>;
   saveProjectDataToCloud: (data: ProjectPayload) => Promise<boolean>;
+  updatePersonDeletionMarkers?: (changes: Record<string, boolean>) => Promise<string[] | null>;
 }
 
 export interface SyncResult { success: boolean; message: string; }
@@ -74,7 +76,8 @@ export function synchronizeProject(
     const store = useCloudSyncStore.getState();
     const manual = options.manual !== false;
     if (!manual && store.syncMode !== 'auto') return { success: false, message: 'Автоматичне вивантаження вимкнено.' };
-    if (!options.forceFull && !store.hasUnsavedChanges) {
+    const deletionChanges = getPendingDeletionChanges();
+    if (!options.forceFull && !store.hasUnsavedChanges && Object.keys(deletionChanges).length === 0) {
       return { success: store.pendingWritesCount === 0 && store.status !== 'error', message: 'Немає нових змін для вивантаження.' };
     }
     const snapshot = captureDirtySnapshot();
@@ -98,7 +101,9 @@ export function synchronizeProject(
       for (const type of entityTypes) {
         const key = ('deleted' + type[0].toUpperCase() + type.slice(1)) as keyof typeof tracker;
         const ids = Array.from(new Set([
-          ...tracker[key], ...(full && type === 'persons' ? (data.trashPersons || []).map(person => person.id) : [])
+          ...tracker[key],
+          ...(type === 'persons' ? Object.entries(deletionChanges).filter(([, change]) => change.deleted).map(([id]) => id) : []),
+          ...(full && type === 'persons' ? (data.trashPersons || []).map(person => person.id) : [])
         ]));
         if (ids.length) deletions.push({ run: () => api.batchDeleteEntities(type, ids, undefined, manual) });
       }
@@ -109,17 +114,30 @@ export function synchronizeProject(
         metricRecordsCount: data.metricRecords.length, documentsCount: data.documents.length,
         hypothesesCount: data.hypotheses.length
       } };
+      const restoredIds = Object.entries(deletionChanges).filter(([, change]) => !change.deleted).map(([id]) => id);
+      const personIds = new Set([...tracker.persons, ...restoredIds]);
+      // A one-person edit avoids building an index. Bulk work performs one scan,
+      // retaining the same first-record choice as Array.find for legacy duplicates.
+      let personIndex: Map<string, Person> | undefined;
+      if ((full ? 0 : personIds.size) + restoredIds.length >= 8) {
+        personIndex = new Map();
+        for (const person of data.persons) if (!personIndex.has(person.id)) personIndex.set(person.id, person);
+      }
+      const findPerson = (id: string) => personIndex ? personIndex.get(id) : data.persons.find(person => person.id === id);
       if (full) {
         payload.persons = data.persons;
       } else {
-        for (const id of tracker.persons) {
-          const delta = snapshot.personDeltas[id];
-          const person = data.persons.find(item => item.id === id);
-          // A missing local entity is not proof that its queued write succeeded.
+        for (const id of personIds) {
+          const delta = deletionChanges[id]?.deleted === false ? undefined : snapshot.personDeltas[id];
+          const person = findPerson(id);
           writes.push({ run: () => delta && Object.keys(delta).length
             ? api.savePersonDeltaDoc(id, delta) : person ? api.savePersonDoc(person) : Promise.resolve(false) });
         }
       }
+      if (restoredIds.some(id => {
+        const person = findPerson(id);
+        return !person || person.isDeleted;
+      })) writes.push({ run: () => Promise.resolve(false) });
       for (const type of ['families', 'events', 'sources', 'places'] as const) {
         const ids = tracker[type];
         if (full) payload[type] = Object.values(data[type]);
@@ -146,9 +164,22 @@ export function synchronizeProject(
         store.setStatus(quota ? 'offline' : 'error', quota ? quotaMessage : errorMessage);
         return { success: false, message: quota ? quotaMessage : errorMessage };
       }
+      if (Object.keys(deletionChanges).length > 0) {
+        const changes = Object.fromEntries(Object.entries(deletionChanges).map(([id, change]) => [id, change.deleted]));
+        const deletionRevision = getDeletionStateRevision();
+        const cloudIds = await api.updatePersonDeletionMarkers?.(changes);
+        const confirmedIds = Array.isArray(cloudIds) ? new Set(cloudIds) : null;
+        if (!Array.isArray(cloudIds) || cloudIds.some(id => typeof id !== 'string') ||
+            Object.entries(changes).some(([id, deleted]) => confirmedIds!.has(id) !== deleted)) {
+          preserveProjectRetry(Boolean(full));
+          store.setStatus(useCloudSyncStore.getState().isQuotaExceeded ? 'offline' : 'error', errorMessage);
+          return { success: false, message: errorMessage };
+        }
+        acknowledgeDeletionChanges(deletionChanges, cloudIds, deletionRevision);
+      }
       // Retain the entire batch on a partial failure. Repeating these merge/delete
       // operations is idempotent; discarding an unconfirmed operation is not safe.
-      if (!store.clearDirtyIfUnchanged(snapshot.revision)) {
+      if (Object.keys(getPendingDeletionChanges()).length > 0 || !store.clearDirtyIfUnchanged(snapshot.revision)) {
         store.setStatus('pending');
         return { success: false, message: 'Під час вивантаження з’явилися нові зміни. Вони залишилися в черзі; повторіть вивантаження перед оновленням з хмари.' };
       }

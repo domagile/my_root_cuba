@@ -1,0 +1,801 @@
+{
+  "baseline": "1b3f8563c017cfd2873b2eb3a81653319b04b53b",
+  "cases": [
+    {
+      "title": "Ukrainian and Russian given names",
+      "query": "Микола",
+      "category": "name",
+      "requiredIds": [
+        "ukr",
+        "rus"
+      ],
+      "expected": [
+        {
+          "id": "ukr",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я",
+            "matchedText": "Надточій Микола",
+            "isFuzzy": false,
+            "fuzzyType": "substring",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Надточій Микола",
+              "isFuzzy": false,
+              "fuzzyType": "substring",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Микола Надточій",
+              "isFuzzy": false,
+              "fuzzyType": "prefix",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Ім'я",
+              "matchedText": "Микола",
+              "isFuzzy": false,
+              "fuzzyType": "exact",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        },
+        {
+          "id": "rus",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я",
+            "matchedText": "Надточей Николай",
+            "isFuzzy": true,
+            "fuzzyType": "keyboard",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Надточей Николай",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Ім'я",
+              "matchedText": "Николай",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 98
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Николай Надточей",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 95
+            }
+          ],
+          "isFuzzy": true,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        },
+        {
+          "id": "multi",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я",
+            "matchedText": "Петренко Іван Миколайович",
+            "isFuzzy": true,
+            "fuzzyType": "phonetic",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Петренко Іван Миколайович",
+              "isFuzzy": true,
+              "fuzzyType": "phonetic",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Іван Миколайович Петренко",
+              "isFuzzy": true,
+              "fuzzyType": "phonetic",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "По батькові",
+              "matchedText": "Миколайович",
+              "isFuzzy": false,
+              "fuzzyType": "prefix",
+              "score": 97
+            }
+          ],
+          "isFuzzy": true,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        },
+        {
+          "id": "repeated",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я",
+            "matchedText": "Петренко Микола",
+            "isFuzzy": false,
+            "fuzzyType": "substring",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Петренко Микола",
+              "isFuzzy": false,
+              "fuzzyType": "substring",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Микола Петренко",
+              "isFuzzy": false,
+              "fuzzyType": "prefix",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Ім'я",
+              "matchedText": "Микола",
+              "isFuzzy": false,
+              "fuzzyType": "exact",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        }
+      ]
+    },
+    {
+      "title": "wrong keyboard layout",
+      "query": "Yflnjxtq",
+      "category": "name",
+      "requiredIds": [
+        "rus"
+      ],
+      "expected": [
+        {
+          "id": "ukr",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я",
+            "matchedText": "Надточій Микола",
+            "isFuzzy": true,
+            "fuzzyType": "keyboard",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Надточій Микола",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Микола Надточій",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Прізвище",
+              "matchedText": "Надточій",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 100
+            }
+          ],
+          "isFuzzy": true,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        },
+        {
+          "id": "rus",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я (пряме)",
+            "matchedText": "Николай Надточей",
+            "isFuzzy": true,
+            "fuzzyType": "keyboard",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Николай Надточей",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Прізвище",
+              "matchedText": "Надточей",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Надточей Николай",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 95
+            }
+          ],
+          "isFuzzy": true,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        }
+      ]
+    },
+    {
+      "title": "surname with a typo",
+      "query": "Шевченок",
+      "category": "name",
+      "requiredIds": [
+        "typo"
+      ],
+      "expected": [
+        {
+          "id": "typo",
+          "score": 82,
+          "bestMatch": {
+            "category": "name",
+            "field": "Прізвище",
+            "matchedText": "Шевченко",
+            "isFuzzy": true,
+            "fuzzyType": "stem",
+            "score": 82
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Прізвище",
+              "matchedText": "Шевченко",
+              "isFuzzy": true,
+              "fuzzyType": "stem",
+              "score": 82
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Шевченко Іван",
+              "isFuzzy": true,
+              "fuzzyType": "stem",
+              "score": 80
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Іван Шевченко",
+              "isFuzzy": true,
+              "fuzzyType": "stem",
+              "score": 80
+            }
+          ],
+          "isFuzzy": true,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        }
+      ]
+    },
+    {
+      "title": "historical place spelling",
+      "query": "Бердянськ",
+      "category": "place",
+      "requiredIds": [
+        "ukr"
+      ],
+      "expected": [
+        {
+          "id": "ukr",
+          "score": 100,
+          "bestMatch": {
+            "category": "place",
+            "field": "Місце народження",
+            "matchedText": "Бердянськ",
+            "isFuzzy": false,
+            "fuzzyType": "exact",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "place",
+              "field": "Місце народження",
+              "matchedText": "Бердянськ",
+              "isFuzzy": false,
+              "fuzzyType": "exact",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": false,
+            "place": true,
+            "note": false
+          }
+        },
+        {
+          "id": "rus",
+          "score": 96,
+          "bestMatch": {
+            "category": "place",
+            "field": "Місце народження",
+            "matchedText": "Бердянск",
+            "isFuzzy": true,
+            "fuzzyType": "phonetic",
+            "score": 96
+          },
+          "allMatches": [
+            {
+              "category": "place",
+              "field": "Місце народження",
+              "matchedText": "Бердянск",
+              "isFuzzy": true,
+              "fuzzyType": "phonetic",
+              "score": 96
+            }
+          ],
+          "isFuzzy": true,
+          "matchedCategories": {
+            "name": false,
+            "place": true,
+            "note": false
+          }
+        }
+      ]
+    },
+    {
+      "title": "custom fields and citations",
+      "query": "позначка",
+      "category": "note",
+      "requiredIds": [
+        "multi",
+        "repeated",
+        "variant"
+      ],
+      "expected": [
+        {
+          "id": "multi",
+          "score": 100,
+          "bestMatch": {
+            "category": "note",
+            "field": "Поле: Архів",
+            "matchedText": "позначка",
+            "highlightSnippet": "позначка",
+            "isFuzzy": false,
+            "fuzzyType": "exact",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "note",
+              "field": "Поле: Архів",
+              "matchedText": "позначка",
+              "highlightSnippet": "позначка",
+              "isFuzzy": false,
+              "fuzzyType": "exact",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": false,
+            "place": false,
+            "note": true
+          }
+        },
+        {
+          "id": "repeated",
+          "score": 100,
+          "bestMatch": {
+            "category": "note",
+            "field": "Джерело #1",
+            "matchedText": "позначка",
+            "highlightSnippet": "позначка",
+            "isFuzzy": false,
+            "fuzzyType": "exact",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "note",
+              "field": "Джерело #1",
+              "matchedText": "позначка",
+              "highlightSnippet": "позначка",
+              "isFuzzy": false,
+              "fuzzyType": "exact",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": false,
+            "place": false,
+            "note": true
+          }
+        },
+        {
+          "id": "variant",
+          "score": 100,
+          "bestMatch": {
+            "category": "note",
+            "field": "Поле: archive",
+            "matchedText": "свідоцтво позначка",
+            "highlightSnippet": "свідоцтво позначка",
+            "isFuzzy": false,
+            "fuzzyType": "substring",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "note",
+              "field": "Поле: archive",
+              "matchedText": "свідоцтво позначка",
+              "highlightSnippet": "свідоцтво позначка",
+              "isFuzzy": false,
+              "fuzzyType": "substring",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": false,
+            "place": false,
+            "note": true
+          }
+        }
+      ]
+    },
+    {
+      "title": "multiple name tokens",
+      "query": "Іван Петренко",
+      "category": "name",
+      "requiredIds": [
+        "multi"
+      ],
+      "expected": [
+        {
+          "id": "multi",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я",
+            "matchedText": "Петренко Іван Миколайович",
+            "isFuzzy": false,
+            "fuzzyType": "substring",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Петренко Іван Миколайович",
+              "isFuzzy": false,
+              "fuzzyType": "substring",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Іван Миколайович Петренко",
+              "isFuzzy": false,
+              "fuzzyType": "substring",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        }
+      ]
+    },
+    {
+      "title": "all categories and match scores",
+      "query": "свідоцтво",
+      "category": "all",
+      "requiredIds": [
+        "ukr",
+        "typo",
+        "multi",
+        "variant"
+      ],
+      "expected": [
+        {
+          "id": "ukr",
+          "score": 100,
+          "bestMatch": {
+            "category": "note",
+            "field": "Замітки",
+            "matchedText": "Сімейне свідоцтво",
+            "highlightSnippet": "Сімейне свідоцтво",
+            "isFuzzy": false,
+            "fuzzyType": "substring",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "note",
+              "field": "Замітки",
+              "matchedText": "Сімейне свідоцтво",
+              "highlightSnippet": "Сімейне свідоцтво",
+              "isFuzzy": false,
+              "fuzzyType": "substring",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": false,
+            "place": false,
+            "note": true
+          }
+        },
+        {
+          "id": "multi",
+          "score": 100,
+          "bestMatch": {
+            "category": "note",
+            "field": "Опис події (Подія)",
+            "matchedText": "свідоцтво",
+            "highlightSnippet": "свідоцтво",
+            "isFuzzy": false,
+            "fuzzyType": "exact",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "note",
+              "field": "Опис події (Подія)",
+              "matchedText": "свідоцтво",
+              "highlightSnippet": "свідоцтво",
+              "isFuzzy": false,
+              "fuzzyType": "exact",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": false,
+            "place": false,
+            "note": true
+          }
+        },
+        {
+          "id": "typo",
+          "score": 92,
+          "bestMatch": {
+            "category": "note",
+            "field": "Біографія",
+            "matchedText": "свідоцтво про народження",
+            "highlightSnippet": "свідоцтво про народження",
+            "isFuzzy": false,
+            "fuzzyType": "prefix",
+            "score": 92
+          },
+          "allMatches": [
+            {
+              "category": "note",
+              "field": "Біографія",
+              "matchedText": "свідоцтво про народження",
+              "highlightSnippet": "свідоцтво про народження",
+              "isFuzzy": false,
+              "fuzzyType": "prefix",
+              "score": 92
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": false,
+            "place": false,
+            "note": true
+          }
+        },
+        {
+          "id": "variant",
+          "score": 92,
+          "bestMatch": {
+            "category": "note",
+            "field": "Поле: archive",
+            "matchedText": "свідоцтво позначка",
+            "highlightSnippet": "свідоцтво позначка",
+            "isFuzzy": false,
+            "fuzzyType": "prefix",
+            "score": 92
+          },
+          "allMatches": [
+            {
+              "category": "note",
+              "field": "Поле: archive",
+              "matchedText": "свідоцтво позначка",
+              "highlightSnippet": "свідоцтво позначка",
+              "isFuzzy": false,
+              "fuzzyType": "prefix",
+              "score": 92
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": false,
+            "place": false,
+            "note": true
+          }
+        }
+      ]
+    },
+    {
+      "title": "limited result ordering",
+      "query": "Микола",
+      "category": "all",
+      "options": {
+        "maxResults": 2
+      },
+      "expected": [
+        {
+          "id": "ukr",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я",
+            "matchedText": "Надточій Микола",
+            "isFuzzy": false,
+            "fuzzyType": "substring",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Надточій Микола",
+              "isFuzzy": false,
+              "fuzzyType": "substring",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Микола Надточій",
+              "isFuzzy": false,
+              "fuzzyType": "prefix",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Ім'я",
+              "matchedText": "Микола",
+              "isFuzzy": false,
+              "fuzzyType": "exact",
+              "score": 100
+            }
+          ],
+          "isFuzzy": false,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        },
+        {
+          "id": "rus",
+          "score": 100,
+          "bestMatch": {
+            "category": "name",
+            "field": "Повне ім'я",
+            "matchedText": "Надточей Николай",
+            "isFuzzy": true,
+            "fuzzyType": "keyboard",
+            "score": 100
+          },
+          "allMatches": [
+            {
+              "category": "name",
+              "field": "Повне ім'я",
+              "matchedText": "Надточей Николай",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 100
+            },
+            {
+              "category": "name",
+              "field": "Ім'я",
+              "matchedText": "Николай",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 98
+            },
+            {
+              "category": "name",
+              "field": "Повне ім'я (пряме)",
+              "matchedText": "Николай Надточей",
+              "isFuzzy": true,
+              "fuzzyType": "keyboard",
+              "score": 95
+            }
+          ],
+          "isFuzzy": true,
+          "matchedCategories": {
+            "name": true,
+            "place": false,
+            "note": false
+          }
+        }
+      ]
+    },
+    {
+      "title": "empty query",
+      "query": " ",
+      "category": "all",
+      "expected": []
+    },
+    {
+      "title": "no matching record",
+      "query": "zzzznnnnvvvvqqqq",
+      "category": "all",
+      "expected": []
+    }
+  ]
+}
