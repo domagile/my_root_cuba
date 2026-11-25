@@ -425,3 +425,16 @@ test('permanent deletion discards only the selected local family recovery histor
   useGenealogyStore.getState().emptyTrash();
   assert.deepEqual(useGenealogyStore.getState().deletedFamilyLinks, {});
 });
+
+test('a large deletion batch cannot acknowledge all intentions if one server marker is missing', async () => {
+  const ids = Array.from({ length: 100 }, (_, i) => `marker-${i}`);
+  await seedTrash(ids);
+  useGenealogyStore.getState().permanentlyDeletePersons(ids);
+  const result = await synchronizeProject(data, api({ updatePersonDeletionMarkers: async () => ids.slice(1) }), { manual: true });
+  assert.equal(result.success, false);
+  assert.equal(Object.keys(deletion.getPendingDeletionChanges()).length, 100);
+  const retry = await synchronizeProject(data, api({ updatePersonDeletionMarkers: async () => [...ids, 'unrelated'] }), { manual: true });
+  assert.equal(retry.success, true);
+  assert.deepEqual(deletion.getPendingDeletionChanges(), {});
+  assert.equal(getTombstoneIds().has('unrelated'), true);
+});

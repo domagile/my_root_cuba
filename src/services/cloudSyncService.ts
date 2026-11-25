@@ -114,22 +114,30 @@ export function synchronizeProject(
         metricRecordsCount: data.metricRecords.length, documentsCount: data.documents.length,
         hypothesesCount: data.hypotheses.length
       } };
+      const restoredIds = Object.entries(deletionChanges).filter(([, change]) => !change.deleted).map(([id]) => id);
+      const personIds = new Set([...tracker.persons, ...restoredIds]);
+      // A one-person edit avoids building an index. Bulk work performs one scan,
+      // retaining the same first-record choice as Array.find for legacy duplicates.
+      let personIndex: Map<string, Person> | undefined;
+      if ((full ? 0 : personIds.size) + restoredIds.length >= 8) {
+        personIndex = new Map();
+        for (const person of data.persons) if (!personIndex.has(person.id)) personIndex.set(person.id, person);
+      }
+      const findPerson = (id: string) => personIndex ? personIndex.get(id) : data.persons.find(person => person.id === id);
       if (full) {
         payload.persons = data.persons;
       } else {
-        const personIds = new Set([...tracker.persons,
-          ...Object.entries(deletionChanges).filter(([, change]) => !change.deleted).map(([id]) => id)]);
         for (const id of personIds) {
           const delta = deletionChanges[id]?.deleted === false ? undefined : snapshot.personDeltas[id];
-          const person = data.persons.find(item => item.id === id);
-          // A missing local entity is not proof that its queued write succeeded.
+          const person = findPerson(id);
           writes.push({ run: () => delta && Object.keys(delta).length
             ? api.savePersonDeltaDoc(id, delta) : person ? api.savePersonDoc(person) : Promise.resolve(false) });
         }
       }
-      if (Object.entries(deletionChanges).some(([id, change]) => !change.deleted && !data.persons.some(person => person.id === id && !person.isDeleted))) {
-        writes.push({ run: () => Promise.resolve(false) });
-      }
+      if (restoredIds.some(id => {
+        const person = findPerson(id);
+        return !person || person.isDeleted;
+      })) writes.push({ run: () => Promise.resolve(false) });
       for (const type of ['families', 'events', 'sources', 'places'] as const) {
         const ids = tracker[type];
         if (full) payload[type] = Object.values(data[type]);
@@ -160,8 +168,9 @@ export function synchronizeProject(
         const changes = Object.fromEntries(Object.entries(deletionChanges).map(([id, change]) => [id, change.deleted]));
         const deletionRevision = getDeletionStateRevision();
         const cloudIds = await api.updatePersonDeletionMarkers?.(changes);
+        const confirmedIds = Array.isArray(cloudIds) ? new Set(cloudIds) : null;
         if (!Array.isArray(cloudIds) || cloudIds.some(id => typeof id !== 'string') ||
-            Object.entries(changes).some(([id, deleted]) => cloudIds.includes(id) !== deleted)) {
+            Object.entries(changes).some(([id, deleted]) => confirmedIds!.has(id) !== deleted)) {
           preserveProjectRetry(Boolean(full));
           store.setStatus(useCloudSyncStore.getState().isQuotaExceeded ? 'offline' : 'error', errorMessage);
           return { success: false, message: errorMessage };

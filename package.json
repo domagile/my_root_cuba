@@ -16,7 +16,9 @@
     "test:storage": "tsx --test tests/localStorage.test.ts tests/persistentBackup.test.ts tests/projectArchive.test.ts tests/cloudRestore.test.ts tests/cloudRead.test.ts tests/cloudTrash.test.ts tests/familyRestore.test.ts",
     "test:api": "tsx --test tests/api.test.ts tests/aiClient.test.ts",
     "test:server": "tsx --test tests/server.test.ts",
-    "test": "npm run test:sync && npm run test:storage && npm run test:api"
+    "test": "npm run test:sync && npm run test:storage && npm run test:search && npm run test:api",
+    "test:search": "tsx --test tests/searchRegression.test.ts",
+    "bench:tree-sync": "node --expose-gc --import tsx scripts/benchmark-cloud-batch.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
