@@ -68,13 +68,36 @@ export const getTabUrl = (tab: string, view?: ViewMode, user?: AuthUser | null):
     }
   }
 
-  return `${url.pathname}${url.search}`;
+  return url.href;
 };
 
 export const openTabInNewWindow = (tab: string, view?: ViewMode, user?: AuthUser | null) => {
   if (typeof window === 'undefined') return;
   const targetUrl = getTabUrl(tab, view, user);
-  window.open(targetUrl, '_blank', 'noopener,noreferrer');
+  try {
+    const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    if (!win) {
+      const a = document.createElement('a');
+      a.href = targetUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch {}
+      }, 100);
+    }
+  } catch {
+    const a = document.createElement('a');
+    a.href = targetUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      try { document.body.removeChild(a); } catch {}
+    }, 100);
+  }
 };
 
 export const getPersonUrl = (
@@ -114,7 +137,7 @@ export const getPersonUrl = (
     }
   }
 
-  return `${url.pathname}${url.search}`;
+  return url.href;
 };
 
 export const openPersonInNewWindow = (
@@ -124,26 +147,17 @@ export const openPersonInNewWindow = (
 ) => {
   if (typeof window === 'undefined') return;
   const targetUrl = getPersonUrl(personId, options, user);
-  try {
-    const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');
-    if (!win) {
-      const a = document.createElement('a');
-      a.href = targetUrl;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
+  const a = document.createElement('a');
+  a.href = targetUrl;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    try {
       document.body.removeChild(a);
-    }
-  } catch {
-    const a = document.createElement('a');
-    a.href = targetUrl;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
+    } catch {}
+  }, 100);
 };
 
 export const getInitialPersonId = (): string | null => {

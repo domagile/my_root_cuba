@@ -314,7 +314,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
                 />
               )}
               <a
-                href={getPersonUrl(p.id)}
+                href={getPersonUrl(p.id, { mode: 'view' })}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => {
@@ -832,7 +832,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
       {isCompact ? (
         <div className="flex items-center gap-2 h-full my-auto px-1 min-w-0">
           <a
-            href={getPersonUrl(p.id)}
+            href={getPersonUrl(p.id, { mode: 'view' })}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => {
@@ -887,7 +887,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
           <div className="flex-1 min-w-0 flex flex-col justify-center">
             <div className="flex items-center justify-between gap-1 min-w-0">
               <a
-                href={getPersonUrl(p.id)}
+                href={getPersonUrl(p.id, { mode: 'view' })}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => {
@@ -920,7 +920,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
                     <Eye className="w-2.5 h-2.5" />
                   </button>
                   <a
-                    href={getPersonUrl(p.id)}
+                    href={getPersonUrl(p.id, { mode: 'view' })}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
@@ -997,7 +997,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
           {/* Centered Avatar */}
           <div className="flex flex-col items-center mt-1">
             <a
-              href={getPersonUrl(p.id)}
+              href={getPersonUrl(p.id, { mode: 'view' })}
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => {
@@ -1068,7 +1068,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
           {/* Name & Genealogical Information */}
           <div className="text-center my-auto px-0.5">
             <a
-              href={getPersonUrl(p.id)}
+              href={getPersonUrl(p.id, { mode: 'view' })}
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => {

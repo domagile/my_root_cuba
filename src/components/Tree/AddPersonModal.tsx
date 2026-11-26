@@ -126,6 +126,9 @@ import {
   clearPersonDraft,
   PersonDraftData
 } from '../../utils/formDraftStorage';
+import { idbGet } from '../../utils/indexedDbStorage';
+import { fetchPersonDoc } from '../../lib/firebase';
+import { normalizePerson } from '../../stores/useGenealogyStore';
 
 export type { ModalSection, ModalAccordionState };
 
@@ -204,7 +207,45 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
 
-  // Determine effective person either from prop or personId, prioritizing live store data, database prop, and global database
+  // On-demand async person fallback (e.g. deep-link in new tab before full store hydrates)
+  const [asyncPerson, setAsyncPerson] = useState<Person | null>(null);
+
+  useEffect(() => {
+    const targetId = personId || initialPersonToEdit?.id;
+    if (!targetId) return;
+
+    const alreadyFound = persons.some((p) => p.id === targetId) || Boolean(database?.persons && database.persons[targetId]);
+    if (alreadyFound) return;
+
+    let isMounted = true;
+    idbGet<Person[]>('genealogy_tree_v1_persons')
+      .then((stored) => {
+        if (!isMounted) return;
+        const match = stored?.find((p) => p.id === targetId);
+        if (match) {
+          setAsyncPerson(match);
+          return;
+        }
+        fetchPersonDoc(targetId).then((cloudDoc) => {
+          if (isMounted && cloudDoc) {
+            setAsyncPerson(normalizePerson(cloudDoc));
+          }
+        });
+      })
+      .catch(() => {
+        fetchPersonDoc(targetId).then((cloudDoc) => {
+          if (isMounted && cloudDoc) {
+            setAsyncPerson(normalizePerson(cloudDoc));
+          }
+        });
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [personId, initialPersonToEdit?.id, persons, database]);
+
+  // Determine effective person either from prop or personId, prioritizing live store data, database prop, global database, and async fallback
   const effectivePerson = useMemo(() => {
     const targetId = personId || initialPersonToEdit?.id;
     if (targetId) {
@@ -219,10 +260,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           return db.persons[targetId];
         }
       } catch {}
+      if (asyncPerson && asyncPerson.id === targetId) {
+        return asyncPerson;
+      }
     }
     if (initialPersonToEdit) return initialPersonToEdit;
     return null;
-  }, [database, getGenealogyDatabase, initialPersonToEdit, personId, persons]);
+  }, [database, getGenealogyDatabase, initialPersonToEdit, personId, persons, asyncPerson]);
 
   // Target Person for initialRelation
   const targetPerson = initialRelation

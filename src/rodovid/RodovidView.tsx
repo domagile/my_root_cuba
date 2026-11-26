@@ -27,8 +27,10 @@ const StatisticsView = React.lazy(() => import('./components/views/StatisticsVie
 const ReportsView = React.lazy(() => import('./components/views/ReportsView').then(m => ({ default: m.ReportsView })));
 const ConflictsView = React.lazy(() => import('./components/views/ConflictsView').then(m => ({ default: m.ConflictsView })));
 
+import { PersonDetailModal } from './components/modals/PersonDetailModal';
+
 // Lazy-loaded modals
-const PersonDetailModal = React.lazy(() => import('./components/modals/PersonDetailModal').then(m => ({ default: m.PersonDetailModal })));
+
 const EditFamilyModal = React.lazy(() => import('./components/modals/EditFamilyModal').then(m => ({ default: m.EditFamilyModal })));
 const EditSourceModal = React.lazy(() => import('./components/modals/EditSourceModal').then(m => ({ default: m.EditSourceModal })));
 const GedcomModal = React.lazy(() => import('./components/modals/GedcomModal').then(m => ({ default: m.GedcomModal })));

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { GenealogyProvider, useUIStore } from './context/GenealogyContext';
+import { GenealogyProvider, useUIStore, useGenealogyStore } from './context/GenealogyContext';
 import { useAuthStore } from './stores/useAuthStore';
 import { useSharedTreeStore } from './stores/useSharedTreeStore';
 import { Sidebar } from './components/Sidebar';
@@ -90,8 +90,11 @@ function AppContent() {
     try {
       const params = new URLSearchParams(window.location.search);
       const pId = params.get('personId') || params.get('person');
-      if (pId && useUIStore.getState().activeInspectPersonId !== pId) {
+      if (pId) {
         useUIStore.getState().setInspectPersonId(pId);
+        try {
+          useGenealogyStore.getState().setSelectedPersonId(pId);
+        } catch {}
       }
     } catch {}
 

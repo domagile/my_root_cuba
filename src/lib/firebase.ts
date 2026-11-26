@@ -537,6 +537,25 @@ export const savePersonDoc = (person: any, projectId?: string) =>
   saveEntityDoc('persons', person.id, person, projectId);
 
 /**
+ * Fetch a single person document by ID from Firestore on demand
+ */
+export async function fetchPersonDoc(personId: string, projectId: string = DEFAULT_PROJECT_ID): Promise<any | null> {
+  try {
+    const db = getDbInstance();
+    if (!db || !personId) return null;
+    const docRef = doc(db, 'projects', projectId, 'persons', String(personId));
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() };
+    }
+  } catch (err) {
+    console.warn('Error fetching person doc:', err);
+  }
+  return null;
+}
+
+
+/**
  * Saves ONLY the changed fields (delta) for a single person document using merge: true
  * Path: projects/{projectId}/persons/{personId}
  */

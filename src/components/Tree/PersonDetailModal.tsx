@@ -62,6 +62,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
   return (
     <AddPersonModal
+      database={getGenealogyDatabase?.()}
       personId={activePersonId}
       initialPersonToEdit={targetPerson}
       initialMode="view"

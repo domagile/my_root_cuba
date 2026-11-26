@@ -6,7 +6,7 @@
 import React from 'react';
 import { ExternalLink, Eye, Pencil, Target, UserPlus, Copy } from 'lucide-react';
 import { Person } from '../../../types/genealogy';
-import { getPersonUrl } from '../../../../stores/useUIStore';
+import { getPersonUrl, openPersonInNewWindow } from '../../../../stores/useUIStore';
 
 interface TreeContextMenuProps {
   contextMenu: { x: number; y: number; personId: string } | null;
@@ -72,7 +72,11 @@ export const TreeContextMenu: React.FC<TreeContextMenuProps> = ({
             rel="noopener noreferrer"
             onClick={(e) => {
               e.stopPropagation();
-              onClose();
+              // Native link navigation opens target="_blank" in a new browser tab.
+              // We delay onClose slightly to prevent unmounting the anchor before browser processes the click.
+              setTimeout(() => {
+                onClose();
+              }, 200);
             }}
             className="flex items-center gap-2.5 px-3.5 py-2 text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/40 font-semibold transition-colors cursor-pointer group"
           >
