@@ -27,7 +27,8 @@
     "test:merge": "node --experimental-test-module-mocks --import tsx --test tests/personMergeRecovery.test.ts tests/mergedPersonState.test.ts",
     "test:delta": "node --import tsx --test tests/personDelta.test.ts",
     "bench:delta": "node --import tsx benchmarks/personDelta.ts",
-    "test:merge-browser": "node scripts/check-safe-merge-browser.mjs"
+    "test:merge-browser": "node scripts/check-safe-merge-browser.mjs",
+    "bench:tree": "node --import tsx benchmarks/treeLayoutCache.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
