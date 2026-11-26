@@ -6,7 +6,9 @@ type CollectionName = typeof projectCollections[number];
 export interface CloudProjectSettings {
   deletedTombstones?: string[];
   ignoredDuplicatePairs?: string[];
+  ignoredDuplicateRevision?: number;
   mergedPersons?: Record<string, string>;
+  mergedPersonsRevision?: number;
 }
 export interface CloudProjectSnapshot {
   data: Partial<Record<CollectionName, any[]>>;
@@ -37,11 +39,15 @@ export async function readProjectSnapshot(reader: ProjectReader): Promise<CloudP
   if (ignored !== undefined) {
     if (!Array.isArray(ignored.keys) || ignored.keys.some((id: unknown) => typeof id !== 'string')) throw new Error('Invalid cloud duplicate settings');
     settings.ignoredDuplicatePairs = ignored.keys;
+    if (ignored.revision !== undefined && (!Number.isSafeInteger(ignored.revision) || ignored.revision < 0)) throw new Error('Invalid cloud duplicate revision');
+    settings.ignoredDuplicateRevision = ignored.revision ?? 0;
   }
   if (merged !== undefined) {
     if (!merged.mapping || typeof merged.mapping !== 'object' || Array.isArray(merged.mapping) ||
         Object.values(merged.mapping).some(id => typeof id !== 'string')) throw new Error('Invalid cloud merge settings');
     settings.mergedPersons = merged.mapping;
+    if (merged.revision !== undefined && (!Number.isSafeInteger(merged.revision) || merged.revision < 0)) throw new Error('Invalid cloud merge revision');
+    settings.mergedPersonsRevision = merged.revision ?? 0;
   }
   // Legacy data may be read locally. Migration requires an explicit later upload.
   if (entries.every(([, rows]) => rows.length === 0) && tombstones === undefined) {

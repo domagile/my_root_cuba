@@ -6,6 +6,7 @@
  */
 
 import { Person, Family, MergeFieldSelection, Source, LifeEvent } from '../types';
+import { assertFreshMergePair } from '../services/personMergeRecovery';
 
 export interface MergeResult {
   updatedPersons: Person[];
@@ -28,6 +29,7 @@ export function executeSmartPersonMerge(
   allFamilies: Record<string, Family> = {},
   masterTarget: 'A' | 'B' = 'A'
 ): MergeResult {
+  assertFreshMergePair(personA, personB, allPersons);
   const master = masterTarget === 'A' ? personA : personB;
   const duplicate = masterTarget === 'A' ? personB : personA;
 
@@ -409,12 +411,14 @@ export function batchMergeSafeDuplicates(
   updatedFamilies: Record<string, Family>;
   mergedNames: string[];
   deletedPersonIds: string[];
+  mergedInto: Record<string, string>;
 } {
   let currentPersons = [...allPersons];
   let currentFamilies = { ...allFamilies };
   let mergedCount = 0;
   const mergedNames: string[] = [];
   const deletedPersonIds: string[] = [];
+  const mergedInto: Record<string, string> = {};
   const processedPersonIds = new Set<string>();
 
   for (const pair of pairs) {
@@ -425,6 +429,8 @@ export function batchMergeSafeDuplicates(
       continue;
     }
 
+    assertFreshMergePair(pair.personA, pair.personB, allPersons);
+
     // Lookup freshest state of persons from currentPersons
     const freshA = currentPersons.find(p => p.id === pair.personA.id);
     const freshB = currentPersons.find(p => p.id === pair.personB.id);
@@ -434,6 +440,7 @@ export function batchMergeSafeDuplicates(
     currentPersons = res.updatedPersons;
     currentFamilies = res.updatedFamilies;
     deletedPersonIds.push(res.deletedPersonId);
+    mergedInto[res.deletedPersonId] = res.masterPerson.id;
     processedPersonIds.add(pair.personA.id);
     processedPersonIds.add(pair.personB.id);
     mergedCount++;
@@ -448,7 +455,8 @@ export function batchMergeSafeDuplicates(
     updatedPersons: currentPersons,
     updatedFamilies: currentFamilies,
     mergedNames,
-    deletedPersonIds
+    deletedPersonIds,
+    mergedInto
   };
 }
 

@@ -21,6 +21,19 @@ test('complete download returns all tree collections and settings without mutati
   assert.deepEqual(result.settings.deletedTombstones, ['deleted']);
   assert.deepEqual(source, { ids: ['deleted'] });
 });
+test('duplicate snapshots expose their revision and accept the legacy unversioned list', async () => {
+  for (const revision of [undefined, 7]) {
+    const result = await readProjectSnapshot(reader({ readSetting: async name => name === 'ignoredDuplicates'
+      ? { keys: ['a___b'], ...(revision === undefined ? {} : { revision }) } : undefined }));
+    assert.deepEqual(result.settings.ignoredDuplicatePairs, ['a___b']);
+    assert.equal(result.settings.ignoredDuplicateRevision, revision ?? 0);
+  }
+});
+test('malformed duplicate revisions cannot authorize replacement of local decisions', async () => {
+  for (const revision of [-1, '2', 0.5]) await assert.rejects(readProjectSnapshot(reader({
+    readSetting: async name => name === 'ignoredDuplicates' ? { keys: [], revision } : undefined
+  })), /Invalid cloud duplicate revision/);
+});
 
 for (const code of ['permission-denied', 'unavailable', 'resource-exhausted']) {
   test(`${code} cannot become an empty successful collection`, async () => {

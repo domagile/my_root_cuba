@@ -22,9 +22,6 @@ import {
   ChevronDown,
   Shield
 } from 'lucide-react';
-import { Person } from '../../../types/genealogy';
-import { DuplicatePair } from '../../../../types';
-import { TreeNodeLayout } from '../../../utils/treeLayout';
 import { getPersonUrl, openPersonInNewWindow } from '../../../../stores/useUIStore';
 import { isPersonLiving, getPrivacySafePerson } from '../../../utils/privacy';
 import {
@@ -35,82 +32,10 @@ import {
 } from '../../../utils/treeLayout';
 import { normalizeUkrainianSurnameGender } from '../../../../utils/ukrainianPhonetics';
 
-export interface TreePersonCardProps {
-  node: TreeNodeLayout;
-  activePersonId: string;
-  rootPersonId: string;
-  isLightCanvas: boolean;
-  isWhitelisted: boolean;
-  isCardHovered: boolean;
-  isMicroLOD: boolean;
-  isPillLOD: boolean;
-  isCompact: boolean;
-  isReadOnly: boolean;
-  orientation: 'vertical' | 'horizontal';
-
-  // Bloodline highlights
-  isNodeInBloodline: boolean;
-  isHoveredTarget: boolean;
-  isAncestorOfHovered: boolean;
-  isDescendantOfHovered: boolean;
-  bloodlineColor: string;
-  bloodlineActive: boolean;
-
-  // Focus Highlights
-  isNodeFocused: boolean;
-  isDimmed: boolean;
-  focusType: string;
-  focusColor: string;
-  focusTitle: string;
-  focusPersonId: string;
-  selectedClanId: string | null;
-
-  // Duplicate pair
-  matchedDuplicate?: DuplicatePair;
-
-  // Collateral siblings data
-  collateralSiblings: Person[];
-  isCollateralPerson: boolean;
-  personSiblings: Person[];
-  collapsedSiblings: Set<string>;
-  showSiblings: boolean;
-
-  // Parents data
-  father?: Person | null;
-  mother?: Person | null;
-
-  // Selective popover state
-  selectiveParentsMenuPersonId: string | null;
-  selectiveMenuPersonId: string | null;
-
-  // Node position index for lateral detection
-  nodeByPersonId: Map<string, TreeNodeLayout>;
-
-  // Callback handlers (stable references)
-  onCardMouseEnter: (id: string) => void;
-  onCardMouseLeave: () => void;
-  onSelectPerson: (id: string) => void;
-  onEditPerson?: (id: string) => void;
-  onChangeRoot: (id: string) => void;
-  onOpenRelationManager?: (id: string) => void;
-  onContextMenu: (e: React.MouseEvent, id: string) => void;
-  onOpenContextMenuAtButton: (e: React.MouseEvent, id: string) => void;
-  onSetActiveMergePair: (pair: DuplicatePair) => void;
-
-  // Toggles
-  onToggleCollapseParents: (personId: string, isCurrentlyCollapsed?: boolean) => void;
-  onToggleCollapseParentBranch: (personId: string, branch: 'paternal' | 'maternal', isCurrentlyCollapsed?: boolean) => void;
-  onToggleCollapseChildren: (personId: string, isCurrentlyCollapsed?: boolean) => void;
-  onToggleCollapseSingleSibling: (siblingId: string, anchorPersonId?: string) => void;
-  onCollapseAllSiblingsOfPerson: (personId: string) => void;
-  onExpandAllSiblingsOfPerson: (personId: string) => void;
-  onSetSelectiveParentsMenuPersonId: (personId: string | null) => void;
-  onSetSelectiveMenuPersonId: (personId: string | null) => void;
-
-  // Focus toggles
-  onToggleClanFocus: (clanId: string) => void;
-  onToggleDirectAncestorsFocus: (personId: string) => void;
-}
+export type { TreePersonCardProps } from './treePersonCardProps';
+import type { TreePersonCardProps } from './treePersonCardProps';
+import { areTreePersonCardPropsEqual, getSiblingBranchSide } from './treePersonCardMemo';
+import { useTreePopover } from './useTreePopover';
 
 const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
   node,
@@ -147,6 +72,8 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
   mother,
   selectiveParentsMenuPersonId,
   selectiveMenuPersonId,
+  selectiveParentsMenuRef,
+  selectiveMenuRef,
   nodeByPersonId,
   onCardMouseEnter,
   onCardMouseLeave,
@@ -172,6 +99,10 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
   const isLiving = isPersonLiving(rawPerson);
   const isMasked = !isWhitelisted && isLiving;
   const p = isMasked ? getPrivacySafePerson(rawPerson, false) : rawPerson;
+  const isParentsMenuOpen = selectiveParentsMenuPersonId === p.id;
+  const isSiblingsMenuOpen = selectiveMenuPersonId === p.id;
+  const parentsPopover = useTreePopover(isParentsMenuOpen, () => onSetSelectiveParentsMenuPersonId(null), selectiveParentsMenuRef);
+  const siblingsPopover = useTreePopover(isSiblingsMenuOpen, () => onSetSelectiveMenuPersonId(null), selectiveMenuRef);
 
   const isRoot = p.id === activePersonId;
   const isTreeRoot = p.id === rootPersonId;
@@ -208,7 +139,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
   if (isMicroLOD) {
     return (
       <div
-        key={`${node.id}_${node.x}_${node.y}`}
+        key={node.id}
         style={{
           position: 'absolute',
           left: `${node.x}px`,
@@ -305,7 +236,7 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
   if (isPillLOD) {
     return (
       <div
-        key={`${node.id}_${node.x}_${node.y}`}
+        key={node.id}
         style={{
           position: 'absolute',
           left: `${node.x}px`,
@@ -473,11 +404,10 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
   const parentsAvailableCount = (father ? 1 : 0) + (mother ? 1 : 0);
   const isBothCollapsed = node.isParentsCollapsed;
   const isPartiallyCollapsed = !isBothCollapsed && (node.isPaternalCollapsed || node.isMaternalCollapsed);
-  const isParentsMenuOpen = selectiveParentsMenuPersonId === p.id;
 
   return (
     <div
-      key={`${node.id}_${node.x}_${node.y}`}
+      key={node.id}
       style={{
         position: 'absolute',
         left: `${node.x}px`,
@@ -703,6 +633,11 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
 
           {parentsAvailableCount > 1 && (
             <button
+              ref={parentsPopover.triggerRef}
+              id={parentsPopover.triggerId}
+              aria-expanded={isParentsMenuOpen}
+              aria-controls={isParentsMenuOpen ? parentsPopover.id : undefined}
+              aria-haspopup="dialog"
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
@@ -724,6 +659,13 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
 
           {isParentsMenuOpen && (
             <div
+              ref={parentsPopover.setPopupRef}
+              id={parentsPopover.id}
+              role="dialog"
+              aria-labelledby={parentsPopover.triggerId}
+              tabIndex={-1}
+              onKeyDown={parentsPopover.onKeyDown}
+              onBlur={parentsPopover.onBlur}
               onClick={(e) => e.stopPropagation()}
               className={`absolute ${
                 orientation === 'horizontal'
@@ -750,7 +692,8 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onSetSelectiveParentsMenuPersonId(null)}
+                  onClick={parentsPopover.close}
+                  aria-label="Закрити меню ліній предків"
                   className={`text-xs p-0.5 cursor-pointer ${
                     isLightCanvas ? 'text-stone-400 hover:text-stone-700' : 'text-slate-400 hover:text-white'
                   }`}
@@ -1399,27 +1342,10 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
 
       {/* Lateral / Sibling Branch Collapse/Expand Controller */}
       {(node.hasSiblings || collateralSiblings.length > 0) && (() => {
-        let siblingSide: 'left' | 'right' = 'right';
-        let sideDescription = 'сестер/братів справа';
-        if (node.isSpouseNode) {
-          siblingSide = 'right';
-          sideDescription = 'осіб справа (жіноча лінія)';
-        } else if (node.spouseId) {
-          siblingSide = 'left';
-          sideDescription = 'осіб зліва (чоловіча лінія)';
-        } else {
-          const hasLeftSibling = personSiblings.some((s) => {
-            const sn = nodeByPersonId.get(s.id);
-            return sn && sn.generation === node.generation && sn.x < node.x;
-          });
-          if (hasLeftSibling) {
-            siblingSide = 'left';
-            sideDescription = 'осіб зліва';
-          } else {
-            siblingSide = 'right';
-            sideDescription = 'осіб справа';
-          }
-        }
+        const siblingSide = getSiblingBranchSide({ node, personSiblings, nodeByPersonId });
+        const sideDescription = node.isSpouseNode ? 'осіб справа (жіноча лінія)'
+          : node.spouseId ? 'осіб зліва (чоловіча лінія)'
+          : siblingSide === 'left' ? 'осіб зліва' : 'осіб справа';
 
         const collapsedCollaterals = collateralSiblings.filter(
           (s) => collapsedSiblings.has(s.id) || !showSiblings
@@ -1431,7 +1357,6 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
         const isPartiallyCollapsed = collapsedCollaterals.length > 0 && visibleCollaterals.length > 0;
         const displayCollapsedCount = collapsedCollaterals.length || node.siblingsCount || 1;
         const displayVisibleCount = visibleCollaterals.length;
-        const isSiblingsMenuOpen = selectiveMenuPersonId === p.id;
 
         return (
           <div
@@ -1490,6 +1415,11 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
 
             {collateralSiblings.length > 1 && (
               <button
+                ref={siblingsPopover.triggerRef}
+                id={siblingsPopover.triggerId}
+                aria-expanded={isSiblingsMenuOpen}
+                aria-controls={isSiblingsMenuOpen ? siblingsPopover.id : undefined}
+                aria-haspopup="dialog"
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1511,6 +1441,13 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
 
             {isSiblingsMenuOpen && (
               <div
+                ref={siblingsPopover.setPopupRef}
+                id={siblingsPopover.id}
+                role="dialog"
+                aria-labelledby={siblingsPopover.triggerId}
+                tabIndex={-1}
+                onKeyDown={siblingsPopover.onKeyDown}
+                onBlur={siblingsPopover.onBlur}
                 onClick={(e) => e.stopPropagation()}
                 className={`absolute ${
                   orientation === 'horizontal'
@@ -1525,7 +1462,8 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => onSetSelectiveMenuPersonId(null)}
+                    onClick={siblingsPopover.close}
+                    aria-label="Закрити меню братів та сестер"
                     className="text-slate-400 hover:text-white text-xs p-0.5 cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -1605,89 +1543,5 @@ const TreePersonCardComponent: React.FC<TreePersonCardProps> = ({
     </div>
   );
 };
-
-function areTreePersonCardPropsEqual(prev: TreePersonCardProps, next: TreePersonCardProps): boolean {
-  // If identity or coordinates changed
-  if (prev.node.id !== next.node.id) return false;
-  if (prev.node.x !== next.node.x || prev.node.y !== next.node.y) return false;
-  if (prev.node.width !== next.node.width || prev.node.height !== next.node.height) return false;
-
-  // Person object change (name, photo, tags, dates)
-  if (prev.node.person !== next.node.person) return false;
-
-  // Selection & Tree Root
-  if (prev.activePersonId !== next.activePersonId) {
-    const wasActive = prev.node.person.id === prev.activePersonId;
-    const isNowActive = next.node.person.id === next.activePersonId;
-    if (wasActive !== isNowActive) return false;
-  }
-  if (prev.rootPersonId !== next.rootPersonId) {
-    const wasRoot = prev.node.person.id === prev.rootPersonId;
-    const isNowRoot = next.node.person.id === next.rootPersonId;
-    if (wasRoot !== isNowRoot) return false;
-  }
-
-  // Hover state (critical for mouse movement performance!)
-  if (prev.isCardHovered !== next.isCardHovered) return false;
-
-  // LOD mode changes
-  if (prev.isMicroLOD !== next.isMicroLOD || prev.isPillLOD !== next.isPillLOD) return false;
-  if (prev.isCompact !== next.isCompact) return false;
-  if (prev.isLightCanvas !== next.isLightCanvas) return false;
-  if (prev.isWhitelisted !== next.isWhitelisted) return false;
-  if (prev.orientation !== next.orientation) return false;
-  if (prev.isReadOnly !== next.isReadOnly) return false;
-
-  // Bloodline highlights
-  if (prev.isNodeInBloodline !== next.isNodeInBloodline) return false;
-  if (prev.bloodlineActive !== next.bloodlineActive) return false;
-  if (prev.isHoveredTarget !== next.isHoveredTarget) return false;
-  if (prev.isAncestorOfHovered !== next.isAncestorOfHovered) return false;
-  if (prev.isDescendantOfHovered !== next.isDescendantOfHovered) return false;
-  if (prev.bloodlineColor !== next.bloodlineColor) return false;
-
-  // Lineage focus highlights
-  if (prev.isNodeFocused !== next.isNodeFocused) return false;
-  if (prev.isDimmed !== next.isDimmed) return false;
-  if (prev.focusType !== next.focusType) return false;
-  if (prev.focusColor !== next.focusColor) return false;
-  if (prev.focusTitle !== next.focusTitle) return false;
-  if (prev.selectedClanId !== next.selectedClanId) return false;
-  if (prev.focusPersonId !== next.focusPersonId) {
-    const wasFocus = prev.node.person.id === prev.focusPersonId;
-    const isNowFocus = next.node.person.id === next.focusPersonId;
-    if (wasFocus !== isNowFocus) return false;
-  }
-
-  // Duplicate pairs
-  if (prev.matchedDuplicate !== next.matchedDuplicate) return false;
-
-  // Branch collapse states on this specific node
-  if (prev.node.isParentsCollapsed !== next.node.isParentsCollapsed) return false;
-  if (prev.node.isPaternalCollapsed !== next.node.isPaternalCollapsed) return false;
-  if (prev.node.isMaternalCollapsed !== next.node.isMaternalCollapsed) return false;
-  if (prev.node.isChildrenCollapsed !== next.node.isChildrenCollapsed) return false;
-  if (prev.node.isSiblingsCollapsed !== next.node.isSiblingsCollapsed) return false;
-
-  // Popover menus state for this person
-  const pId = prev.node.person.id;
-  const prevParentsOpen = prev.selectiveParentsMenuPersonId === pId;
-  const nextParentsOpen = next.selectiveParentsMenuPersonId === pId;
-  if (prevParentsOpen !== nextParentsOpen) return false;
-
-  const prevSiblingsOpen = prev.selectiveMenuPersonId === pId;
-  const nextSiblingsOpen = next.selectiveMenuPersonId === pId;
-  if (prevSiblingsOpen !== nextSiblingsOpen) return false;
-
-  // Siblings collapse membership check
-  if (prev.showSiblings !== next.showSiblings) return false;
-  if (prev.collapsedSiblings !== next.collapsedSiblings) {
-    const prevCollapsed = prev.collapsedSiblings.has(pId);
-    const nextCollapsed = next.collapsedSiblings.has(pId);
-    if (prevCollapsed !== nextCollapsed) return false;
-  }
-
-  return true;
-}
 
 export const TreePersonCard = memo(TreePersonCardComponent, areTreePersonCardPropsEqual);

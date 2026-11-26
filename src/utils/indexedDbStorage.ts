@@ -307,11 +307,23 @@ export function hasPendingLocalWrites(): boolean {
 }
 
 /** Queue every write, including immediate writes, until durable confirmation. */
+let localWriteBatchDepth = 0;
+/** Keep related records and journals in one commit, including immediate writers. */
+export function batchLocalWrites(operation: () => void): void {
+  localWriteBatchDepth++;
+  try { operation(); }
+  finally {
+    localWriteBatchDepth--;
+    if (localWriteBatchDepth === 0) void flushPendingLocalWrites().catch(() => {});
+  }
+}
+
 export function persistLocalData(key: string, data: any, immediate: boolean = false): void {
   advanceSynchronousRevision(key);
   pendingWritesBuffer.set(key, data);
   pendingVersions.set(key, ++writeRevision);
   useLocalPersistenceStore.setState({ pendingWritesCount: pendingWritesBuffer.size });
+  if (localWriteBatchDepth > 0) return;
   if (immediate) {
     void flushPendingLocalWrites().catch(() => {});
     return;

@@ -1,4 +1,8 @@
 import { getPendingDeletionChanges, acknowledgeDeletionChanges, getDeletionStateRevision } from '../utils/personDeletionState';
+import { flushPendingLocalWrites } from '../utils/indexedDbStorage';
+import { getPendingIgnoredDuplicateChanges, acknowledgeIgnoredDuplicateChanges } from '../utils/ignoredDuplicateState';
+import { getPendingMergedPersonChanges, acknowledgeMergedPersonChanges, type MergedPersonSnapshot } from '../utils/mergedPersonState';
+import type { IgnoredDuplicateChange, IgnoredDuplicateSnapshot } from '../utils/ignoredDuplicateKeys';
 import type { Person } from '../types';
 import { captureDirtySnapshot, isQuotaExceededToday, useCloudSyncStore } from '../stores/useCloudSyncStore';
 
@@ -41,6 +45,8 @@ export interface CloudSyncApi {
   batchDeleteEntities: (type: string, ids: string[], projectId?: string, allowManual?: boolean) => Promise<boolean>;
   saveProjectDataToCloud: (data: ProjectPayload) => Promise<boolean>;
   updatePersonDeletionMarkers?: (changes: Record<string, boolean>) => Promise<string[] | null>;
+  updateIgnoredDuplicatePairs?: (changes: IgnoredDuplicateChange[]) => Promise<IgnoredDuplicateSnapshot | null>;
+  updateMergedPersons?: (changes: Record<string, string | null>) => Promise<MergedPersonSnapshot | null>;
 }
 
 export interface SyncResult { success: boolean; message: string; }
@@ -77,7 +83,9 @@ export function synchronizeProject(
     const manual = options.manual !== false;
     if (!manual && store.syncMode !== 'auto') return { success: false, message: 'Автоматичне вивантаження вимкнено.' };
     const deletionChanges = getPendingDeletionChanges();
-    if (!options.forceFull && !store.hasUnsavedChanges && Object.keys(deletionChanges).length === 0) {
+    const ignoredChanges = getPendingIgnoredDuplicateChanges();
+    const mergedChanges = getPendingMergedPersonChanges();
+    if (!options.forceFull && !store.hasUnsavedChanges && Object.keys(deletionChanges).length === 0 && Object.keys(ignoredChanges).length === 0 && Object.keys(mergedChanges).length === 0) {
       return { success: store.pendingWritesCount === 0 && store.status !== 'error', message: 'Немає нових змін для вивантаження.' };
     }
     const snapshot = captureDirtySnapshot();
@@ -88,6 +96,7 @@ export function synchronizeProject(
     if (manual) store.setIsManualPushing(true);
     store.setStatus('syncing');
     try {
+      await flushPendingLocalWrites();
       if (options.beforeUpload) {
         try { await options.beforeUpload(data); }
         catch { /* A local backup failure must never be presented as a cloud success. */ }
@@ -177,9 +186,26 @@ export function synchronizeProject(
         }
         acknowledgeDeletionChanges(deletionChanges, cloudIds, deletionRevision);
       }
+      if (Object.keys(ignoredChanges).length > 0) {
+        const confirmed = await api.updateIgnoredDuplicatePairs?.(Object.values(ignoredChanges));
+        if (!acknowledgeIgnoredDuplicateChanges(ignoredChanges, confirmed)) {
+          preserveProjectRetry(Boolean(full));
+          store.setStatus(useCloudSyncStore.getState().isQuotaExceeded ? 'offline' : 'error', errorMessage);
+          return { success: false, message: errorMessage };
+        }
+      }
+      if (Object.keys(mergedChanges).length > 0) {
+        const changes = Object.fromEntries(Object.entries(mergedChanges).map(([id, change]) => [id, change.target]));
+        const confirmed = await api.updateMergedPersons?.(changes);
+        if (!acknowledgeMergedPersonChanges(mergedChanges, confirmed)) {
+          preserveProjectRetry(Boolean(full));
+          store.setStatus(useCloudSyncStore.getState().isQuotaExceeded ? 'offline' : 'error', errorMessage);
+          return { success: false, message: errorMessage };
+        }
+      }
       // Retain the entire batch on a partial failure. Repeating these merge/delete
       // operations is idempotent; discarding an unconfirmed operation is not safe.
-      if (Object.keys(getPendingDeletionChanges()).length > 0 || !store.clearDirtyIfUnchanged(snapshot.revision)) {
+      if (Object.keys(getPendingDeletionChanges()).length > 0 || Object.keys(getPendingIgnoredDuplicateChanges()).length > 0 || Object.keys(getPendingMergedPersonChanges()).length > 0 || !store.clearDirtyIfUnchanged(snapshot.revision)) {
         store.setStatus('pending');
         return { success: false, message: 'Під час вивантаження з’явилися нові зміни. Вони залишилися в черзі; повторіть вивантаження перед оновленням з хмари.' };
       }
@@ -207,6 +233,7 @@ export function synchronizePersonDeltas(
       const delta = snapshot.personDeltas[id];
       if (!delta || !snapshot.tracker.persons.includes(id)) continue;
       try {
+        await flushPendingLocalWrites();
         // Send the full accumulated delta, including any previously failed fields.
         if (await writeDelta(id, delta) === true) state.clearPersonDirtyDelta(id, snapshot);
         else state.setStatus(useCloudSyncStore.getState().isQuotaExceeded ? 'offline' : 'error', errorMessage);

@@ -1,5 +1,9 @@
+import { writeMergedPersonChanges } from '../services/mergedPersonCloudService';
+import type { MergedPersonSnapshot } from '../utils/mergedPersonState';
 import { serializeFamilyForCloud } from '../utils/familyCloudData';
 import { writePersonDeletionMarkers } from '../services/personDeletionCloudService';
+import { writeIgnoredDuplicateChanges } from '../services/ignoredDuplicateCloudService';
+import type { IgnoredDuplicateChange, IgnoredDuplicateSnapshot } from '../utils/ignoredDuplicateKeys';
 import { readProjectFromFirestore, type CloudProjectSnapshot } from '../services/projectCloudReadService';
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
@@ -971,33 +975,8 @@ export function subscribeToAccessConfigCloud(
 }
 
 // Ignored Duplicate Pairs Cloud Persistence Helpers
-export async function saveIgnoredDuplicatePairsToCloud(
-  keys: string[],
-  projectId: string = DEFAULT_PROJECT_ID
-): Promise<boolean> {
-  if (isCloudWriteBlocked() || useCloudSyncStore.getState().syncMode === 'manual') return false;
-  try {
-    const db = getDbInstance();
-    if (!db) return false;
-    const docRef = doc(db, 'projects', projectId, 'systemSettings', 'ignoredDuplicates');
-    await setDoc(docRef, { keys: Array.from(new Set(keys)), updatedAt: new Date().toISOString() }, { merge: true });
-    return true;
-  } catch (err) {
-    if (isFirestoreQuotaError(err)) {
-      useCloudSyncStore.getState().setQuotaExceeded(true);
-      markQuotaExceededToday(true);
-      const firestore = getDbInstance();
-      if (firestore) {
-        disableNetwork(firestore).catch(() => {});
-      }
-    }
-    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/ignoredDuplicates`);
-    return false;
-  }
-}
-
 export function subscribeToIgnoredDuplicatePairsCloud(
-  onUpdate: (keys: string[]) => void,
+  onUpdate: (keys: string[], revision?: number) => void,
   projectId: string = DEFAULT_PROJECT_ID
 ): () => void {
   try {
@@ -1010,7 +989,7 @@ export function subscribeToIgnoredDuplicatePairsCloud(
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (Array.isArray(data?.keys)) {
-            onUpdate(data.keys);
+            onUpdate(data.keys, data.revision ?? 0);
           }
         }
       },
@@ -1023,6 +1002,26 @@ export function subscribeToIgnoredDuplicatePairsCloud(
 }
 
 // Deleted Tombstones Cloud Persistence Helpers
+export async function updateIgnoredDuplicatePairs(
+  changes: IgnoredDuplicateChange[], projectId: string = DEFAULT_PROJECT_ID
+): Promise<IgnoredDuplicateSnapshot | null> {
+  // Explicit manual uploads set isManualPushing; background calls remain blocked in manual mode.
+  if (isCloudWriteBlocked()) return null;
+  try {
+    const db = getDbInstance();
+    if (!db) return null;
+    return await writeIgnoredDuplicateChanges(db, projectId, changes);
+  } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      useCloudSyncStore.getState().setQuotaExceeded(true);
+      markQuotaExceededToday(true);
+      const db = getDbInstance(); if (db) disableNetwork(db).catch(() => {});
+    }
+    handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/ignoredDuplicates`);
+    return null;
+  }
+}
+
 export async function saveDeletedTombstonesToCloud(
   ids: string[],
   projectId: string = DEFAULT_PROJECT_ID
@@ -1096,33 +1095,27 @@ export function subscribeToDeletedTombstonesCloud(
 }
 
 // Merged Persons Mapping Cloud Persistence Helpers
-export async function saveMergedPersonsToCloud(
-  mapping: Record<string, string>,
-  projectId: string = DEFAULT_PROJECT_ID
-): Promise<boolean> {
-  if (isCloudWriteBlocked() || useCloudSyncStore.getState().syncMode === 'manual') return false;
+export async function updateMergedPersons(
+  changes: Record<string, string | null>, projectId: string = DEFAULT_PROJECT_ID
+): Promise<MergedPersonSnapshot | null> {
+  if (isCloudWriteBlocked()) return null;
   try {
     const db = getDbInstance();
-    if (!db) return false;
-    const docRef = doc(db, 'projects', projectId, 'systemSettings', 'mergedPersons');
-    await setDoc(docRef, { mapping: mapping || {}, updatedAt: new Date().toISOString() }, { merge: true });
-    return true;
+    if (!db) return null;
+    return await writeMergedPersonChanges(db, projectId, changes);
   } catch (err) {
     if (isFirestoreQuotaError(err)) {
       useCloudSyncStore.getState().setQuotaExceeded(true);
       markQuotaExceededToday(true);
-      const firestore = getDbInstance();
-      if (firestore) {
-        disableNetwork(firestore).catch(() => {});
-      }
+      const db = getDbInstance(); if (db) disableNetwork(db).catch(() => {});
     }
     handleFirestoreError(err, OperationType.WRITE, `projects/${projectId}/systemSettings/mergedPersons`);
-    return false;
+    return null;
   }
 }
 
 export function subscribeToMergedPersonsCloud(
-  onUpdate: (mapping: Record<string, string>) => void,
+  onUpdate: (mapping: Record<string, string>, revision?: number) => void,
   projectId: string = DEFAULT_PROJECT_ID
 ): () => void {
   try {
@@ -1135,7 +1128,7 @@ export function subscribeToMergedPersonsCloud(
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (data?.mapping && typeof data.mapping === 'object') {
-            onUpdate(data.mapping);
+            onUpdate(data.mapping, data.revision ?? 0);
           }
         }
       },

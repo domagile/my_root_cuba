@@ -63,7 +63,7 @@ import { DuplicatePair } from '../../../types';
 import { TreeIcon, FanIcon } from '../../../components/common/GenealogyIcons';
 import { downloadGedcom, parseGedcom } from '../../utils/gedcom';
 import { useGenealogyStore } from '../../../stores/useGenealogyStore';
-import { detectDuplicatePersons, ignoreDuplicatePair } from '../../../utils/duplicateDetector';
+import { detectDuplicatePersons, ignoreDuplicatePair, isDuplicatePairIgnored, getIgnoredDuplicatePairKeys } from '../../../utils/duplicateDetector';
 import type { MergeResult } from '../../utils/mergeDatabase';
 
 const GedcomMergeModal = React.lazy(() => import('../modals/GedcomMergeModal').then(m => ({ default: m.GedcomMergeModal })));
@@ -84,14 +84,18 @@ import {
   getRelationshipIndex
 } from '../../utils/treeLayout';
 import { getFullName, sortPersonsBySurnameAndBirthDesc, findRootPersonId, calculateKinship } from '../../utils/relationship';
-import { getSavedUserTreeState, saveUserTreeState } from '../../../utils/userTreeState';
+import { getSavedUserTreeState } from '../../../utils/userTreeState';
+import { readSavedTreeViewport, treeViewportHasVisibleNode } from '../../../utils/treeViewportState';
 import { useUIStore, getPersonUrl, openPersonInNewWindow } from '../../../stores/useUIStore';
 import { useAuthStore } from '../../../stores/useAuthStore';
 import { isPersonLiving, getPrivacySafePerson, getPrivacyLifespan, isUserWhitelisted } from '../../utils/privacy';
 import { getThemeConfig } from '../../../utils/theme';
 const PersonReportModal = React.lazy(() => import('../../../components/common/PersonReportModal').then(m => ({ default: m.PersonReportModal })));
 import { TreeContextMenu } from './tree/TreeContextMenu';
+import { useTreeCardActions } from './tree/useTreeCardActions';
+import { usePersistedTreeView, type TreeViewSnapshot } from './tree/usePersistedTreeView';
 import { TreePersonCard } from './tree/TreePersonCard';
+import { getTreeViewportBounds } from '../../utils/treeViewport';
 import {
   normalizeUkrainianSurnameGender,
   formatClanName,
@@ -243,14 +247,15 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const duplicatesByPersonId = useMemo(() => {
     const map = new Map<string, DuplicatePair>();
+    const ignoredKeys = getIgnoredDuplicatePairKeys();
     for (const pair of duplicatePairs) {
-      if (pair.confidence >= 50) {
+      if (database.persons[pair.personA.id] && database.persons[pair.personB.id] && pair.confidence >= 50 && !isDuplicatePairIgnored(pair.personA.id, pair.personB.id, ignoredKeys)) {
         if (!map.has(pair.personA.id)) map.set(pair.personA.id, pair);
         if (!map.has(pair.personB.id)) map.set(pair.personB.id, pair);
       }
     }
     return map;
-  }, [duplicatePairs]);
+  }, [duplicatePairs, ignoredRevision, database.persons]);
 
   // Generation options list: 1 to 4 in dropdown, plus custom if selected
   const treeGenOptions = useMemo(() => {
@@ -264,18 +269,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const [isCustomGenOpen, setIsCustomGenOpen] = useState<boolean>(false);
   const [customGenInput, setCustomGenInput] = useState<string>('');
 
-  const [scale, setScale] = useState<number>(() => {
-    if (initialUserState?.scale && typeof initialUserState.scale === 'number') {
-      return initialUserState.scale;
-    }
-    return 0.95;
-  });
-  const [pan, setPan] = useState<{ x: number; y: number }>(() => {
-    if (initialUserState?.pan && typeof initialUserState.pan.x === 'number' && (initialUserState.pan.x !== 80 || initialUserState.pan.y !== 80)) {
-      return initialUserState.pan;
-    }
-    return { x: 0, y: 0 };
-  });
+  const [initialTreeState] = useState(() => initialUserState);
+  const initialViewport = useMemo(() => readSavedTreeViewport(initialTreeState, activePersonId), [initialTreeState, activePersonId]);
+  const [scale, setScale] = useState<number>(() => initialViewport?.scale ?? 0.95);
+  const [pan, setPan] = useState<{ x: number; y: number }>(() => initialViewport?.pan ?? { x: 0, y: 0 });
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isWheeling, setIsWheeling] = useState<boolean>(false);
   const scaleRef = useRef<number>(scale);
@@ -399,7 +397,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   // Visibility & Branch Collapse Filters
   const [showParents, setShowParents] = useState<boolean>(true);
-  const [showSiblings, setShowSiblings] = useState<boolean>(true);
+  const [showSiblings, setShowSiblings] = useState<boolean>(() => typeof initialUserState?.showSiblings === 'boolean' ? initialUserState.showSiblings : true);
   const [showDescendants, setShowDescendants] = useState<boolean>(true);
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
   const [collapsedSiblings, setCollapsedSiblings] = useState<Set<string>>(new Set());
@@ -560,10 +558,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const setAnchorForPerson = useCallback((personId: string) => {
     const node = nodeByPersonId.get(personId);
     if (node) {
+      const rect = containerRef.current?.getBoundingClientRect();
       anchorRef.current = {
         personId,
-        screenX: node.x * scale + pan.x,
-        screenY: node.y * scale + pan.y
+        screenX: (rect?.left ?? 0) + node.x * scale + pan.x,
+        screenY: (rect?.top ?? 0) + node.y * scale + pan.y
       };
     }
   }, [nodeByPersonId, scale, pan.x, pan.y]);
@@ -1146,30 +1145,11 @@ export const TreeView: React.FC<TreeViewProps> = ({
     setGenerations(0);
   }, []);
 
-  // High-Performance Quantized Viewport Culling Bounding Box
-  // Uses 550px safety margin and quantizes pan shifts (200px) and scale (0.12)
-  // This allows the GPU to translate/scale the canvas smoothly at 60-120 FPS without React re-filtering nodes/links on every single pixel/zoom tick!
-  const visibleBounds = useMemo(() => {
-    const margin = 550;
-    const quantStep = 200;
-    const qX = Math.round((pan.x || 0) / quantStep) * quantStep;
-    const qY = Math.round((pan.y || 0) / quantStep) * quantStep;
-    const quantScaleStep = 0.12;
-    const qScale = Math.max(0.05, Math.round((scale || 1) / quantScaleStep) * quantScaleStep);
-    const cw = containerDimensions.width || 1200;
-    const ch = containerDimensions.height || 800;
-    return {
-      minX: (-qX - margin) / qScale,
-      maxX: (-qX + cw + margin) / qScale,
-      minY: (-qY - margin) / qScale,
-      maxY: (-qY + ch + margin) / qScale
-    };
-  }, [
-    Math.round((pan.x || 0) / 200),
-    Math.round((pan.y || 0) / 200),
-    Math.round((scale || 1) / 0.12),
-    containerDimensions.width,
-    containerDimensions.height
+  // Quantize outward in world space so distant visible branches cannot be lost.
+  // Reuse the bounds object while camera movement stays within the same buckets.
+  const worldBounds = getTreeViewportBounds(pan, scale, containerDimensions);
+  const visibleBounds = useMemo(() => worldBounds, [
+    worldBounds.minX, worldBounds.maxX, worldBounds.minY, worldBounds.maxY
   ]);
 
   // Culled Nodes: Only render nodes that intersect visible viewport using 2D Spatial Grid Index
@@ -1525,25 +1505,36 @@ export const TreeView: React.FC<TreeViewProps> = ({
       anchorRef.current = null;
       const newNode = layout.nodes.find((n) => n.person.id === personId);
       if (newNode) {
-        const newPanX = screenX - newNode.x * scale;
-        const newPanY = screenY - newNode.y * scale;
+        const rect = containerRef.current?.getBoundingClientRect();
+        const newPanX = screenX - (rect?.left ?? 0) - newNode.x * scale;
+        const newPanY = screenY - (rect?.top ?? 0) - newNode.y * scale;
         setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
       }
     }
   }, [layout, scale]);
 
-  // Center tree on root person as soon as layout nodes are available, and on root person change
+  // Restore a valid visible camera once; explicit root changes still center on that root.
   const hasCenteredOnMount = useRef<boolean>(false);
   const prevRootId = useRef<string>(activePersonId);
   const prevLayoutType = useRef<TreeLayoutType>(layoutType);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!layout.nodes.length) return;
 
     if (!hasCenteredOnMount.current) {
       hasCenteredOnMount.current = true;
       prevRootId.current = activePersonId;
       prevLayoutType.current = layoutType;
+
+      const container = containerRef.current;
+      const cw = container?.clientWidth || containerDimensions.width || 1200;
+      const ch = container?.clientHeight || containerDimensions.height || 800;
+      if (initialViewport && treeViewportHasVisibleNode(initialViewport, layout.nodes, { width: cw, height: ch })) {
+        setPan(initialViewport.pan);
+        setScale(initialViewport.scale);
+        setIsCameraReady(true);
+        return;
+      }
 
       // Focus on the root person (or active person)
       const targetId = activePersonId || rootPersonId;
@@ -1552,9 +1543,6 @@ export const TreeView: React.FC<TreeViewProps> = ({
         || layout.nodes[0];
 
       if (targetNode) {
-        const container = containerRef.current;
-        const cw = container?.clientWidth || containerDimensions.width || 1200;
-        const ch = container?.clientHeight || containerDimensions.height || 800;
         const targetScale = 0.95;
         const nodeCenterX = targetNode.x + (targetNode.width || CLASSIC_CARD_WIDTH) / 2;
         const nodeCenterY = targetNode.y + (targetNode.height || CLASSIC_CARD_HEIGHT) / 2;
@@ -1565,6 +1553,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
         });
         setScale(targetScale);
       }
+      setIsCameraReady(true);
       return;
     }
 
@@ -1573,29 +1562,23 @@ export const TreeView: React.FC<TreeViewProps> = ({
       prevLayoutType.current = layoutType;
       focusOnPerson(activePersonId, 0.95);
     }
-  }, [layout.nodes, activePersonId, rootPersonId, layoutType, containerDimensions, focusOnPerson]);
+  }, [layout.nodes, activePersonId, rootPersonId, layoutType, containerDimensions, focusOnPerson, initialViewport]);
 
-  // Auto-save user tree viewport and active state for authorized users
-  useEffect(() => {
-    if (!isWhitelisted || !currentUser?.email) return;
-    if (!hasCenteredOnMount.current) return;
-    if (pan.x === 80 && pan.y === 80) return;
-    if (pan.x === 0 && pan.y === 0) return;
-
-    const timer = setTimeout(() => {
-      saveUserTreeState(currentUser.email, {
+  const treeViewSnapshot = useMemo<TreeViewSnapshot | null>(() => {
+    if (!isCameraReady || !isWhitelisted || !currentUserEmail) return null;
+    return { email: currentUserEmail.trim().toLowerCase(), state: {
         pan,
         scale,
+        viewport: { version: 1, personId: activePersonId, pan, scale },
         selectedPersonId: activePersonId,
         generations,
         showSiblings,
         orientation,
         enableBloodlineHover,
         isCompact
-      });
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [pan, scale, activePersonId, generations, showSiblings, orientation, enableBloodlineHover, isCompact, isWhitelisted, currentUser?.email]);
+    } };
+  }, [isCameraReady, pan, scale, activePersonId, generations, showSiblings, orientation, enableBloodlineHover, isCompact, isWhitelisted, currentUserEmail]);
+  usePersistedTreeView(treeViewSnapshot);
 
   const hasCustomFilters = useMemo(() => {
     return (
@@ -1675,7 +1658,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
     midPoint: { x: number; y: number };
   } | null>(null);
 
-  // High-performance RAF throttle for mouse, touch and wheel zoom/pan to deliver constant 60/120 FPS
+  // Coalesce mouse, touch and wheel transforms into a single animation frame.
   const panRafRef = useRef<number | null>(null);
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
   const pendingScaleRef = useRef<number | null>(null);
@@ -1744,8 +1727,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0) {
+      const currentPan = pendingPanRef.current ?? panRef.current;
       setIsDragging(true);
-      setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      setDragStart({ x: e.clientX - currentPan.x, y: e.clientY - currentPan.y });
     }
   };
 
@@ -1765,11 +1749,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
   // Touch Support for tablets and mobile (Smooth pinch-to-zoom anchored to midpoint)
   const handleTouchStart = (e: React.TouchEvent) => {
+    const currentPan = pendingPanRef.current ?? panRef.current;
+    const currentScale = pendingScaleRef.current ?? scaleRef.current;
     if (e.touches.length === 1) {
       setIsDragging(true);
       setDragStart({
-        x: e.touches[0].clientX - pan.x,
-        y: e.touches[0].clientY - pan.y
+        x: e.touches[0].clientX - currentPan.x,
+        y: e.touches[0].clientY - currentPan.y
       });
       touchStateRef.current = null;
     } else if (e.touches.length === 2) {
@@ -1781,8 +1767,8 @@ export const TreeView: React.FC<TreeViewProps> = ({
       const midY = (t1.clientY + t2.clientY) / 2;
       touchStateRef.current = {
         initialDist: Math.max(dist, 10),
-        initialScale: scale,
-        initialPan: { ...pan },
+        initialScale: currentScale,
+        initialPan: { ...currentPan },
         midPoint: { x: midX, y: midY }
       };
     }
@@ -1818,8 +1804,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
       const newPanX = containerMidX - worldX * targetScale;
       const newPanY = containerMidY - worldY * targetScale;
 
-      setScale(targetScale);
-      schedulePanUpdate({
+      scheduleTransformUpdate(targetScale, {
         x: Math.round(newPanX),
         y: Math.round(newPanY)
       });
@@ -1832,11 +1817,12 @@ export const TreeView: React.FC<TreeViewProps> = ({
       touchStateRef.current = null;
       flushPanUpdate();
     } else if (e.touches.length === 1) {
+      const currentPan = pendingPanRef.current ?? panRef.current;
       setIsDragging(true);
       flushPanUpdate();
       setDragStart({
-        x: e.touches[0].clientX - pan.x,
-        y: e.touches[0].clientY - pan.y
+        x: e.touches[0].clientX - currentPan.x,
+        y: e.touches[0].clientY - currentPan.y
       });
       touchStateRef.current = null;
     }
@@ -1993,6 +1979,28 @@ export const TreeView: React.FC<TreeViewProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
+
+  const cardActions = useTreeCardActions({
+    onCardMouseEnter: handleCardMouseEnter,
+    onCardMouseLeave: handleCardMouseLeave,
+    onSelectPerson: onSelectPerson,
+    onEditPerson: onEditPerson,
+    onChangeRoot: onChangeRoot,
+    onOpenRelationManager: onOpenRelationManager,
+    onContextMenu: handlePersonContextMenu,
+    onOpenContextMenuAtButton: handleOpenContextMenuAtButton,
+    onSetActiveMergePair: setActiveMergePair,
+    onToggleCollapseParents: toggleCollapseParents,
+    onToggleCollapseParentBranch: toggleCollapseParentBranch,
+    onToggleCollapseChildren: toggleCollapseChildren,
+    onToggleCollapseSingleSibling: toggleCollapseSingleSibling,
+    onCollapseAllSiblingsOfPerson: collapseAllSiblingsOfPerson,
+    onExpandAllSiblingsOfPerson: expandAllSiblingsOfPerson,
+    onSetSelectiveParentsMenuPersonId: setSelectiveParentsMenuPersonId,
+    onSetSelectiveMenuPersonId: setSelectiveMenuPersonId,
+    onToggleClanFocus: handleToggleClanFocus,
+    onToggleDirectAncestorsFocus: handleToggleDirectAncestorsFocus,
+  });
 
   return (
     <div className="flex flex-col h-full w-full bg-[#23272b] overflow-hidden relative select-none">
@@ -3382,7 +3390,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
 
             return (
               <TreePersonCard
-                key={`${node.id}_${node.x}_${node.y}`}
+                key={node.id}
                 node={node}
                 activePersonId={activePersonId}
                 rootPersonId={rootPersonId}
@@ -3417,26 +3425,10 @@ export const TreeView: React.FC<TreeViewProps> = ({
                 mother={mother}
                 selectiveParentsMenuPersonId={selectiveParentsMenuPersonId}
                 selectiveMenuPersonId={selectiveMenuPersonId}
+                selectiveParentsMenuRef={selectiveParentsMenuRef}
+                selectiveMenuRef={selectiveMenuRef}
                 nodeByPersonId={nodeByPersonId}
-                onCardMouseEnter={handleCardMouseEnter}
-                onCardMouseLeave={handleCardMouseLeave}
-                onSelectPerson={onSelectPerson}
-                onEditPerson={onEditPerson}
-                onChangeRoot={onChangeRoot}
-                onOpenRelationManager={onOpenRelationManager}
-                onContextMenu={handlePersonContextMenu}
-                onOpenContextMenuAtButton={handleOpenContextMenuAtButton}
-                onSetActiveMergePair={setActiveMergePair}
-                onToggleCollapseParents={toggleCollapseParents}
-                onToggleCollapseParentBranch={toggleCollapseParentBranch}
-                onToggleCollapseChildren={toggleCollapseChildren}
-                onToggleCollapseSingleSibling={toggleCollapseSingleSibling}
-                onCollapseAllSiblingsOfPerson={collapseAllSiblingsOfPerson}
-                onExpandAllSiblingsOfPerson={expandAllSiblingsOfPerson}
-                onSetSelectiveParentsMenuPersonId={setSelectiveParentsMenuPersonId}
-                onSetSelectiveMenuPersonId={setSelectiveMenuPersonId}
-                onToggleClanFocus={handleToggleClanFocus}
-                onToggleDirectAncestorsFocus={handleToggleDirectAncestorsFocus}
+                {...cardActions}
               />
             );
           })}
@@ -3964,21 +3956,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
             allFamilies={database.families || {}}
             isOpen={Boolean(activeMergePair)}
             onClose={() => setActiveMergePair(null)}
-            onMergeComplete={(updatedPersons, updatedFamilies, masterName, extra) => {
-              ignoreDuplicatePair(activeMergePair.personA.id, activeMergePair.personB.id);
-              if (extra?.deletedPersonId && extra?.masterPerson?.id) {
-                ignoreDuplicatePair(extra.deletedPersonId, extra.masterPerson.id);
-              }
-              mergePersons({
-                updatedPersons,
-                updatedFamilies,
-                masterPerson: extra?.masterPerson,
-                deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : []
-              });
+            onMergeComplete={async (updatedPersons, updatedFamilies, masterName, extra) => {
+              const committed = await mergePersons({ updatedPersons, updatedFamilies, masterPerson: extra?.masterPerson,
+                deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : [],
+                sourcePersons: Object.values(database.persons), sourceFamilies: database.families || {} });
               setActiveMergePair(null);
-              setImportNotification({
-                message: `Особи успішно об'єднані в профіль «${masterName}».`
-              });
+              setImportNotification({ message: committed.persisted ? `Особи об’єднано у «${masterName}». Скасування доступне у верхній панелі.`
+                : 'Злиття виконано в пам’яті, але локальне збереження ще не підтверджене. Не закривайте вкладку.' });
             }}
             onMarkNotDuplicate={(pair) => {
               ignoreDuplicatePair(pair.personA.id, pair.personB.id);

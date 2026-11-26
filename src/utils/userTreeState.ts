@@ -6,7 +6,8 @@
 import { Person, AuthUser, WhitelistEntry } from '../types';
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { findRootPersonId } from '../rodovid/utils/relationship';
-import { persistLocalData, idbDelete } from './indexedDbStorage';
+import { persistLocalData, readLocalDataSync } from './indexedDbStorage';
+import type { SavedTreeViewport } from './treeViewportState';
 
 export interface UserTreeState {
   selectedPersonId: string;
@@ -17,6 +18,7 @@ export interface UserTreeState {
   orientation?: 'vertical' | 'horizontal';
   enableBloodlineHover?: boolean;
   isCompact?: boolean;
+  viewport?: SavedTreeViewport;
   updatedAt: string;
 }
 
@@ -30,11 +32,11 @@ export function getSavedUserTreeState(email?: string | null): UserTreeState | nu
   if (!email) return null;
   try {
     const clean = email.trim().toLowerCase();
-    const raw = localStorage.getItem(`${USER_STATE_PREFIX}${clean}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as UserTreeState;
+    const stored = readLocalDataSync<UserTreeState>(`${USER_STATE_PREFIX}${clean}`);
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return null;
+    const parsed = { ...stored };
     // Filter out uncentered fallback/stale coordinates
-    if (parsed.pan && ((parsed.pan.x === 80 && parsed.pan.y === 80) || (parsed.pan.x === 0 && parsed.pan.y === 0))) {
+    if (parsed.viewport?.version !== 1 && parsed.pan && ((parsed.pan.x === 80 && parsed.pan.y === 80) || (parsed.pan.x === 0 && parsed.pan.y === 0))) {
       delete parsed.pan;
     }
     return parsed;
@@ -46,7 +48,7 @@ export function getSavedUserTreeState(email?: string | null): UserTreeState | nu
 /**
  * Saves or updates tree state for an authorized user.
  */
-export function saveUserTreeState(email: string, partial: Partial<UserTreeState>): void {
+export function saveUserTreeState(email: string, partial: Partial<UserTreeState>, immediate = false): void {
   if (!email) return;
   try {
     const clean = email.trim().toLowerCase();
@@ -56,7 +58,7 @@ export function saveUserTreeState(email: string, partial: Partial<UserTreeState>
     };
     // Never persist dummy uncentered pan (80, 80) or (0, 0)
     const sanitizedPartial = { ...partial };
-    if (sanitizedPartial.pan && ((sanitizedPartial.pan.x === 80 && sanitizedPartial.pan.y === 80) || (sanitizedPartial.pan.x === 0 && sanitizedPartial.pan.y === 0))) {
+    if (sanitizedPartial.viewport?.version !== 1 && sanitizedPartial.pan && ((sanitizedPartial.pan.x === 80 && sanitizedPartial.pan.y === 80) || (sanitizedPartial.pan.x === 0 && sanitizedPartial.pan.y === 0))) {
       delete sanitizedPartial.pan;
     }
     const next: UserTreeState = {
@@ -64,7 +66,7 @@ export function saveUserTreeState(email: string, partial: Partial<UserTreeState>
       ...sanitizedPartial,
       updatedAt: new Date().toISOString()
     };
-    persistLocalData(`${USER_STATE_PREFIX}${clean}`, next);
+    persistLocalData(`${USER_STATE_PREFIX}${clean}`, next, immediate);
   } catch {}
 }
 
@@ -75,7 +77,8 @@ export function clearUserTreeState(email: string): void {
   if (!email) return;
   try {
     const clean = email.trim().toLowerCase();
-    idbDelete(`${USER_STATE_PREFIX}${clean}`).catch(() => {});
+    // Queue the cleared value too, so an older pending save cannot resurrect it.
+    persistLocalData(`${USER_STATE_PREFIX}${clean}`, null, true);
     localStorage.removeItem(`${USER_STATE_PREFIX}${clean}`);
   } catch {}
 }

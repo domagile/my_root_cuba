@@ -19,7 +19,7 @@ localStorage.setItem('genealogy_workstation_data_v4_familio_persons', JSON.strin
 const calls: string[] = [];
 const names = ['savePersonDoc','savePersonDeltaDoc','deletePersonDoc','saveFamilyDoc','deleteFamilyDoc','saveSourceDoc',
   'deleteSourceDoc','saveEventDoc','deleteEventDoc','savePlaceDoc','deletePlaceDoc','saveDeletedTombstonesToCloud',
-  'saveMergedPersonsToCloud','saveIgnoredDuplicatePairsToCloud','batchSaveEntities','batchDeleteEntities'];
+  'saveMergedPersonsToCloud','batchSaveEntities','batchDeleteEntities'];
 mock.module(new URL('../src/lib/firebase.ts', import.meta.url).href, {
   namedExports: Object.fromEntries(names.map(name => [name, async () => { calls.push(name); return true; }]))
 });

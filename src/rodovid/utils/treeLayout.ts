@@ -7,6 +7,7 @@ import { GenealogyDatabase, Person } from '../types/genealogy';
 import { normalizeUkrainianSurnameGender, formatClanName, areSurnamesEquivalent } from '../../utils/ukrainianPhonetics';
 import { applyBridgeJumpsToLinks, LineCrossingCutout } from './treeLineBridges';
 import { SpatialTreeIndex } from './treeSpatialIndex';
+import { LruCache, getLayoutDataRevision, type LayoutDataRevision } from './layoutCache';
 
 export interface TreeNodeLayout {
   id: string;
@@ -151,12 +152,12 @@ export interface DatabaseRelationshipIndex {
   totalDescendants: Map<string, number>;
 }
 
-const databaseIndexWeakMap = new WeakMap<object, DatabaseRelationshipIndex>();
+let databaseIndexWeakMap = new WeakMap<object, { revision: LayoutDataRevision; index: DatabaseRelationshipIndex }>();
 
 export function getRelationshipIndex(database: { persons?: Record<string, Person>; families?: Record<string, any> }): DatabaseRelationshipIndex {
-  if (database && typeof database === 'object' && databaseIndexWeakMap.has(database)) {
-    return databaseIndexWeakMap.get(database)!;
-  }
+  const revision = getLayoutDataRevision(database);
+  const cached = databaseIndexWeakMap.get(database);
+  if (cached && cached.revision.every((value, i) => value === revision[i])) return cached.index;
 
   const parentToChildren = new Map<string, Set<string>>();
   const childToParents = new Map<string, { fatherId?: string; motherId?: string; father: Person | null; mother: Person | null }>();
@@ -327,7 +328,7 @@ export function getRelationshipIndex(database: { persons?: Record<string, Person
 
   if (database && typeof database === 'object') {
     try {
-      databaseIndexWeakMap.set(database, result);
+      databaseIndexWeakMap.set(database, { revision, index: result });
     } catch {}
   }
 
@@ -547,14 +548,15 @@ export function comparePersonsByAge(pA?: Person | null, pB?: Person | null): num
 
 // High-Performance Multi-Level LRU layout caches for instant tree & fan chart render & navigation
 const MAX_LAYOUT_CACHE_SIZE = 40;
-const treeLayoutCache = new Map<string, TreeLayoutResult>();
-const fanChartCache = new Map<string, FanChartSector[]>();
+const treeLayoutCache = new LruCache<TreeLayoutResult>(MAX_LAYOUT_CACHE_SIZE);
+const fanChartCache = new LruCache<FanChartSector[]>(MAX_LAYOUT_CACHE_SIZE);
 
 export function clearFanChartCache(): void {
   fanChartCache.clear();
 }
 
 export function clearTreeLayoutCache(): void {
+  databaseIndexWeakMap = new WeakMap();
   treeLayoutCache.clear();
   fanChartCache.clear();
 }
@@ -565,34 +567,16 @@ function buildLayoutCacheKey(
   maxGenerations: number,
   options?: TreeLayoutFilterOptions
 ): string {
-  const pCount = Object.keys(database?.persons || {}).length;
-  const fCount = Object.keys(database?.families || {}).length;
-  const lastMod = (database as any)?.lastModified || (database as any)?.version || '';
-  
-  const cp = options?.collapsedParents && options.collapsedParents.size > 0 
-    ? Array.from(options.collapsedParents).sort().join(',') : '';
-  const cs = options?.collapsedSiblings && options.collapsedSiblings.size > 0 
-    ? Array.from(options.collapsedSiblings).sort().join(',') : '';
-  const cc = options?.collapsedChildren && options.collapsedChildren.size > 0 
-    ? Array.from(options.collapsedChildren).sort().join(',') : '';
-
-  return `${rootPersonId}_${maxGenerations}_${pCount}_${fCount}_${lastMod}_${options?.orientation || 'v'}_${options?.isCompact ? 1 : 0}_${options?.directAncestorsOnly ? 1 : 0}_${options?.showParents !== false ? 1 : 0}_${options?.showSiblings !== false ? 1 : 0}_${options?.showDescendants !== false ? 1 : 0}_${options?.enableLineBridges !== false ? 1 : 0}_${cp}_${cs}_${cc}`;
-}
-
-function putInTreeLayoutCache(key: string, result: TreeLayoutResult): void {
-  if (treeLayoutCache.size >= MAX_LAYOUT_CACHE_SIZE) {
-    const oldest = treeLayoutCache.keys().next().value;
-    if (oldest) treeLayoutCache.delete(oldest);
-  }
-  treeLayoutCache.set(key, result);
-}
-
-function putInFanChartCache(key: string, sectors: FanChartSector[]): void {
-  if (fanChartCache.size >= MAX_LAYOUT_CACHE_SIZE) {
-    const oldest = fanChartCache.keys().next().value;
-    if (oldest) fanChartCache.delete(oldest);
-  }
-  fanChartCache.set(key, sectors);
+  return JSON.stringify([
+    getLayoutDataRevision(database), rootPersonId, maxGenerations,
+    options?.orientation || 'vertical', Boolean(options?.isCompact),
+    Boolean(options?.directAncestorsOnly), options?.showParents !== false,
+    options?.showSiblings !== false, options?.showDescendants !== false,
+    options?.enableLineBridges !== false,
+    Array.from(options?.collapsedParents || []).sort(),
+    Array.from(options?.collapsedSiblings || []).sort(),
+    Array.from(options?.collapsedChildren || []).sort()
+  ]);
 }
 
 /**
@@ -2345,7 +2329,7 @@ export function calculateClassicFamilyTreeLayout(
     bridgeResult.crossingCount
   );
 
-  putInTreeLayoutCache(cacheKey, result);
+  treeLayoutCache.set(cacheKey, result);
   return result;
 }
 
@@ -3815,7 +3799,7 @@ export function calculateHorizontalFamilyTreeLayout(
     bridgeResult.crossingCount
   );
 
-  putInTreeLayoutCache(cacheKey, result);
+  treeLayoutCache.set(cacheKey, result);
   return result;
 }
 
@@ -4043,6 +4027,12 @@ export interface FanChartOptions {
   includeDescendantsAndSpouses?: boolean;
 }
 
+function normalizeFanColorMode(mode: string): FanColorMode {
+  if (mode === 'lineage') return 'clans';
+  if (mode === 'familysearch') return 'grandparents';
+  return mode as FanColorMode;
+}
+
 export function calculateFanChart(
   database: GenealogyDatabase,
   rootPersonId: string,
@@ -4059,18 +4049,12 @@ export function calculateFanChart(
   let customInnerRadius: number | undefined = undefined;
 
   if (typeof colorModeOrCustomInner === 'string') {
-    if (colorModeOrCustomInner === 'lineage' as any) {
-      colorMode = 'clans';
-    } else if (colorModeOrCustomInner === 'familysearch' as any) {
-      colorMode = 'grandparents';
-    } else {
-      colorMode = colorModeOrCustomInner as FanColorMode;
-    }
+    colorMode = normalizeFanColorMode(colorModeOrCustomInner);
   } else if (typeof colorModeOrCustomInner === 'number') {
     customInnerRadius = colorModeOrCustomInner;
   } else if (colorModeOrCustomInner && typeof colorModeOrCustomInner === 'object') {
     if (colorModeOrCustomInner.colorMode) {
-      colorMode = colorModeOrCustomInner.colorMode === 'lineage' ? 'clans' : (colorModeOrCustomInner.colorMode as FanColorMode);
+      colorMode = normalizeFanColorMode(colorModeOrCustomInner.colorMode);
     }
     if (colorModeOrCustomInner.customInnerRadius !== undefined) {
       customInnerRadius = colorModeOrCustomInner.customInnerRadius;
@@ -4080,29 +4064,21 @@ export function calculateFanChart(
     }
   }
 
-  const pCount = Object.keys(database?.persons || {}).length;
-  const fCount = Object.keys(database?.families || {}).length;
-  const lastMod = (database as any)?.lastModified || (database as any)?.version || '';
-  const fanCacheKey = `fan_${rootPersonId}_${generations}_${pCount}_${fCount}_${lastMod}_${colorMode}_${customInnerRadius || 0}_${customRingWidth || 0}_${Boolean(options?.includeDescendantsAndSpouses)}`;
-  const cachedSectors = fanChartCache.get(fanCacheKey);
-  if (cachedSectors) {
-    return cachedSectors;
-  }
-
-  if (options?.colorMode) {
-    colorMode = options.colorMode === 'lineage' ? 'clans' : (options.colorMode as FanColorMode);
-  }
-
+  if (options?.colorMode) colorMode = normalizeFanColorMode(options.colorMode);
   const includeDescendantsAndSpouses = Boolean(
     options?.includeDescendantsAndSpouses ??
     (typeof colorModeOrCustomInner === 'object' ? colorModeOrCustomInner?.includeDescendantsAndSpouses : false)
   );
+  const innerRadiusBase = customInnerRadius ?? 110;
+  const ringWidth = customRingWidth ?? 85;
+  const fanCacheKey = JSON.stringify([
+    getLayoutDataRevision(database), rootPersonId, generations, colorMode,
+    innerRadiusBase, ringWidth, includeDescendantsAndSpouses
+  ]);
+  const cachedSectors = fanChartCache.get(fanCacheKey);
+  if (cachedSectors) return cachedSectors;
 
   const lineageColorMap = getLineageColorMap(database);
-
-  // Spacious, clear ring sizing matching user screenshot layout
-  const innerRadiusBase = customInnerRadius !== undefined ? customInnerRadius : 110;
-  const ringWidth = customRingWidth !== undefined ? customRingWidth : 85;
 
   function getSectorColor(ahnentafel: number, gen: number, person: Person): string {
     if (gen === 0) {
@@ -4392,6 +4368,6 @@ export function calculateFanChart(
     }
   }
 
-  putInFanChartCache(fanCacheKey, sectors);
+  fanChartCache.set(fanCacheKey, sectors);
   return sectors;
 }
