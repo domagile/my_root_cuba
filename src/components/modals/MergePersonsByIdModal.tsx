@@ -1,3 +1,4 @@
+import { useGenealogyStore } from '../../stores/useGenealogyStore';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -147,7 +148,10 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
   }, [personA, personB, comparison]);
 
   // Quick merge execute
-  const handleQuickMerge = () => {
+  const mergeInProgress = useGenealogyStore(s => s.mergeInProgress);
+
+  const handleQuickMerge = async () => {
+    if (mergeInProgress) return;
     if (!personA || !personB) return;
     if (personA.id === personB.id) {
       setStatusMessage({ type: 'error', text: 'Неможливо обʼєднати особу із самою собою' });
@@ -187,47 +191,36 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
         masterTarget
       );
 
-      mergePersons({
+      const committed = await mergePersons({
         updatedPersons: result.updatedPersons,
         updatedFamilies: result.updatedFamilies,
         masterPerson: result.masterPerson,
-        deletedPersonIds: [result.deletedPersonId]
+        deletedPersonIds: [result.deletedPersonId], sourcePersons: persons, sourceFamilies: families
       });
 
-      ignoreDuplicatePair(personA.id, personB.id);
 
       setSelectedPersonId(result.masterPerson.id);
       if (onMergeSuccess) {
         onMergeSuccess(result.masterPerson);
       }
-      onClose();
+      if (committed.persisted) onClose();
+      else setStatusMessage({ type: 'success', text: 'Злиття виконано в пам’яті. Локальне збереження ще не підтверджене; не закривайте вкладку.' });
     } catch (err: any) {
       console.error('Error during merge:', err);
       setStatusMessage({ type: 'error', text: `Помилка при злитті: ${err.message || 'Невідома помилка'}` });
     }
   };
 
-  const handleDetailedMergeComplete = (
-    updatedPersons: Person[],
-    updatedFamilies: Record<string, Family>,
-    masterName: string,
+  const handleDetailedMergeComplete = async (
+    updatedPersons: Person[], updatedFamilies: Record<string, Family>, masterName: string,
     extra?: { masterPerson?: Person; deletedPersonId?: string }
   ) => {
-    const deletedId = extra?.deletedPersonId || (masterTarget === 'A' ? personB?.id : personA?.id);
-    if (personA && personB) {
-      ignoreDuplicatePair(personA.id, personB.id);
-    }
-    mergePersons({
-      updatedPersons,
-      updatedFamilies,
-      masterPerson: extra?.masterPerson,
-      deletedPersonIds: deletedId ? [deletedId] : []
-    });
-    const targetId = masterTarget === 'A' ? personA?.id : personB?.id;
-    if (targetId) setSelectedPersonId(targetId);
-
+    const committed = await mergePersons({ updatedPersons, updatedFamilies, masterPerson: extra?.masterPerson,
+      deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : [], sourcePersons: persons, sourceFamilies: families });
+    if (extra?.masterPerson) setSelectedPersonId(extra.masterPerson.id);
     setIsDetailedMergeOpen(false);
-    onClose();
+    if (committed.persisted) onClose();
+    else setStatusMessage({ type: 'success', text: 'Злиття виконано в пам’яті. Локальне збереження ще не підтверджене; не закривайте вкладку.' });
   };
 
   if (!isOpen) return null;
@@ -639,7 +632,7 @@ export const MergePersonsByIdModal: React.FC<MergePersonsByIdModalProps> = ({
 
               <button
                 type="button"
-                disabled={!personA || !personB || personA.id === personB.id}
+                disabled={mergeInProgress || !personA || !personB || personA.id === personB.id}
                 onClick={handleQuickMerge}
                 className="flex-1 sm:flex-none px-5 py-2 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-600 text-white shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all cursor-pointer"
               >

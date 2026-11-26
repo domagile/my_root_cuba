@@ -19,8 +19,10 @@ import {
   extractUkrainianSurnameRoot
 } from './ukrainianPhonetics';
 import { extractYear } from './treeAudit';
-import { saveIgnoredDuplicatePairsToCloud } from '../lib/firebase';
-import { persistLocalData } from './indexedDbStorage';
+import { useCloudSyncStore } from '../stores/useCloudSyncStore';
+import { getEffectiveIgnoredDuplicateKeys, setIgnoredDuplicateDecision } from './ignoredDuplicateState';
+import { IGNORED_DUPLICATE_PAIRS_KEY, getDuplicatePairKey, duplicatePairAliases } from './ignoredDuplicateKeys';
+export { getDuplicatePairKey } from './ignoredDuplicateKeys';
 
 export interface PersonDuplicateMatch {
   person: Person;
@@ -939,150 +941,29 @@ export function detectDuplicatePersons(
   return duplicatePairs;
 }
 
-export const RODOVID_IGNORED_DUPLICATE_PAIRS_KEY = 'rodovid_ignored_duplicate_pairs';
+export const RODOVID_IGNORED_DUPLICATE_PAIRS_KEY = IGNORED_DUPLICATE_PAIRS_KEY;
 
-/**
- * Standardizes a pair key regardless of order
- */
-export function getDuplicatePairKey(idA: string, idB: string): string {
-  const a = (idA || '').trim();
-  const b = (idB || '').trim();
-  return [a, b].sort().join('___');
-}
-
-/**
- * Loads all ignored pair keys from localStorage
- */
+/** Read durable local decisions over the latest confirmed cloud base. */
 export function getIgnoredDuplicatePairKeys(): Set<string> {
-  const set = new Set<string>();
-  try {
-    if (typeof localStorage === 'undefined' || !localStorage.getItem) return set;
-    const raw = localStorage.getItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY);
-    if (raw) {
-      const list = JSON.parse(raw);
-      if (Array.isArray(list)) {
-        list.forEach((item) => {
-          if (typeof item === 'string' && item.trim()) {
-            const trimmed = item.trim();
-            set.add(trimmed);
-            if (trimmed.includes('___')) {
-              const clean = trimmed.replace(/^dup_/, '');
-              const parts = clean.split('___');
-              if (parts.length === 2 && parts[0] && parts[1]) {
-                const norm = [parts[0], parts[1]].sort().join('___');
-                set.add(norm);
-                set.add(`dup_${parts[0]}___${parts[1]}`);
-                set.add(`dup_${parts[1]}___${parts[0]}`);
-              }
-            } else if (trimmed.includes(':::')) {
-              const parts = trimmed.split(':::');
-              if (parts.length === 2 && parts[0] && parts[1]) {
-                const norm = [parts[0], parts[1]].sort().join('___');
-                set.add(norm);
-              }
-            }
-          }
-        });
-      }
-    }
-  } catch {}
-  return set;
+  return getEffectiveIgnoredDuplicateKeys();
 }
-
-/**
- * Checks whether a pair of person IDs is marked as "not a duplicate" (ignored)
- */
 export function isDuplicatePairIgnored(idA: string, idB: string, ignoredSet?: Set<string>): boolean {
-  if (!idA || !idB || idA === idB) return true;
-  const set = ignoredSet || getIgnoredDuplicatePairKeys();
-  const normalizedKey = getDuplicatePairKey(idA, idB);
-  if (set.has(normalizedKey)) return true;
-  if (set.has(`dup_${normalizedKey}`)) return true;
-  if (set.has(`${idA}___${idB}`) || set.has(`${idB}___${idA}`)) return true;
-  if (set.has(`dup_${idA}___${idB}`) || set.has(`dup_${idB}___${idA}`)) return true;
-  if (set.has(`dup_${idA}_${idB}`) || set.has(`dup_${idB}_${idA}`)) return true;
-  if (set.has(`${idA}:::${idB}`) || set.has(`${idB}:::${idA}`)) return true;
-  return false;
+  if (!idA?.trim() || !idB?.trim() || idA === idB) return true;
+  const keys = ignoredSet || getIgnoredDuplicatePairKeys();
+  if (keys.size === 0) return false;
+  if (keys.has(getDuplicatePairKey(idA, idB))) return true;
+  return duplicatePairAliases(idA, idB).some(key => keys.has(key));
 }
-
-/**
- * Marks a pair of persons as "not duplicate"
- */
-export function ignoreDuplicatePair(idA: string, idB: string): void {
-  try {
-    if (!idA || !idB || idA === idB) return;
-    const set = getIgnoredDuplicatePairKeys();
-    const key = getDuplicatePairKey(idA, idB);
-    set.add(key);
-    set.add(`dup_${key}`);
-    set.add(`${idA}___${idB}`);
-    set.add(`${idB}___${idA}`);
-    set.add(`dup_${idA}___${idB}`);
-    set.add(`dup_${idB}___${idA}`);
-    set.add(`dup_${idA}_${idB}`);
-    set.add(`dup_${idB}_${idA}`);
-    set.add(`${idA}:::${idB}`);
-    set.add(`${idB}:::${idA}`);
-    const list = Array.from(set);
-
-    // 1. Immediately store in localStorage so synchronous reads get the updated list instantly
-    try {
-      localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(list));
-    } catch {}
-
-    // 2. Persist to IndexedDB with immediate flag
-    persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, list, true);
-
-    // 3. Invalidate duplicate detector memoization cache
-    clearDuplicateDetectorCache();
-
-    // 4. Persist to Firestore cloud settings so it survives refresh and cross-device sessions
-    saveIgnoredDuplicatePairsToCloud(list).catch(() => {});
-
-    // 5. Broadcast event across app
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed', { detail: { idA, idB, ignored: true } }));
-    }
-  } catch (err) {
-    console.error('Failed to ignore duplicate pair:', err);
-  }
+function setDuplicateDecision(idA: string, idB: string, ignored: boolean): void {
+  if (!setIgnoredDuplicateDecision(idA, idB, ignored)) return;
+  clearDuplicateDetectorCache();
+  // Manual mode keeps the choice locally until an explicit upload. Automatic
+  // mode drains it through the same project outbox, with retries on failure.
+  useCloudSyncStore.getState().markProjectUploadPending();
+  useCloudSyncStore.getState().setStatus('pending');
 }
-
-/**
- * Restores a pair back to the duplicates list
- */
-export function unignoreDuplicatePair(idA: string, idB: string): void {
-  try {
-    if (!idA || !idB) return;
-    const set = getIgnoredDuplicatePairKeys();
-    const key = getDuplicatePairKey(idA, idB);
-    set.delete(key);
-    set.delete(`dup_${key}`);
-    set.delete(`${idA}___${idB}`);
-    set.delete(`${idB}___${idA}`);
-    set.delete(`dup_${idA}___${idB}`);
-    set.delete(`dup_${idB}___${idA}`);
-    set.delete(`dup_${idA}_${idB}`);
-    set.delete(`dup_${idB}_${idA}`);
-    set.delete(`${idA}:::${idB}`);
-    set.delete(`${idB}:::${idA}`);
-    const list = Array.from(set);
-
-    try {
-      localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(list));
-    } catch {}
-
-    persistLocalData(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, list, true);
-    clearDuplicateDetectorCache();
-    saveIgnoredDuplicatePairsToCloud(list).catch(() => {});
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed', { detail: { idA, idB, ignored: false } }));
-    }
-  } catch (err) {
-    console.error('Failed to unignore duplicate pair:', err);
-  }
-}
+export function ignoreDuplicatePair(idA: string, idB: string): void { setDuplicateDecision(idA, idB, true); }
+export function unignoreDuplicatePair(idA: string, idB: string): void { setDuplicateDecision(idA, idB, false); }
 
 /**
  * Searches for potential duplicates of a single person (e.g. during person creation)

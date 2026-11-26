@@ -1,3 +1,7 @@
+import { saveSnapshot, getSnapshot } from '../utils/persistentBackup';
+import { preparePersonMerge, mergeRecordsFingerprint, sameMergeValue, type MergePayload, type PersonMergeRecovery } from '../services/personMergeRecovery';
+import { getMergedPersonMap, recordMergedPersonChanges, hydrateMergedPersonState, getPendingMergedPersonChanges } from '../utils/mergedPersonState';
+import { hydrateIgnoredDuplicateState, getPendingIgnoredDuplicateChanges } from '../utils/ignoredDuplicateState';
 import { create } from 'zustand';
 import { normalizePerson } from '../utils/personNormalization';
 import { removeFamilyMemberships, restoreFamilyMemberships, FAMILY_RESTORE_STORAGE_KEY, type FamilyRestoreHistory, type RestorePersonsResult } from '../services/familyRestoreService';
@@ -16,12 +20,11 @@ import {
   deleteEventDoc,
   savePlaceDoc,
   deletePlaceDoc,
-  saveMergedPersonsToCloud,
   batchSaveEntities,
   batchDeleteEntities
 } from '../lib/firebase';
 import { useCloudSyncStore, EntitySyncType, isQuotaExceededToday } from './useCloudSyncStore';
-import { synchronizePersonDeltas } from '../services/cloudSyncService';
+import { synchronizePersonDeltas, queueCloudSync } from '../services/cloudSyncService';
 import { computePersonDelta } from '../utils/personDelta';
 import { findRootPersonId } from '../rodovid/utils/relationship';
 import { resolveInitialPersonId, saveUserTreeState } from '../utils/userTreeState';
@@ -30,7 +33,7 @@ import { useAuthStore } from './useAuthStore';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent } from '../utils/demoPurge';
 import { executeMerge, MergeResult, ImportHistorySession, ResolvedPersonConflictRecord, getPersonAncestorsIds } from '../rodovid/utils/mergeDatabase';
 import { purgeUnknownPlaceholderPersons, cleanDatabaseFromUnknownPersons, isUnknownPlaceholderPerson } from '../rodovid/utils/unknownPersonCleaner';
-import { persistLocalData, readLocalDataSync, idbGet, flushPendingLocalWrites } from '../utils/indexedDbStorage';
+import { persistLocalData, readLocalDataSync, idbGet, flushPendingLocalWrites, batchLocalWrites } from '../utils/indexedDbStorage';
 import { clearDuplicateDetectorCache } from '../utils/duplicateDetector';
 import { clearTreeAuditCache } from '../utils/treeAudit';
 import { clearKinshipCache } from '../rodovid/utils/relationship';
@@ -189,12 +192,11 @@ export interface GenealogyDataState {
     deletedPersonIds: string[];
     rootPersonName: string;
   };
-  mergePersons: (payload: {
-    updatedPersons: Person[];
-    updatedFamilies: Record<string, Family>;
-    masterPerson?: Person;
-    deletedPersonIds: string[];
-  }) => void;
+  mergeInProgress: boolean;
+  lastPersonMergeSnapshotId: string | null;
+  mergePersons: (payload: MergePayload) => Promise<{ snapshotId: string; persisted: boolean }>;
+  undoLastPersonMerge: () => Promise<{ persisted: boolean }>;
+
 
   // Family Actions
   setFamilies: (families: Record<string, Family> | ((prev: Record<string, Family>) => Record<string, Family>)) => void;
@@ -658,93 +660,97 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
     };
   },
 
-  mergePersons: (payload) =>
-    set((state) => {
-      const deletedIds = payload.deletedPersonIds || [];
-      const deletedSet = new Set(deletedIds);
-      if (deletedIds.length > 0) {
-        addTombstoneIds(deletedIds);
-      }
-
-      // Filter deleted from updated persons
-      const nextPersons = payload.updatedPersons
-        .filter((p) => p && p.id && !deletedSet.has(p.id))
-        .map(normalizePerson);
-
-      const seen = new Set<string>();
-      const deduplicated: Person[] = [];
-      for (const p of nextPersons) {
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
-          deduplicated.push(p);
+  mergeInProgress: false,
+  lastPersonMergeSnapshotId: readLocalDataSync<string>(`${STORAGE_KEY}_lastPersonMergeSnapshotId`),
+  mergePersons: async (payload) => {
+    if (get().mergeInProgress) throw new Error('Інша операція злиття ще виконується.');
+    set({ mergeInProgress: true });
+    try {
+      return await queueCloudSync(async () => {
+        const before = get(), beforeFingerprint = mergeRecordsFingerprint(before);
+        const next = preparePersonMerge(before, payload);
+        const existingMapping = getMergedPersonMap();
+        if (next.deletedIds.some(id => existingMapping[id])) throw new Error('Особа вже має зв’язок злиття. Оновіть базу перед операцією.');
+        const recovery: PersonMergeRecovery = {
+          version: 1, afterFingerprint: mergeRecordsFingerprint(next), deletedPersonIds: next.deletedIds,
+          mergedInto: next.mapping, previousSelectedId: before.selectedPersonId,
+          afterSelectedId: next.selectedPersonId, previousSnapshotId: before.lastPersonMergeSnapshotId
+        };
+        const snapshot = await saveSnapshot({ persons: before.persons, families: before.families, sources: before.sources,
+          events: before.events, places: before.places, trashPersons: before.trashPersons, whitelist: [] },
+          `Перед злиттям ${next.deletedIds.length} дублікатів`, recovery);
+        if (!snapshot) throw new Error('Не вдалося зберегти контрольну точку. Злиття не виконано.');
+        if (mergeRecordsFingerprint(get()) !== beforeFingerprint || !sameMergeValue(getMergedPersonMap(), existingMapping)) {
+          throw new Error('Дані змінилися під час збереження контрольної точки. Повторіть порівняння.');
         }
-      }
-
-      // Add deleted targets to trash
-      const targets = state.persons.filter((p) => deletedSet.has(p.id));
-      const masterName = payload.masterPerson?.name?.given || payload.masterPerson?.id || 'основним профілем';
-      const newTrashItems = targets.map((t) => ({
-        ...t,
-        isDeleted: true,
-        deletedAt: new Date().toISOString(),
-        notes: (t.notes ? t.notes + ' • ' : '') + `Об'єднано з ${masterName}`
-      }));
-      const nextTrash = [...state.trashPersons, ...newTrashItems];
-
-      // Record in genealogy_merged_person_ids
-      try {
-        let mergedMap: Record<string, string> = {};
-        const raw = localStorage.getItem('genealogy_merged_person_ids');
-        if (raw) mergedMap = JSON.parse(raw);
-        deletedIds.forEach((id) => {
-          mergedMap[id] = payload.masterPerson?.id || 'merged';
+        // No outbound writes before a confirmed recovery point and a fresh input check.
+        batchLocalWrites(() => {
+          recordPersonDeletionChanges(next.deletedIds, true);
+          recordMergedPersonChanges(next.mapping);
+          persistLocalData(`${STORAGE_KEY}_persons`, next.persons);
+          persistLocalData(`${STORAGE_KEY}_families`, next.families);
+          persistLocalData(`${STORAGE_KEY}_trashPersons`, next.trashPersons);
+          persistLocalData(`${STORAGE_KEY}_selectedPersonId`, next.selectedPersonId);
+          persistLocalData(`${STORAGE_KEY}_lastPersonMergeSnapshotId`, snapshot.id);
         });
-        persistLocalData('genealogy_merged_person_ids', mergedMap);
-        const syncState = useCloudSyncStore.getState();
-        if (syncState.syncMode === 'auto' && !syncState.isQuotaExceeded && !isQuotaExceededToday()) {
-          saveMergedPersonsToCloud(mergedMap).catch(() => {});
+        for (const id of next.deletedIds) notifySyncDelete('persons', id);
+        const previousPersons = new Map(before.persons.map(person => [person.id, person]));
+        for (const person of next.persons) if (!sameMergeValue(previousPersons.get(person.id), person)) {
+          useCloudSyncStore.getState().markDirty('persons', person.id);
         }
-      } catch {}
-
-      persistLocalData(`${STORAGE_KEY}_persons`, deduplicated);
-      persistLocalData(`${STORAGE_KEY}_trashPersons`, nextTrash);
-      persistLocalData(`${STORAGE_KEY}_families`, payload.updatedFamilies);
-
-      // Queue explicit deletions; only the shared sync drain writes them to Firestore
-      deletedIds.forEach((id) => {
-
-        notifySyncDelete('persons', id);
-      });
-
-      if (payload.masterPerson) {
-        const normMaster = normalizePerson(payload.masterPerson);
-        notifySyncChange('persons', normMaster.id, () => savePersonDoc(normMaster));
-      }
-
-      // Save other updated persons
-      deduplicated.forEach((p) => {
-        const prev = state.persons.find((op) => op.id === p.id);
-        if (!prev || JSON.stringify(prev) !== JSON.stringify(p)) {
-          notifySyncChange('persons', p.id, () => savePersonDoc(p));
+        for (const [id, family] of Object.entries(next.families)) if (!sameMergeValue(before.families[id], family)) {
+          useCloudSyncStore.getState().markDirty('families', id);
         }
+        useCloudSyncStore.getState().markProjectUploadPending();
+        invalidateAllTreeCaches();
+        set({ persons: next.persons, families: next.families, trashPersons: next.trashPersons,
+          selectedPersonId: next.selectedPersonId, lastPersonMergeSnapshotId: snapshot.id });
+        try { await flushPendingLocalWrites(); return { snapshotId: snapshot.id, persisted: true }; }
+        catch { return { snapshotId: snapshot.id, persisted: false }; }
       });
-
-      // Save updated families
-      Object.values(payload.updatedFamilies).forEach((f) => {
-        const prev = state.families[f.id];
-        if (!prev || JSON.stringify(prev) !== JSON.stringify(f)) {
-          notifySyncChange('families', f.id, () => saveFamilyDoc(f));
+    } finally { set({ mergeInProgress: false }); }
+  },
+  undoLastPersonMerge: async () => {
+    if (get().mergeInProgress) throw new Error('Дочекайтеся завершення поточної операції.');
+    set({ mergeInProgress: true });
+    try {
+      return await queueCloudSync(async () => {
+        const current = get(), id = current.lastPersonMergeSnapshotId;
+        if (!id) throw new Error('Немає злиття для скасування.');
+        const snapshot = await getSnapshot(id), recovery = snapshot?.personMerge;
+        if (!snapshot || recovery?.version !== 1) throw new Error('Контрольна точка недоступна.');
+        if (mergeRecordsFingerprint(get()) !== recovery.afterFingerprint
+          || Object.entries(recovery.mergedInto).some(([personId, target]) => getMergedPersonMap()[personId] !== target)) {
+          throw new Error('Після злиття записи змінилися. Автоматичне скасування не перезапише ці правки; контрольна точка збережена.');
         }
+        const before = snapshot.data, restored = before.persons.map(normalizePerson);
+        const trashPersons = before.trashPersons || [];
+        const selectedPersonId = get().selectedPersonId === recovery.afterSelectedId ? recovery.previousSelectedId : get().selectedPersonId;
+        batchLocalWrites(() => {
+          recordPersonDeletionChanges(recovery.deletedPersonIds, false);
+          recordMergedPersonChanges(Object.fromEntries(recovery.deletedPersonIds.map(personId => [personId, null])));
+          persistLocalData(`${STORAGE_KEY}_persons`, restored);
+          persistLocalData(`${STORAGE_KEY}_families`, before.families);
+          persistLocalData(`${STORAGE_KEY}_trashPersons`, trashPersons);
+          persistLocalData(`${STORAGE_KEY}_selectedPersonId`, selectedPersonId);
+          persistLocalData(`${STORAGE_KEY}_lastPersonMergeSnapshotId`, recovery.previousSnapshotId);
+        });
+        const previousPersons = new Map(current.persons.map(person => [person.id, person]));
+        for (const person of restored) if (!sameMergeValue(previousPersons.get(person.id), person)) {
+          useCloudSyncStore.getState().markDirty('persons', person.id);
+        }
+        for (const [familyId, family] of Object.entries(before.families)) if (!sameMergeValue(current.families[familyId], family)) {
+          useCloudSyncStore.getState().markDirty('families', familyId);
+        }
+        useCloudSyncStore.getState().markProjectUploadPending();
+        invalidateAllTreeCaches();
+        set({ persons: restored, families: before.families, trashPersons, selectedPersonId,
+          lastPersonMergeSnapshotId: recovery.previousSnapshotId });
+        try { await flushPendingLocalWrites(); return { persisted: true }; }
+        catch { return { persisted: false }; }
       });
-
-      invalidateAllTreeCaches();
-      return {
-        persons: deduplicated,
-        trashPersons: nextTrash,
-        families: payload.updatedFamilies,
-        selectedPersonId: payload.masterPerson?.id || state.selectedPersonId
-      };
-    }),
+    } finally { set({ mergeInProgress: false }); }
+  },
 
   // Families
   setFamilies: (updater) =>
@@ -1210,6 +1216,18 @@ export const useGenealogyStore = create<GenealogyDataState>((set, get) => ({
   hydrateFromIndexedDB: async () => {
     try {
       await hydratePersonDeletionState();
+      await hydrateIgnoredDuplicateState();
+      await hydrateMergedPersonState();
+      if (Object.keys(getPendingMergedPersonChanges()).length > 0) {
+        useCloudSyncStore.getState().markProjectUploadPending();
+        useCloudSyncStore.getState().setStatus('pending');
+      }
+      const lastMergeSnapshotId = await idbGet<string>(`${STORAGE_KEY}_lastPersonMergeSnapshotId`);
+      if (lastMergeSnapshotId) set({ lastPersonMergeSnapshotId: lastMergeSnapshotId });
+      if (Object.keys(getPendingIgnoredDuplicateChanges()).length > 0) {
+        useCloudSyncStore.getState().markProjectUploadPending();
+        useCloudSyncStore.getState().setStatus('pending');
+      }
       if (Object.keys(getPendingDeletionChanges()).length > 0) {
         useCloudSyncStore.getState().markProjectUploadPending();
         useCloudSyncStore.getState().setStatus('pending');

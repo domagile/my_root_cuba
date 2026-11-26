@@ -1,3 +1,4 @@
+import { useGenealogyStore } from '../stores/useGenealogyStore';
 import React, { useState, useEffect } from 'react';
 import { 
   Palette, 
@@ -426,6 +427,12 @@ export const SettingsView: React.FC = () => {
     if (!snap.data) return;
     setSnapshotError(false);
     try {
+      if (snap.personMerge) {
+        if (useGenealogyStore.getState().lastPersonMergeSnapshotId !== snap.id) throw new Error('Ця точка належить попередньому злиттю. Спочатку скасуйте останнє злиття.');
+        const result = await useGenealogyStore.getState().undoLastPersonMerge();
+        setSnapshotMsg(result.persisted ? 'Злиття скасовано разом зі службовими позначками та родинними зв’язками.' : 'Скасування виконано в пам’яті. Збереження ще не підтверджене; не закривайте вкладку.');
+        return;
+      }
       if (snap.data.persons) {
         if (!importJsonData(JSON.stringify(snap.data))) throw new Error('Не вдалося прочитати контрольну точку.');
         await flushPendingLocalWrites();

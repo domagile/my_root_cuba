@@ -4,6 +4,7 @@
  */
 
 import { isDemoSnapshot } from './demoPurge';
+import type { PersonMergeRecovery } from '../services/personMergeRecovery';
 
 // IndexedDB database configuration
 const DB_NAME = 'GenealogyWorkstationPersistence';
@@ -18,6 +19,7 @@ export interface DataSnapshot {
   familiesCount: number;
   adminsCount: number;
   note: string;
+  personMerge?: PersonMergeRecovery;
   data: {
     persons: any[];
     families: Record<string, any>;
@@ -130,7 +132,8 @@ export async function getFromIDB<T = any>(key: string): Promise<T | null> {
  */
 export async function saveSnapshot(
   snapshotData: DataSnapshot['data'],
-  note: string = 'Автоматичне збереження'
+  note: string = 'Автоматичне збереження',
+  personMerge?: PersonMergeRecovery
 ): Promise<DataSnapshot | null> {
   try {
     const db = await getDB();
@@ -141,6 +144,7 @@ export async function saveSnapshot(
       familiesCount: Object.keys(snapshotData.families || {}).length,
       adminsCount: (snapshotData.whitelist || []).filter((w: any) => w.role === 'admin').length,
       note,
+      ...(personMerge ? { personMerge } : {}),
       data: snapshotData
     };
 
@@ -157,6 +161,18 @@ export async function saveSnapshot(
   } catch {
     return null;
   }
+}
+
+/** Read only the requested recovery point; do not load every full-tree backup. */
+export async function getSnapshot(id: string): Promise<DataSnapshot | null> {
+  try {
+    const db = await getDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(SNAPSHOTS_STORE, 'readonly'), request = tx.objectStore(SNAPSHOTS_STORE).get(id);
+      request.onsuccess = () => resolve(request.result && !isDemoSnapshot(request.result) ? request.result : null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch { return null; }
 }
 
 function cleanOldSnapshots(store: IDBObjectStore) {
