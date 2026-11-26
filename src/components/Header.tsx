@@ -9,6 +9,7 @@ import { getTabUrl } from '../stores/useUIStore';
 import { ThemePalette } from '../types';
 import { THEME_CONFIGS, getThemeConfig } from '../utils/theme';
 import { HeaderSearchBar } from './HeaderSearchBar';
+import { UndoPersonMergeButton } from './UndoPersonMergeButton';
 import { testConnection } from '../lib/firebase';
 import { flushPendingLocalWrites } from '../utils/indexedDbStorage';
 import { flushPendingCloudDeltas } from '../stores/useGenealogyStore';
@@ -533,6 +534,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAddPerson, onInspectPerson
           </button>
 
           {/* GEDCOM / Database Import & Export Button (Desktop/Tablet) */}
+          {isWhitelisted && <UndoPersonMergeButton />}
           <button
             onClick={() => {
               setGedcomInitialTab('import');

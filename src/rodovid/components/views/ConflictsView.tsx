@@ -72,6 +72,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
   onSelectPerson
 }) => {
   const mergePersons = useGenealogyStore(s => s.mergePersons);
+  const mergeInProgress = useGenealogyStore(s => s.mergeInProgress);
 
   // Navigation tabs within this view
   const [activeSubTab, setActiveSubTab] = useState<'health' | 'duplicates'>(initialSubTab);
@@ -181,62 +182,45 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
 
   const ignoredSet = useMemo(() => new Set(ignoredPairIds), [ignoredPairIds]);
 
+  const activeDuplicatePairs = useMemo(() => {
+    const ids = new Set(persons.map(person => person.id));
+    return duplicatePairs.filter(pair => ids.has(pair.personA.id) && ids.has(pair.personB.id));
+  }, [persons, duplicatePairs]);
+
   // Duplicate pairs statistics
   const duplicateStats = useMemo(() => {
-    const total = duplicatePairs.length;
-    const exact = duplicatePairs.filter(p => p.confidence >= 85).length;
-    const probable = duplicatePairs.filter(p => p.confidence >= 70 && p.confidence < 85).length;
-    const withParents = duplicatePairs.filter(p => p.criteria?.parentsMatch && p.criteria.parentsMatch !== 'none').length;
-    const ignored = duplicatePairs.filter(p => isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet)).length;
+    const total = activeDuplicatePairs.length;
+    const exact = activeDuplicatePairs.filter(p => p.confidence >= 85).length;
+    const probable = activeDuplicatePairs.filter(p => p.confidence >= 70 && p.confidence < 85).length;
+    const withParents = activeDuplicatePairs.filter(p => p.criteria?.parentsMatch && p.criteria.parentsMatch !== 'none').length;
+    const ignored = activeDuplicatePairs.filter(p => isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet)).length;
     return { total, exact, probable, withParents, ignored };
-  }, [duplicatePairs, ignoredSet]);
+  }, [activeDuplicatePairs, ignoredSet]);
 
   // Safe pairs for batch merge (confidence >= 85% and not ignored)
   const safeBatchPairs = useMemo(() => {
-    return duplicatePairs.filter(p => p.confidence >= 85 && !isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet));
-  }, [duplicatePairs, ignoredSet]);
+    return activeDuplicatePairs.filter(p => p.confidence >= 85 && !isDuplicatePairIgnored(p.personA.id, p.personB.id, ignoredSet));
+  }, [activeDuplicatePairs, ignoredSet]);
 
   // Quick 1-click merge
-  const handleQuickMerge = (pair: DuplicatePair) => {
-    ignoreDuplicatePair(pair.personA.id, pair.personB.id);
-    const res = quickMergePersons(pair.personA, pair.personB, persons, families);
-    mergePersons({
-      updatedPersons: res.updatedPersons,
-      updatedFamilies: res.updatedFamilies,
-      masterPerson: res.masterPerson,
-      deletedPersonIds: [res.deletedPersonId]
-    });
-    onUpdatePersons(res.updatedPersons);
-    if (onUpdateFamilies) {
-      onUpdateFamilies(res.updatedFamilies);
-    }
-    setIgnoredPairIds(Array.from(getIgnoredDuplicatePairKeys()));
-    const nameStr = res.masterPerson.name?.given
-      ? `${res.masterPerson.name.surname || ''} ${res.masterPerson.name.given}`.trim()
-      : res.masterPerson.id;
-    showNotification(`Швидке злиття виконано успішно! Особи об'єднано у профіль «${nameStr}».`);
+  const handleQuickMerge = async (pair: DuplicatePair) => {
+    if (mergeInProgress) return;
+    try {
+      const res = quickMergePersons(pair.personA, pair.personB, persons, families);
+      const committed = await mergePersons({ ...res, deletedPersonIds: [res.deletedPersonId], sourcePersons: persons, sourceFamilies: families });
+      showNotification(committed.persisted ? 'Особи об’єднано. Скасування доступне у верхній панелі.' : 'Злиття виконано в пам’яті, але локальне збереження ще не підтверджене. Не закривайте вкладку.');
+    } catch (error) { showNotification(error instanceof Error ? error.message : 'Не вдалося виконати злиття.'); }
   };
 
-  // Batch merge safe duplicates
-  const handleExecuteBatchMerge = () => {
-    if (safeBatchPairs.length === 0) {
-      showNotification('Немає безпечних дублікатів (>85%) для пакетного злиття.');
-      return;
-    }
-    safeBatchPairs.forEach(p => ignoreDuplicatePair(p.personA.id, p.personB.id));
-    const res = batchMergeSafeDuplicates(safeBatchPairs, persons, families, 85);
-    mergePersons({
-      updatedPersons: res.updatedPersons,
-      updatedFamilies: res.updatedFamilies,
-      deletedPersonIds: res.deletedPersonIds
-    });
-    onUpdatePersons(res.updatedPersons);
-    if (onUpdateFamilies) {
-      onUpdateFamilies(res.updatedFamilies);
-    }
-    setIgnoredPairIds(Array.from(getIgnoredDuplicatePairKeys()));
-    setIsBatchConfirmOpen(false);
-    showNotification(`Автоматично об'єднано ${res.mergedCount} дублікатів у базі даних!`);
+  const handleExecuteBatchMerge = async () => {
+    if (mergeInProgress) return;
+    if (!safeBatchPairs.length) { showNotification('Немає дублікатів для пакетного злиття.'); return; }
+    try {
+      const res = batchMergeSafeDuplicates(safeBatchPairs, persons, families, 85);
+      const committed = await mergePersons({ ...res, sourcePersons: persons, sourceFamilies: families });
+      setIsBatchConfirmOpen(false);
+      showNotification(committed.persisted ? `Об’єднано ${res.mergedCount} дублікатів. Скасування доступне у верхній панелі.` : 'Злиття виконано в пам’яті, але локальне збереження ще не підтверджене. Не закривайте вкладку.');
+    } catch (error) { showNotification(error instanceof Error ? error.message : 'Не вдалося виконати злиття.'); }
   };
 
   // Trigger manual rescan in background Web Worker
@@ -287,7 +271,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
 
   // Filtered duplicates
   const filteredDuplicates = useMemo(() => {
-    return duplicatePairs.filter(pair => {
+    return activeDuplicatePairs.filter(pair => {
       const isIgnored = isDuplicatePairIgnored(pair.personA.id, pair.personB.id, ignoredSet);
       if (showIgnoredPairs) {
         if (!isIgnored) return false;
@@ -313,7 +297,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
       }
       return true;
     });
-  }, [duplicatePairs, minConfidenceFilter, duplicateSearchQuery, ignoredSet, showIgnoredPairs, duplicateCriteriaFilter]);
+  }, [activeDuplicatePairs, minConfidenceFilter, duplicateSearchQuery, ignoredSet, showIgnoredPairs, duplicateCriteriaFilter]);
 
   // Auto fix single conflict
   const handleAutoFix = (conflict: TreeConflict) => {
@@ -344,31 +328,14 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
   };
 
   // Handle merge complete
-  const handleMergeComplete = (
-    updatedPersons: Person[],
-    updatedFamilies: Record<string, Family>,
-    masterName: string,
+  const handleMergeComplete = async (
+    updatedPersons: Person[], updatedFamilies: Record<string, Family>, masterName: string,
     extra?: { masterPerson?: Person; deletedPersonId?: string }
   ) => {
-    if (activeMergePair) {
-      ignoreDuplicatePair(activeMergePair.personA.id, activeMergePair.personB.id);
-    }
-    if (extra?.deletedPersonId && extra?.masterPerson?.id) {
-      ignoreDuplicatePair(extra.deletedPersonId, extra.masterPerson.id);
-    }
-    mergePersons({
-      updatedPersons,
-      updatedFamilies,
-      masterPerson: extra?.masterPerson,
-      deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : []
-    });
-    onUpdatePersons(updatedPersons);
-    if (onUpdateFamilies) {
-      onUpdateFamilies(updatedFamilies);
-    }
-    setIgnoredPairIds(Array.from(getIgnoredDuplicatePairKeys()));
+    const committed = await mergePersons({ updatedPersons, updatedFamilies, masterPerson: extra?.masterPerson,
+      deletedPersonIds: extra?.deletedPersonId ? [extra.deletedPersonId] : [], sourcePersons: persons, sourceFamilies: families });
     setActiveMergePair(null);
-    showNotification(`Персони успішно злито! Запис «${masterName}» оновлено.`);
+    showNotification(committed.persisted ? `Персони злито у «${masterName}». Скасування доступне у верхній панелі.` : 'Злиття виконано в пам’яті, але локальне збереження ще не підтверджене. Не закривайте вкладку.');
   };
 
   // Health Score Color & Rating
@@ -440,7 +407,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
               <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
                 activeSubTab === 'duplicates' ? 'bg-black/20 text-neutral-900' : 'bg-neutral-800 text-neutral-300'
               }`}>
-                {duplicatePairs.length}
+                {activeDuplicatePairs.length}
               </span>
             </button>
           </div>
@@ -1046,6 +1013,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
                           {!isPairIgnored && (
                             <button
                               type="button"
+                              disabled={mergeInProgress}
                               onClick={() => handleQuickMerge(pair)}
                               className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
                               title="Автоматично об'єднати записи за одне натискання (більш повний профіль стане головним)"
@@ -1575,6 +1543,7 @@ export const ConflictsView: React.FC<ConflictsViewProps> = ({
               </button>
               <button
                 type="button"
+                disabled={mergeInProgress}
                 onClick={handleExecuteBatchMerge}
                 className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition-colors flex items-center gap-2 cursor-pointer"
               >

@@ -1,3 +1,8 @@
+import { writePersonDeletionMarkers } from '../src/services/personDeletionCloudService';
+import { writeIgnoredDuplicateChanges } from '../src/services/ignoredDuplicateCloudService';
+import { readProjectFromFirestore } from '../src/services/projectCloudReadService';
+import { removeFamilyMemberships, restoreFamilyMemberships } from '../src/services/familyRestoreService';
+import { serializeFamilyForCloud } from '../src/utils/familyCloudData';
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -263,4 +268,108 @@ test('a failed public write leaves the previous version inaccessible', async () 
   assert.equal((await getDoc(doc(db, 'publicTrees/share'))).data()!.enabled, false);
   assert.equal(await getPublicTree(guest, 'share'), null);
   await assertFails(getDoc(doc(guest, `${publicBase}/persons/deceased`)));
+});
+
+test('deletion marker transaction restores selected people while preserving unrelated markers', async () => {
+  const db = identity('editor') as unknown as Firestore;
+  const ref = doc(db, 'projects', project, 'systemSettings', 'deletedTombstones');
+  await setDoc(ref, { ids: ['restored','keep'] });
+  assert.deepEqual(await writePersonDeletionMarkers(db, project, { restored: false, added: true }), ['keep','added']);
+  assert.deepEqual((await getDoc(ref)).data()!.ids, ['keep','added']);
+});
+
+test('concurrent marker transactions do not overwrite another client’s independent deletion', async () => {
+  const first = identity('editor') as unknown as Firestore;
+  const second = identity('researcher') as unknown as Firestore;
+  const ref = doc(first, 'projects', project, 'systemSettings', 'deletedTombstones');
+  await setDoc(ref, { ids: ['restored','keep'] });
+  await Promise.all([
+    writePersonDeletionMarkers(first, project, { restored: false }),
+    writePersonDeletionMarkers(second, project, { other: true })
+  ]);
+  assert.deepEqual((await getDoc(ref)).data()!.ids.sort(), ['keep','other']);
+});
+
+test('viewer and anonymous clients cannot change deletion markers through the transaction helper', async () => {
+  const admin = identity('admin') as unknown as Firestore;
+  const ref = doc(admin, 'projects', project, 'systemSettings', 'deletedTombstones');
+  await setDoc(ref, { ids: ['keep'] });
+  await assertFails(writePersonDeletionMarkers(identity('viewer') as unknown as Firestore, project, { keep: false }));
+  await assertFails(writePersonDeletionMarkers(env.unauthenticatedContext().firestore() as unknown as Firestore, project, { keep: false }));
+  assert.deepEqual((await getDoc(ref)).data()!.ids, ['keep']);
+});
+test('duplicate choices patch existing keys and return a monotonic revision for stale-read protection', async () => {
+  const db = identity('editor') as unknown as Firestore;
+  const ref = doc(db, 'projects', project, 'systemSettings', 'ignoredDuplicates');
+  await setDoc(ref, { keys: ['old___pair', 'keep___pair'] });
+  const result = await writeIgnoredDuplicateChanges(db, project, [
+    { key: 'old___pair', ignored: false, token: 'one' }, { key: 'new___pair', ignored: true, token: 'two' }
+  ]);
+  assert.equal(result.revision, 1); assert.deepEqual(result.keys.sort(), ['keep___pair','new___pair']);
+  const next = await writeIgnoredDuplicateChanges(db, project, [{ key: 'other___pair', ignored: true, token: 'three' }]);
+  assert.equal(next.revision, 2); assert.ok(next.keys.includes('keep___pair'));
+});
+test('concurrent clients retain independent not-a-duplicate choices', async () => {
+  const first = identity('editor') as unknown as Firestore, second = identity('researcher') as unknown as Firestore;
+  const ref = doc(first, 'projects', project, 'systemSettings', 'ignoredDuplicates');
+  await setDoc(ref, { keys: [], revision: 0 });
+  await Promise.all([
+    writeIgnoredDuplicateChanges(first, project, [{ key: 'a___b', ignored: true, token: 'one' }]),
+    writeIgnoredDuplicateChanges(second, project, [{ key: 'c___d', ignored: true, token: 'two' }])
+  ]);
+  const result = (await getDoc(ref)).data()!;
+  assert.deepEqual(result.keys.sort(), ['a___b','c___d']); assert.equal(result.revision, 2);
+});
+test('viewer and anonymous clients cannot rewrite duplicate choices', async () => {
+  const db = identity('admin') as unknown as Firestore;
+  const ref = doc(db, 'projects', project, 'systemSettings', 'ignoredDuplicates');
+  await setDoc(ref, { keys: ['keep___pair'], revision: 1 });
+  for (const actor of [identity('viewer'), env.unauthenticatedContext().firestore()]) {
+    await assertFails(writeIgnoredDuplicateChanges(actor as unknown as Firestore, project, [{ key: 'keep___pair', ignored: false, token: 'one' }]));
+  }
+  assert.deepEqual((await getDoc(ref)).data()!.keys, ['keep___pair']);
+});
+
+test('viewer can download the tree with the read-only adapter without deleting or migrating cloud records', async () => {
+  const viewer = identity('viewer') as unknown as Firestore;
+  const result = await readProjectFromFirestore(viewer, project);
+  assert.deepEqual(result.data.persons!.map(person => person.id).sort(), ['deceased','living']);
+  const admin = identity('admin') as unknown as Firestore;
+  assert.equal((await getDoc(doc(admin, 'projects', project, 'persons', 'living'))).data()!.firstName, 'Private');
+  assert.equal((await getDocs(collection(admin, 'projects', project, 'systemSettings'))).size, 0);
+});
+
+test('family merge writes remove a parent and restore memberships without leaving a stale cloud parent', async () => {
+  const db = identity('editor') as unknown as Firestore;
+  const ref = doc(db, 'projects', project, 'families', 'restore');
+  const initial = { restore: { id: 'restore', husbandId: 'dad', wifeId: 'mom', children: [{ personId: 'child' }], childrenIds: ['child'], marriageDate: '1900' } };
+  await setDoc(ref, initial.restore);
+  const removed = removeFamilyMemberships(initial, new Set(['dad','child']));
+  await setDoc(ref, serializeFamilyForCloud(removed.families.restore), { merge: true });
+  const afterDelete = (await getDoc(ref)).data()!;
+  assert.equal(afterDelete.husbandId, null);
+  assert.deepEqual(afterDelete.childrenIds, []);
+  const restored = restoreFamilyMemberships(removed.families, removed.history, ['child','dad']);
+  await setDoc(ref, serializeFamilyForCloud(restored.families.restore), { merge: true });
+  assert.deepEqual((await getDoc(ref)).data(), initial.restore);
+});
+
+test('merge mapping transactions retain concurrent unrelated merges and remove an undone ID', async () => {
+  const { writeMergedPersonChanges } = await import('../src/services/mergedPersonCloudService');
+  const db = identity('editor') as unknown as Firestore;
+  await Promise.all([writeMergedPersonChanges(db, project, { duplicate: 'master' }), writeMergedPersonChanges(db, project, { other: 'target' })]);
+  const result = await writeMergedPersonChanges(db, project, { duplicate: null });
+  assert.deepEqual(result, { mapping: { other: 'target' }, revision: 3 });
+  const saved = (await getDoc(doc(db, `projects/${project}/systemSettings/mergedPersons`))).data();
+  assert.deepEqual(saved?.mapping, { other: 'target' });
+  const read = await readProjectFromFirestore(db, project);
+  assert.equal(read.settings.mergedPersonsRevision, 3); assert.deepEqual(read.settings.mergedPersons, { other: 'target' });
+});
+test('readers cannot change merge mappings and an invalid revision is rejected without overwriting data', async () => {
+  const { writeMergedPersonChanges } = await import('../src/services/mergedPersonCloudService');
+  await assertFails(writeMergedPersonChanges(identity('viewer') as unknown as Firestore, project, { duplicate: 'master' }));
+  await env.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), `projects/${project}/systemSettings/mergedPersons`), { mapping: { other: 'target' }, revision: -1 }));
+  await assert.rejects(writeMergedPersonChanges(identity('editor') as unknown as Firestore, project, { duplicate: null }), /Invalid merged/);
+  await assert.rejects(readProjectFromFirestore(identity('editor') as unknown as Firestore, project), /Invalid cloud merge revision/);
+  assert.deepEqual((await getDoc(doc(identity('editor'), `projects/${project}/systemSettings/mergedPersons`))).data()?.mapping, { other: 'target' });
 });

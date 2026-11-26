@@ -5,7 +5,7 @@
  * Interactive Smart Merge Modal
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   X,
   GitMerge,
@@ -40,7 +40,7 @@ interface SmartMergeModalProps {
     updatedFamilies: Record<string, Family>,
     masterName: string,
     extra?: { masterPerson?: Person; deletedPersonId?: string }
-  ) => void;
+  ) => void | Promise<void>;
   onMarkNotDuplicate?: (pair: DuplicatePair) => void;
 }
 
@@ -83,6 +83,8 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitting = useRef(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -101,8 +103,11 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
 
   const criteria = pair.criteria;
 
-  const handleExecuteMerge = () => {
+  const handleExecuteMerge = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
     setIsSubmitting(true);
+    setMergeError(null);
     try {
       const result = executeSmartPersonMerge(
         personA,
@@ -114,23 +119,23 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
       );
 
       const chosenMasterName = masterTarget === 'A' ? nameA : nameB;
-      onMergeComplete(result.updatedPersons, result.updatedFamilies, chosenMasterName, {
+      await onMergeComplete(result.updatedPersons, result.updatedFamilies, chosenMasterName, {
         masterPerson: result.masterPerson,
         deletedPersonId: result.deletedPersonId
       });
       onClose();
     } catch (err) {
-      console.error('Merge error:', err);
+      setMergeError(err instanceof Error ? err.message : 'Не вдалося виконати злиття. Спробуйте ще раз.');
     } finally {
+      submitting.current = false;
       setIsSubmitting(false);
     }
   };
 
   const handleNotDuplicate = () => {
-    ignoreDuplicatePair(personA.id, personB.id);
-    if (onMarkNotDuplicate) {
-      onMarkNotDuplicate(pair);
-    }
+    if (submitting.current) return;
+    if (onMarkNotDuplicate) onMarkNotDuplicate(pair);
+    else ignoreDuplicatePair(personA.id, personB.id);
     onClose();
   };
 
@@ -223,7 +228,8 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
           </div>
 
           <button
-            onClick={onClose}
+            onClick={() => { if (!submitting.current) onClose(); }}
+              disabled={isSubmitting}
             className="p-2 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -560,17 +566,20 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
           <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-300">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-semibold">Увага:</span> Картка дубліката (ID: {masterTarget === 'A' ? personB.id : personA.id}) буде остаточно видалена після перенесення всіх родинних звʼязків та архівних матеріалів до основної картки (ID: {masterTarget === 'A' ? personA.id : personB.id}).
+              <span className="font-semibold">Увага:</span> Перед злиттям збережеться контрольна точка. Картка дубліката (ID: {masterTarget === 'A' ? personB.id : personA.id}) буде переміщена до кошика після перенесення всіх родинних звʼязків та архівних матеріалів до основної картки (ID: {masterTarget === 'A' ? personA.id : personB.id}).
             </div>
           </div>
         </div>
+
+        {mergeError && <p role="alert" className="px-5 py-3 text-sm text-rose-300">{mergeError}</p>}
 
         {/* Footer */}
         <div className="p-4 md:p-5 border-t border-neutral-800 bg-neutral-900/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => { if (!submitting.current) onClose(); }}
+              disabled={isSubmitting}
               className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
             >
               Скасувати
@@ -578,6 +587,7 @@ export const SmartMergeModal: React.FC<SmartMergeModalProps> = ({
             <button
               type="button"
               onClick={handleNotDuplicate}
+              disabled={isSubmitting}
               className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-800 hover:bg-neutral-700 text-emerald-400 hover:text-emerald-300 border border-neutral-700 hover:border-emerald-500/50 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
               title="Це різні люди: прибрати цю пару зі списку дублікатів"
             >

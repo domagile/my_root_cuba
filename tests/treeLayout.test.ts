@@ -125,3 +125,27 @@ test('clearing fan and tree caches causes fresh calculations', () => {
   clearTreeLayoutCache();
   assert.notEqual(calculateClassicFamilyTreeLayout(db, 'root', 2), tree);
 });
+
+for (const { name, render } of renderers.slice(0, 2)) {
+  test(`${name}: remarriages and a shared ancestor keep unique, coordinate-independent node IDs`, () => {
+    const db = data();
+    Object.assign(db.persons, {
+      mom: { id: 'mom', gender: 'F', fatherId: 'common' },
+      common: { id: 'common', gender: 'M' },
+      spouse1: { id: 'spouse1', gender: 'M' }, spouse2: { id: 'spouse2', gender: 'M' },
+      child1: { id: 'child1', gender: 'F', parentFamilyId: 'union1' },
+      child2: { id: 'child2', gender: 'M', parentFamilyId: 'union2' }
+    });
+    db.persons.dad1 = { ...db.persons.dad1, fatherId: 'common' };
+    db.persons.root = { ...db.persons.root, spouseFamilyIds: ['union1','union2'] };
+    db.families.parents = { ...db.families.parents, wifeId: 'mom' };
+    db.families.union1 = { id: 'union1', wifeId: 'root', husbandId: 'spouse1', children: [], childrenIds: ['child1'] };
+    db.families.union2 = { id: 'union2', wifeId: 'root', husbandId: 'spouse2', children: [], childrenIds: ['child2'] };
+    const nodes = render(db) as ReturnType<typeof calculateClassicFamilyTreeLayout>['nodes'];
+    assert.equal(new Set(nodes.map(node => node.id)).size, nodes.length);
+    const firstIds = nodes.map(node => node.id).sort();
+    db.persons = { ...db.persons, root: { ...db.persons.root, firstName: 'Renamed' } };
+    const after = render(db) as ReturnType<typeof calculateClassicFamilyTreeLayout>['nodes'];
+    assert.deepEqual(after.map(node => node.id).sort(), firstIds);
+  });
+}

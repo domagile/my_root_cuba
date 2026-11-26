@@ -1,0 +1,236 @@
+{
+  "node": "v24.15.0",
+  "platform": "darwin",
+  "arch": "x64",
+  "network": "mocked writes only; fake IndexedDB",
+  "results": [
+    {
+      "operation": "sync-single",
+      "persons": 1000,
+      "medianMs": 0.304,
+      "samplesMs": [
+        0.304,
+        0.284,
+        0.486,
+        0.356,
+        0.283
+      ]
+    },
+    {
+      "operation": "sync-bulk",
+      "persons": 1000,
+      "medianMs": 2.688,
+      "samplesMs": [
+        2.695,
+        2.645,
+        2.688,
+        2.735,
+        2.686
+      ]
+    },
+    {
+      "operation": "sync-restore",
+      "persons": 1000,
+      "medianMs": 4.552,
+      "samplesMs": [
+        4.949,
+        4.864,
+        4.543,
+        4.552,
+        4.529
+      ]
+    },
+    {
+      "operation": "search-cold",
+      "persons": 1000,
+      "medianMs": 165.065,
+      "samplesMs": [
+        172.551,
+        165.065,
+        155.238
+      ]
+    },
+    {
+      "operation": "search-warm",
+      "persons": 1000,
+      "medianMs": 0.008,
+      "samplesMs": [
+        0.012,
+        0.007,
+        0.008
+      ]
+    },
+    {
+      "operation": "layout-cold",
+      "persons": 1000,
+      "medianMs": 7.531,
+      "samplesMs": [
+        33.65,
+        7.531,
+        7.407
+      ]
+    },
+    {
+      "operation": "layout-warm",
+      "persons": 1000,
+      "medianMs": 0.069,
+      "samplesMs": [
+        0.072,
+        0.068,
+        0.069
+      ]
+    },
+    {
+      "operation": "sync-single",
+      "persons": 5000,
+      "medianMs": 0.455,
+      "samplesMs": [
+        0.443,
+        0.451,
+        0.461,
+        0.563,
+        0.455
+      ]
+    },
+    {
+      "operation": "sync-bulk",
+      "persons": 5000,
+      "medianMs": 13.138,
+      "samplesMs": [
+        39.678,
+        13.138,
+        13.03,
+        13.759,
+        13.09
+      ]
+    },
+    {
+      "operation": "sync-restore",
+      "persons": 5000,
+      "medianMs": 39.757,
+      "samplesMs": [
+        38.919,
+        40.43,
+        38.984,
+        39.757,
+        39.952
+      ]
+    },
+    {
+      "operation": "search-cold",
+      "persons": 5000,
+      "medianMs": 805.009,
+      "samplesMs": [
+        805.009,
+        849.81,
+        762.267
+      ]
+    },
+    {
+      "operation": "search-warm",
+      "persons": 5000,
+      "medianMs": 0.009,
+      "samplesMs": [
+        0.056,
+        0.009,
+        0.008
+      ]
+    },
+    {
+      "operation": "layout-cold",
+      "persons": 5000,
+      "medianMs": 28.52,
+      "samplesMs": [
+        32.202,
+        28.444,
+        28.52
+      ]
+    },
+    {
+      "operation": "layout-warm",
+      "persons": 5000,
+      "medianMs": 0.917,
+      "samplesMs": [
+        0.917,
+        0.921,
+        0.917
+      ]
+    },
+    {
+      "operation": "sync-single",
+      "persons": 10000,
+      "medianMs": 0.792,
+      "samplesMs": [
+        0.791,
+        0.781,
+        0.792,
+        0.849,
+        0.897
+      ]
+    },
+    {
+      "operation": "sync-bulk",
+      "persons": 10000,
+      "medianMs": 26.751,
+      "samplesMs": [
+        26.44,
+        28.297,
+        26.751,
+        27.884,
+        26.46
+      ]
+    },
+    {
+      "operation": "sync-restore",
+      "persons": 10000,
+      "medianMs": 94.989,
+      "samplesMs": [
+        88.93,
+        91.688,
+        95.294,
+        96.956,
+        94.989
+      ]
+    },
+    {
+      "operation": "search-cold",
+      "persons": 10000,
+      "medianMs": 1500.508,
+      "samplesMs": [
+        1607.025,
+        1500.508,
+        1473.338
+      ]
+    },
+    {
+      "operation": "search-warm",
+      "persons": 10000,
+      "medianMs": 0.008,
+      "samplesMs": [
+        0.008,
+        0.009,
+        0.008
+      ]
+    },
+    {
+      "operation": "layout-cold",
+      "persons": 10000,
+      "medianMs": 45.938,
+      "samplesMs": [
+        45.938,
+        42.371,
+        48.725
+      ]
+    },
+    {
+      "operation": "layout-warm",
+      "persons": 10000,
+      "medianMs": 1.982,
+      "samplesMs": [
+        1.974,
+        1.992,
+        1.982
+      ]
+    }
+  ]
+}

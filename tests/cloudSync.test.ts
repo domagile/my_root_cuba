@@ -60,6 +60,33 @@ test('resolved false from an atomic write is an error, with the previous timesta
   assert.equal(state.lastSyncTime, previousSync);
 });
 
+test('a large full-person batch preserves selected records and the entire queue on partial failure', async () => {
+  const content = data();
+  content.persons = Array.from({ length: 2000 }, (_, index) => ({ id: `bulk-${index}`, gender: 'U' as const, firstName: `Person ${index}` }));
+  const original = content.persons[17];
+  content.persons.push({ ...original, firstName: 'Later duplicate must not replace the original' });
+  const selected = content.persons.slice(0, 2000).map(person => person.id).reverse();
+  useCloudSyncStore.setState({
+    dirtyTracker: { ...useCloudSyncStore.getState().dirtyTracker, persons: selected },
+    hasUnsavedChanges: true, unsavedChangesCount: selected.length
+  });
+  let fail = true;
+  const writes: any[] = [];
+  const client = api({ savePersonDoc: async person => {
+    writes.push(person);
+    return !fail || person.id !== original.id;
+  } });
+  assert.equal((await synchronizeProject(() => content, client)).success, false);
+  assert.deepEqual(writes.map(person => person.id), selected);
+  assert.equal(writes.find(person => person.id === original.id), original);
+  assert.deepEqual(useCloudSyncStore.getState().dirtyTracker.persons, selected);
+  fail = false;
+  writes.length = 0;
+  assert.equal((await synchronizeProject(() => content, client)).success, true);
+  assert.equal(writes.length, 2000);
+  assert.equal(useCloudSyncStore.getState().hasUnsavedChanges, false);
+});
+
 test('a rejected atomic write is an error and does not replace the last confirmed timestamp', async () => {
   await assert.rejects(trackAtomicSync(async () => { throw new Error('offline'); }), /offline/);
   assert.equal(useCloudSyncStore.getState().status, 'error');

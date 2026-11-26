@@ -34,13 +34,20 @@ test('built server starts in production without NODE_ENV and serves deep links o
       child.stdout.on('data', () => { if (logs.includes('Listening on')) { clearTimeout(timer); resolve(); } });
     });
     const base = `http://127.0.0.1:${port}`;
-    assert.equal((await fetch(base + '/api/health')).status, 200);
+    const health = await fetch(base + '/api/health');
+    assert.equal(health.status, 200);
+    await health.arrayBuffer();
     const html = await (await fetch(base + '/?personId=test')).text();
     assert.match(html, /\/assets\//);
     assert.doesNotMatch(html, /@vite\/client/);
     const asset = html.match(/src="([^\"]+\.js)"/)![1];
-    assert.equal((await fetch(base + asset)).status, 200);
-    assert.equal((await fetch(base + '/api/unknown')).status, 404);
+    const script = await fetch(base + asset);
+    assert.equal(script.status, 200);
+    // Finish consuming streamed responses before checking graceful shutdown.
+    await script.arrayBuffer();
+    const missing = await fetch(base + '/api/unknown');
+    assert.equal(missing.status, 404);
+    await missing.arrayBuffer();
   } finally {
     const exit = once(child, 'exit');
     child.kill('SIGTERM');

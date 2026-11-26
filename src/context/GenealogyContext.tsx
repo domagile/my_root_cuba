@@ -1,3 +1,7 @@
+import { getMergedPersonMap, acceptMergedPersonSnapshot, getPendingMergedPersonChanges } from '../utils/mergedPersonState';
+import type { RestorePersonsResult } from '../services/familyRestoreService';
+import { selectCloudPersons } from '../services/cloudPersonReadService';
+import { getPendingDeletionChanges } from '../utils/personDeletionState';
 import { prepareCloudRestore } from '../services/cloudRestoreService';
 import { createProjectArchive, parseProjectArchive } from '../utils/projectArchive';
 /**
@@ -25,28 +29,23 @@ import {
   saveProjectDataToCloud,
   fetchAllProjectDataFromCloud,
   savePersonDoc,
+  updatePersonDeletionMarkers,
+  updateIgnoredDuplicatePairs,
   savePersonDeltaDoc,
-  deletePersonDoc,
   batchDeleteEntities,
   subscribeToIgnoredDuplicatePairsCloud,
   subscribeToDeletedTombstonesCloud,
   subscribeToMergedPersonsCloud,
-  saveDeletedTombstonesToCloud,
-  saveMergedPersonsToCloud
+  updateMergedPersons
 } from '../lib/firebase';
 import { useUIStore } from '../stores/useUIStore';
 import {
   useGenealogyStore,
   normalizePerson,
   INITIAL_PERSONS,
-  getTombstoneIds,
-  addTombstoneIds,
-  TOMBSTONE_STORAGE_KEY
+  getTombstoneIds
 } from '../stores/useGenealogyStore';
-import {
-  RODOVID_IGNORED_DUPLICATE_PAIRS_KEY,
-  getIgnoredDuplicatePairKeys
-} from '../utils/duplicateDetector';
+import { applyCloudIgnoredDuplicateSnapshot } from '../utils/ignoredDuplicateState';
 import { useResearchStore, INITIAL_METRICS, INITIAL_DOCUMENTS, INITIAL_TASKS, INITIAL_FINDINGS, INITIAL_HYPOTHESES, INITIAL_REQUESTS, INITIAL_MATRIX } from '../stores/useResearchStore';
 import { useCloudSyncStore, CloudSyncStatus, CloudSyncMode, isQuotaExceededToday } from '../stores/useCloudSyncStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -55,7 +54,7 @@ import { getSavedUserTreeState, resolveInitialPersonId } from '../utils/userTree
 import { isUserWhitelisted } from '../rodovid/utils/privacy';
 import { isDemoPerson, isDemoFamily, isDemoSource, isDemoEvent, isDemoResearchItem, purgeDemoStorage } from '../utils/demoPurge';
 import { saveSnapshot } from '../utils/persistentBackup';
-import { autoMigrateLocalStorageToIDB } from '../utils/indexedDbStorage';
+import { autoMigrateLocalStorageToIDB, persistLocalData } from '../utils/indexedDbStorage';
 import { useNotesStore } from '../stores/useNotesStore';
 import { synchronizeProject, ProjectSyncData } from '../services/cloudSyncService';
 export { useUIStore };
@@ -64,7 +63,7 @@ export { useGenealogyStore, normalizePerson } from '../stores/useGenealogyStore'
 export { useResearchStore } from '../stores/useResearchStore';
 export { useCloudSyncStore } from '../stores/useCloudSyncStore';
 
-const cloudSyncApi = { savePersonDoc, savePersonDeltaDoc, batchDeleteEntities, saveProjectDataToCloud };
+const cloudSyncApi = { savePersonDoc, savePersonDeltaDoc, batchDeleteEntities, saveProjectDataToCloud, updatePersonDeletionMarkers, updateIgnoredDuplicatePairs, updateMergedPersons };
 
 function getCurrentCloudData(): ProjectSyncData {
   const genealogy = useGenealogyStore.getState();
@@ -119,8 +118,8 @@ export interface GenealogyContextType {
   updatePersons: (persons: Person[]) => void;
   deletePerson: (id: string) => void;
   deletePersons: (ids: string[]) => void;
-  restorePerson: (id: string) => void;
-  restorePersons: (ids: string[]) => void;
+  restorePerson: (id: string) => RestorePersonsResult;
+  restorePersons: (ids: string[]) => RestorePersonsResult;
   permanentlyDeletePerson: (id: string) => void;
   permanentlyDeletePersons: (ids: string[]) => void;
   emptyTrash: () => void;
@@ -130,12 +129,7 @@ export interface GenealogyContextType {
     deletedPersonIds: string[];
     rootPersonName: string;
   };
-  mergePersons: (payload: {
-    updatedPersons: Person[];
-    updatedFamilies: Record<string, any>;
-    masterPerson?: Person;
-    deletedPersonIds: string[];
-  }) => void;
+  mergePersons: ReturnType<typeof useGenealogyStore.getState>['mergePersons'];
 
   // Families, Sources & Events (Unified Domain Layer)
   families: Record<string, any>;
@@ -225,6 +219,15 @@ export interface GenealogyContextType {
 const GenealogyContext = createContext<GenealogyContextType | null>(null);
 
 export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [isLocalHydrated, setIsLocalHydrated] = React.useState(false);
+  const confirmedCloudPersons = React.useRef<Person[] | undefined>(undefined);
+  const confirmedCloudDeletions = React.useRef<string[] | undefined>(undefined);
+  const applyConfirmedDeletions = React.useCallback(() => {
+    if (!confirmedCloudDeletions.current) return;
+    const mergedIds = Object.keys(getMergedPersonMap());
+    useGenealogyStore.getState().applyConfirmedCloudDeletionState(
+      confirmedCloudDeletions.current, confirmedCloudPersons.current, mergedIds);
+  }, []);
   // Granular store bindings
   const activeTab = useUIStore((s) => s.activeTab);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
@@ -380,15 +383,9 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [currentUser, whitelist, persons, setSelectedPersonId]);
 
-  // Automatically purge any unknown placeholder persons who have no specified ancestors
-  useEffect(() => {
-    try {
-      useGenealogyStore.getState().purgeUnknownPersons();
-    } catch {}
-  }, []);
-
   // Auto-migrate historical localStorage into unlimited IndexedDB and hydrate all stores
   useEffect(() => {
+    let active = true;
     autoMigrateLocalStorageToIDB()
       .then(() => Promise.all([
         useGenealogyStore.getState().hydrateFromIndexedDB(),
@@ -396,52 +393,40 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         useNotesStore.getState().hydrateFromIndexedDB(),
         useUIStore.getState().hydrateEmblemFromIndexedDB()
       ]))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (active) setIsLocalHydrated(true); });
+    return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    confirmedCloudPersons.current = undefined;
+    confirmedCloudDeletions.current = undefined;
+  }, [syncMode]);
 
   // Realtime Cloud Settings Listener (Tombstones, Ignored Duplicates, Merged Persons)
   // Ensures cross-session and cross-device consistency so deleted persons and resolved duplicates never reappear
   useEffect(() => {
+    if (!isLocalHydrated) return;
     const syncState = useCloudSyncStore.getState();
     if (syncState.syncMode === 'manual' || syncState.isQuotaExceeded || isQuotaExceededToday()) {
       return;
     }
 
     const unsubTombstones = subscribeToDeletedTombstonesCloud((cloudTombstones) => {
-      if (Array.isArray(cloudTombstones) && cloudTombstones.length > 0) {
-        addTombstoneIds(cloudTombstones);
-        const tombSet = new Set(cloudTombstones);
-        setPersons((prev) => prev.filter((p) => !tombSet.has(p.id)));
+      if (Array.isArray(cloudTombstones)) {
+        confirmedCloudDeletions.current = cloudTombstones;
+        applyConfirmedDeletions();
       }
     });
 
-    const unsubIgnored = subscribeToIgnoredDuplicatePairsCloud((cloudKeys) => {
-      if (Array.isArray(cloudKeys) && cloudKeys.length > 0) {
-        const localKeys = getIgnoredDuplicatePairKeys();
-        cloudKeys.forEach((k) => localKeys.add(k));
-        try {
-          localStorage.setItem(RODOVID_IGNORED_DUPLICATE_PAIRS_KEY, JSON.stringify(Array.from(localKeys)));
-        } catch {}
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('rodovid_ignored_duplicates_changed'));
-        }
-      }
+    const unsubIgnored = subscribeToIgnoredDuplicatePairsCloud((keys, revision = 0) => {
+      applyCloudIgnoredDuplicateSnapshot({ keys, revision });
     });
 
-    const unsubMerged = subscribeToMergedPersonsCloud((cloudMapping) => {
-      if (cloudMapping && typeof cloudMapping === 'object' && Object.keys(cloudMapping).length > 0) {
-        let localMerged: Record<string, string> = {};
-        try {
-          const raw = localStorage.getItem('genealogy_merged_person_ids');
-          if (raw) localMerged = JSON.parse(raw);
-        } catch {}
-        const combined = { ...localMerged, ...cloudMapping };
-        try {
-          localStorage.setItem('genealogy_merged_person_ids', JSON.stringify(combined));
-        } catch {}
-        const mergedIdsSet = new Set(Object.keys(combined));
-        setPersons((prev) => prev.filter((p) => !mergedIdsSet.has(p.id)));
-      }
+    const unsubMerged = subscribeToMergedPersonsCloud((mapping, revision = 0) => {
+      if (!acceptMergedPersonSnapshot({ mapping, revision })) return;
+      const mergedIds = new Set(Object.keys(getMergedPersonMap()));
+      setPersons(prev => prev.filter(person => !mergedIds.has(person.id)));
     });
 
     return () => {
@@ -449,10 +434,11 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       unsubIgnored();
       unsubMerged();
     };
-  }, [setPersons]);
+  }, [isLocalHydrated, syncMode, applyConfirmedDeletions, setPersons]);
 
   // Firestore Sync Listener
   useEffect(() => {
+    if (!isLocalHydrated) return;
     const syncState = useCloudSyncStore.getState();
     if (syncState.syncMode === 'manual' || syncState.isQuotaExceeded || isQuotaExceededToday()) {
       return;
@@ -467,50 +453,26 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (currentSync.syncMode === 'manual' && currentSync.hasUnsavedChanges) {
         return;
       }
-      if (cloudData.persons && Array.isArray(cloudData.persons) && cloudData.persons.length > 0) {
+      if (Array.isArray(cloudData.persons)) {
+        confirmedCloudPersons.current = cloudData.persons;
+        applyConfirmedDeletions();
         setPersons((prevPersons: Person[]) => {
           const trashIds = new Set(useGenealogyStore.getState().trashPersons.map((p) => p.id));
           const tombstoneIds = getTombstoneIds();
-          let mergedIdsMap: Record<string, string> = {};
-          try {
-            const raw = localStorage.getItem('genealogy_merged_person_ids');
-            if (raw) mergedIdsMap = JSON.parse(raw);
-          } catch {}
-          const mergedIds = new Set(Object.keys(mergedIdsMap));
+          const mergedIds = new Set(Object.keys(getMergedPersonMap()));
 
-          const isExcluded = (id: string) => trashIds.has(id) || mergedIds.has(id) || tombstoneIds.has(id);
-
-          // Filter out demo persons, trashed persons, and merged duplicate persons
-          const cloudList: Person[] = [];
-          for (const p of cloudData.persons) {
-            if (!p?.id) continue;
-            if (isDemoPerson(p)) continue;
-            if (isExcluded(p.id)) {
-              // Actively purge ghost doc from Firestore so it never resurrects again
-              deletePersonDoc(p.id).catch(() => {});
-              continue;
-            }
-            cloudList.push(normalizePerson(p));
-          }
-
-          const cloudMap = new Map(cloudList.map((p) => [p.id, p]));
-          const merged: Person[] = [...cloudMap.values()];
-
-          // Preserve local persons that have not synced yet or exist in local store
-          for (const localP of prevPersons) {
-            if (!cloudMap.has(localP.id) && !isDemoPerson(localP) && !isExcluded(localP.id)) {
-              cloudMap.set(localP.id, localP);
-              merged.push(localP);
-            }
-          }
-          return merged;
+          return selectCloudPersons(cloudData.persons, {
+            excludedIds: new Set([...trashIds, ...mergedIds, ...tombstoneIds]),
+            localPersons: prevPersons,
+            pendingIds: new Set(useCloudSyncStore.getState().dirtyTracker.persons)
+          });
         });
       }
       if (cloudData.families && Array.isArray(cloudData.families)) {
         setFamilies((prevFamilies: Record<string, any>) => {
           const famMap: Record<string, any> = { ...prevFamilies };
           cloudData.families.forEach((f: any) => {
-            if (f && f.id && !isDemoFamily(f.id, f)) famMap[f.id] = f;
+            if (f && f.id && !isDemoFamily(f.id, f) && !useCloudSyncStore.getState().dirtyTracker.families.includes(f.id)) famMap[f.id] = f;
           });
           return famMap;
         });
@@ -566,11 +528,11 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => {
       unsubscribe();
     };
-  }, [setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
+  }, [isLocalHydrated, syncMode, applyConfirmedDeletions, setPersons, setFamilies, setEvents, setSources, setPlaces, setMetricRecords, setDocuments, setTasks, setFindings, setHypotheses, setRequests, setMatrixEntries, setStatus]);
 
   // Both background and manual drains inspect every result and preserve new edits.
   useEffect(() => {
-    if (syncMode !== 'auto') return;
+    if (!isLocalHydrated || syncMode !== 'auto') return;
     const upload = () => { void synchronizeProject(getCurrentCloudData, cloudSyncApi, { manual: false }); };
     const timer = setTimeout(upload, 5000);
     window.addEventListener('online', upload);
@@ -578,7 +540,7 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       clearTimeout(timer);
       window.removeEventListener('online', upload);
     };
-  }, [syncMode, persons, families, events, sources, places, metricRecords, documents,
+  }, [isLocalHydrated, syncMode, persons, families, events, sources, places, metricRecords, documents,
     tasks, findings, hypotheses, requests, matrixEntries, unsavedChangesCount]);
 
   const triggerUploadToCloud = useCallback((options?: { forceFull?: boolean }): Promise<{ success: boolean; message: string }> => {
@@ -609,32 +571,29 @@ export const GenealogyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           findings: data.findings, hypotheses: data.hypotheses,
           requests: data.requests, matrixEntries: data.matrixEntries
         }
-      }, `Резервна точка перед завантаженням з хмари (${data.persons.length} осіб)`), fetchAllProjectDataFromCloud);
+      }, `Резервна точка перед завантаженням з хмари (${data.persons.length} осіб)`), fetchAllProjectDataFromCloud, () => Object.keys(getPendingDeletionChanges()).length > 0 || Object.keys(getPendingMergedPersonChanges()).length > 0);
       if (res.success && res.data) {
         const d = res.data;
+        if (res.settings?.mergedPersons) {
+          acceptMergedPersonSnapshot({ mapping: res.settings.mergedPersons, revision: res.settings.mergedPersonsRevision ?? 0 });
+        }
+        if (res.settings?.deletedTombstones) {
+          useGenealogyStore.getState().applyConfirmedCloudDeletionState(
+            res.settings.deletedTombstones, d.persons, Object.keys(getMergedPersonMap()));
+        }
+        if (res.settings?.ignoredDuplicatePairs) {
+          applyCloudIgnoredDuplicateSnapshot({ keys: res.settings.ignoredDuplicatePairs,
+            revision: res.settings.ignoredDuplicateRevision ?? 0 });
+        }
         let totalCount = 0;
 
-        if (Array.isArray(d.persons) && d.persons.length > 0) {
+        if (Array.isArray(d.persons)) {
           const tombstoneIds = getTombstoneIds();
           const trashIds = new Set(useGenealogyStore.getState().trashPersons.map((p) => p.id));
-          let mergedIdsMap: Record<string, string> = {};
-          try {
-            const raw = localStorage.getItem('genealogy_merged_person_ids');
-            if (raw) mergedIdsMap = JSON.parse(raw);
-          } catch {}
-          const mergedIds = new Set(Object.keys(mergedIdsMap));
-          const isExcluded = (id: string) => tombstoneIds.has(id) || trashIds.has(id) || mergedIds.has(id);
-
-          const validPersons: Person[] = [];
-          for (const p of d.persons) {
-            if (!p || !p.id) continue;
-            if (isDemoPerson(p)) continue;
-            if (isExcluded(p.id)) {
-              deletePersonDoc(p.id).catch(() => {});
-              continue;
-            }
-            validPersons.push(normalizePerson(p));
-          }
+          const mergedIds = new Set(Object.keys(getMergedPersonMap()));
+          const validPersons = selectCloudPersons(d.persons, {
+            excludedIds: new Set([...tombstoneIds, ...trashIds, ...mergedIds])
+          });
           setPersons(validPersons);
           totalCount += validPersons.length;
         }

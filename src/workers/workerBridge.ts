@@ -10,7 +10,7 @@ import { GenealogyDatabase, Person, Family } from '../rodovid/types/genealogy';
 import { MergeAnalysis, analyzeMerge } from '../rodovid/utils/mergeDatabase';
 import { parseGedcom } from '../rodovid/utils/gedcom';
 import { DuplicatePair } from '../types';
-import { detectDuplicatePersons, getIgnoredDuplicatePairKeys } from '../utils/duplicateDetector';
+import { detectDuplicatePersons, getIgnoredDuplicatePairKeys, isDuplicatePairIgnored } from '../utils/duplicateDetector';
 import { TreeHealthReport, runTreeDataHealthAudit } from '../utils/treeAudit';
 import { calculateKinship, KinshipCalculationResult } from '../rodovid/utils/relationship';
 import { WorkerMessageRequest, WorkerMessageResponse } from './genealogy.worker';
@@ -140,12 +140,18 @@ export async function detectDuplicatesAsync(
   const id = generateRequestId();
 
   return new Promise<DuplicatePair[]>((resolve, reject) => {
+    const finish = (pairs: DuplicatePair[]) => {
+      if (!filterIgnored) { resolve(pairs); return; }
+      const latest = getIgnoredDuplicatePairKeys();
+      for (const key of explicitIgnoredKeys || []) latest.add(key);
+      resolve(pairs.filter(pair => !isDuplicatePairIgnored(pair.personA.id, pair.personB.id, latest)));
+    };
     pendingTasks.set(id, {
-      resolve,
+      resolve: finish,
       reject: (err) => {
         console.warn('Worker duplicate search failed, retrying on main thread:', err);
         try {
-          resolve(detectDuplicatePersons(persons, filterIgnored, onProgress, ignoredKeys));
+          finish(detectDuplicatePersons(persons, filterIgnored, onProgress, ignoredKeys));
         } catch (syncErr) {
           reject(syncErr);
         }

@@ -24,3 +24,16 @@ test('unchanged local data with a committed backup permits a cloud restore', asy
   const remote = { persons: [{ id: 'remote' }] };
   assert.equal(await prepareCloudRestore(() => state, async () => ({ saved: true }), async () => remote), remote);
 });
+
+test('unconfirmed deletion or restoration blocks replacement before backup and cloud reading', async () => {
+  await assert.rejects(prepareCloudRestore(data,
+    async () => { assert.fail('must not start a backup for blocked replacement'); },
+    async () => { assert.fail('must not read'); }, () => true), /невивантажені/);
+});
+
+test('a new deletion intention during the read blocks replacement even if entity references did not change', async () => {
+  const state = data();
+  let pending = false;
+  await assert.rejects(prepareCloudRestore(() => state, async () => true,
+    async () => { pending = true; return {}; }, () => pending), /невивантажені/);
+});
