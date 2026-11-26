@@ -1,0 +1,118 @@
+name: Deploy website
+on:
+  workflow_run:
+    workflows: [Verify application]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: website-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: >-
+      vars.WEBSITE_DEPLOY_ENABLED == 'true' &&
+      github.repository == 'domagile/my_root_cuba' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      RUN_PROJECT_ID: ${{ vars.RUN_PROJECT_ID }}
+      HOSTING_PROJECT_ID: ${{ vars.HOSTING_PROJECT_ID }}
+      FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
+      RUN_REGION: ${{ vars.RUN_REGION }}
+      RUN_SERVICE: ${{ vars.RUN_SERVICE }}
+      ARTIFACT_REPOSITORY: ${{ vars.ARTIFACT_REPOSITORY }}
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+      GEMINI_SECRET_NAME: ${{ vars.GEMINI_SECRET_NAME }}
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.5'
+      - name: Validate deployment settings
+        run: node scripts/deploy-settings.mjs
+      - name: Require successful CI on the latest main commit
+        id: eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$LATEST_SHA" != "$DEPLOY_SHA" ]; then
+            echo 'Skipping superseded deployment.'
+            echo 'deploy=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CI_STATUS="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$DEPLOY_SHA&event=push&per_page=100" --jq '[.workflow_runs[] | select(.name == "Verify application")][0].conclusion')"
+          test "$CI_STATUS" = success
+          echo 'deploy=true' >> "$GITHUB_OUTPUT"
+      - name: Build server image
+        if: steps.eligibility.outputs.deploy == 'true'
+        run: |
+          IMAGE="$RUN_REGION-docker.pkg.dev/$RUN_PROJECT_ID/$ARTIFACT_REPOSITORY/my-root-cuba:$DEPLOY_SHA"
+          docker build --tag "$IMAGE" .
+      - uses: google-github-actions/auth@v3
+        if: steps.eligibility.outputs.deploy == 'true'
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        if: steps.eligibility.outputs.deploy == 'true'
+      - name: Push server image
+        if: steps.eligibility.outputs.deploy == 'true'
+        run: |
+          gcloud auth configure-docker "$RUN_REGION-docker.pkg.dev" --quiet
+          IMAGE="$RUN_REGION-docker.pkg.dev/$RUN_PROJECT_ID/$ARTIFACT_REPOSITORY/my-root-cuba:$DEPLOY_SHA"
+          docker push "$IMAGE"
+      - name: Deploy a separate authenticated AI service
+        id: api
+        if: steps.eligibility.outputs.deploy == 'true'
+        run: |
+          IMAGE="$RUN_REGION-docker.pkg.dev/$RUN_PROJECT_ID/$ARTIFACT_REPOSITORY/my-root-cuba:$DEPLOY_SHA"
+          gcloud run deploy "$RUN_SERVICE" --project "$RUN_PROJECT_ID" --region "$RUN_REGION" \
+            --image "$IMAGE" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --allow-unauthenticated --min-instances 0 --max-instances 1 --concurrency 4 \
+            --cpu 1 --memory 512Mi --port 8080 --timeout 60s --cpu-throttling \
+            --set-env-vars "^;^NODE_ENV=production;HOST=0.0.0.0;ALLOWED_WEB_ORIGINS=https://$FIREBASE_HOSTING_SITE.web.app,https://$FIREBASE_HOSTING_SITE.firebaseapp.com" \
+            --set-secrets "GEMINI_API_KEY=$GEMINI_SECRET_NAME:latest" --quiet
+          API_URL="$(gcloud run services describe "$RUN_SERVICE" --project "$RUN_PROJECT_ID" --region "$RUN_REGION" --format='value(status.url)')"
+          case "$API_URL" in https://*.run.app) ;; *) echo 'Unexpected API origin'; exit 1;; esac
+          echo "url=$API_URL" >> "$GITHUB_OUTPUT"
+          curl --fail --silent --show-error "$API_URL/api/health"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST "$API_URL/api/ai/analyze-metric" -H 'Content-Type: application/json' --data '{}')" = 401
+      - name: Build frontend and generate Hosting-only configuration
+        if: steps.eligibility.outputs.deploy == 'true'
+        env:
+          VITE_AI_API_BASE_URL: ${{ steps.api.outputs.url }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun run prepare:hosting
+      - name: Refresh short-lived credentials before publishing
+        if: steps.eligibility.outputs.deploy == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Publish Hosting
+        env:
+          GH_TOKEN: ${{ github.token }}
+        if: steps.eligibility.outputs.deploy == 'true'
+        run: |
+          LATEST_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          test "$LATEST_SHA" = "$DEPLOY_SHA"
+          node node_modules/firebase-tools/lib/bin/firebase.js deploy --only hosting --project "$HOSTING_PROJECT_ID" --config .firebase-deploy/hosting.json --non-interactive

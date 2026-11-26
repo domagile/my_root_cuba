@@ -103,3 +103,30 @@ test('invalid JSON and unknown API paths return JSON errors, not the application
     assert.equal((await response.json()).code, 'INVALID_JSON');
   });
 });
+
+test('production API access is checked before parsing a scan or contacting the model', async () => {
+  const { AiAccessError } = await import('../src/server/aiAccess'); let providerCalls = 0;
+  await withApi({ apiKey: 'test', requireAuth: true, authorize: async () => { throw new AiAccessError(401, 'SIGN_IN_REQUIRED', 'Sign in'); },
+    generateContent: async () => { providerCalls++; return { text: '[]' }; } }, async base => {
+    for (const route of routes) assert.equal((await post(base, route, image)).status, 401);
+    const malformed = await fetch(base + routes[0], { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{broken' });
+    assert.equal(malformed.status, 401); assert.equal(providerCalls, 0);
+  });
+});
+test('only configured frontend origins pass preflight and authorization remains required on the actual request', async () => {
+  const { AiAccessError } = await import('../src/server/aiAccess');
+  await withApi({ apiKey: 'test', requireAuth: true, allowedOrigins: ['https://synthetic.web.app'], authorize: async () => { throw new AiAccessError(401, 'SIGN_IN_REQUIRED', 'Sign in'); } }, async base => {
+    const preflight = await fetch(base + routes[0], { method: 'OPTIONS', headers: { Origin: 'https://synthetic.web.app', 'Access-Control-Request-Method': 'POST' } });
+    assert.equal(preflight.status, 204); assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), 'https://synthetic.web.app');
+    const denied = await fetch(base + routes[0], { method: 'POST', headers: { Origin: 'https://other.example', 'Content-Type': 'application/json' }, body: '{}' });
+    assert.equal(denied.status, 403); assert.equal(denied.headers.get('Access-Control-Allow-Origin'), null);
+    const actual = await fetch(base + routes[0], { method: 'POST', headers: { Origin: 'https://synthetic.web.app', 'Content-Type': 'application/json' }, body: '{}' });
+    assert.equal(actual.status, 401); assert.equal(actual.headers.get('Access-Control-Allow-Origin'), 'https://synthetic.web.app');
+  });
+});
+test('an authorized request retains the existing model response contract', async () => {
+  await withApi({ apiKey: 'test', requireAuth: true, authorize: async header => { assert.equal(header, 'Bearer synthetic-token'); }, generateContent: async () => ({ text: '[]' }) }, async base => {
+    const response = await fetch(base + routes[0], { method: 'POST', headers: { Authorization: 'Bearer synthetic-token', 'Content-Type': 'application/json' }, body: JSON.stringify({ textContent: 'Synthetic' }) });
+    assert.equal(response.status, 200); assert.deepEqual((await response.json()).results, []);
+  });
+});

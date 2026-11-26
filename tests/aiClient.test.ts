@@ -35,3 +35,26 @@ test('AI candidates have no fabricated birth date, place, sex or confirmed statu
   assert.match(person.notes!, /Парафія/);
   assert.throws(() => aiEntityToPerson({}, 'Scan'), /імені/);
 });
+
+test('authenticated AI requests carry the current ID token only to a configured API origin', async () => {
+  const { setAiTokenProvider } = await import('../src/services/aiApiClient');
+  setAiTokenProvider(async () => 'synthetic-id-token');
+  try {
+    globalThis.fetch = async (url, init) => { assert.equal(url, '/api/test'); assert.equal((init?.headers as any).Authorization, 'Bearer synthetic-id-token'); return Response.json({ success: true }); };
+    await requestAiJson('/api/test', {});
+  } finally { setAiTokenProvider(null); }
+});
+test('an unavailable or stalled login cannot send an anonymous paid request', async () => {
+  const { setAiTokenProvider } = await import('../src/services/aiApiClient');
+  globalThis.fetch = async () => assert.fail('Unexpected API call');
+  try {
+    setAiTokenProvider(async () => { throw new Error('Sign in required'); }); await assert.rejects(requestAiJson('/api/test', {}), /Sign in/);
+    setAiTokenProvider(() => new Promise(() => {})); await assert.rejects(requestAiJson('/api/test', {}, 5), /очікування/);
+  } finally { setAiTokenProvider(null); }
+});
+test('a configured AI origin requires HTTPS and cannot redirect the Firebase ID token to an arbitrary endpoint', async () => {
+  const { resolveAiEndpoint } = await import('../src/services/aiApiClient');
+  assert.equal(resolveAiEndpoint('/api/ai/analyze-metric', 'https://synthetic.run.app'), 'https://synthetic.run.app/api/ai/analyze-metric');
+  for (const base of ['http://other.example', 'https://user:password@other.example', 'https://other.example/path', 'https://other.example?key=value']) assert.throws(() => resolveAiEndpoint('/api/test', base));
+  for (const endpoint of ['https://other.example/api/test', '//other.example/api/test', '/login']) assert.throws(() => resolveAiEndpoint(endpoint, 'https://synthetic.run.app'));
+});

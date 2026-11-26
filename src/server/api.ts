@@ -1,3 +1,4 @@
+import { authorizeAiRequest, AiAccessError, aiCors } from './aiAccess';
 import express,{ type Response } from 'express';
 import { GoogleGenAI,Type,type GenerateContentParameters } from '@google/genai';
 
@@ -5,6 +6,9 @@ export interface ApiOptions {
   apiKey?: string;
   model?: string;
   timeoutMs?: number;
+  requireAuth?: boolean;
+  allowedOrigins?: string[];
+  authorize?: (header: string | undefined) => Promise<void>;
   // Dependency injection keeps automated tests entirely offline.
   generateContent?: (request: GenerateContentParameters) => Promise<{ text?: string }>;
 }
@@ -56,6 +60,25 @@ function sendFailure(res: Response,error: unknown): void {
 }
 export function createApiApp(options: ApiOptions={}) {
   const app=express();
+  if (process.env.K_SERVICE) app.set('trust proxy', 1);
+
+  const aiRoutes = ['/api/ai', '/api/nyshporka'];
+  const origins = options.allowedOrigins ?? (process.env.ALLOWED_WEB_ORIGINS || '').split(',').map(origin => origin.trim());
+  // Same-origin Cloud Run pages and local development work without a proxy.
+  app.use(aiRoutes, (req, res, next) => {
+    const origin = req.get('Origin');
+    const ownOrigin = `${req.protocol}://${req.get('Host')}`;
+    if (origin && origin === ownOrigin && req.method !== 'OPTIONS') return next();
+    return aiCors(origins)(req, res, next);
+  });
+  app.use(aiRoutes, async (req, res, next) => {
+    if (!options.requireAuth) return next();
+    try { await (options.authorize ?? authorizeAiRequest)(req.get('Authorization')); next(); }
+    catch (error) {
+      const denied = error instanceof AiAccessError ? error : new AiAccessError(503, 'AUTH_UNAVAILABLE', 'Не вдалося перевірити доступ.');
+      res.status(denied.status).json({ success: false, code: denied.code, error: denied.message, results: [] });
+    }
+  });
 
   // Body parser with 50mb limit for high-resolution archival scans
   app.use(express.json({ limit: '50mb' }));

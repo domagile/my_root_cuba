@@ -36,6 +36,12 @@ test('built server starts in production without NODE_ENV and serves deep links o
     const base = `http://127.0.0.1:${port}`;
     const health = await fetch(base + '/api/health');
     assert.equal(health.status, 200);
+    const unauthorized = await fetch(base + '/api/ai/analyze-metric', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    assert.equal(unauthorized.status, 401);
+    await unauthorized.arrayBuffer();
+    const serverSource = await (await fetch(base + '/server.mjs')).text();
+    assert.doesNotMatch(serverSource, /function createApiApp|GEMINI_API_KEY|identitytoolkit.googleapis.com/);
+
     await health.arrayBuffer();
     const html = await (await fetch(base + '/?personId=test')).text();
     assert.match(html, /\/assets\//);
