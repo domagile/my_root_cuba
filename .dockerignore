@@ -1,0 +1,14 @@
+.git
+node_modules
+dist
+.firebase
+.firebase-deploy
+.env
+.env.*
+!.env.example
+**/gha-creds-*.json
+**/*service-account*.json
+**/*credentials*.json
+*.log
+artifacts
+coverage

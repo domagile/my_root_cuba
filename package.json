@@ -16,7 +16,7 @@
     "test:storage": "tsx --test tests/localStorage.test.ts tests/persistentBackup.test.ts tests/projectArchive.test.ts tests/cloudRestore.test.ts tests/cloudRead.test.ts tests/cloudTrash.test.ts tests/familyRestore.test.ts",
     "test:api": "tsx --test tests/api.test.ts tests/aiClient.test.ts",
     "test:server": "tsx --test tests/server.test.ts",
-    "test": "npm run test:sync && npm run test:storage && npm run test:search && npm run test:tree && npm run test:duplicates && npm run test:merge && npm run test:delta && npm run test:api",
+    "test": "npm run test:sync && npm run test:storage && npm run test:search && npm run test:tree && npm run test:duplicates && npm run test:merge && npm run test:delta && npm run test:deploy && npm run test:api",
     "test:duplicates": "tsx --test tests/ignoredDuplicates.test.ts",
     "test:duplicates-browser": "node scripts/check-ignored-duplicates-browser.mjs",
     "test:search": "tsx --test tests/searchRegression.test.ts",
@@ -28,7 +28,9 @@
     "test:delta": "node --import tsx --test tests/personDelta.test.ts",
     "bench:delta": "node --import tsx benchmarks/personDelta.ts",
     "test:merge-browser": "node scripts/check-safe-merge-browser.mjs",
-    "bench:tree": "node --import tsx benchmarks/treeLayoutCache.ts"
+    "bench:tree": "node --import tsx benchmarks/treeLayoutCache.ts",
+    "test:deploy": "node --import tsx --test tests/deployment.test.ts tests/aiAccess.test.ts",
+    "prepare:hosting": "node scripts/hosting-config.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -23,10 +23,10 @@ export function getPortAndHost(args=process.argv.slice(2)) {
 
 export async function startServer() {
   const { port,host }=getPortAndHost();
-  const app=createApiApp();
+  const app=createApiApp({ requireAuth: isBuiltServer || process.env.NODE_ENV==='production' });
   if(isBuiltServer||process.env.NODE_ENV==='production') {
     const express=(await import('express')).default;
-    const distPath=path.join(projectRoot,'dist');
+    const distPath=path.join(projectRoot,'dist','client');
     if(!existsSync(path.join(distPath,'index.html'))) throw new Error('Production build is missing. Run npm run build first.');
     app.use(express.static(distPath));
     app.get('*',(_req,res) => res.sendFile(path.join(distPath,'index.html')));
